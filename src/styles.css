@@ -602,3 +602,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .brain-options small { font-size: 9px; color: var(--muted); }
 .brain-options em { font-style: normal; font-size: 9px; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .brain-options em.ready { color: var(--accent); }
+.cloud-settings { margin-top: 4px; }
+.cloud-settings .field-help .text-button { margin-left: auto; font-size: 9px; }
+.cloud-shares-label { margin-top: 16px; }
+.cloud-shares-intro { font-size: 10px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
+.cloud-share { align-items: flex-start !important; }
+.cloud-share input { margin-top: 2px; }
+.cloud-share small { display: block; font-size: 9px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.cloud-settings .usage-meter { margin-top: 14px; }

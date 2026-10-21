@@ -1,5 +1,6 @@
 mod approvals;
 mod budget;
+mod cloud;
 mod controller;
 mod conversation;
 mod indexer;
@@ -57,6 +58,10 @@ pub fn run() {
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
+            let notices = app.handle().clone();
+            app.state::<controller::AppState>().models.on_notice(move |text| {
+                let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
+            });
             // Learn whether Apple Intelligence can run here before the first chat.
             let probe = app.handle().clone();
             tauri::async_runtime::spawn(async move {

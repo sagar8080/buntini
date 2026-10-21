@@ -8,6 +8,7 @@ const defaults: Settings = {
   voiceId: '', voiceRate: 180, notificationsEnabled: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [],
+  cloudProvider: 'anthropic', cloudModel: '', cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
 };
 export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');

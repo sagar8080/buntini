@@ -52,9 +52,12 @@ impl AppState {
             )?,
             None => {}
         }
+        let store = Arc::new(Mutex::new(store));
+        let models = ModelHub::new(resource("worker/main.py"), resource("native/buntini-fm"));
+        models.set_ledger(store.clone());
         Ok(Self {
-            store: Arc::new(Mutex::new(store)),
-            models: ModelHub::new(resource("worker/main.py"), resource("native/buntini-fm")),
+            store,
+            models,
             voice: Voice::new(resource("native/buntini-audio"), cache),
             active: Mutex::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
@@ -82,6 +85,8 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
     };
     let conversation_start = state.store.lock().unwrap().conversation_start()?;
     let usage = state.store.lock().unwrap().usage(&settings.search_provider)?;
+    let cloud_spend_usd = state.store.lock().unwrap().usage(&crate::cloud::ledger_key(&settings.cloud_provider))?.spend;
+    let cloud_keys = crate::cloud::PROVIDERS.iter().filter(|provider| web::credential(provider.id).is_ok()).map(|provider| provider.id.to_string()).collect();
     let limits = crate::budget::search_limits(&settings);
     let model_ready = state.models.ready(&settings).is_ok();
     let worker_status = state.models.status(&settings);
@@ -109,6 +114,8 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             search_limit_day: limits.daily,
             estimated_spend_usd: usage.spend,
             remaining_budget_usd,
+            cloud_keys,
+            cloud_spend_usd,
         },
     })
 }
@@ -820,7 +827,11 @@ async fn execute_with_settings(
                 _ => return Err("Unauthorized tool.".into()),
             };
             // The worker accepts normalized textual results, never instructions or executable code.
-            messages.push(json!({"role":"assistant","content":turn.text,"tool_calls":[{"type":"function","function":{"name":name,"arguments":args}}]}));
+            let mut assistant = json!({"role":"assistant","content":turn.text,"tool_calls":[{"type":"function","function":{"name":name,"arguments":args}}]});
+            if let Some(raw) = turn.raw {
+                assistant["provider_content"] = raw;
+            }
+            messages.push(assistant);
             messages.push(json!({"role":"tool","content":format!("UNTRUSTED READ-ONLY TOOL RESULT: {}",result)}));
         } else {
             if turn.text.trim().is_empty() {

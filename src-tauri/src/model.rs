@@ -5,14 +5,16 @@
 //! the `buntini-fm` helper, or a cloud model with the user's key. On-device backends
 //! see local data freely; cloud models only what `privacy.rs` allows.
 use crate::{
+    cloud,
     privacy::Locality,
+    store::Store,
     types::Settings,
     worker::{Launch, Turn, WorkerManager},
 };
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, Mutex, OnceLock},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,10 @@ pub struct ModelHub {
     apple_helper: PathBuf,
     /// Apple Intelligence availability from the helper's last ping: (available, reason).
     apple_state: std::sync::Mutex<Option<(bool, String)>>,
+    /// Where cloud spending is reserved and settled.
+    ledger: OnceLock<Arc<Mutex<Store>>>,
+    /// Shows the 80% spending notice.
+    notice: OnceLock<Box<dyn Fn(String) + Send + Sync>>,
 }
 
 pub fn backend(settings: &Settings) -> Backend {
@@ -57,7 +63,15 @@ pub fn mlx_model_present(path: &str) -> bool {
 
 impl ModelHub {
     pub fn new(mlx_script: PathBuf, apple_helper: PathBuf) -> Self {
-        Self { mlx: WorkerManager::new("local MLX model"), apple: WorkerManager::new("Apple Intelligence helper"), mlx_script, apple_helper, apple_state: std::sync::Mutex::new(None) }
+        Self { mlx: WorkerManager::new("local MLX model"), apple: WorkerManager::new("Apple Intelligence helper"), mlx_script, apple_helper, apple_state: std::sync::Mutex::new(None), ledger: OnceLock::new(), notice: OnceLock::new() }
+    }
+
+    pub fn set_ledger(&self, store: Arc<Mutex<Store>>) {
+        let _ = self.ledger.set(store);
+    }
+
+    pub fn on_notice(&self, notify: impl Fn(String) + Send + Sync + 'static) {
+        let _ = self.notice.set(Box::new(notify));
     }
 
     pub fn locality(&self, settings: &Settings) -> Locality {
@@ -85,7 +99,23 @@ impl ModelHub {
                 None if self.apple_helper.is_file() => Ok(()),
                 None => Err(apple_advice("missing")),
             },
-            Backend::Cloud => Err("Cloud models aren’t available in this version yet. Choose a local model in Settings → Brain.".into()),
+            Backend::Cloud => {
+                let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose Anthropic, OpenAI or Gemini in Settings → Brain.")?;
+                if crate::web::credential(provider.id).is_err() {
+                    return Err(format!("Add your {} API key in Settings → Brain to use the cloud model.", provider.name));
+                }
+                if settings.cloud_budget_usd <= 0.0 {
+                    return Err("Set a monthly spending cap above $0 in Settings → Brain to use the cloud model.".into());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn cloud_model(settings: &Settings) -> String {
+        match settings.cloud_model.trim() {
+            "" => cloud::provider(&settings.cloud_provider).map(|provider| provider.model).unwrap_or_default().to_string(),
+            model => model.to_string(),
         }
     }
 
@@ -93,7 +123,8 @@ impl ModelHub {
         match backend(settings) {
             Backend::Apple => Budget { history_tokens: 1200, max_tokens: 512 },
             Backend::Mlx => Budget { history_tokens: 6000, max_tokens: 1024 },
-            Backend::Cloud => Budget { history_tokens: 12000, max_tokens: 1024 },
+            // Thinking counts toward the reply allowance on current cloud models.
+            Backend::Cloud => Budget { history_tokens: 12000, max_tokens: 4096 },
         }
     }
 
@@ -113,7 +144,10 @@ impl ModelHub {
                 Some((false, reason)) => apple_advice(&reason),
                 None => "Checking Apple Intelligence…".into(),
             },
-            Backend::Cloud => "Cloud model · not configured".into(),
+            Backend::Cloud => match self.ready(settings) {
+                Ok(()) => format!("Ready · {} {}", cloud::provider(&settings.cloud_provider).map(|provider| provider.name).unwrap_or("Cloud"), Self::cloud_model(settings)),
+                Err(advice) => advice,
+            },
         }
     }
 
@@ -207,7 +241,40 @@ impl ModelHub {
                 self.mlx.request(&self.mlx_launch(settings)?, payload, cancel, on_token).await
             }
             Backend::Apple => self.apple.request(&self.apple_launch()?, payload, cancel, on_token).await,
-            Backend::Cloud => Err(self.ready(settings).unwrap_err()),
+            Backend::Cloud => self.cloud_generate(settings, payload, cancel, on_token).await,
+        }
+    }
+
+    /// One cloud call: reserve the estimated cost, stream, then settle with real usage.
+    /// Rejected requests cost nothing; anything accepted keeps at least its reservation
+    /// until the provider reports usage.
+    async fn cloud_generate<F>(&self, settings: &Settings, payload: Value, cancel: Arc<AtomicBool>, on_token: F) -> Result<Turn, String>
+    where
+        F: FnMut(String) + Send,
+    {
+        let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose a cloud provider in Settings → Brain.")?;
+        let ledger = self.ledger.get().ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
+        let key = crate::web::credential(provider.id)?;
+        let (input_price, output_price) = (settings.cloud_input_price, settings.cloud_output_price);
+        let estimate = cloud::price(cloud::estimate(&payload), input_price, output_price);
+        let account = cloud::ledger_key(provider.id);
+        let reservation = ledger.lock().unwrap().reserve(&account, crate::budget::cloud_limits(settings, estimate))?;
+        if let (Some(warning), Some(notify)) = (reservation.warning, self.notice.get()) {
+            notify(warning);
+        }
+        let settle = |actual: f64| {
+            let _ = ledger.lock().unwrap().settle(&account, estimate, actual);
+        };
+        match cloud::generate(provider, &Self::cloud_model(settings), &key, &payload, cancel, on_token).await {
+            Ok((turn, usage)) => {
+                settle(cloud::price(usage, input_price, output_price));
+                Ok(turn)
+            }
+            Err(cloud::Failure::Rejected(message)) => {
+                settle(0.0);
+                Err(message)
+            }
+            Err(cloud::Failure::Failed(message)) => Err(message),
         }
     }
 

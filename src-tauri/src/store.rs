@@ -378,7 +378,7 @@ impl Store {
             return Err(format!("This month’s limit of {} lookups for this service is used up. Review the limits in Settings to search again.", limits.monthly));
         }
         if usage.spend + limits.unit_cost > limits.budget_usd + 0.000000001 {
-            return Err(format!("This month’s estimated budget of ${:.2} is used up. Review the limits in Settings to search again.", limits.budget_usd));
+            return Err(format!("This month’s estimated {} budget of ${:.2} is used up. Review the limits in Settings, or wait for next month.", crate::budget::display_name(provider), limits.budget_usd));
         }
         transaction
             .execute(
@@ -399,6 +399,14 @@ impl Store {
         }
         transaction.commit().map_err(|e| e.to_string())?;
         Ok(Reservation { warning })
+    }
+    /// Replaces a reservation's estimate with what the provider actually reported.
+    pub fn settle(&self, provider: &str, reserved: f64, actual: f64) -> Result<(), String> {
+        let month = chrono::Local::now().format("%Y-%m").to_string();
+        self.db
+            .execute("UPDATE usage_monthly SET estimated_spend=MAX(0,estimated_spend+?3-?4) WHERE month=?1 AND provider=?2", params![month, provider, actual, reserved])
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn save_update_check(&self, check: &OsUpdateCheck) -> Result<(), String> {
         self.db
@@ -492,6 +500,18 @@ mod tests {
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         assert!(s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap_err().contains("budget of $0.01"));
+    }
+    #[test]
+    fn cloud_reservations_settle_to_reported_usage() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let settings = Settings { cloud_budget_usd: 1.0, ..Settings::default() };
+        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap();
+        assert!(s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap_err().contains("OpenAI budget of $1.00"));
+        // The reply cost far less than the cautious estimate, which frees the rest of the cap.
+        s.settle("cloud-openai", 0.6, 0.01).unwrap();
+        assert!((s.usage("cloud-openai").unwrap().spend - 0.01).abs() < 1e-9);
+        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap();
+        assert_eq!(s.usage("openai").unwrap().month, 0, "cloud spending is kept apart from search counts");
     }
     #[test]
     fn the_80_percent_warning_fires_once_a_month() {

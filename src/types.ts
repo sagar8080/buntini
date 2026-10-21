@@ -6,6 +6,8 @@ export type CatAccessory = 'none' | 'bell' | 'bow' | 'bandana' | 'hat' | 'flower
 export type PetMotion = 'calm' | 'playful' | 'sleepy';
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: Settings['accent'] }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini';
+export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
   assistantName: string;
@@ -38,6 +40,11 @@ export interface Settings {
   reducedMotion: boolean;
   ebayMarketplace: string;
   externalShares: string[];
+  cloudProvider: CloudProvider;
+  cloudModel: string;
+  cloudBudgetUsd: number;
+  cloudInputPrice: number;
+  cloudOutputPrice: number;
 }
 export interface Source { title: string; url: string; snippet: string; retrievedAt: string }
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }
@@ -74,6 +81,8 @@ export interface Diagnostics {
   searchLimitDay?: number;
   estimatedSpendUsd?: number;
   remainingBudgetUsd?: number;
+  cloudKeys?: string[];
+  cloudSpendUsd?: number;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 export interface SavedSearch { id: string; query: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastResultTaskId?: string; lastError?: string }

@@ -18,7 +18,7 @@ import { relativeTime } from './format';
 import FileIndexSettings from './FileIndexSettings';
 import { SpeechQueue } from './speech';
 import { bootstrap, command, desktop, errorMessage, runTask, saveSettings } from './bridge';
-import type { Bootstrap, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import type { Bootstrap, KeyProvider, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
@@ -356,7 +356,7 @@ export default function App() {
             <div className="mode-picker" aria-label="Tool mode">{modes.map(item => <button key={item.id} aria-pressed={mode === item.id} className={mode === item.id ? 'active' : ''} onClick={() => setMode(item.id)} disabled={busy}><item.icon size={12} />{item.name}</button>)}</div>
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
               <textarea ref={inputRef} rows={2} value={input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'I’m listening… release to finish' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> Release to transcribe</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : 'Local by default'}</>}</span><div>
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> Release to transcribe</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
                 <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title="Hold to talk" aria-label="Hold to talk; release to transcribe" disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void startVoice(); }} onPointerUp={() => void finishVoice()} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? <button type="button" className="send-button stop-button" aria-label="Cancel voice input" onClick={() => void cancelVoice()}><X size={15} /></button> : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
@@ -412,7 +412,7 @@ export default function App() {
 function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice }: {
   data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
-  onKey: (provider: 'brave' | 'tavily' | 'ebay' | 'duffel', key: string) => Promise<void>; onAudit: () => void;
+  onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(data.settings);
@@ -424,7 +424,7 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
   return <div className="subpage settings-page"><div className="subpage-title"><div className="eyebrow">MAKE YOURSELF AT HOME</div><h2>Your companion, your way.</h2><p>A few small things to get us acquainted.</p></div>
     <form onSubmit={async event => { event.preventDefault(); setSaving(true); onError(''); try { await onSave(draft); } catch (e) { onError(errorMessage(e)); } finally { setSaving(false); } }}>
       <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} />
-      <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} />
+      <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} />
       <section className="settings-section"><div className="settings-section-heading"><Folder size={15} /><h3>Folders I can see</h3><span className="count-badge">{data.roots.length}</span></div><p>Only these folders are available to file search.</p>
         {data.roots.map(path => <div className="root-item" key={path}><Folder size={13} /><span title={path}>{path}</span><button type="button" aria-label={`Revoke access to ${path}`} title="Revoke access" onClick={() => void onRemoveFolder(path)}><X size={13} /></button></div>)}
         <button type="button" className="secondary-button add-folder" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Allow a folder</button>

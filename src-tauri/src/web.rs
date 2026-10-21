@@ -91,6 +91,14 @@ pub fn provider_valid(provider: &str) -> Result<(), String> {
         Err("Unknown search provider.".into())
     }
 }
+/// Services whose keys Buntini keeps in the Keychain: online lookups and cloud models.
+pub fn credential_valid(provider: &str) -> Result<(), String> {
+    if provider_valid(provider).is_ok() || crate::cloud::provider(provider).is_some() {
+        Ok(())
+    } else {
+        Err("Unknown service.".into())
+    }
+}
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "app.buntini.companion";
 #[cfg(target_os = "macos")]
@@ -98,7 +106,7 @@ const LEGACY_KEYCHAIN_SERVICE: &str = "app.nexon.companion";
 #[cfg(target_os = "macos")]
 pub fn credential(provider: &str) -> Result<String, String> {
     use security_framework::passwords::*;
-    provider_valid(provider)?;
+    credential_valid(provider)?;
     get_generic_password(KEYCHAIN_SERVICE, provider)
         .or_else(|_| {
             // A key saved under the former Nexon name moves to the current entry once.
@@ -121,7 +129,7 @@ pub fn credential(_provider: &str) -> Result<String, String> {
 }
 #[cfg(target_os = "macos")]
 pub fn set_credential(provider: &str, key: &str) -> Result<(), String> {
-    provider_valid(provider)?;
+    credential_valid(provider)?;
     if key.len() > 4096 || key.contains(['\r', '\n']) {
         return Err("Invalid API key.".into());
     }

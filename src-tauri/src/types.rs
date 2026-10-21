@@ -40,6 +40,13 @@ pub struct Settings {
     pub ebay_marketplace: String,
     /// Local data categories an external model backend may receive. On-device models see everything.
     pub external_shares: Vec<String>,
+    /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
+    /// prices per million tokens used to estimate spending.
+    pub cloud_provider: String,
+    pub cloud_model: String,
+    pub cloud_budget_usd: f64,
+    pub cloud_input_price: f64,
+    pub cloud_output_price: f64,
 }
 
 impl Default for Settings {
@@ -109,6 +116,11 @@ impl Default for Settings {
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
             external_shares: Vec::new(),
+            cloud_provider: "anthropic".into(),
+            cloud_model: String::new(),
+            cloud_budget_usd: 5.0,
+            cloud_input_price: crate::cloud::PROVIDERS[0].input_per_m,
+            cloud_output_price: crate::cloud::PROVIDERS[0].output_per_m,
             vad_model_path: std::env::var("BUNTINI_VAD_MODEL_PATH").unwrap_or_else(|_| {
                 if local_vad.is_file() {
                     local_vad.to_string_lossy().into_owned()
@@ -194,6 +206,16 @@ impl Settings {
         }
         if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
             return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
+        }
+        if crate::cloud::provider(&self.cloud_provider).is_none() || !crate::cloud::model_valid(self.cloud_model.trim()) {
+            return Err("Choose Anthropic, OpenAI or Gemini, and a model name of letters, numbers, dots and dashes.".into());
+        }
+        if [self.cloud_budget_usd, self.cloud_input_price, self.cloud_output_price].iter().any(|value| !value.is_finite() || *value < 0.0)
+            || self.cloud_budget_usd > 10_000.0
+            || self.cloud_input_price > 1_000.0
+            || self.cloud_output_price > 1_000.0
+        {
+            return Err("Set a cloud spending cap up to $10,000 and token prices up to $1,000 per million.".into());
         }
         if self.python_path.len() > 4096 || self.python_path.chars().any(char::is_control) {
             return Err("The Python path is not valid.".into());
@@ -380,6 +402,9 @@ pub struct Diagnostics {
     pub search_limit_day: u32,
     pub estimated_spend_usd: f64,
     pub remaining_budget_usd: f64,
+    /// Cloud providers with a saved key, and this month's estimated spend on the chosen one.
+    pub cloud_keys: Vec<String>,
+    pub cloud_spend_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -38,9 +38,12 @@ pub struct WorkerManager {
     label: &'static str,
     closed: AtomicBool,
 }
+#[derive(Debug)]
 pub struct Turn {
     pub text: String,
     pub tool: Option<Value>,
+    /// A cloud model's reply exactly as received (thinking, signatures), sent back on the next step.
+    pub raw: Option<Value>,
 }
 
 async fn bounded_line(
@@ -186,11 +189,11 @@ impl WorkerManager {
                     let msg:Value=match serde_json::from_str(&line){Ok(v)=>v,Err(_)=>break Err("The local worker returned invalid JSON.".into())};
                     if msg.get("id").and_then(Value::as_str)!=Some(&id){continue;}
                     match msg.get("type").and_then(Value::as_str).unwrap_or("") {
-                        "pong"=>break Ok(Turn{text:msg.to_string(),tool:None}),
+                        "pong"=>break Ok(Turn{text:msg.to_string(),tool:None,raw:None}),
                         "token"=>{if let Some(t)=msg.get("text").and_then(Value::as_str){if text.len()+t.len()>64_000{break Err("The local response exceeded its safe size limit.".into());} text.push_str(t);on_token(t.into());}},
                         "tool_call"=>{if tool.is_some(){break Err("The model requested multiple tools in a single turn.".into());} tool=Some(msg);},
                         "error"=>{failure=Some(msg.get("message").and_then(Value::as_str).unwrap_or("Local model inference failed.").chars().take(2000).collect::<String>());},
-                        "done"=>{if msg.get("finish_reason").and_then(Value::as_str)==Some("cancelled"){break Err("Task cancelled.".into());}if text.is_empty(){text=msg.get("text").and_then(Value::as_str).unwrap_or("").to_string();}break match failure{Some(e)=>Err(e),None=>Ok(Turn{text,tool})};},
+                        "done"=>{if msg.get("finish_reason").and_then(Value::as_str)==Some("cancelled"){break Err("Task cancelled.".into());}if text.is_empty(){text=msg.get("text").and_then(Value::as_str).unwrap_or("").to_string();}break match failure{Some(e)=>Err(e),None=>Ok(Turn{text,tool,raw:None})};},
                         _=>{}
                     }
                 },

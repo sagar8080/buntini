@@ -44,14 +44,23 @@ pub fn service_limits(settings: &Settings) -> Limits {
 }
 
 /// The plain-language notice shown once a month when usage crosses 80%.
-pub fn warning(provider: &str, month_used: u32, limits: Limits, spend: f64) -> String {
-    let name = match provider {
+pub fn display_name(provider: &str) -> &str {
+    match provider {
         "brave" => "Brave Search",
         "tavily" => "Tavily",
         "ebay" => "eBay",
         "duffel" => "Duffel",
-        other => other,
-    };
+        other => other.strip_prefix("cloud-").and_then(crate::cloud::provider).map(|cloud| cloud.name).unwrap_or(other),
+    }
+}
+
+/// Limits for a cloud model call: only the monthly dollar cap applies.
+pub fn cloud_limits(settings: &Settings, estimate_usd: f64) -> Limits {
+    Limits { daily: u32::MAX, monthly: u32::MAX, budget_usd: settings.cloud_budget_usd, unit_cost: estimate_usd }
+}
+
+pub fn warning(provider: &str, month_used: u32, limits: Limits, spend: f64) -> String {
+    let name = display_name(provider);
     if limits.budget_usd.is_finite() && limits.budget_usd > 0.0 && spend / limits.budget_usd >= month_used as f64 / limits.monthly.max(1) as f64 {
         format!("Heads up: you’ve used about {:.0}% of this month’s {name} budget (${spend:.2} of ${:.2}).", spend / limits.budget_usd * 100.0, limits.budget_usd)
     } else {
@@ -86,5 +95,7 @@ mod tests {
         assert_eq!(warning("tavily", 800, count, 0.0), "Heads up: you’ve used 800 of this month’s 1000 Tavily searches.");
         let money = Limits { daily: 30, monthly: 1000, budget_usd: 5.0, unit_cost: 0.005 };
         assert!(warning("brave", 100, money, 4.1).contains("82% of this month’s Brave Search budget"));
+        let cloud = cloud_limits(&Settings::default(), 0.02);
+        assert!(warning("cloud-anthropic", 300, cloud, 4.2).contains("84% of this month’s Anthropic budget"));
     }
 }
