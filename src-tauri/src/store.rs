@@ -68,14 +68,23 @@ impl Store {
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let old_schema = raw
-            .as_ref()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .map(|value| value.get("assistantName").is_none())
-            .unwrap_or(false);
+        let stored = raw.as_ref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        let old_schema = stored.as_ref().map(|value| value.get("assistantName").is_none()).unwrap_or(false);
+        // Saved before brains were selectable: keep a working local MLX setup, otherwise
+        // start on Apple Intelligence like a fresh install.
+        let needs_backend = stored.as_ref().is_some_and(|value| value.get("modelBackend").is_none());
         let mut settings: Settings = raw
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        if needs_backend {
+            settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) { "mlx" } else { "apple" }.into();
+            if !old_schema {
+                self.db
+                    .execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)", [serde_json::to_string(&settings).map_err(|e| e.to_string())?])
+                    .map_err(|e| e.to_string())?;
+                self.audit("settings.migrated", &format!("Model choice set to {} for existing preferences", settings.model_backend))?;
+            }
+        }
         if old_schema {
             let defaults = Settings::default();
             if settings.whisper_model.is_empty() && !defaults.whisper_model.is_empty() {
@@ -478,6 +487,23 @@ mod tests {
         assert!(warnings[..7].iter().all(Option::is_none));
         assert_eq!(warnings[7].as_deref(), Some("Heads up: you’ve used 8 of this month’s 10 Tavily searches."));
         assert!(warnings[8..].iter().all(Option::is_none));
+    }
+    #[test]
+    fn existing_settings_keep_a_working_local_model_and_others_get_apple() {
+        let model = tempfile::tempdir().unwrap();
+        std::fs::write(model.path().join("config.json"), "{}").unwrap();
+        for (model_path, expected) in [(model.path().to_string_lossy().into_owned(), "mlx"), ("/no/longer/here".to_string(), "apple")] {
+            let s = Store::open(Path::new(":memory:")).unwrap();
+            let mut raw = serde_json::to_value(Settings::default()).unwrap();
+            raw.as_object_mut().unwrap().remove("modelBackend");
+            raw["modelPath"] = serde_json::json!(model_path);
+            s.db.execute("INSERT INTO preferences VALUES('settings',?1)", [raw.to_string()]).unwrap();
+            assert_eq!(s.settings().unwrap().model_backend, expected);
+            // The choice is saved, so it never flips later.
+            let saved: String = s.db.query_row("SELECT value FROM preferences WHERE key='settings'", [], |r| r.get(0)).unwrap();
+            assert!(saved.contains(&format!("\"modelBackend\":\"{expected}\"")));
+        }
+        assert_eq!(Store::open(Path::new(":memory:")).unwrap().settings().unwrap().model_backend, "apple", "fresh installs start on Apple Intelligence");
     }
     #[test]
     fn the_old_monthly_counter_is_migrated_to_the_search_provider() {

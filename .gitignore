@@ -2,6 +2,7 @@ node_modules/
 dist/
 src-tauri/target/
 native/buntini-audio
+native/buntini-fm
 native/.build/
 __pycache__/
 *.pyc

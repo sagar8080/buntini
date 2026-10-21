@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, ExternalLink, FileText, Folder, FolderPlus, Globe2, History, KeyRound, Laptop, LoaderCircle, Mic, Minus, Moon, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, Volume2, VolumeX, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, ExternalLink, FileText, Folder, FolderPlus, Globe2, History, KeyRound, Laptop, LoaderCircle, Mic, Minus, Moon, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import Customization from './Customization';
 import { ApprovalSheet, ConnectedServices, ResultCards } from './Online';
 import SearchBudget from './SearchBudget';
+import BrainSettings, { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
 import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
-import SetupChecks from './SetupChecks';
 import FileIndexSettings from './FileIndexSettings';
 import { SpeechQueue } from './speech';
 import { bootstrap, command, desktop, errorMessage, runTask, saveSettings } from './bridge';
@@ -355,7 +355,7 @@ export default function App() {
                 {recording || transcribing ? <button type="button" className="send-button stop-button" aria-label="Cancel voice input" onClick={() => void cancelVoice()}><X size={15} /></button> : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>
-            <div className="composer-hint"><span>{modelReady ? <><span className="status-dot" /> Qwen · MLX</> : <button onClick={() => setPage('settings')}><span className="status-dot amber" /> Set up local model <ChevronRight size={10} /></button>}</span><span><kbd>↵</kbd> to send <span className="hint-separator">·</span> <kbd>⇧ ↵</kbd> new line</span></div>
+            <div className="composer-hint"><span>{modelReady ? <><span className="status-dot" /> {backendLabel[data?.settings.modelBackend || 'apple']}</> : <button onClick={() => setPage('settings')}><span className="status-dot amber" /> Choose a brain <ChevronRight size={10} /></button>}</span><span><kbd>↵</kbd> to send <span className="hint-separator">·</span> <kbd>⇧ ↵</kbd> new line</span></div>
           </div>
         </>}
 
@@ -419,13 +419,7 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
   return <div className="subpage settings-page"><div className="subpage-title"><div className="eyebrow">MAKE YOURSELF AT HOME</div><h2>Your companion, your way.</h2><p>A few small things to get us acquainted.</p></div>
     <form onSubmit={async event => { event.preventDefault(); setSaving(true); onError(''); try { await onSave(draft); } catch (e) { onError(errorMessage(e)); } finally { setSaving(false); } }}>
       <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} />
-      <section className="settings-section"><div className="settings-section-heading"><Laptop size={15} /><h3>Local intelligence</h3><span className={`pill ${data.diagnostics.modelReady ? 'good' : ''}`}>{data.diagnostics.modelReady ? 'Configured' : 'Needs setup'}</span></div><p>Your model runs here. Your thoughts stay here.</p>
-        <label>Python interpreter<input value={draft.pythonPath} onChange={event => update('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} required /></label>
-        <label>Qwen model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/local/qwen-model" spellCheck={false} /></label>
-        <div className="field-help"><WifiOff size={11} /> Local model files only. No automatic downloads.</div>
-        <div className="worker-status"><span className={`status-dot ${data.diagnostics.modelReady ? '' : 'amber'}`} />{data.diagnostics.workerStatus}</div>
-        <SetupChecks onError={onError} />
-      </section>
+      <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} />
       <section className="settings-section"><div className="settings-section-heading"><Folder size={15} /><h3>Folders I can see</h3><span className="count-badge">{data.roots.length}</span></div><p>Only these folders are available to file search.</p>
         {data.roots.map(path => <div className="root-item" key={path}><Folder size={13} /><span title={path}>{path}</span><button type="button" aria-label={`Revoke access to ${path}`} title="Revoke access" onClick={() => void onRemoveFolder(path)}><X size={13} /></button></div>)}
         <button type="button" className="secondary-button add-folder" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Allow a folder</button>
@@ -438,7 +432,7 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
         <SearchBudget draft={draft} update={update} diagnostics={data.diagnostics} />
       </section>
       <ConnectedServices draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />
-      <section className="settings-section"><div className="settings-section-heading"><Mic size={15} /><h3>A familiar voice</h3><span className="pill">Offline</span></div><p>Hold the mic to talk. Release to transcribe.</p><label>MLX Whisper model folder<input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="/path/to/local/whisper-model" spellCheck={false} /></label><div className="field-help">Requires mlx-whisper in your Python environment.</div>
+      <section className="settings-section"><div className="settings-section-heading"><Mic size={15} /><h3>A familiar voice</h3><span className="pill">Offline</span></div><p>Hold the mic to talk. Release to transcribe. Buntini uses Apple’s on-device speech recognition; with a local MLX model you can use Whisper instead.</p><label>MLX Whisper model folder <span className="label-status">Optional</span><input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="/path/to/local/whisper-model" spellCheck={false} /></label><div className="field-help">Requires mlx-whisper in your Python environment.</div>
         <label>Silero VAD model <span className="label-status">Optional · local ONNX</span><input value={draft.vadModelPath} onChange={event => update('vadModelPath', event.target.value)} placeholder="/path/to/silero_vad.onnx" spellCheck={false} /></label>
         <div className="field-help">Filters recordings without speech before transcription.</div>
         <Toggle label="Read responses aloud" detail="Uses your Mac’s built-in voice" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />

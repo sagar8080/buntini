@@ -42,3 +42,18 @@ for args in (["--output", "relative.wav"], ["--output", str(root / "bad.wav"), "
 assert not (root / "bad.wav").exists()
 print("Native audio checks passed: 16 kHz mono PCM, resampling, private permissions, duration and overwrite protection.")
 PY
+
+# Apple Intelligence helper: builds where the SDK allows, then reports availability.
+# Machines without Apple Intelligence still pass; the helper must answer either way.
+"$BUNTINI_NATIVE_DIR/build-fm.sh"
+if [ -x "$BUNTINI_NATIVE_DIR/buntini-fm" ]; then
+  "$BUNTINI_NATIVE_DIR/buntini-fm" --self-test --tools "$BUNTINI_NATIVE_DIR/../worker/tools.json" | python3 -c '
+import json, sys
+lines = [json.loads(line) for line in sys.stdin]
+status = lines[0]
+assert status["check"] == "availability" and status["tools"] >= 9, status
+if status["available"]:
+    assert lines[1]["ok"], lines
+print("Apple Intelligence helper checks passed:", "available" if status["available"] else "not available here (" + status["reason"] + ")")
+'
+fi

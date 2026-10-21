@@ -568,3 +568,14 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .usage-track i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); transition: width .3s ease; }
 .usage-track.is-high i { background: var(--danger); }
 .usage-track b { position: absolute; top: -3px; bottom: -3px; width: 1.5px; background: var(--muted); opacity: .6; }
+/* Brain picker (BrainSettings.tsx). */
+.brain-options { display: grid; gap: 6px; margin: 12px 0 8px; }
+.brain-options button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 11px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; }
+.brain-options button > svg { color: var(--muted); flex-shrink: 0; }
+.brain-options button.active { border-color: var(--accent); background: var(--accent-soft); }
+.brain-options button.active > svg { color: var(--accent); }
+.brain-options span { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.brain-options strong { font-size: 11px; font-weight: 500; }
+.brain-options small { font-size: 9px; color: var(--muted); }
+.brain-options em { font-style: normal; font-size: 9px; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.brain-options em.ready { color: var(--accent); }

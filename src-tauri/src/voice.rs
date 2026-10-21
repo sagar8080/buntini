@@ -1,5 +1,5 @@
 use crate::{model::ModelHub, types::Settings};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     path::PathBuf,
     process::Stdio,
@@ -321,11 +321,7 @@ impl Voice {
         let result = match stopped {
             Err(e) => Err(e),
             Ok(()) => {
-                if settings.whisper_model.is_empty() {
-                    Err("Choose an existing local MLX Whisper model folder in Settings. Your recording has been discarded.".into())
-                } else {
-                    models.mlx_request(settings,json!({"type":"transcribe","audio_path":rec.path,"model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}),rec.cancel.clone()).await.map(|turn|turn.text)
-                }
+                models.transcribe(settings, &rec.path, rec.cancel.clone()).await
             }
         };
         let _ = std::fs::remove_file(&rec.path);

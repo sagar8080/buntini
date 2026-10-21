@@ -6,7 +6,7 @@ const defaults: Settings = {
   assistantName: 'Buntini', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'ember', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
-  modelBackend: 'mlx', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
+  modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [],
 };
 export async function bootstrap(): Promise<Bootstrap> {
@@ -15,7 +15,7 @@ export async function bootstrap(): Promise<Bootstrap> {
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
   return {
     settings, tasks: [], roots: [], audit: [], savedSearches: [], priceWatches: [],
-    diagnostics: { modelReady: false, workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
+    diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
   };
 }
 export async function saveSettings(settings: Settings): Promise<Settings> {

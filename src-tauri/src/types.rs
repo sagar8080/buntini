@@ -55,7 +55,7 @@ impl Default for Settings {
             .map(|h| format!("{h}/projects/pulse-venv/bin/python"))
             .unwrap_or_default();
         Self {
-            model_backend: "mlx".into(),
+            model_backend: "apple".into(),
             // Never guess `python3`: on a fresh Mac that launches the Command Line Tools installer.
             python_path: std::env::var("BUNTINI_PYTHON").unwrap_or_else(|_| {
                 if voice_python.is_file() {
@@ -360,6 +360,8 @@ pub struct PriceWatch {
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     pub model_ready: bool,
+    /// "available", a reason it isn't, or "checking".
+    pub apple_intelligence: String,
     pub worker_status: String,
     pub brave_configured: bool,
     pub tavily_configured: bool,

@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "app.buntini.companion",
   "build": {
-    "beforeDevCommand": "npm run build:audio && npm run dev",
-    "beforeBuildCommand": "npm run build:audio && npm run build",
+    "beforeDevCommand": "npm run build:audio && npm run build:fm && npm run dev",
+    "beforeBuildCommand": "npm run build:audio && npm run build:fm && npm run build",
     "devUrl": "http://127.0.0.1:1421",
     "frontendDist": "../dist"
   },

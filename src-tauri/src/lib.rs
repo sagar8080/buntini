@@ -56,6 +56,11 @@ pub fn run() {
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
+            // Learn whether Apple Intelligence can run here before the first chat.
+            let probe = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                probe.state::<controller::AppState>().models.probe_apple().await;
+            });
             if let Some(window) = app.get_webview_window("main") {
                 let profile = app
                     .state::<controller::AppState>()

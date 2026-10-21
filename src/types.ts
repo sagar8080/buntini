@@ -60,6 +60,7 @@ export interface TaskRecord {
 }
 export interface Diagnostics {
   modelReady: boolean;
+  appleIntelligence?: string;
   workerStatus: string;
   braveConfigured: boolean;
   tavilyConfigured: boolean;

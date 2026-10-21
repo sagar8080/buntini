@@ -2,18 +2,17 @@
 //! held to. Every request is reserved before it is sent (see `Store::reserve`).
 use crate::types::Settings;
 
-/// Free allowances and pay-as-you-go prices, as published in October 2026. Providers
-/// change these, so Settings tells people to check their dashboard.
+/// Free allowances as published in October 2026 (prices after that: Brave $0.005,
+/// Tavily $0.008 per search). Providers change these, so Settings says to check.
 pub struct Preset {
     pub provider: &'static str,
     pub free_monthly: u32,
-    pub cost_per_request: f64,
 }
 pub const PRESETS: [Preset; 2] = [
     // $5 per 1,000 requests with a $5 monthly credit (a card is required).
-    Preset { provider: "brave", free_monthly: 1000, cost_per_request: 0.005 },
+    Preset { provider: "brave", free_monthly: 1000 },
     // 1,000 free credits a month; a basic search costs one credit, then $0.008.
-    Preset { provider: "tavily", free_monthly: 1000, cost_per_request: 0.008 },
+    Preset { provider: "tavily", free_monthly: 1000 },
 ];
 
 pub fn preset(provider: &str) -> Option<&'static Preset> {

@@ -1,7 +1,7 @@
 {
   "search_files": {
     "name": "search_files",
-    "description": "Search file names and indexed content within folders authorized by the user.",
+    "description": "Search file names and indexed text in the folders the user allowed, to find documents or files on this Mac.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -19,7 +19,7 @@
   },
   "system_info": {
     "name": "system_info",
-    "description": "Read a basic snapshot of this Mac's system and storage information.",
+    "description": "Live snapshot of this Mac right now: memory (RAM) use, CPU load, storage space, uptime and the busiest processes.",
     "parameters": {
       "type": "object",
       "properties": {},
