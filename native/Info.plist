@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>app.buntini.companion.audio</string>
+    <key>CFBundleName</key>
+    <string>Buntini Audio</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Buntini records your voice while push-to-talk is active so it can transcribe your request locally on this Mac.</string>
+</dict>
+</plist>
