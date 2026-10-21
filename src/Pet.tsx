@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react';
+import { useId, useRef, type CSSProperties } from 'react';
 import Cat from './Cat';
 import { usePetLife, type PetReaction } from './usePetLife';
 import type { PetLook, PetState, Settings } from './types';
@@ -19,17 +19,20 @@ const tailTips = [
   'M47 30C46 22 48 16 52 12C50 28 58 40 69 47L69 37L74 49C64 57 51 51 47 30Z',
 ];
 
-export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook, alive = false, reaction }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook; alive?: boolean; reaction?: PetReaction }) {
+export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook, alive = false, reaction, moving = null, facing = -1, landing = false, asleep = false, speed = 90 }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook; alive?: boolean; reaction?: PetReaction; moving?: 'walk' | 'jump' | 'fall' | null; facing?: -1 | 1; landing?: boolean; asleep?: boolean; speed?: number }) {
   const gradientId = useId().replaceAll(':', '');
   const element = useRef<HTMLDivElement>(null);
-  const { action, blinking } = usePetLife(element, { alive, state, motion: look.motion, cat: avatar === 'cat', reaction });
+  // Habits wait while the pet is travelling or napping.
+  const { action, blinking } = usePetLife(element, { alive, state: moving || asleep ? 'working' : state, motion: look.motion, cat: avatar === 'cat', reaction });
   const curious = state === 'listening' || state === 'approval';
   const focused = state === 'thinking' || state === 'working';
 
-  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small'];
-  return <div ref={element} className={classes.filter(Boolean).join(' ')} aria-hidden="true">
+  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && !moving && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small', moving && `pet--${moving}ing`, facing > 0 && 'pet--facing-right', landing && 'pet--landing', asleep && !moving && 'pet--asleep'];
+  // One full gait cycle covers about 36 points, so the paws keep pace with the window.
+  const stride = `${Math.min(.7, Math.max(.26, 36 / speed)).toFixed(2)}s`;
+  return <div ref={element} className={classes.filter(Boolean).join(' ')} style={{ '--stride': stride } as CSSProperties} aria-hidden="true">
     <div className="pet-aura" />
-    {avatar === 'orb' ? <Orb state={state} id={gradientId} /> : avatar === 'cat' ? <Cat id={gradientId} look={look} /> : <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+    {avatar === 'orb' ? <Orb state={state} id={gradientId} /> : avatar === 'cat' ? <Cat id={gradientId} look={look} pose={moving === 'walk' ? 'walk' : moving === 'jump' ? 'leap' : 'sit'} /> : <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id={`${gradientId}-tail`} x1="90" y1="22" x2="90" y2="147" gradientUnits="userSpaceOnUse">
           <stop stopColor="#FFA83F" /><stop offset=".54" stopColor="#ED8127" /><stop offset="1" stopColor="#B74C20" />

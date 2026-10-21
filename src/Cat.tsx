@@ -1,12 +1,12 @@
 import type { CatCoat, PetLook } from './types';
 import { accentColor, eyeColors } from './petOptions';
 
-interface Coat {
+export interface Coat {
   base: string; shade: string; outline: string; belly: string; ear: string; nose: string; whisker: string;
   marks?: string; patchA?: string; patchB?: string; point?: string; blush: number;
 }
 
-const palettes: Record<CatCoat, Coat> = {
+export const palettes: Record<CatCoat, Coat> = {
   ginger: { base: '#F6AA5E', shade: '#E2843D', outline: '#9A5126', belly: '#FFF1DC', ear: '#F7B3A6', nose: '#F08A98', whisker: '#9A5126', marks: '#D46F2D', blush: .38 },
   gray: { base: '#A9B1BE', shade: '#8A93A2', outline: '#4E5563', belly: '#F2F3F6', ear: '#F2B8B5', nose: '#E58C9A', whisker: '#4E5563', marks: '#6E7787', blush: .38 },
   black: { base: '#3E3B45', shade: '#2B2930', outline: '#141217', belly: '#4B4753', ear: '#C98A93', nose: '#7A505D', whisker: '#CFCAD6', blush: .24 },
@@ -20,7 +20,9 @@ const flowers: [number, number][] = [[66, 69], [77, 62], [90, 59], [103, 62], [1
 
 /* Seated, round-headed kitten. Coat, eyes and accessory come from the saved look;
    state reactions are CSS-driven so the SVG stays static and cheap to render. */
-export default function Cat({ id, look }: { id: string; look: PetLook }) {
+export type CatPose = 'sit' | 'walk' | 'leap';
+
+export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetLook; pose?: CatPose }) {
   const coat = palettes[look.coat];
   const accent = accentColor(look.accent);
   const tabby = look.coat === 'ginger' || look.coat === 'gray';
@@ -32,6 +34,13 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
   const rightEar = coat.point ?? coat.patchB ?? coat.base;
   const line = { stroke: coat.outline, strokeWidth: 1.8, strokeLinejoin: 'round' as const };
 
+  // A walking leg hangs from (x, 132); its inner group swings about the hip.
+  const leg = (x: number, pair: 'a' | 'b', end: 'front' | 'back', far: boolean) => <g transform={`translate(${x} 132)`} key={`${x}-${pair}`}>
+    <g className={`walk-leg ${pair} ${end}`}>
+      <path d="M-5.5 0H5.5V22C5.5 25.5 3.5 27.5 0 27.5C-3.5 27.5 -5.5 25.5 -5.5 22Z" fill={far ? coat.shade : coat.point ?? coat.base} {...line} />
+      <ellipse cx="-1.5" cy="27" rx="7" ry="4" fill={far ? coat.shade : paws} {...line} />
+    </g>
+  </g>;
   const ear = (fill: string) => <>
     <path d="M57 82C53 68 52 54 55 45C56 41 60 40 63 42C71 48 78 55 84 63Z" fill={fill} {...line} />
     <path d="M61 73C59 63 59 55 60 49C66 53 71 58 76 63Z" fill={coat.ear} />
@@ -45,13 +54,17 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
     </g></g>
   </>;
 
-  return <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  return <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg" className={`cat cat--${pose}`}>
     <defs>
       <linearGradient id={`${id}-coat`} x1="90" y1="56" x2="90" y2="164" gradientUnits="userSpaceOnUse"><stop stopColor={coat.base} /><stop offset=".62" stopColor={coat.base} /><stop offset="1" stopColor={coat.shade} /></linearGradient>
       <radialGradient id={`${id}-mask`} cx="90" cy="106" r="27" gradientUnits="userSpaceOnUse"><stop stopColor={coat.point} stopOpacity=".92" /><stop offset=".55" stopColor={coat.point} stopOpacity=".55" /><stop offset="1" stopColor={coat.point} stopOpacity="0" /></radialGradient>
     </defs>
-    <ellipse className="pet-shadow" cx="90" cy="165" rx="38" ry="5" fill="#1D1720" fillOpacity=".18" />
+    <ellipse className="pet-shadow cat-sit-shadow" cx="90" cy="165" rx="38" ry="5" fill="#1D1720" fillOpacity=".18" />
+    <ellipse className="pet-shadow cat-walk-shadow" cx="114" cy="165" rx="46" ry="5" fill="#1D1720" fillOpacity=".18" />
     <g className="pet-body">
+      {/* Seated body. While walking it fades out and the walking body below fades in;
+          the head never changes, so switching poses reads as the cat getting up. */}
+      <g className="cat-sit">
       <g className="cat-tail">
         <path d="M110 154C132 160 150 150 151 128C152 116 146 106 138 104" stroke={coat.outline} strokeWidth="13.5" strokeLinecap="round" />
         <path d="M110 154C132 160 150 150 151 128C152 116 146 106 138 104" stroke={tail} strokeWidth="10" strokeLinecap="round" />
@@ -73,7 +86,31 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
         <path d="M93 156C93 151 97 149 102 149C107 149 110 151 110 156C110 161 107 163 102 163C97 163 93 161 93 156Z" fill={paws} {...line} />
         <path d="M99 158V161M105 158V161" stroke={coat.outline} strokeWidth="1.2" strokeLinecap="round" strokeOpacity=".55" />
       </g>
+      </g>
 
+      {/* Walking body, side-on behind the head: far legs, tail, torso, near legs. */}
+      <g className="cat-walkbody">
+        {leg(111, 'b', 'front', true)}
+        {leg(146, 'a', 'back', true)}
+        <g className="walk-tail">
+          <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={coat.outline} strokeWidth="13" strokeLinecap="round" />
+          <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={tail} strokeWidth="9.5" strokeLinecap="round" />
+          {tabby && <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 6" />}
+        </g>
+        <path d="M96 128C96 116 106 110 120 110H134C146 110 153 117 153 128C153 139 146 145 134 145H112C102 145 96 139 96 128Z" fill={`url(#${id}-coat)`} {...line} />
+        {look.coat === 'calico' && <g>
+          <path d="M116 111C124 109 132 111 135 116C129 121 119 121 113 117C112 114 113 112 116 111Z" fill={coat.patchA} />
+          <path d="M140 112C148 114 153 120 153 128C147 128 141 124 138 118Z" fill={coat.patchB} />
+        </g>}
+        <path d="M104 138C112 145 132 146 145 140C141 145 137 145 133 145H112C108 145 105 142 104 138Z" fill={coat.belly} />
+        {look.coat === 'tuxedo' && <path d="M96 128C96 138 102 144 110 145C113 137 112 124 105 117C100 119 96 123 96 128Z" fill={coat.belly} />}
+        {tabby && <path d="M118 111C119 116 118 120 116 123M128 111C129 116 128 120 126 123M138 113C139 117 138 121 136 124" stroke={coat.marks} strokeWidth="2.4" strokeLinecap="round" />}
+        {leg(101, 'a', 'front', false)}
+        {leg(136, 'b', 'back', false)}
+      </g>
+
+      {/* Head and collar lean forward a touch while walking. */}
+      <g className="cat-front">
       {/* The head turns toward the cursor (outer group) and acts out habits (inner group).
           Ears sit behind it; each is wrapped so CSS can rotate it without overriding
           the mirror transform. */}
@@ -138,6 +175,7 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
         <path d="M66 120Q90 132 114 120L108 128Q99 146 90 149Q81 146 72 128Z" fill={accent} stroke="#000" strokeOpacity=".18" strokeWidth="1.2" strokeLinejoin="round" />
         <circle cx="84" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="96" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="90" cy="140" r="1.4" fill="#fff" fillOpacity=".8" />
       </g>}
+      </g>
       {/* A copy of the right paw drawn in front of the face, shown only while grooming. */}
       <g className="cat-groom-paw">
         <path d="M93 156C93 151 97 149 102 149C107 149 110 151 110 156C110 161 107 163 102 163C97 163 93 161 93 156Z" fill={paws} {...line} />

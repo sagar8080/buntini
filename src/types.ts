@@ -15,6 +15,9 @@ export interface Settings {
   catEyes: CatEyes;
   catAccessory: CatAccessory;
   petMotion: PetMotion;
+  petRoam: boolean;
+  petAwareness: boolean;
+  petNudges: boolean;
   voiceId: string;
   voiceRate: number;
   notificationsEnabled: boolean;
@@ -30,6 +33,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark';
   reducedMotion: boolean;
   ebayMarketplace: string;
+  externalShares: string[];
 }
 export interface Source { title: string; url: string; snippet: string; retrievedAt: string }
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }

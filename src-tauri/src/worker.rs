@@ -64,6 +64,10 @@ async fn bounded_line(
     }
 }
 impl WorkerManager {
+    /// The MLX worker runs on this Mac, so it may see local data (see privacy.rs).
+    pub fn locality(&self) -> crate::privacy::Locality {
+        crate::privacy::Locality::OnDevice
+    }
     pub fn new(script: PathBuf) -> Self {
         Self {
             worker: Mutex::new(None),

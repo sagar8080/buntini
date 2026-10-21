@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Only the local Buntini companion UI can invoke its read-only controller.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-hide", "core:window:allow-set-size", "core:window:allow-set-position", "core:window:allow-set-focus", "core:window:allow-set-focusable"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-hide", "core:window:allow-set-size", "core:window:allow-set-position", "core:window:allow-set-focus", "core:window:allow-set-focusable", "core:window:allow-set-ignore-cursor-events"]
 }

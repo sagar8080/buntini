@@ -185,6 +185,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "buntini"
+version = "0.1.0"
+dependencies = [
+ "block2",
+ "chrono",
+ "futures-util",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-user-notifications",
+ "reqwest 0.12.28",
+ "rfd",
+ "rusqlite",
+ "scraper",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2137,35 +2166,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
-name = "buntini"
-version = "0.1.0"
-dependencies = [
- "block2",
- "chrono",
- "futures-util",
- "libc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-user-notifications",
- "reqwest 0.12.28",
- "rfd",
- "rusqlite",
- "scraper",
- "security-framework",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tempfile",
- "tokio",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "ntapi"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2229,6 +2229,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.2",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",

@@ -6,6 +6,7 @@ mod local;
 mod migration;
 mod notifications;
 mod overlay;
+mod privacy;
 mod pricing;
 mod research;
 mod scheduler;
@@ -16,6 +17,7 @@ mod voice;
 mod watches;
 mod web;
 mod worker;
+mod world;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
@@ -45,7 +47,9 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data = app.path().app_data_dir()?;
             let cache = app.path().app_cache_dir()?;
-            let resources = app.path().resource_dir()?;
+            // Dev builds under a custom CARGO_TARGET_DIR have no resource folder; the
+            // controller then falls back to the project's worker/ and native/ folders.
+            let resources = app.path().resource_dir().unwrap_or_default();
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
@@ -74,6 +78,7 @@ pub fn run() {
                 }
             }
             overlay::start_hit_testing(app.handle().clone());
+            world::start(app.handle().clone());
             scheduler::start(app.handle().clone());
             if let Err(error) = app
                 .global_shortcut()
@@ -148,6 +153,11 @@ pub fn run() {
             controller::refresh_file_index,
             controller::cancel_file_index,
             approvals::plan_online_request,
+            world::pet_world,
+            world::pet_move,
+            world::pet_stop,
+            world::pet_perch,
+            world::pet_sample,
             approvals::approve_web_approval,
             notifications::request_notification_permission,
             notifications::notification_permission_status,

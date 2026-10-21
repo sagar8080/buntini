@@ -24,6 +24,9 @@ pub struct Settings {
     pub cat_eyes: String,
     pub cat_accessory: String,
     pub pet_motion: String,
+    pub pet_roam: bool,
+    pub pet_awareness: bool,
+    pub pet_nudges: bool,
     pub voice_id: String,
     pub voice_rate: u32,
     pub notifications_enabled: bool,
@@ -31,6 +34,8 @@ pub struct Settings {
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
     pub ebay_marketplace: String,
+    /// Local data categories an external model backend may receive. On-device models see everything.
+    pub external_shares: Vec<String>,
 }
 
 impl Default for Settings {
@@ -86,12 +91,16 @@ impl Default for Settings {
             cat_eyes: "green".into(),
             cat_accessory: "bell".into(),
             pet_motion: "playful".into(),
+            pet_roam: true,
+            pet_awareness: true,
+            pet_nudges: true,
             voice_id: String::new(),
             voice_rate: 180,
             notifications_enabled: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
+            external_shares: Vec::new(),
             vad_model_path: std::env::var("BUNTINI_VAD_MODEL_PATH").unwrap_or_else(|_| {
                 if local_vad.is_file() {
                     local_vad.to_string_lossy().into_owned()
@@ -124,6 +133,7 @@ impl Settings {
         {
             return Err("Choose a supported avatar and accent.".into());
         }
+        crate::privacy::validate_shares(&self.external_shares)?;
         if !crate::integrations::ebay::MARKETPLACES
             .iter()
             .any(|(id, _)| *id == self.ebay_marketplace)

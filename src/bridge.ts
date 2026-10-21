@@ -4,10 +4,10 @@ import type { Bootstrap, Mode, Settings, TaskEvent, TaskRecord } from './types';
 export const desktop = isTauri();
 const defaults: Settings = {
   assistantName: 'Buntini', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'ember', companionScale: 1,
-  catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful',
+  catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   pythonPath: 'python3', modelPath: '', whisperModel: '', searchProvider: 'brave',
-  monthlySearchLimit: 100, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US',
+  monthlySearchLimit: 100, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [],
 };
 export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');

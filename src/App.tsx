@@ -7,6 +7,8 @@ import Customization from './Customization';
 import { ApprovalSheet, ConnectedServices, ResultCards } from './Online';
 import { lookFrom } from './petOptions';
 import type { PetReaction } from './usePetLife';
+import { usePetWorld } from './usePetWorld';
+import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import SetupChecks from './SetupChecks';
 import FileIndexSettings from './FileIndexSettings';
@@ -99,11 +101,25 @@ export default function App() {
     setExpanded(open); setMenu(false);
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
+  const nudgeAction = useRef<(action: NudgeAction) => void>(() => {});
+  const stillPreferred = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const world = usePetWorld({
+    enabled: desktop && !!data,
+    roam: !!data?.settings.petRoam && !data.settings.reducedMotion && !stillPreferred,
+    aware: !!data?.settings.petAwareness,
+    nudges: !!data?.settings.petNudges && !!data?.settings.petAwareness,
+    motion: data?.settings.petMotion || 'playful',
+    scale: data?.settings.companionScale || 1,
+    expanded, petState, react,
+    onAction: action => nudgeAction.current(action),
+  });
+  const nudging = !expanded && !!world.nudge;
   useEffect(() => {
     if (!desktop) return;
     const scale = data?.settings.companionScale || 1;
-    const width = expanded ? 420 : Math.max(128, Math.round(128 * scale));
-    const height = expanded ? (page === 'home' ? task ? 620 : approval ? 520 : 420 : 690) + Math.round(120 * (scale - 1)) : Math.max(136, Math.round(136 * scale));
+    // A nudge borrows room above the pet for its speech bubble.
+    const width = expanded ? 420 : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
+    const height = expanded ? (page === 'home' ? task ? 620 : approval ? 520 : 420 : 690) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
     resizeQueue.current = resizeQueue.current.then(async () => {
       const window = getCurrentWindow();
       const [position, before, monitor] = await Promise.all([window.outerPosition(), window.outerSize(), currentMonitor()]);
@@ -119,7 +135,7 @@ export default function App() {
       }
       await window.setPosition(new PhysicalPosition(x, y));
     }).catch(e => setError(errorMessage(e)));
-  }, [expanded, page, !!task, !!approval, data?.settings.companionScale]);
+  }, [expanded, nudging, page, !!task, !!approval, data?.settings.companionScale]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
@@ -226,6 +242,11 @@ export default function App() {
       setError(message); react('sad'); setTask(previous => previous ? { ...previous, state: 'error' } : previous); await speechQueue.current?.cancel().catch(() => {});
     } finally { taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle'); }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses]);
+  nudgeAction.current = action => {
+    if (action === 'checkMac') { void expand(true); void submit('How is my Mac doing?', 'system'); }
+    else if (action === 'lookUp') { setMode('web'); void expand(true); }
+    else if (action === 'findFile') { setMode('files'); void expand(true); }
+  };
   async function cancel() {
     const taskId = activeId.current;
     const stopTask = taskId ? command('cancel_task', { taskId }).then(() => {
@@ -287,7 +308,7 @@ export default function App() {
   const assistantName = data?.settings.assistantName || 'Buntini';
   const companionScale = data?.settings.companionScale || 1;
 
-  return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}`}>
+  return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
     <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? task ? 620 : approval ? 520 : 420 : 690) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
@@ -355,6 +376,7 @@ export default function App() {
       </section>}
 
       <div className="pet-dock">
+        {nudging && world.nudge && <div className="nudge-bubble" role="status" aria-live="polite"><p>{world.nudge.text}</p><div>{world.nudge.actions.map(item => <button key={item.label} onClick={() => world.act(item.action)}>{item.label}</button>)}</div></div>}
         {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? 'All ears.' : petState === 'thinking' ? 'A little thinking…' : petState === 'working' ? 'On it, one moment.' : petState === 'speaking' ? 'Something to say.' : 'Here when you need me.'}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
         <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  title={expanded ? 'Drag to move · click to tuck away' : 'Click to open Buntini'} onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
           if (!desktop || event.button !== 0) return;
@@ -364,12 +386,12 @@ export default function App() {
           const move = (moveEvent: PointerEvent) => {
             if (Math.abs(moveEvent.clientX - startX) + Math.abs(moveEvent.clientY - startY) > 5) {
               petDragged.current = true;
-              button.removeEventListener('pointermove', move); void getCurrentWindow().startDragging();
+              button.removeEventListener('pointermove', move); world.beforeDrag(); void getCurrentWindow().startDragging();
             }
           };
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
-        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} /></button>
+        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} speed={world.speed} /></button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button></div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>

@@ -4,7 +4,7 @@ import { desktop } from './bridge';
 import { actionDuration, gazeToward, nextBlinkDelay, nextIdleDelay, pickIdleAction, randomGlance, type PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
-export interface PetReaction { kind: 'happy' | 'sad'; id: number }
+export interface PetReaction { kind: PetAction; id: number }
 
 const reactions = new Set<PetAction>(['love', 'purr', 'happy', 'sad']);
 const stillPreferred = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;

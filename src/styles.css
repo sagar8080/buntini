@@ -500,3 +500,62 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .service-heading strong { font-weight: 500; }
 .service-heading .label-status { margin-left: auto; }
 .service-actions { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+/* Out and about: travelling, landing, napping, quiet mode and nudges (usePetWorld.ts). */
+.pet--facing-right svg { transform: scaleX(-1); }
+.pet.pet--walking .pet-body { animation: pet-trot .44s ease-in-out infinite; }
+.pet.pet--walking .pet-shadow { animation: pet-trot-shadow .44s ease-in-out infinite; }
+.pet.pet--walking .cat-paw-left { animation: cat-step .44s ease-in-out infinite; }
+.pet.pet--walking .cat-paw-right { animation: cat-step .44s ease-in-out .22s infinite; }
+.pet.pet--walking .cat-tail { animation: cat-tail-playful .88s ease-in-out infinite; }
+.pet.pet--walking .cat-ear-left, .pet.pet--walking .cat-ear-right { animation: none; transform: rotate(0); }
+.pet.pet--jumping .pet-body { animation: pet-leap .7s ease-out; }
+.pet.pet--jumping .cat-pupil, .pet.pet--falling .cat-pupil { transform: scale(1.18); }
+.pet.pet--falling .pet-body { animation: none; transform: scale(.95, 1.07); }
+.pet.pet--falling .cat-ear-left { transform: rotate(-14deg); }
+.pet.pet--falling .cat-ear-right { transform: rotate(14deg); }
+.pet.pet--jumping .pet-shadow, .pet.pet--falling .pet-shadow { opacity: 0; }
+.pet.pet--landing .pet-body { animation: pet-land .38s ease-out; }
+.pet--asleep .pet-eyes { display: none; }
+.pet--asleep .cat-eyes-closed, .pet--asleep .cat-zzz { display: block; }
+.pet--asleep .pet-body { animation-duration: 7s; }
+.pet--asleep .cat-head-gaze, .pet--asleep .cat-look { transform: none; }
+.pet--asleep:not(.pet--cat) .pet-eyes { display: block; transform: scaleY(.12); }
+.is-quiet .companion { opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+.companion { transition: opacity .4s ease; }
+.nudge-bubble { position: absolute; right: calc(10px * var(--companion-scale, 1)); bottom: calc(112px * var(--companion-scale, 1)); width: min(calc(232px * var(--companion-scale, 1)), calc(100% - 12px)); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 11px; font-size: 11px; line-height: 1.5; animation: nudge-in .25s ease-out; z-index: 3; }
+.nudge-bubble::after { content: ''; position: absolute; right: calc(52px * var(--companion-scale, 1)); bottom: -6px; width: 10px; height: 10px; background: var(--panel); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
+.nudge-bubble p { margin: 0 0 8px; }
+.nudge-bubble div { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.nudge-bubble button { font-size: 10px; padding: 4px 8px; border-radius: 6px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+.nudge-bubble button:first-child { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+@keyframes pet-trot { 0%, 100% { transform: translateY(0) rotate(-1.5deg); } 50% { transform: translateY(-3.5px) rotate(1.5deg); } }
+@keyframes pet-trot-shadow { 50% { transform: scaleX(.9); opacity: .6; } }
+@keyframes cat-step { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes pet-leap { 0% { transform: translateY(3px) scale(1.06, .9); } 30% { transform: scale(.93, 1.1); } 70% { transform: scale(.97, 1.04); } 100% { transform: none; } }
+@keyframes pet-land { 0% { transform: translateY(3px) scale(1.1, .86); } 55% { transform: translateY(-2px) scale(.97, 1.04); } 100% { transform: none; } }
+@keyframes nudge-in { from { opacity: 0; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
+/* Walking pose (Cat.tsx): one cat whose seated body crossfades into a walking body under
+   the same head. Legs move in a diagonal gait timed by --stride; turning flips smoothly. */
+.pet svg { transition: transform .22s ease; }
+.cat-sit, .cat-walkbody, .cat-front, .cat-sit-shadow, .cat-walk-shadow { transition: opacity .18s ease, transform .24s ease; }
+.cat-sit { transform-origin: 90px 160px; }
+.cat-walkbody, .cat-walk-shadow { opacity: 0; }
+.cat--walk .cat-sit, .cat--leap .cat-sit, .cat--walk .cat-sit-shadow, .cat--leap .cat-sit-shadow { opacity: 0; transform: scale(.94, .84); }
+.cat--walk .cat-walkbody, .cat--leap .cat-walkbody, .cat--walk .cat-walk-shadow { opacity: 1; }
+.cat--walk .cat-front, .cat--leap .cat-front { transform: translate(-6px, 3px); }
+.cat--walk .cat-look, .cat--leap .cat-look { transform: translate(-2.4px, .6px); }
+.cat--walk .cat-head-gaze, .cat--leap .cat-head-gaze { transform: none; }
+.cat--walk .cat-groom-paw, .cat--leap .cat-groom-paw { display: none !important; }
+.walk-leg { transform-box: fill-box; transform-origin: 50% 0%; }
+.cat--walk .walk-leg { animation: walk-leg var(--stride, .4s) ease-in-out infinite; }
+.cat--walk .walk-leg.b { animation-delay: calc(var(--stride, .4s) * -.5); }
+.walk-tail { transform-origin: 150px 122px; }
+.cat--walk .walk-tail { animation: walk-tail calc(var(--stride, .4s) * 2) ease-in-out infinite; }
+.cat--leap .walk-leg.front { transform: rotate(36deg); }
+.cat--leap .walk-leg.back { transform: rotate(-40deg); }
+.cat--leap .cat-walkbody { transform: rotate(-6deg); transform-origin: 124px 128px; }
+.pet.pet--walking.pet--cat .pet-body { animation: walk-bob calc(var(--stride, .4s) / 2) ease-in-out infinite; }
+.pet.pet--walking.pet--cat .pet-shadow { animation: none; }
+@keyframes walk-leg { 0%, 100% { transform: rotate(24deg); } 50% { transform: rotate(-24deg); } }
+@keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
+@keyframes walk-tail { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(8deg); } }

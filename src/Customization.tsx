@@ -45,6 +45,11 @@ export default function Customization({ draft, update, onError, onPreviewVoice }
       <div className="cat-studio-label">How lively<small>Applies to every character</small></div>
       <div className="motion-options" aria-label="Motion personality">{motions.map(item => <button type="button" key={item.id} aria-pressed={draft.petMotion === item.id} onClick={() => update('petMotion', item.id)}>{item.label}</button>)}</div>
       <div className="field-help">{draft.reducedMotion ? 'Animations are off because “A little less motion” is on.' : motions.find(item => item.id === draft.petMotion)?.detail}</div>
+      <div className="cat-studio-label">Out and about<small>Stays on this Mac</small></div>
+      <label className="notification-choice"><input type="checkbox" checked={draft.petRoam} onChange={event => update('petRoam', event.target.checked)} />Walk around the screen and sit on the window I’m using</label>
+      <label className="notification-choice"><input type="checkbox" checked={draft.petAwareness} onChange={event => update('petAwareness', event.target.checked)} />Notice what I’m doing: time away, the app in front (name only) and Mac health</label>
+      <label className="notification-choice"><input type="checkbox" checked={draft.petNudges} disabled={!draft.petAwareness} onChange={event => update('petNudges', event.target.checked)} />Helpful nudges: breaks, focus timers, battery and app-aware offers</label>
+      <div className="field-help">Never window titles or contents. It stays on this Mac: Buntini’s on-device model uses it to understand what you’re doing, and nothing is saved or sent online. Buntini naps when you’re away and hides during meetings and full screen.</div>
       <label className="inline-field"><span>Companion size<small>The bubble stays easy to read</small></span><select value={draft.companionScale} onChange={event => update('companionScale', Number(event.target.value))}><option value={.8}>Small</option><option value={1}>Default</option><option value={1.2}>Large</option></select></label>
     </section>
     <section className="settings-section"><div className="settings-section-heading"><AudioLines size={15} /><h3>A voice to match</h3></div><p>Choose from voices already installed on your Mac.</p>
