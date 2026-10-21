@@ -1,7 +1,5 @@
-import { useState } from 'react';
-import { BookOpen, CloudSun, Coins, ExternalLink, Globe2, KeyRound, MapPin, Plane, ShieldCheck, ShoppingBag } from 'lucide-react';
-import { errorMessage } from './bridge';
-import type { Diagnostics, ResultCard, Settings, WebApproval } from './types';
+import { BookOpen, CloudSun, Coins, ExternalLink, Globe2, MapPin, Plane, ShieldCheck, ShoppingBag } from 'lucide-react';
+import type { ResultCard, WebApproval } from './types';
 
 const titles: Record<string, string> = {
   web_search: 'Search the web?', weather: 'Check the weather?', currency: 'Get exchange rates?', wikipedia: 'Look it up on Wikipedia?',
@@ -35,33 +33,4 @@ export function ResultCards({ cards, onOpen }: { cards: ResultCard[]; onOpen: (u
       </article>;
     })}
   </div>;
-}
-
-const marketplaces = [['EBAY_US', 'United States'], ['EBAY_GB', 'United Kingdom'], ['EBAY_DE', 'Germany'], ['EBAY_FR', 'France'], ['EBAY_IT', 'Italy'], ['EBAY_ES', 'Spain'], ['EBAY_AU', 'Australia'], ['EBAY_CA', 'Canada']];
-
-/** Optional services that need the user's own keys. Keys go straight to the macOS Keychain. */
-export function ConnectedServices({ draft, update, diagnostics, onKey, onError }: { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; diagnostics: Diagnostics; onKey: (provider: 'ebay' | 'duffel', key: string) => Promise<void>; onError: (error: string) => void }) {
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [token, setToken] = useState('');
-  const [saving, setSaving] = useState('');
-  const save = async (provider: 'ebay' | 'duffel', key: string, reset: () => void) => {
-    setSaving(provider);
-    try { await onKey(provider, key); reset(); } catch (error) { onError(errorMessage(error)); } finally { setSaving(''); }
-  };
-  return <section className="settings-section"><div className="settings-section-heading"><Globe2 size={15} /><h3>Live lookups</h3></div>
-    <p>Weather (Open-Meteo), exchange rates (ECB), Wikipedia and nearby places (OpenStreetMap) need no key. Every request asks you first and shows exactly what is sent.</p>
-    <div className="service"><div className="service-heading"><ShoppingBag size={14} /><strong>eBay listings</strong><span className="label-status">{diagnostics.ebayConfigured ? 'Saved in Keychain' : 'Not connected'}</span></div>
-      <label>Client ID (App ID)<div className="key-input"><KeyRound size={13} /><input autoComplete="off" spellCheck={false} value={clientId} onChange={event => setClientId(event.target.value)} placeholder={diagnostics.ebayConfigured ? 'Saved · enter to replace' : 'YourName-App-PRD-…'} /></div></label>
-      <label>Client secret (Cert ID)<div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={clientSecret} onChange={event => setClientSecret(event.target.value)} placeholder="PRD-…" /></div></label>
-      <label>Marketplace<select value={draft.ebayMarketplace} onChange={event => update('ebayMarketplace', event.target.value)}>{marketplaces.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-      <div className="service-actions"><button type="button" className="secondary-button" disabled={!clientId.trim() || !clientSecret.trim() || saving === 'ebay'} onClick={() => void save('ebay', JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim() }), () => { setClientId(''); setClientSecret(''); })}>{saving === 'ebay' ? 'Saving…' : 'Save eBay keys'}</button>{diagnostics.ebayConfigured && <button type="button" className="text-button danger" onClick={() => void save('ebay', '', () => {})}>Remove</button>}</div>
-      <div className="field-help">Create a free app at developer.ebay.com. Sandbox keys (with “SBX”) search the eBay sandbox.</div>
-    </div>
-    <div className="service"><div className="service-heading"><Plane size={14} /><strong>Flights via Duffel</strong><span className="label-status">{diagnostics.duffelConfigured ? 'Saved in Keychain' : 'Not connected'}</span></div>
-      <label>Access token<div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder={diagnostics.duffelConfigured ? '••••••••••••' : 'duffel_test_… or duffel_live_…'} /></div></label>
-      <div className="service-actions"><button type="button" className="secondary-button" disabled={!token.trim() || saving === 'duffel'} onClick={() => void save('duffel', token.trim(), () => setToken(''))}>{saving === 'duffel' ? 'Saving…' : 'Save token'}</button>{diagnostics.duffelConfigured && <button type="button" className="text-button danger" onClick={() => void save('duffel', '', () => {})}>Remove</button>}</div>
-      <div className="field-help">Search only. Buntini never books, holds, or pays for flights. Test tokens return sample airline data.</div>
-    </div>
-  </section>;
 }

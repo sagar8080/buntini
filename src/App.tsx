@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, FolderPlus, Globe2, History, KeyRound, Laptop, LoaderCircle, Mic, Minus, Moon, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mic, Minus, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
-import Customization from './Customization';
-import { ApprovalSheet, ConnectedServices, ResultCards } from './Online';
-import SearchBudget from './SearchBudget';
-import BrainSettings, { backendLabel } from './BrainSettings';
+import { ApprovalSheet, ResultCards } from './Online';
+import { backendLabel } from './brain.ts';
 import { lookFrom } from './petOptions';
 import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
@@ -14,9 +12,9 @@ import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
 import Onboarding from './Onboarding';
+import SettingsView from './SettingsView';
 import { greeting, mergeTurns } from './thread';
 import { relativeTime } from './format';
-import FileIndexSettings from './FileIndexSettings';
 import { SpeechQueue } from './speech';
 import { bootstrap, command, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import type { Bootstrap, KeyProvider, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
@@ -387,7 +385,7 @@ export default function App() {
         </div>}
 
         {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
-          const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh(); setNotice('Settings saved. All set.');
+          const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh();
         }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><div className="eyebrow">NOTHING BEHIND YOUR BACK</div><h2>The paper trail.</h2><p>Tool calls and permissions, recorded locally.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
@@ -419,51 +417,6 @@ export default function App() {
       </div>
     </div>
   </main>;
-}
-
-
-function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice, onRestartSetup }: {
-  data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
-  onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
-  onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void; onRestartSetup: () => void;
-  onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
-}) {
-  const [draft, setDraft] = useState(data.settings);
-  const [key, setKey] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [savingKey, setSavingKey] = useState(false);
-  const update = <K extends keyof Settings>(name: K, value: Settings[K]) => setDraft(previous => ({ ...previous, [name]: value }));
-  const configured = draft.searchProvider === 'brave' ? data.diagnostics.braveConfigured : data.diagnostics.tavilyConfigured;
-  return <div className="subpage settings-page"><div className="subpage-title"><div className="eyebrow">MAKE YOURSELF AT HOME</div><h2>Your companion, your way.</h2><p>A few small things to get us acquainted.</p></div>
-    <form onSubmit={async event => { event.preventDefault(); setSaving(true); onError(''); try { await onSave(draft); } catch (e) { onError(errorMessage(e)); } finally { setSaving(false); } }}>
-      <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} />
-      <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} />
-      <section className="settings-section"><div className="settings-section-heading"><Folder size={15} /><h3>Folders I can see</h3><span className="count-badge">{data.roots.length}</span></div><p>Only these folders are available to file search.</p>
-        {data.roots.map(path => <div className="root-item" key={path}><Folder size={13} /><span title={path}>{path}</span><button type="button" aria-label={`Revoke access to ${path}`} title="Revoke access" onClick={() => void onRemoveFolder(path)}><X size={13} /></button></div>)}
-        <button type="button" className="secondary-button add-folder" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Allow a folder</button>
-        <FileIndexSettings roots={data.roots} onError={onError} />
-      </section>
-      <section className="settings-section"><div className="settings-section-heading"><Globe2 size={15} /><h3>A window to the web</h3></div><p>Your own key and your own limits. Only the searches you approve leave your Mac.</p>
-        <label>Search provider<select value={draft.searchProvider} onChange={event => { update('searchProvider', event.target.value as 'brave' | 'tavily'); setKey(''); }}><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></label>
-        <label>API key <span className="label-status">{configured ? 'Saved in Keychain' : 'Not connected'}</span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={configured ? '••••••••••••••••' : 'Paste your API key'} /><button type="button" disabled={!key.trim() || savingKey} onClick={async () => { setSavingKey(true); try { await onKey(draft.searchProvider, key.trim()); setKey(''); } catch (e) { onError(errorMessage(e)); } finally { setSavingKey(false); } }}>{savingKey ? <LoaderCircle size={12} className="spin" /> : 'Save key'}</button></div></label>
-        {configured && <button type="button" className="text-button danger" onClick={async () => { try { await onKey(draft.searchProvider, ''); } catch (e) { onError(errorMessage(e)); } }}>Remove saved key</button>}
-        <SearchBudget draft={draft} update={update} diagnostics={data.diagnostics} />
-      </section>
-      <ConnectedServices draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />
-      <section className="settings-section"><div className="settings-section-heading"><Mic size={15} /><h3>A familiar voice</h3><span className="pill">Offline</span></div><p>Hold the mic to talk. Release to transcribe. Buntini uses Apple’s on-device speech recognition; with a local MLX model you can use Whisper instead.</p><label>MLX Whisper model folder <span className="label-status">Optional</span><input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="/path/to/local/whisper-model" spellCheck={false} /></label><div className="field-help">Requires mlx-whisper in your Python environment.</div>
-        <label>Silero VAD model <span className="label-status">Optional · local ONNX</span><input value={draft.vadModelPath} onChange={event => update('vadModelPath', event.target.value)} placeholder="/path/to/silero_vad.onnx" spellCheck={false} /></label>
-        <div className="field-help">Filters recordings without speech before transcription.</div>
-        <Toggle label="Read responses aloud" detail="Uses your Mac’s built-in voice" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
-      </section>
-      <section className="settings-section"><div className="settings-section-heading"><Sun size={15} /><h3>The little details</h3></div><div className="theme-options" aria-label="Color theme">{[{ id: 'light', icon: Sun, label: 'Light' }, { id: 'dark', icon: Moon, label: 'Dark' }, { id: 'system', icon: Laptop, label: 'System' }].map(item => <button key={item.id} type="button" aria-pressed={draft.theme === item.id} className={draft.theme === item.id ? 'active' : ''} onClick={() => update('theme', item.id as Settings['theme'])}><item.icon size={14} />{item.label}</button>)}</div><Toggle label="A little less motion" detail="Keep companion animations still" checked={draft.reducedMotion} onChange={value => update('reducedMotion', value)} /></section>
-      <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={15} /><span>Run setup again</span><ChevronRight size={14} /></button>
-      <button type="button" className="audit-button" onClick={onAudit}><ShieldCheck size={15} /><span>View activity & permission log</span><ChevronRight size={14} /></button>
-      <button className="primary-button save-settings" type="submit" disabled={saving}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving ? 'Saving…' : 'Save preferences'}</button>
-    </form>
-  </div>;
-}
-function Toggle({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="toggle-row"><span>{label}<small>{detail}</small></span><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} /><span className="toggle-track" aria-hidden="true"><span /></span></label>;
 }
 
 
