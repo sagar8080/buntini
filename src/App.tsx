@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, ExternalLink, FileText, Folder, FolderPlus, Globe2, History, KeyRound, Laptop, LoaderCircle, Mic, Minus, Moon, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, FolderPlus, Globe2, History, KeyRound, Laptop, LoaderCircle, Mic, Minus, Moon, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
@@ -12,6 +12,9 @@ import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
+import Conversation from './Conversation';
+import { greeting, mergeTurns } from './thread';
+import { relativeTime } from './format';
 import FileIndexSettings from './FileIndexSettings';
 import { SpeechQueue } from './speech';
 import { bootstrap, command, desktop, errorMessage, runTask, saveSettings } from './bridge';
@@ -24,28 +27,18 @@ const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: strin
   { id: 'system', name: 'My Mac', icon: Laptop, placeholder: 'How is my Mac doing?' },
   { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather, rates, places, prices, flights or the web…' },
 ];
-function relativeTime(value: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-function fileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
   const [page, setPage] = useState<Page>('home');
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<Mode>('auto');
   const [input, setInput] = useState('');
-  const [task, setTask] = useState<TaskRecord | null>(null);
+  const [turns, setTurns] = useState<TaskRecord[]>([]);
+  const [live, setLive] = useState<TaskRecord | null>(null);
+  const [boundary, setBoundary] = useState<string | null>(null);
+  const [canLoadEarlier, setCanLoadEarlier] = useState(false);
+  const [focusId, setFocusId] = useState('');
+  const threadLoaded = useRef(false);
   const [busy, setBusy] = useState(false);
   const [petState, setPetState] = useState<PetState>('idle');
   const [petReaction, setPetReaction] = useState<PetReaction>();
@@ -91,6 +84,13 @@ export default function App() {
     refresh().catch(e => setError(errorMessage(e)));
     return () => { mounted.current = false; void speechQueue.current?.cancel().catch(() => {}); };
   }, [refresh]);
+  // The thread loads once; later turns are added as they finish.
+  useEffect(() => {
+    if (!data || threadLoaded.current) return;
+    threadLoaded.current = true;
+    setTurns(mergeTurns([], data.tasks)); setBoundary(data.conversationStart ?? null); setCanLoadEarlier(data.tasks.length >= 100);
+  }, [data]);
+  const chatting = turns.length > 0 || !!live;
   useEffect(() => {
     document.documentElement.dataset.theme = data?.settings.theme || 'system';
     document.documentElement.dataset.motion = data?.settings.reducedMotion ? 'reduced' : 'full';
@@ -120,7 +120,7 @@ export default function App() {
     const scale = data?.settings.companionScale || 1;
     // A nudge borrows room above the pet for its speech bubble.
     const width = expanded ? 420 : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
-    const height = expanded ? (page === 'home' ? task ? 620 : approval ? 520 : 420 : 690) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
+    const height = expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
     resizeQueue.current = resizeQueue.current.then(async () => {
       const window = getCurrentWindow();
       const [position, before, monitor] = await Promise.all([window.outerPosition(), window.outerSize(), currentMonitor()]);
@@ -136,7 +136,7 @@ export default function App() {
       }
       await window.setPosition(new PhysicalPosition(x, y));
     }).catch(e => setError(errorMessage(e)));
-  }, [expanded, nudging, page, !!task, !!approval, data?.settings.companionScale]);
+  }, [expanded, nudging, page, chatting, !!approval, data?.settings.companionScale]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
@@ -146,6 +146,7 @@ export default function App() {
     if (!desktop) return;
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
       void refresh();
+      setTurns(previous => mergeTurns(previous, [event.payload.task]));
       setNotice(event.payload.task.state === 'completed' ? `A saved search has an update: ${event.payload.task.prompt}` : 'A saved search needs attention. Check the task shelf.');
     });
     return () => { void subscription.then(unlisten => unlisten()); };
@@ -176,7 +177,12 @@ export default function App() {
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, [page, expanded, busy, recording, transcribing, speaking, expand, approval]);
-  useEffect(() => { if (task) conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'smooth' }); }, [task?.answer, activity]);
+  useEffect(() => {
+    const element = conversationRef.current;
+    if (!element || page !== 'home') return;
+    if (focusId) { document.getElementById(`turn-${focusId}`)?.scrollIntoView({ block: 'start' }); return; }
+    element.scrollTo({ top: element.scrollHeight, behavior: live ? 'smooth' : 'instant' });
+  }, [page, expanded, focusId, boundary, live?.answer, activity, turns.at(-1)?.id]);
   useEffect(() => {
     if (!notice) return;
     const id = window.setTimeout(() => setNotice(''), 3500);
@@ -214,26 +220,27 @@ export default function App() {
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses;
-    let streamedText = '';
+    let streamedText = '', answerSoFar = '', liveId = '';
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
-    setTask(provisional);
+    setFocusId(''); setLive(provisional);
     try {
       const result = await runTask(prompt.trim(), chosenMode, event => {
-        if (event.taskId) activeId.current = event.taskId;
+        if (event.taskId) { activeId.current = event.taskId; liveId = event.taskId; }
         if (event.type === 'state') {
           if (!speechActive.current) setPetState(event.state === 'working' ? 'working' : 'thinking');
           setActivity(event.text || ({ thinking: 'Thinking locally', working: 'Taking a look', planning: 'Making a plan' }[event.state || ''] || 'Working on it'));
         } else if (event.type === 'delta') {
-          setTask(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });
+          answerSoFar += event.text || '';
+          setLive(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });
           if (useSpeech) { streamedText += event.text || ''; speechQueue.current?.append(event.text || '', speechToken); }
         }
         else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
         else if (event.type === 'error') setError(event.text || 'The task could not finish.');
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);
-      setTask(result);
+      setTurns(previous => mergeTurns(previous, [result])); setLive(null);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
         if (!streamedText && result.answer) speechQueue.current?.append(result.answer, speechToken);
@@ -242,7 +249,8 @@ export default function App() {
       await refresh();
     } catch (e) {
       const message = errorMessage(e);
-      setError(message); react('sad'); setTask(previous => previous ? { ...previous, state: 'error' } : previous); await speechQueue.current?.cancel().catch(() => {});
+      setError(message); react('sad');
+      setLive(null); setTurns(thread => mergeTurns(thread, [{ ...provisional, id: liveId || `local-${provisional.createdAt}`, state: 'error', answer: answerSoFar || message }])); await speechQueue.current?.cancel().catch(() => {});
     } finally { taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle'); }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses]);
   nudgeAction.current = action => {
@@ -295,6 +303,16 @@ export default function App() {
     try { await command('cancel_recording'); } catch (e) { setError(errorMessage(e)); }
     finally { await pendingStart?.catch(() => {}); if (version === voiceVersion.current) { recordPromise.current = null; voiceStoppingRef.current = false; setVoiceStopping(false); } }
   }
+  async function newTopic() {
+    try { setBoundary(await command<string>('new_topic')); setFocusId(''); setNotice('Fresh start. I won’t bring up what we talked about before.'); }
+    catch (e) { setError(errorMessage(e)); }
+  }
+  async function loadEarlier() {
+    const oldest = turns[0];
+    if (!oldest) return;
+    try { const older = await command<TaskRecord[]>('conversation', { before: oldest.createdAt, limit: 30 }); setTurns(previous => mergeTurns(previous, older)); setCanLoadEarlier(older.length === 30); }
+    catch (e) { setError(errorMessage(e)); }
+  }
   async function addFolder() {
     try {
       const path = await command<string | null>('pick_folder');
@@ -312,7 +330,7 @@ export default function App() {
   const companionScale = data?.settings.companionScale || 1;
 
   return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
-    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? task ? 620 : approval ? 520 : 420 : 690) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
+    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
           <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark"><Sparkles size={15} strokeWidth={1.8} /></span><span>{assistantName}<span className="brand-dot">.</span></span></button>
@@ -326,24 +344,12 @@ export default function App() {
 
         {page === 'home' && <>
           <div className="conversation" ref={conversationRef}>
-            {!task ? <div className="overlay-welcome"><span>Hey, what’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button></div></div> : <div className="task-view">
-              <button className="back-link" onClick={() => { if (!busy) { setTask(null); setError(''); } }} disabled={busy}><ArrowLeft size={13} /> New conversation</button>
-              <div className="user-message"><span>YOU</span><p>{task.prompt}</p></div>
-              <div className="answer-heading"><span className="tiny-brand"><Sparkles size={12} /></span><strong>{assistantName}</strong><span className="local-badge">{task.cards?.length ? 'Live lookup' : mode === 'web' || task.sources.length ? 'Web research' : 'On your Mac'}</span></div>
-              {task.answer && <div className="answer-text">{task.answer}</div>}
-              {task.system && <SystemCard snapshot={task.system} />}
-              {!!task.cards?.length && <ResultCards cards={task.cards} onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} />}
-              {busy && <div className="activity" role="status"><LoaderCircle size={13} className="spin" /><span>{activity || 'Thinking locally'}</span></div>}
-              {task.state === 'cancelled' && <div className="muted-note"><Square size={12} /> Stopped. You’re in control.</div>}
-              {task.files.length > 0 && <div className="file-results">{task.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
-              {task.sources.length > 0 && <div className="sources"><div className="section-label">SOURCES <span>{task.sources.length}</span></div>{task.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={source.url} target="_blank" rel="noreferrer" onClick={event => {
-                if (desktop) { event.preventDefault(); void safeAction(() => command('open_source', { url: source.url })); }
-              }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
-              {!!task.prices?.length && <div className="product-comparison"><div className="section-label">PUBLISHED OFFERS</div>{task.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? 'Published range' : 'Published offer'}</span></div>{offer.seller && <small>Seller: {offer.seller}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => void safeAction(() => command('open_source', { url: offer.url }))}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}<p>Page-reported offers, observed at retrieval. Seller reliability requires separate evidence.</p></div>}
-              {!!task.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {task.research.length} pages</summary>{task.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
-              {!busy && task.state === 'completed' && <div className="answer-footer"><span><Check size={12} /> {relativeTime(task.createdAt)}</span><button className="text-button" onClick={() => speaking ? void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))) : void speak(task.answer)}>{speaking ? <VolumeX size={13} /> : <Volume2 size={13} />}{speaking ? 'Stop' : 'Read aloud'}</button></div>}
-              {!busy && task.state === 'error' && !error && <div className="error-box">{task.answer || 'This task could not finish. Please try again.'}</div>}
-            </div>}
+            {!chatting ? <div className="overlay-welcome"><span>{greeting(new Date())} What’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button></div></div> : <>
+              <div className="thread-bar"><span>{greeting(new Date())}</span><button className="text-button" onClick={() => void newTopic()} disabled={busy || !!boundary && turns.every(turn => turn.createdAt <= boundary) && !live} title="Start fresh: earlier messages stay here but aren’t sent to the model"><Plus size={11} /> New topic</button></div>
+              <Conversation turns={turns} live={live} boundary={boundary} busy={busy} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={canLoadEarlier} onLoadEarlier={loadEarlier}
+                onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
+                onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
+            </>}
           </div>
           <div className="composer-area">
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
@@ -360,10 +366,10 @@ export default function App() {
         </>}
 
         {page === 'history' && <div className="subpage"><div className="subpage-title"><div className="eyebrow">YOUR LOCAL MEMORY</div><h2>The task shelf.</h2><p>A few things to remember. A few to keep an eye on.</p></div>
-          <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { setTask(result); setPage('home'); }} onError={setError} />
+          <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { setTurns(previous => mergeTurns(previous, [result])); setFocusId(result.id); setPage('home'); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">PAST CONVERSATIONS</div>
-          {data?.tasks.length ? <><div className="history-list">{data.tasks.map(item => <button key={item.id} className="history-item" onClick={() => { setTask(item); setError(''); setPage('home'); }}><span className="history-icon">{item.sources.length ? <Globe2 size={16} /> : <Clock3 size={16} />}</span><span><strong>{item.prompt}</strong><small>{relativeTime(item.createdAt)} · {item.state}</small></span><ChevronRight size={14} /></button>)}</div><button className="text-button danger clear-history" onClick={() => void safeAction(async () => { await command('clear_history'); setTask(null); }, 'Task history cleared.')}><Trash2 size={13} /> Clear task history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
+          {data?.tasks.length ? <><div className="history-list">{data.tasks.map(item => <button key={item.id} className="history-item" onClick={() => { setTurns(previous => mergeTurns(previous, [item])); setFocusId(item.id); setError(''); setPage('home'); }}><span className="history-icon">{item.sources.length ? <Globe2 size={16} /> : <Clock3 size={16} />}</span><span><strong>{item.prompt}</strong><small>{relativeTime(item.createdAt)} · {item.state}</small></span><ChevronRight size={14} /></button>)}</div><button className="text-button danger clear-history" onClick={() => void safeAction(async () => { await command('clear_history'); setTurns([]); setLive(null); setCanLoadEarlier(false); }, 'Task history cleared.')}><Trash2 size={13} /> Clear task history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
           <div className="history-privacy"><ShieldCheck size={13} /> Stored in SQLite. Never synced to a cloud.</div>
         </div>}
 
@@ -402,7 +408,6 @@ export default function App() {
   </main>;
 }
 
-function safeHostname(url: string) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'Source'; } }
 
 function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice }: {
   data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
@@ -447,11 +452,6 @@ function Toggle({ label, detail, checked, onChange }: { label: string; detail: s
   return <label className="toggle-row"><span>{label}<small>{detail}</small></span><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} /><span className="toggle-track" aria-hidden="true"><span /></span></label>;
 }
 
-function SystemCard({ snapshot }: { snapshot: Record<string, unknown> }) {
-  const memoryUsed = Number(snapshot.memoryUsed || 0), memoryTotal = Number(snapshot.memoryTotal || 1);
-  const cpu = Number(snapshot.cpuPercent || 0), memoryPercent = memoryUsed / memoryTotal * 100;
-  return <div className="system-card"><div className="system-card-heading"><Laptop size={13} /><span>{String(snapshot.os || 'Your Mac')}</span><small>Live snapshot</small></div><div className="system-metrics"><div><span>CPU usage</span><strong>{cpu.toFixed(1)}<small>%</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, cpu))}%` }} /></div></div><div><span>Memory in use</span><strong>{(memoryUsed / 1073741824).toFixed(1)}<small> / {(memoryTotal / 1073741824).toFixed(0)} GB</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, memoryPercent))}%` }} /></div></div></div><p>A moment in time, measured on your Mac.</p></div>;
-}
 
 function SavedSearches({ searches, onAction, onResult, onError }: { searches: SavedSearch[]; onAction: (name: string, args: Record<string, unknown>) => Promise<unknown>; onResult: (result: TaskRecord) => void; onError: (message: string) => void }) {
   const [adding, setAdding] = useState(false);

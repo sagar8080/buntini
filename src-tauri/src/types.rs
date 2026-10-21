@@ -282,6 +282,13 @@ pub struct TaskRecord {
     pub prices: Vec<crate::pricing::PriceOffer>,
     #[serde(default)]
     pub cards: Vec<ResultCard>,
+    /// The brain that answered: apple, mlx or cloud.
+    #[serde(default)]
+    pub backend: String,
+    /// Local data categories this turn used (activity, system, files); external models
+    /// only see it again when the user shares all of them.
+    #[serde(default)]
+    pub touched: Vec<String>,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -432,6 +439,8 @@ pub struct Bootstrap {
     pub saved_searches: Vec<SavedSearch>,
     pub price_watches: Vec<PriceWatch>,
     pub os_update_check: Option<OsUpdateCheck>,
+    /// When the user last started a new topic; earlier turns are not remembered.
+    pub conversation_start: Option<String>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

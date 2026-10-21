@@ -1,6 +1,7 @@
 mod approvals;
 mod budget;
 mod controller;
+mod conversation;
 mod indexer;
 mod integrations;
 mod local;
@@ -149,6 +150,8 @@ pub fn run() {
             controller::add_root,
             controller::remove_root,
             controller::run_task,
+            controller::new_topic,
+            controller::conversation,
             controller::cancel_task,
             controller::clear_history,
             controller::speak,

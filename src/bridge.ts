@@ -14,9 +14,13 @@ export async function bootstrap(): Promise<Bootstrap> {
   let settings = defaults;
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
   return {
-    settings, tasks: [], roots: [], audit: [], savedSearches: [], priceWatches: [],
+    settings, tasks: previewTasks(), roots: [], audit: [], savedSearches: [], priceWatches: [],
     diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
   };
+}
+// Preview-only sample thread, seeded by hand through localStorage for UI checks.
+function previewTasks(): TaskRecord[] {
+  try { return JSON.parse(localStorage.getItem('buntini-preview-tasks') || '[]'); } catch { return []; }
 }
 export async function saveSettings(settings: Settings): Promise<Settings> {
   if (desktop) return invoke('save_settings', { settings });
@@ -24,7 +28,12 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
   return settings;
 }
 export async function command<T = void>(name: string, args?: Record<string, unknown>): Promise<T> {
-  if (!desktop) throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
+  if (!desktop) {
+    // The browser preview keeps the conversation controls usable without the desktop app.
+    if (name === 'new_topic') return new Date().toISOString() as T;
+    if (name === 'conversation') return [] as T;
+    throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
+  }
   return invoke<T>(name, args);
 }
 export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskEvent) => void, approvalId?: string): Promise<TaskRecord> {

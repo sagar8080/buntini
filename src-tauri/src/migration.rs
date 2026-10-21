@@ -100,6 +100,8 @@ mod tests {
                 research: vec![],
                 prices: vec![],
                 cards: vec![],
+                backend: String::new(),
+                touched: vec![],
             })
             .unwrap();
         let mut settings = serde_json::to_value(Settings::default()).unwrap();

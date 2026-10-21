@@ -169,6 +169,20 @@ impl Store {
         })
         .collect()
     }
+    /// Turns created before `before`, newest first, for "Load earlier".
+    pub fn tasks_before(&self, before: &str, limit: u32) -> Result<Vec<TaskRecord>, String> {
+        let mut stmt = self.db.prepare("SELECT data FROM tasks WHERE created_at < ?1 ORDER BY created_at DESC LIMIT ?2").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![before, limit.min(100)], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        rows.map(|r| r.map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))).collect()
+    }
+    pub fn conversation_start(&self) -> Result<Option<String>, String> {
+        self.db.query_row("SELECT value FROM preferences WHERE key='conversation-start'", [], |r| r.get(0)).optional().map_err(|e| e.to_string())
+    }
+    pub fn start_new_topic(&self) -> Result<String, String> {
+        let at = now();
+        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('conversation-start',?1)", [&at]).map_err(|e| e.to_string())?;
+        Ok(at)
+    }
     pub fn task(&self, id: &str) -> Result<Option<TaskRecord>, String> {
         let raw: Option<String> = self
             .db

@@ -118,6 +118,8 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         research: vec![],
         prices: vec![],
         cards: vec![],
+        backend: String::new(),
+        touched: vec![],
     };
     let cancel = Arc::new(AtomicBool::new(false));
     let active_key = format!("saved-search-{id}");

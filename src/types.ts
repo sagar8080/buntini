@@ -57,6 +57,8 @@ export interface TaskRecord {
   prices?: PriceOffer[];
   cards?: ResultCard[];
   system?: Record<string, unknown>;
+  backend?: string;
+  touched?: string[];
 }
 export interface Diagnostics {
   modelReady: boolean;
@@ -79,5 +81,5 @@ export interface PricePoint { price: string; currency: string; observedAt: strin
 export interface PriceWatch { id: string; url: string; label: string; currency: string; threshold: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastCheckedAt?: string; lastPrice?: string; lastError?: string; history: PricePoint[] }
 export interface Voice { id: string; name: string; language: string }
 export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean; tool: string; arguments: Record<string, unknown>; service: string; summary: string; sends: CardField[]; host: string; usesKey: boolean; note?: string }
-export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[] }
+export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; conversationStart?: string | null }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
