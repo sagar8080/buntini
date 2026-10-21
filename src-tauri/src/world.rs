@@ -212,10 +212,6 @@ pub fn activity() -> Result<Activity, String> {
     Ok(summarize(&TIMELINE.lock().unwrap(), chrono::Local::now(), idle, *ACTIVE_SINCE.lock().unwrap(), *HEALTH.lock().unwrap()))
 }
 
-pub fn aware() -> bool {
-    AWARE.load(Ordering::Relaxed)
-}
-
 /// The latest battery, CPU and disk reading, refreshed once a minute while aware.
 pub fn health_now() -> Option<Health> {
     *HEALTH.lock().unwrap()

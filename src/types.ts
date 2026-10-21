@@ -5,7 +5,9 @@ export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';
 export type CatAccessory = 'none' | 'bell' | 'bow' | 'bandana' | 'hat' | 'flowers';
 export type PetMotion = 'calm' | 'playful' | 'sleepy';
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: Settings['accent'] }
+export type ModelBackend = 'apple' | 'mlx' | 'cloud';
 export interface Settings {
+  modelBackend: ModelBackend;
   assistantName: string;
   personality: string;
   avatar: 'kyuubi' | 'fox' | 'cat' | 'orb';

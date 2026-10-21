@@ -7,6 +7,7 @@ pub fn now() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct Settings {
+    pub model_backend: String,
     pub python_path: String,
     pub model_path: String,
     pub whisper_model: String,
@@ -51,13 +52,15 @@ impl Default for Settings {
             .map(|h| format!("{h}/projects/pulse-venv/bin/python"))
             .unwrap_or_default();
         Self {
+            model_backend: "mlx".into(),
+            // Never guess `python3`: on a fresh Mac that launches the Command Line Tools installer.
             python_path: std::env::var("BUNTINI_PYTHON").unwrap_or_else(|_| {
                 if voice_python.is_file() {
                     voice_python.to_string_lossy().into_owned()
                 } else if std::path::Path::new(&candidate).is_file() {
                     candidate
                 } else {
-                    "python3".into()
+                    String::new()
                 }
             }),
             model_path: std::env::var("BUNTINI_MODEL_PATH").unwrap_or_else(|_| {
@@ -181,8 +184,11 @@ impl Settings {
         if self.monthly_search_limit > 10_000 {
             return Err("The monthly search limit cannot exceed 10,000.".into());
         }
-        if self.python_path.trim().is_empty() || self.python_path.len() > 4096 {
-            return Err("Enter a Python executable path.".into());
+        if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
+            return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
+        }
+        if self.python_path.len() > 4096 || self.python_path.chars().any(char::is_control) {
+            return Err("The Python path is not valid.".into());
         }
         if self.model_path.len() > 4096 || self.whisper_model.len() > 4096 {
             return Err("Model path is too long.".into());

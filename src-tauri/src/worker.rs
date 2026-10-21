@@ -1,4 +1,3 @@
-use crate::types::Settings;
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
@@ -20,13 +19,23 @@ pub struct Worker {
     input: ChildStdin,
     output: BufReader<ChildStdout>,
     partial: Vec<u8>,
-    python: String,
-    model: String,
+    key: String,
+}
+/// How to start one model process that speaks the JSONL contract in worker/PROTOCOL.md.
+/// A different `key` (interpreter, model folder, helper version) restarts the process.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Launch {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(&'static str, String)>,
+    pub key: String,
+    /// Shown when the program cannot be started at all.
+    pub start_error: String,
 }
 pub struct WorkerManager {
     worker: Mutex<Option<Worker>>,
     pub status: std::sync::Mutex<String>,
-    script: PathBuf,
+    label: &'static str,
     closed: AtomicBool,
 }
 pub struct Turn {
@@ -44,7 +53,7 @@ async fn bounded_line(
             .await
             .map_err(|_| "Cannot read from the local worker.".to_string())?;
         if buf.is_empty() {
-            return Err("The local worker closed unexpectedly. Check your Python environment and model path.".into());
+            return Err("The local model process closed unexpectedly. Check the model settings and try again.".into());
         }
         let take = buf
             .iter()
@@ -64,15 +73,11 @@ async fn bounded_line(
     }
 }
 impl WorkerManager {
-    /// The MLX worker runs on this Mac, so it may see local data (see privacy.rs).
-    pub fn locality(&self) -> crate::privacy::Locality {
-        crate::privacy::Locality::OnDevice
-    }
-    pub fn new(script: PathBuf) -> Self {
+    pub fn new(label: &'static str) -> Self {
         Self {
             worker: Mutex::new(None),
             status: std::sync::Mutex::new("Not started · local tools are ready".into()),
-            script,
+            label,
             closed: AtomicBool::new(false),
         }
     }
@@ -87,22 +92,16 @@ impl WorkerManager {
         self.closed.store(true, Ordering::SeqCst);
         self.reset().await;
     }
-    async fn spawn(&self, settings: &Settings) -> Result<Worker, String> {
-        if !self.script.is_file() {
-            return Err("The MLX worker is missing from this installation.".into());
-        }
-        let mut command = Command::new(&settings.python_path);
+    async fn spawn(&self, launch: &Launch) -> Result<Worker, String> {
+        let mut command = Command::new(&launch.program);
         command
-            .arg("-u")
-            .arg(&self.script)
-            .env("PYTHONUNBUFFERED", "1")
-            .env("HF_HUB_OFFLINE", "1")
-            .env("TRANSFORMERS_OFFLINE", "1")
+            .args(&launch.args)
+            .envs(launch.env.iter().map(|(key, value)| (*key, value.as_str())))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        let mut child=command.spawn().map_err(|_|"Cannot start Python. Select your existing MLX virtual environment's Python executable in Settings.".to_string())?;
+        let mut child = command.spawn().map_err(|_| launch.start_error.clone())?;
         let input = child.stdin.take().ok_or("Cannot open worker input.")?;
         let mut output = BufReader::new(child.stdout.take().ok_or("Cannot open worker output.")?);
         let mut partial = Vec::new();
@@ -111,25 +110,18 @@ impl WorkerManager {
             bounded_line(&mut output, &mut partial),
         )
         .await
-        .map_err(|_| "The local worker did not start within 30 seconds.".to_string())??;
+        .map_err(|_| format!("The {} did not start within 30 seconds.", self.label))??;
         let ready: Value = serde_json::from_str(&ready)
             .map_err(|_| "The local worker returned an invalid startup message.".to_string())?;
         if ready.get("type").and_then(Value::as_str) != Some("ready") {
-            return Err("The local worker could not initialize. Verify MLX is installed in the selected Python environment.".into());
+            return Err(format!("The {} could not initialize.", self.label));
         }
-        *self.status.lock().unwrap() = "Ready · persistent MLX worker".into();
-        Ok(Worker {
-            child,
-            input,
-            output,
-            partial,
-            python: settings.python_path.clone(),
-            model: settings.model_path.clone(),
-        })
+        *self.status.lock().unwrap() = format!("Ready · {}", self.label);
+        Ok(Worker { child, input, output, partial, key: launch.key.clone() })
     }
     pub async fn request<F>(
         &self,
-        settings: &Settings,
+        launch: &Launch,
         mut request: Value,
         cancel: Arc<AtomicBool>,
         mut on_token: F,
@@ -149,11 +141,7 @@ impl WorkerManager {
         }
         if slot
             .as_mut()
-            .map(|w| {
-                w.python != settings.python_path
-                    || w.model != settings.model_path
-                    || w.child.try_wait().ok().flatten().is_some()
-            })
+            .map(|w| w.key != launch.key || w.child.try_wait().ok().flatten().is_some())
             .unwrap_or(false)
         {
             if let Some(mut w) = slot.take() {
@@ -161,7 +149,7 @@ impl WorkerManager {
             }
         }
         if slot.is_none() {
-            let startup = self.spawn(settings);
+            let startup = self.spawn(launch);
             tokio::pin!(startup);
             loop {
                 tokio::select! {result=&mut startup=>{*slot=Some(result?);break;},_=tokio::time::sleep(Duration::from_millis(40))=>{if cancel.load(Ordering::Relaxed){return Err("Task cancelled.".into());}}}
@@ -222,22 +210,20 @@ impl WorkerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn scripted_worker(source: &str) -> (tempfile::TempDir, WorkerManager, Settings) {
+    fn scripted_worker(source: &str) -> (tempfile::TempDir, WorkerManager, Launch) {
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("test_worker.py");
         std::fs::write(&script, source).unwrap();
-        let worker = WorkerManager::new(script);
-        let mut settings = Settings::default();
-        settings.python_path = "python3".into();
-        (dir, worker, settings)
+        let launch = Launch { program: "python3".into(), args: vec!["-u".into(), script.to_string_lossy().into_owned()], env: vec![], key: "test".into(), start_error: "no python".into() };
+        (dir, WorkerManager::new("test worker"), launch)
     }
     #[tokio::test]
     async fn partial_json_lines_survive_timer_wakeups_and_worker_is_reused() {
-        let (_dir,worker,settings)=scripted_worker("import json,sys,time\nprint(json.dumps({'type':'ready'}),flush=True)\nfor line in sys.stdin:\n r=json.loads(line)\n event=json.dumps({'id':r['id'],'type':'token','text':'hello'})+'\\n'\n sys.stdout.write(event[:9]);sys.stdout.flush();time.sleep(.12);sys.stdout.write(event[9:]);sys.stdout.flush()\n print(json.dumps({'id':r['id'],'type':'done','text':'hello'}),flush=True)\n");
+        let (_dir,worker,launch)=scripted_worker("import json,sys,time\nprint(json.dumps({'type':'ready'}),flush=True)\nfor line in sys.stdin:\n r=json.loads(line)\n event=json.dumps({'id':r['id'],'type':'token','text':'hello'})+'\\n'\n sys.stdout.write(event[:9]);sys.stdout.flush();time.sleep(.12);sys.stdout.write(event[9:]);sys.stdout.flush()\n print(json.dumps({'id':r['id'],'type':'done','text':'hello'}),flush=True)\n");
         for _ in 0..2 {
             let result = worker
                 .request(
-                    &settings,
+                    &launch,
                     json!({"type":"generate"}),
                     Arc::new(AtomicBool::new(false)),
                     |_| {},
@@ -250,7 +236,7 @@ mod tests {
     }
     #[tokio::test]
     async fn cancellation_kills_stuck_worker_and_next_request_restarts() {
-        let (_dir,worker,settings)=scripted_worker("import json,sys,time\nprint(json.dumps({'type':'ready'}),flush=True)\nfor line in sys.stdin:\n r=json.loads(line)\n if r.get('hang'): time.sleep(30)\n print(json.dumps({'id':r['id'],'type':'done','text':'recovered'}),flush=True)\n");
+        let (_dir,worker,launch)=scripted_worker("import json,sys,time\nprint(json.dumps({'type':'ready'}),flush=True)\nfor line in sys.stdin:\n r=json.loads(line)\n if r.get('hang'): time.sleep(30)\n print(json.dumps({'id':r['id'],'type':'done','text':'recovered'}),flush=True)\n");
         let cancel = Arc::new(AtomicBool::new(false));
         let token = cancel.clone();
         tokio::spawn(async move {
@@ -260,7 +246,7 @@ mod tests {
         let before = Instant::now();
         assert!(worker
             .request(
-                &settings,
+                &launch,
                 json!({"type":"generate","hang":true}),
                 cancel,
                 |_| {}
@@ -270,7 +256,7 @@ mod tests {
         assert!(before.elapsed() < Duration::from_secs(2));
         let result = worker
             .request(
-                &settings,
+                &launch,
                 json!({"type":"generate"}),
                 Arc::new(AtomicBool::new(false)),
                 |_| {},

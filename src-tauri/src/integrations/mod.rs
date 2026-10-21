@@ -156,7 +156,7 @@ pub async fn plan(
     cancel: Arc<AtomicBool>,
 ) -> Result<(Call, Option<String>), String> {
     let web = || validate("web_search", &Value::Null, prompt).map(|call| (call, None));
-    if settings.model_path.is_empty() {
+    if state.models.ready(settings).is_err() {
         return web();
     }
     let tools: Vec<Value> = available().into_iter().map(|name| json!({ "name": name })).collect();
@@ -165,8 +165,8 @@ pub async fn plan(
         {"role":"system","content":format!("Route the user's request to exactly one read-only online lookup and reply only with that tool call. Today is {today}. Prefer the most specific tool: weather for forecasts, currency for exchange rates, wikipedia for encyclopedic facts about a topic, places for nearby businesses or amenities, ebay_search for buying or pricing items, flight_search for flights (use IATA codes when you know them). Use web_search for news and everything else. Fill arguments only with details the user wrote; never invent dates, places or personal information.")},
         {"role":"user","content":prompt}
     ]);
-    let request = json!({"type":"generate","model_path":settings.model_path,"messages":messages,"tools":tools,"max_tokens":256});
-    match state.worker.request(settings, request, cancel, |_| {}).await {
+    let request = json!({"messages":messages,"tools":tools,"max_tokens":256});
+    match state.models.generate(settings, request, cancel, |_| {}).await {
         Ok(turn) => {
             let Some(call) = turn.tool else { return web() };
             let name = call.get("name").and_then(Value::as_str).unwrap_or("");

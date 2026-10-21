@@ -4,6 +4,7 @@ mod indexer;
 mod integrations;
 mod local;
 mod migration;
+mod model;
 mod notifications;
 mod overlay;
 mod privacy;
@@ -11,6 +12,7 @@ mod pricing;
 mod research;
 mod scheduler;
 mod store;
+mod tools;
 mod support;
 mod types;
 mod voice;
@@ -205,7 +207,7 @@ pub fn run() {
                             cancel.store(true, Ordering::SeqCst);
                         }
                         state.voice.shutdown().await;
-                        state.worker.shutdown().await;
+                        state.models.shutdown().await;
                         app.exit(0);
                     });
                 }

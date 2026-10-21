@@ -65,7 +65,7 @@ pub async fn preview_voice(
 #[tauri::command]
 pub async fn worker_diagnostics(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let settings = state.store.lock().unwrap().settings()?;
-    let response=state.worker.request(&settings,serde_json::json!({"type":"ping","model_path":settings.model_path,"whisper_model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}),std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),|_|{}).await?;
+    let response=state.models.mlx_request(&settings,serde_json::json!({"type":"ping","model_path":settings.model_path,"whisper_model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}),std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).await?;
     serde_json::from_str(&response.text)
         .map_err(|_| "The local worker returned invalid diagnostics.".into())
 }

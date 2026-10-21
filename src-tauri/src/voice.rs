@@ -1,4 +1,4 @@
-use crate::{types::Settings, worker::WorkerManager};
+use crate::{model::ModelHub, types::Settings};
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
@@ -274,7 +274,7 @@ impl Voice {
     }
     pub async fn stop(
         &self,
-        worker: &WorkerManager,
+        models: &ModelHub,
         settings: &Settings,
     ) -> Result<String, String> {
         let mut rec = self
@@ -324,7 +324,7 @@ impl Voice {
                 if settings.whisper_model.is_empty() {
                     Err("Choose an existing local MLX Whisper model folder in Settings. Your recording has been discarded.".into())
                 } else {
-                    worker.request(settings,json!({"type":"transcribe","audio_path":rec.path,"model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}),rec.cancel.clone(),|_|{}).await.map(|turn|turn.text)
+                    models.mlx_request(settings,json!({"type":"transcribe","audio_path":rec.path,"model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}),rec.cancel.clone()).await.map(|turn|turn.text)
                 }
             }
         };
