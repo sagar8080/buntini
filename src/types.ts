@@ -29,10 +29,13 @@ export interface Settings {
   speakResponses: boolean;
   theme: 'system' | 'light' | 'dark';
   reducedMotion: boolean;
+  ebayMarketplace: string;
 }
 export interface Source { title: string; url: string; snippet: string; retrievedAt: string }
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }
 export interface PriceOffer { product: string; url: string; price: string; currency: string; availability?: string; seller?: string; isAggregate: boolean; highPrice?: string }
+export interface CardField { label: string; value: string }
+export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'listing' | 'flight'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string }
 export interface FileHit { name: string; path: string; size: number; modifiedAt: string; excerpt?: string }
 export interface TaskRecord {
   id: string;
@@ -44,6 +47,7 @@ export interface TaskRecord {
   files: FileHit[];
   research?: ResearchContent[];
   prices?: PriceOffer[];
+  cards?: ResultCard[];
   system?: Record<string, unknown>;
 }
 export interface Diagnostics {
@@ -51,6 +55,8 @@ export interface Diagnostics {
   workerStatus: string;
   braveConfigured: boolean;
   tavilyConfigured: boolean;
+  ebayConfigured?: boolean;
+  duffelConfigured?: boolean;
   searchesUsed: number;
   estimatedSpendUsd?: number;
   remainingBudgetUsd?: number;
@@ -60,6 +66,6 @@ export interface SavedSearch { id: string; query: string; intervalMinutes: numbe
 export interface PricePoint { price: string; currency: string; observedAt: string; url: string }
 export interface PriceWatch { id: string; url: string; label: string; currency: string; threshold: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastCheckedAt?: string; lastPrice?: string; lastError?: string; history: PricePoint[] }
 export interface Voice { id: string; name: string; language: string }
-export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean }
+export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean; tool: string; arguments: Record<string, unknown>; service: string; summary: string; sends: CardField[]; host: string; usesKey: boolean; note?: string }
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[] }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }

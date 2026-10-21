@@ -1,6 +1,7 @@
 mod approvals;
 mod controller;
 mod indexer;
+mod integrations;
 mod local;
 mod migration;
 mod notifications;
@@ -146,7 +147,7 @@ pub fn run() {
             controller::file_index_status,
             controller::refresh_file_index,
             controller::cancel_file_index,
-            approvals::create_web_approval,
+            approvals::plan_online_request,
             approvals::approve_web_approval,
             notifications::request_notification_permission,
             notifications::notification_permission_status,

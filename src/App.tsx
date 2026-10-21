@@ -4,6 +4,7 @@ import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from 
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import Customization from './Customization';
+import { ApprovalSheet, ConnectedServices, ResultCards } from './Online';
 import { lookFrom } from './petOptions';
 import type { PetReaction } from './usePetLife';
 import PriceWatches from './PriceWatches';
@@ -18,7 +19,7 @@ const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: strin
   { id: 'auto', name: 'Ask anything', icon: Sparkles, placeholder: 'What can I help you with?' },
   { id: 'files', name: 'My files', icon: Folder, placeholder: 'Find a file or a phrase…' },
   { id: 'system', name: 'My Mac', icon: Laptop, placeholder: 'How is my Mac doing?' },
-  { id: 'web', name: 'The web', icon: Globe2, placeholder: 'Search the live web…' },
+  { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather, rates, places, prices, flights or the web…' },
 ];
 function relativeTime(value: string) {
   const date = new Date(value);
@@ -56,6 +57,7 @@ export default function App() {
   const [menu, setMenu] = useState(false);
   const [approval, setApproval] = useState<WebApproval | null>(null);
   const [approving, setApproving] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const activeId = useRef('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -176,11 +178,19 @@ export default function App() {
     playbackOverride.current = null;
     try { await speechQueue.current?.speakText(text); } catch (error) { setError(errorMessage(error)); }
   }, []);
+  // The local model proposes one online tool; nothing is sent until the user approves the exact request.
+  const planOnline = useCallback(async (prompt: string, webOnly: boolean) => {
+    const planId = crypto.randomUUID();
+    activeId.current = planId;
+    setError(''); setPlanning(true); setPetState('thinking');
+    try { const next = await command<WebApproval>('plan_online_request', { prompt, planId, webOnly }); setApproval(next); setPetState('approval'); }
+    catch (error) { const message = errorMessage(error); if (message !== 'Task cancelled.') setError(message); setPetState('idle'); }
+    finally { setPlanning(false); if (activeId.current === planId) activeId.current = ''; }
+  }, []);
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string) => {
-    if (!prompt.trim() || busy || recording || transcribing || voiceStoppingRef.current) return;
+    if (!prompt.trim() || busy || planning || recording || transcribing || voiceStoppingRef.current) return;
     if (chosenMode === 'web' && !approvalId) {
-      try { setError(''); const next = await command<WebApproval>('create_web_approval', { prompt: prompt.trim() }); setApproval(next); setPetState('approval'); }
-      catch (error) { setError(errorMessage(error)); }
+      await planOnline(prompt.trim(), false);
       return;
     }
     playbackOverride.current = null;
@@ -215,7 +225,7 @@ export default function App() {
       const message = errorMessage(e);
       setError(message); react('sad'); setTask(previous => previous ? { ...previous, state: 'error' } : previous); await speechQueue.current?.cancel().catch(() => {});
     } finally { taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle'); }
-  }, [input, mode, busy, recording, transcribing, refresh, data?.settings.speakResponses]);
+  }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses]);
   async function cancel() {
     const taskId = activeId.current;
     const stopTask = taskId ? command('cancel_task', { taskId }).then(() => {
@@ -273,7 +283,7 @@ export default function App() {
   }
   const currentMode = modes.find(item => item.id === mode)!;
   const modelReady = data?.diagnostics.modelReady;
-  const pending = busy || recording || transcribing || voiceStopping;
+  const pending = busy || planning || recording || transcribing || voiceStopping;
   const assistantName = data?.settings.assistantName || 'Buntini';
   const companionScale = data?.settings.companionScale || 1;
 
@@ -295,9 +305,10 @@ export default function App() {
             {!task ? <div className="overlay-welcome"><span>Hey, what’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button></div></div> : <div className="task-view">
               <button className="back-link" onClick={() => { if (!busy) { setTask(null); setError(''); } }} disabled={busy}><ArrowLeft size={13} /> New conversation</button>
               <div className="user-message"><span>YOU</span><p>{task.prompt}</p></div>
-              <div className="answer-heading"><span className="tiny-brand"><Sparkles size={12} /></span><strong>{assistantName}</strong><span className="local-badge">{mode === 'web' || task.sources.length ? 'Web research' : 'On your Mac'}</span></div>
+              <div className="answer-heading"><span className="tiny-brand"><Sparkles size={12} /></span><strong>{assistantName}</strong><span className="local-badge">{task.cards?.length ? 'Live lookup' : mode === 'web' || task.sources.length ? 'Web research' : 'On your Mac'}</span></div>
               {task.answer && <div className="answer-text">{task.answer}</div>}
               {task.system && <SystemCard snapshot={task.system} />}
+              {!!task.cards?.length && <ResultCards cards={task.cards} onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} />}
               {busy && <div className="activity" role="status"><LoaderCircle size={13} className="spin" /><span>{activity || 'Thinking locally'}</span></div>}
               {task.state === 'cancelled' && <div className="muted-note"><Square size={12} /> Stopped. You’re in control.</div>}
               {task.files.length > 0 && <div className="file-results">{task.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
@@ -311,10 +322,11 @@ export default function App() {
             </div>}
           </div>
           <div className="composer-area">
+            {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             <div className="mode-picker" aria-label="Tool mode">{modes.map(item => <button key={item.id} aria-pressed={mode === item.id} className={mode === item.id ? 'active' : ''} onClick={() => setMode(item.id)} disabled={busy}><item.icon size={12} />{item.name}</button>)}</div>
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
               <textarea ref={inputRef} rows={2} value={input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'I’m listening… release to finish' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> Release to transcribe</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Sends this query to your search provider' : 'Local by default'}</>}</span><div>
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> Release to transcribe</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : 'Local by default'}</>}</span><div>
                 <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title="Hold to talk" aria-label="Hold to talk; release to transcribe" disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void startVoice(); }} onPointerUp={() => void finishVoice()} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? <button type="button" className="send-button stop-button" aria-label="Cancel voice input" onClick={() => void cancelVoice()}><X size={15} /></button> : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
@@ -337,7 +349,7 @@ export default function App() {
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><div className="eyebrow">NOTHING BEHIND YOUR BACK</div><h2>The paper trail.</h2><p>Tool calls and permissions, recorded locally.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
-        {approval && <div className="approval-backdrop"><section className="approval-sheet" role="alertdialog" aria-modal="true" aria-labelledby="approval-title"><ShieldCheck size={23} /><h3 id="approval-title">Search the web?</h3><p>This query will be sent to {approval.provider === 'brave' ? 'Brave Search' : 'Tavily'}. Public result pages may also be retrieved for a sourced answer.</p><blockquote>{approval.prompt}</blockquote><small>Private files and conversation history stay on this Mac. This permission expires after one use.</small><div><button className="secondary-button" disabled={approving} onClick={() => { setApproval(null); setPetState('idle'); }}>Cancel</button><button className="primary-button" disabled={approving} autoFocus onClick={async () => { setApproving(true); try { const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id }); setApproval(null); await submit(allowed.prompt, 'web', allowed.id); } catch (error) { setError(errorMessage(error)); setApproval(null); setPetState('idle'); } finally { setApproving(false); } }}>{approving ? 'Starting…' : 'Allow once'}</button></div></section></div>}
+        {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={() => { setApproval(null); setPetState('idle'); }} onWebInstead={() => { const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true); }} onAllow={async () => { setApproving(true); try { const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id }); setApproval(null); await submit(allowed.prompt, 'web', allowed.id); } catch (error) { setError(errorMessage(error)); setApproval(null); setPetState('idle'); } finally { setApproving(false); } }} />}
         {(error || notice) && <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div>}
         <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · Local-first desktop companion. Shortcut: ⌘ ⇧ Space. No unrestricted shell tools.')}><CircleHelp size={12} /></button></footer>
       </section>}
@@ -370,7 +382,7 @@ function safeHostname(url: string) { try { return new URL(url).hostname.replace(
 function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice }: {
   data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
-  onKey: (provider: 'brave' | 'tavily', key: string) => Promise<void>; onAudit: () => void;
+  onKey: (provider: 'brave' | 'tavily' | 'ebay' | 'duffel', key: string) => Promise<void>; onAudit: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(data.settings);
@@ -403,6 +415,7 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
         <label className="inline-field"><span>Estimated cost per search<small>Set this from your provider’s plan</small></span><input aria-label="Estimated cost per search in USD" type="number" min="0" max="100" step="0.001" value={draft.costPerSearchUsd} onChange={event => update('costPerSearchUsd', Number(event.target.value))} required /></label>
         <div className="field-help">Estimates enforce a local limit. Your provider’s invoice is authoritative.</div>
       </section>
+      <ConnectedServices draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />
       <section className="settings-section"><div className="settings-section-heading"><Mic size={15} /><h3>A familiar voice</h3><span className="pill">Offline</span></div><p>Hold the mic to talk. Release to transcribe.</p><label>MLX Whisper model folder<input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="/path/to/local/whisper-model" spellCheck={false} /></label><div className="field-help">Requires mlx-whisper in your Python environment.</div>
         <label>Silero VAD model <span className="label-status">Optional · local ONNX</span><input value={draft.vadModelPath} onChange={event => update('vadModelPath', event.target.value)} placeholder="/path/to/silero_vad.onnx" spellCheck={false} /></label>
         <div className="field-help">Filters recordings without speech before transcription.</div>

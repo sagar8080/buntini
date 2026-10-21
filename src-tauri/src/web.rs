@@ -85,7 +85,7 @@ where
 }
 
 pub fn provider_valid(provider: &str) -> Result<(), String> {
-    if ["brave", "tavily"].contains(&provider) {
+    if ["brave", "tavily", "ebay", "duffel"].contains(&provider) {
         Ok(())
     } else {
         Err("Unknown search provider.".into())

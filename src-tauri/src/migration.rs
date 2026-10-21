@@ -99,6 +99,7 @@ mod tests {
                 system: None,
                 research: vec![],
                 prices: vec![],
+                cards: vec![],
             })
             .unwrap();
         let mut settings = serde_json::to_value(Settings::default()).unwrap();

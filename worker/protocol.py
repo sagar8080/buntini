@@ -39,6 +39,88 @@ TOOL_DEFINITIONS = {
             "required": ["query"], "additionalProperties": False,
         },
     },
+    # Online integrations. The Rust controller re-validates every argument and the
+    # user approves the exact request before anything leaves the Mac.
+    "weather": {
+        "name": "weather",
+        "description": "Current conditions and the 7-day forecast for a named place.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "place": {"type": "string", "minLength": 1, "maxLength": 120, "description": "City or town, optionally with region or country"},
+                "units": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["place"], "additionalProperties": False,
+        },
+    },
+    "currency": {
+        "name": "currency",
+        "description": "Convert money using European Central Bank reference rates.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number", "minimum": 0.000001, "maximum": 1e12},
+                "from": {"type": "string", "minLength": 3, "maxLength": 3, "description": "ISO 4217 code, e.g. USD"},
+                "to": {"type": "string", "minLength": 3, "maxLength": 40, "description": "One or more ISO codes separated by commas"},
+            },
+            "required": ["from", "to"], "additionalProperties": False,
+        },
+    },
+    "wikipedia": {
+        "name": "wikipedia",
+        "description": "Look up an encyclopedia article summary about a person, place, thing or idea.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                "language": {"type": "string", "enum": ["en", "de", "fr", "es", "it", "pt", "nl", "sv", "pl", "ru", "uk", "ja", "zh", "ko", "ar", "hi", "tr", "id"]},
+            },
+            "required": ["query"], "additionalProperties": False,
+        },
+    },
+    "places": {
+        "name": "places",
+        "description": "Find nearby places of one kind around a street, district or city using OpenStreetMap.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["cafe", "restaurant", "bar", "pharmacy", "hospital", "atm", "bank", "supermarket", "bakery", "fuel", "charging_station", "parking", "hotel", "museum", "park", "library", "post_office", "gym", "toilets"]},
+                "near": {"type": "string", "minLength": 1, "maxLength": 160},
+                "radius_m": {"type": "integer", "minimum": 100, "maximum": 5000},
+            },
+            "required": ["category", "near"], "additionalProperties": False,
+        },
+    },
+    "ebay_search": {
+        "name": "ebay_search",
+        "description": "Search live eBay listings to compare prices of an item.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                "max_price": {"type": "number", "minimum": 0.01, "maximum": 10000000},
+                "condition": {"type": "string", "enum": ["any", "new", "used"]},
+                "sort": {"type": "string", "enum": ["best_match", "price", "newest"]},
+            },
+            "required": ["query"], "additionalProperties": False,
+        },
+    },
+    "flight_search": {
+        "name": "flight_search",
+        "description": "Search flight offers between two airports or cities on given dates. Search only, never booking.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "minLength": 2, "maxLength": 60, "description": "IATA code like LIS, or a city name"},
+                "destination": {"type": "string", "minLength": 2, "maxLength": 60},
+                "departure_date": {"type": "string", "minLength": 10, "maxLength": 10, "description": "YYYY-MM-DD"},
+                "return_date": {"type": "string", "minLength": 10, "maxLength": 10, "description": "YYYY-MM-DD, only for return trips"},
+                "adults": {"type": "integer", "minimum": 1, "maximum": 9},
+                "cabin": {"type": "string", "enum": ["economy", "premium_economy", "business", "first"]},
+            },
+            "required": ["origin", "destination", "departure_date"], "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -118,15 +200,45 @@ def validate_tool_call(value: Any, allowed: set[str]) -> tuple[str, dict[str, An
         raise WorkerError("invalid_tool_call", "The model requested an unavailable tool")
     if not isinstance(arguments, dict):
         raise WorkerError("invalid_tool_call", "Tool arguments must be an object")
-    if name == "system_info":
-        if arguments:
-            raise WorkerError("invalid_tool_call", "system_info accepts no arguments")
-    else:
-        query = arguments.get("query")
-        if set(arguments) != {"query"} or not isinstance(query, str) or not 1 <= len(query.strip()) <= MAX_QUERY_CHARS:
-            raise WorkerError("invalid_tool_call", f"{name} requires only a query of 1 to {MAX_QUERY_CHARS} characters")
-        arguments = {"query": query.strip()}
-    return name, arguments
+    return name, validate_arguments(name, arguments)
+
+
+def validate_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Check arguments against the fixed schema. Qwen's native tags carry every value
+    as text, so numeric strings are converted; nothing else is coerced."""
+    schema = TOOL_DEFINITIONS[name]["parameters"]
+    properties, required = schema["properties"], set(schema.get("required", []))
+    if not set(arguments) <= set(properties) or not required <= set(arguments):
+        raise WorkerError("invalid_tool_call", f"{name} received missing or unexpected arguments")
+    clean: dict[str, Any] = {}
+    for key, value in arguments.items():
+        spec = properties[key]
+        if spec["type"] == "string":
+            if not isinstance(value, str):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} must be text")
+            value = value.strip()
+            if not spec.get("minLength", 0) <= len(value) <= spec.get("maxLength", MAX_QUERY_CHARS):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} has an invalid length")
+            if "enum" in spec:
+                value = value.lower().replace(" ", "_").replace("-", "_")
+                if value not in spec["enum"]:
+                    raise WorkerError("invalid_tool_call", f"{name}.{key} must be one of {', '.join(spec['enum'])}")
+        else:
+            if isinstance(value, str):
+                try:
+                    value = float(value.strip().replace(",", ""))
+                except ValueError as exc:
+                    raise WorkerError("invalid_tool_call", f"{name}.{key} must be a number") from exc
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} must be a number")
+            if spec["type"] == "integer":
+                if value != int(value):
+                    raise WorkerError("invalid_tool_call", f"{name}.{key} must be a whole number")
+                value = int(value)
+            if not spec["minimum"] <= value <= spec["maximum"]:
+                raise WorkerError("invalid_tool_call", f"{name}.{key} is out of range")
+        clean[key] = value
+    return clean
 
 
 def parse_tool_payload(payload: str, allowed: set[str]) -> tuple[str, dict[str, Any]]:

@@ -1,3 +1,47 @@
+# Online integrations
+
+Online mode can reach a small, fixed set of read-only services. The flow is:
+
+1. **Plan (no network).** `plan_online_request` asks the local model to pick one
+   tool from the catalog in `src-tauri/src/integrations/mod.rs` and fill its
+   arguments from the user's message only. Keyed tools are offered only when their
+   key is saved. Without a model, or when the proposal fails validation, the plan
+   is an exact web search of the user's words.
+2. **Validate.** Rust parses every argument against a strict per-tool schema
+   (unknown keys rejected, lengths and ranges bounded, enums and ISO/IATA codes
+   checked, dates limited to the next 360 days) and fills defaults so the
+   approval shows exactly what will be sent. The Python worker independently
+   validates the same schemas before any tool call reaches Rust.
+3. **Approve.** The user sees the service, host and every outgoing value. The
+   approval is one-use, expires after five minutes, and is re-validated when
+   consumed; a changed or widened call is refused.
+4. **Execute.** Requests go only to constant HTTPS hosts with redirects disabled,
+   25-second deadlines, and response caps (64 KiB–4 MiB). Results become at most
+   ten cards with attribution; links are kept only if they are plain public HTTPS.
+5. **Summarize.** The model answers from the numbered card text, which it must
+   treat as untrusted data and cite as [n]. Without a model the card text is the
+   answer.
+
+| Tool | Service and host | Key | Sends |
+| --- | --- | --- | --- |
+| `web_search` | Brave or Tavily | Yes | The user's exact message |
+| `weather` | Open-Meteo (`geocoding-api.open-meteo.com`, `api.open-meteo.com`) | No | Place name and units (always the 7-day forecast) |
+| `currency` | Frankfurter / ECB (`api.frankfurter.dev`) | No | Amount and ISO currency codes |
+| `wikipedia` | Wikipedia (`<lang>.wikipedia.org`) | No | Search text and language |
+| `places` | OpenStreetMap Nominatim (`nominatim.openstreetmap.org`) | No | Location text, one of 19 categories, radius (100–5000 m) |
+| `ebay_search` | eBay Browse API (`api.ebay.com`, sandbox for SBX keys) | App ID + secret | Search text, max price, condition, sort, marketplace |
+| `flight_search` | Duffel (`api.duffel.com`) | Access token | Origin, destination, dates, adults, cabin |
+
+Nominatim calls are spaced at least 1.1 seconds apart to respect its usage
+policy. eBay application tokens are cached in memory until shortly before they
+expire. Duffel searches create an offer request and read back the eight cheapest
+offers; Buntini has no booking, payment or order endpoints. Keyed requests are
+reserved against the monthly request cap before dispatch.
+
+`cargo test live_keyless -- --ignored --nocapture` performs a real weather,
+currency, Wikipedia and places lookup. eBay and Duffel parsing is covered by
+fixtures; live checks need the user's own keys.
+
 # Public page research and price evidence
 
 The controller owns online consent. Research reads at most three URLs from its

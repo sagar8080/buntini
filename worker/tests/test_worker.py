@@ -18,7 +18,7 @@ from worker.main import MLXBackend
 from worker.voice import WHISPER_DIMENSIONS
 from worker.protocol import (
     Cancelled, MAX_LINE_BYTES, MAX_OUTPUT_CHARS, QwenStreamParser, WorkerError,
-    local_model_path, selected_tools, validate_messages, validate_tool_call,
+    local_model_path, parse_tool_payload, selected_tools, validate_messages, validate_tool_call,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +44,30 @@ class ProtocolTests(unittest.TestCase):
                 validate_tool_call(call, {"search_files", "system_info", "web_search"})
         with self.assertRaises(WorkerError):
             validate_tool_call({"name": "web_search", "arguments": {"query": "news"}}, {"system_info"})
+
+    def test_integration_tools_follow_their_schemas(self):
+        allowed = {"weather", "currency", "places", "flight_search", "ebay_search"}
+        self.assertEqual(validate_tool_call({"name": "weather", "arguments": {"place": " Lisbon ", "units": "Fahrenheit"}}, allowed), ("weather", {"place": "Lisbon", "units": "fahrenheit"}))
+        self.assertEqual(validate_tool_call({"name": "places", "arguments": {"category": "Charging Station", "near": "Baixa"}}, allowed)[1]["category"], "charging_station")
+        self.assertEqual(validate_tool_call({"name": "ebay_search", "arguments": {"query": "kindle", "max_price": "1,200"}}, allowed)[1]["max_price"], 1200.0)
+        invalid = [
+            {"name": "weather", "arguments": {"units": "celsius"}},
+            {"name": "weather", "arguments": {"place": "Lisbon", "days": 3}},
+            {"name": "places", "arguments": {"category": "cafe", "near": "Lisbon", "radius_m": "2.5"}},
+            {"name": "places", "arguments": {"category": "cafe", "near": "Lisbon", "radius_m": True}},
+            {"name": "places", "arguments": {"category": "casino", "near": "Lisbon"}},
+            {"name": "currency", "arguments": {"from": "USD", "to": "EUR", "amount": "lots"}},
+            {"name": "flight_search", "arguments": {"origin": "LIS", "destination": "JFK", "departure_date": "2026-11-10", "book": True}},
+        ]
+        for call in invalid:
+            with self.subTest(call=call), self.assertRaises(WorkerError):
+                validate_tool_call(call, allowed)
+        with self.assertRaises(WorkerError):
+            validate_tool_call({"name": "wikipedia", "arguments": {"query": "Turing"}}, allowed)
+
+    def test_native_tags_carry_integration_numbers_as_text(self):
+        payload = "<function=places>\n<parameter=category>\ncafe\n</parameter>\n<parameter=near>\nPorto\n</parameter>\n<parameter=radius_m>\n800\n</parameter>\n</function>"
+        self.assertEqual(parse_tool_payload(payload, {"places"}), ("places", {"category": "cafe", "near": "Porto", "radius_m": 800}))
 
     def test_schema_normalizes_query(self):
         self.assertEqual(validate_tool_call({"name": "search_files", "arguments": {"query": "  invoice  "}}, {"search_files"}), ("search_files", {"query": "invoice"}))

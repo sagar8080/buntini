@@ -7,7 +7,7 @@ const defaults: Settings = {
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful',
   voiceId: '', voiceRate: 180, notificationsEnabled: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   pythonPath: 'python3', modelPath: '', whisperModel: '', searchProvider: 'brave',
-  monthlySearchLimit: 100, speakResponses: false, theme: 'system', reducedMotion: false,
+  monthlySearchLimit: 100, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US',
 };
 export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');

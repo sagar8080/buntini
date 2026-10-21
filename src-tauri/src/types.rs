@@ -30,6 +30,7 @@ pub struct Settings {
     pub monthly_budget_usd: f64,
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
+    pub ebay_marketplace: String,
 }
 
 impl Default for Settings {
@@ -90,6 +91,7 @@ impl Default for Settings {
             notifications_enabled: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,
+            ebay_marketplace: "EBAY_US".into(),
             vad_model_path: std::env::var("BUNTINI_VAD_MODEL_PATH").unwrap_or_else(|_| {
                 if local_vad.is_file() {
                     local_vad.to_string_lossy().into_owned()
@@ -121,6 +123,12 @@ impl Settings {
             || !["ember", "ocean", "violet", "sage"].contains(&self.accent.as_str())
         {
             return Err("Choose a supported avatar and accent.".into());
+        }
+        if !crate::integrations::ebay::MARKETPLACES
+            .iter()
+            .any(|(id, _)| *id == self.ebay_marketplace)
+        {
+            return Err("Choose a supported eBay marketplace.".into());
         }
         if !CAT_COATS.contains(&self.cat_coat.as_str())
             || !CAT_EYES.contains(&self.cat_eyes.as_str())
@@ -248,6 +256,32 @@ pub struct TaskRecord {
     pub research: Vec<crate::research::ResearchContent>,
     #[serde(default)]
     pub prices: Vec<crate::pricing::PriceOffer>,
+    #[serde(default)]
+    pub cards: Vec<ResultCard>,
+}
+/// One structured result from an approved integration (a forecast, rate, place, listing or flight).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultCard {
+    pub kind: String,
+    pub title: String,
+    pub subtitle: String,
+    pub fields: Vec<CardField>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub attribution: String,
+    pub retrieved_at: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CardField {
+    pub label: String,
+    pub value: String,
+}
+impl CardField {
+    pub fn new(label: &str, value: impl Into<String>) -> Self {
+        Self { label: label.into(), value: value.into() }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,6 +339,8 @@ pub struct Diagnostics {
     pub worker_status: String,
     pub brave_configured: bool,
     pub tavily_configured: bool,
+    pub ebay_configured: bool,
+    pub duffel_configured: bool,
     pub searches_used: u32,
     pub estimated_spend_usd: f64,
     pub remaining_budget_usd: f64,
@@ -318,6 +354,16 @@ pub struct PendingApproval {
     pub provider: String,
     pub expires_at: String,
     pub approved: bool,
+    /// The validated tool call this approval authorizes, exactly as shown to the user.
+    pub tool: String,
+    pub arguments: serde_json::Value,
+    pub service: String,
+    pub summary: String,
+    pub sends: Vec<CardField>,
+    pub host: String,
+    pub uses_key: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

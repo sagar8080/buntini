@@ -469,3 +469,34 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes pet-purr { 50% { transform: translate(.4px, .25px); } }
 @keyframes pet-sad { 20%, 75% { transform: translateY(2px) scale(1.01, .98); } }
 @keyframes cat-heart { 0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-14px) scale(.9); } }
+/* Online integrations: approval details, live result cards and connected services. */
+.approval-sends { margin: 12px 0; padding: 4px 10px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 4px; font-size: 11px; }
+.approval-sends > div { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.approval-sends > div:last-child { border-bottom: 0; }
+.approval-sends dt { flex: 0 0 72px; color: var(--muted); }
+.approval-sends dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.approval-sends dd span { color: var(--muted); font-size: 9px; margin-left: 4px; }
+.approval-note { font-size: 10px !important; background: var(--accent-soft); color: var(--text) !important; padding: 7px 9px; border-radius: 6px; }
+.approval-sheet > div > .text-button { margin-right: auto; }
+.planning-status { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--muted); padding: 0 2px 8px; }
+.planning-status .text-button { margin-left: auto; }
+.result-cards { margin-top: 18px; }
+.result-card { border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 10px 11px; margin-bottom: 6px; }
+.result-card header { display: flex; align-items: flex-start; gap: 7px; }
+.result-card header > svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.result-card header > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.result-card header strong { font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.result-card header small { font-size: 9px; color: var(--muted); }
+.result-card header a { color: var(--muted); padding: 2px; }
+.result-card header a:hover { color: var(--accent); }
+.result-card dl { margin: 8px 0 0; display: grid; gap: 4px; }
+.result-card dl > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; font-size: 10px; line-height: 1.55; }
+.result-card dt { color: var(--muted); }
+.result-card dd { margin: 0; overflow-wrap: anywhere; }
+.result-card footer { margin-top: 8px; font-size: 8px; color: var(--muted); }
+.service { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.service-heading { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.service-heading > svg { color: var(--accent); }
+.service-heading strong { font-weight: 500; }
+.service-heading .label-status { margin-left: auto; }
+.service-actions { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
