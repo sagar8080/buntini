@@ -17,6 +17,7 @@ pub struct AppState {
     pub active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub approvals: Mutex<HashMap<String, PendingApproval>>,
     pub config_gate: tokio::sync::Mutex<()>,
+    pub data_dir: PathBuf,
 }
 impl AppState {
     pub fn new(data: PathBuf, cache: PathBuf, resources: PathBuf) -> Result<Self, String> {
@@ -60,6 +61,7 @@ impl AppState {
             active: Mutex::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             config_gate: tokio::sync::Mutex::new(()),
+            data_dir: data,
         })
     }
     pub(crate) fn audit(&self, action: &str, detail: &str) {

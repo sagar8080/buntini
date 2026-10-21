@@ -13,6 +13,7 @@ import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
 import Onboarding from './Onboarding';
 import SettingsView from './SettingsView';
+import YourData from './YourData';
 import { greeting, mergeTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
@@ -392,7 +393,7 @@ export default function App() {
 
         {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
           const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh();
-        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} />}
+        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setBoundary(null); setCanLoadEarlier(false); setPage('home'); await refresh(); }} />} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 

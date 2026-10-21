@@ -292,6 +292,37 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.audit("price_watch.deleted", id)
     }
+    /// Everything Buntini keeps about you, for "Export my data". Keys stay in the Keychain
+    /// and are never included.
+    pub fn export_snapshot(&self) -> Result<serde_json::Value, String> {
+        let rows = |sql: &str| -> Result<Vec<serde_json::Value>, String> {
+            let mut stmt = self.db.prepare(sql).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+            rows.map(|row| row.map_err(|e| e.to_string()).map(|raw| serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)))).collect()
+        };
+        Ok(serde_json::json!({
+            "exportedAt": now(),
+            "settings": self.settings()?,
+            "folders": self.roots()?,
+            "conversation": rows("SELECT data FROM tasks ORDER BY created_at")?,
+            "savedSearches": rows("SELECT data FROM saved_searches")?,
+            "priceWatches": rows("SELECT data FROM price_watches")?,
+            "activityLog": self.audit_entries()?,
+        }))
+    }
+    /// "Delete everything": every table back to empty, as on a fresh install.
+    pub fn erase_everything(&self) -> Result<(), String> {
+        self.db
+            .execute_batch(
+                "BEGIN;
+                 DELETE FROM tasks; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
+                 DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
+                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit;
+                 COMMIT;",
+            )
+            .map_err(|e| e.to_string())?;
+        self.set_onboarded(false)
+    }
     pub fn clear_history(&self) -> Result<(), String> {
         self.db
             .execute("DELETE FROM tasks", [])
@@ -510,6 +541,21 @@ mod tests {
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         assert!(s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap_err().contains("budget of $0.01"));
+    }
+    #[test]
+    fn export_has_your_data_and_erase_starts_over() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        s.add_root("/tmp/docs").unwrap();
+        s.save_settings(&Settings { assistant_name: "Miso".into(), ..Settings::default() }).unwrap();
+        s.set_onboarded(true).unwrap();
+        let export = s.export_snapshot().unwrap();
+        assert_eq!(export["settings"]["assistantName"], "Miso");
+        assert_eq!(export["folders"][0], "/tmp/docs");
+        assert!(!export.to_string().to_lowercase().contains("apikey"), "keys never leave the Keychain");
+        s.erase_everything().unwrap();
+        assert!(s.roots().unwrap().is_empty());
+        assert_eq!(s.settings().unwrap().assistant_name, "Buntini");
+        assert!(!s.onboarded().unwrap(), "setup runs again after erasing");
     }
     #[test]
     fn onboarding_is_needed_once_unless_asked_again() {

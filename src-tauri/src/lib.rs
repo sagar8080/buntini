@@ -2,6 +2,7 @@ mod approvals;
 mod budget;
 mod cloud;
 mod controller;
+mod data;
 mod conversation;
 mod indexer;
 mod integrations;
@@ -55,6 +56,7 @@ pub fn run() {
             // Dev builds under a custom CARGO_TARGET_DIR have no resource folder; the
             // controller then falls back to the project's worker/ and native/ folders.
             let resources = app.path().resource_dir().unwrap_or_default();
+            data::install_crash_log(&data);
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
@@ -157,6 +159,9 @@ pub fn run() {
             controller::run_task,
             controller::new_topic,
             controller::finish_onboarding,
+            data::export_data,
+            data::delete_all_data,
+            data::support_info,
             controller::restart_onboarding,
             controller::conversation,
             controller::cancel_task,

@@ -68,17 +68,24 @@ pub struct Voice {
     helper: PathBuf,
     cache: PathBuf,
 }
-impl Voice {
-    pub fn new(helper: PathBuf, cache: PathBuf) -> Self {
-        // Only remove this app's own prior recordings after an interrupted session.
-        if let Ok(entries) = std::fs::read_dir(&cache) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with("buntini-recording-") && name.ends_with(".wav") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
+/// Only removes this app's own recordings (left after an interrupted session, or on
+/// "Delete everything").
+fn remove_recordings(cache: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(cache) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("buntini-recording-") && name.ends_with(".wav") {
+                let _ = std::fs::remove_file(entry.path());
             }
         }
+    }
+}
+impl Voice {
+    pub fn clear_cache(&self) {
+        remove_recordings(&self.cache);
+    }
+    pub fn new(helper: PathBuf, cache: PathBuf) -> Self {
+        remove_recordings(&cache);
         Self {
             recording: Mutex::new(None),
             speech: Mutex::new(None),
