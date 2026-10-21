@@ -13,6 +13,9 @@ pub struct Settings {
     pub whisper_model: String,
     pub search_provider: String,
     pub monthly_search_limit: u32,
+    pub daily_search_limit: u32,
+    /// Stay inside the search provider's free monthly allowance.
+    pub free_tier_only: bool,
     pub speak_responses: bool,
     pub theme: String,
     pub reduced_motion: bool,
@@ -81,7 +84,9 @@ impl Default for Settings {
                 }
             }),
             search_provider: "brave".into(),
-            monthly_search_limit: 100,
+            monthly_search_limit: 1000,
+            daily_search_limit: 30,
+            free_tier_only: true,
             speak_responses: false,
             theme: "system".into(),
             reduced_motion: false,
@@ -183,6 +188,9 @@ impl Settings {
         }
         if self.monthly_search_limit > 10_000 {
             return Err("The monthly search limit cannot exceed 10,000.".into());
+        }
+        if !(1..=2_000).contains(&self.daily_search_limit) {
+            return Err("The daily lookup limit must be between 1 and 2,000.".into());
         }
         if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
             return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
@@ -358,6 +366,9 @@ pub struct Diagnostics {
     pub ebay_configured: bool,
     pub duffel_configured: bool,
     pub searches_used: u32,
+    pub searches_today: u32,
+    pub search_limit_month: u32,
+    pub search_limit_day: u32,
     pub estimated_spend_usd: f64,
     pub remaining_budget_usd: f64,
 }
@@ -445,4 +456,18 @@ impl TaskEvent {
             task: None,
         }
     }
+}
+
+/// Requests used by one online service today and this month (local dates).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub today: u32,
+    pub month: u32,
+    pub spend: f64,
+}
+/// A reserved request; `warning` is set the first time this month usage crosses 80%.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reservation {
+    pub warning: Option<String>,
 }

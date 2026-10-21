@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import Customization from './Customization';
 import { ApprovalSheet, ConnectedServices, ResultCards } from './Online';
+import SearchBudget from './SearchBudget';
 import { lookFrom } from './petOptions';
 import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
@@ -151,12 +152,13 @@ export default function App() {
   }, [refresh]);
   useEffect(() => {
     if (!desktop) return;
+    const budget = listen<string>('budget-warning', event => setNotice(event.payload));
     const subscription = listen<{ watch: { label: string }; belowThreshold: boolean; changed: boolean }>('price-watch-result', event => {
       void refresh();
       if (event.payload.belowThreshold) setNotice(`${event.payload.watch.label} reached your target price. Check the task shelf.`);
       else if (event.payload.changed) setNotice(`Price watch updated: ${event.payload.watch.label}`);
     });
-    return () => { void subscription.then(unlisten => unlisten()); };
+    return () => { void subscription.then(unlisten => unlisten()); void budget.then(unlisten => unlisten()); };
   }, [refresh]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -229,6 +231,7 @@ export default function App() {
         }
         else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
         else if (event.type === 'error') setError(event.text || 'The task could not finish.');
+        else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);
       setTask(result);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
@@ -428,14 +431,11 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
         <button type="button" className="secondary-button add-folder" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Allow a folder</button>
         <FileIndexSettings roots={data.roots} onError={onError} />
       </section>
-      <section className="settings-section"><div className="settings-section-heading"><Globe2 size={15} /><h3>A window to the web</h3></div><p>Your own key. Only search queries leave your Mac.</p>
+      <section className="settings-section"><div className="settings-section-heading"><Globe2 size={15} /><h3>A window to the web</h3></div><p>Your own key and your own limits. Only the searches you approve leave your Mac.</p>
         <label>Search provider<select value={draft.searchProvider} onChange={event => { update('searchProvider', event.target.value as 'brave' | 'tavily'); setKey(''); }}><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></label>
         <label>API key <span className="label-status">{configured ? 'Saved in Keychain' : 'Not connected'}</span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={configured ? '••••••••••••••••' : 'Paste your API key'} /><button type="button" disabled={!key.trim() || savingKey} onClick={async () => { setSavingKey(true); try { await onKey(draft.searchProvider, key.trim()); setKey(''); } catch (e) { onError(errorMessage(e)); } finally { setSavingKey(false); } }}>{savingKey ? <LoaderCircle size={12} className="spin" /> : 'Save key'}</button></div></label>
         {configured && <button type="button" className="text-button danger" onClick={async () => { try { await onKey(draft.searchProvider, ''); } catch (e) { onError(errorMessage(e)); } }}>Remove saved key</button>}
-        <label className="inline-field"><span>Monthly search cap<small>{data.diagnostics.searchesUsed} searches used this month</small></span><input type="number" min="0" max="10000" value={draft.monthlySearchLimit} onChange={event => update('monthlySearchLimit', Number(event.target.value))} required /></label>
-        <label className="inline-field"><span>Monthly estimated budget<small>${(data.diagnostics.estimatedSpendUsd || 0).toFixed(2)} estimated this month</small></span><input aria-label="Monthly estimated budget in USD" type="number" min="0" max="1000" step="0.01" value={draft.monthlyBudgetUsd} onChange={event => update('monthlyBudgetUsd', Number(event.target.value))} required /></label>
-        <label className="inline-field"><span>Estimated cost per search<small>Set this from your provider’s plan</small></span><input aria-label="Estimated cost per search in USD" type="number" min="0" max="100" step="0.001" value={draft.costPerSearchUsd} onChange={event => update('costPerSearchUsd', Number(event.target.value))} required /></label>
-        <div className="field-help">Estimates enforce a local limit. Your provider’s invoice is authoritative.</div>
+        <SearchBudget draft={draft} update={update} diagnostics={data.diagnostics} />
       </section>
       <ConnectedServices draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />
       <section className="settings-section"><div className="settings-section-heading"><Mic size={15} /><h3>A familiar voice</h3><span className="pill">Offline</span></div><p>Hold the mic to talk. Release to transcribe.</p><label>MLX Whisper model folder<input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="/path/to/local/whisper-model" spellCheck={false} /></label><div className="field-help">Requires mlx-whisper in your Python environment.</div>

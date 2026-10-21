@@ -1,4 +1,5 @@
 mod approvals;
+mod budget;
 mod controller;
 mod indexer;
 mod integrations;

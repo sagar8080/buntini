@@ -73,28 +73,18 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
         tasks,
         roots,
         audit,
-        searches_used,
         saved_searches,
-        estimated_spend_usd,
         price_watches,
         os_update_check,
     ) = {
         let s = state.store.lock().unwrap();
-        (
-            s.settings()?,
-            s.tasks()?,
-            s.roots()?,
-            s.audit_entries()?,
-            s.used()?,
-            s.saved_searches()?,
-            s.estimated_spend()?,
-            s.price_watches()?,
-            s.update_check()?,
-        )
+        (s.settings()?, s.tasks()?, s.roots()?, s.audit_entries()?, s.saved_searches()?, s.price_watches()?, s.update_check()?)
     };
+    let usage = state.store.lock().unwrap().usage(&settings.search_provider)?;
+    let limits = crate::budget::search_limits(&settings);
     let model_ready = state.models.ready(&settings).is_ok();
     let worker_status = state.models.status(&settings);
-    let remaining_budget_usd = (settings.monthly_budget_usd - estimated_spend_usd).max(0.0);
+    let remaining_budget_usd = (limits.budget_usd - usage.spend).max(0.0);
     Ok(Bootstrap {
         settings,
         tasks,
@@ -110,8 +100,11 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             tavily_configured: web::credential("tavily").is_ok(),
             ebay_configured: web::credential("ebay").is_ok(),
             duffel_configured: web::credential("duffel").is_ok(),
-            searches_used,
-            estimated_spend_usd,
+            searches_used: usage.month,
+            searches_today: usage.today,
+            search_limit_month: limits.monthly,
+            search_limit_day: limits.daily,
+            estimated_spend_usd: usage.spend,
             remaining_budget_usd,
         },
     })
@@ -497,7 +490,7 @@ pub(crate) async fn web_tool(
     settings: &Settings,
     query: &str,
     cancel: Arc<AtomicBool>,
-) -> Result<Vec<Source>, String> {
+) -> Result<(Vec<Source>, Option<String>), String> {
     if query.trim().is_empty() || query.len() > 2000 {
         return Err("Enter a web query of up to 2,000 characters.".into());
     }
@@ -509,17 +502,16 @@ pub(crate) async fn web_tool(
     let cached = { state.store.lock().unwrap().cached(&cache_key)? };
     if let Some(cached) = cached {
         state.audit("web.cache_hit", &settings.search_provider);
-        return Ok(cached);
+        return Ok((cached, None));
     }
     let key = web::credential(&settings.search_provider)?;
+    let limits = crate::budget::search_limits(settings);
+    let mut warning = None;
     let results = web::with_retry(
         || web::search(&settings.search_provider, &key, query),
         || {
-            state.store.lock().unwrap().reserve_search_budget(
-                settings.monthly_search_limit,
-                settings.monthly_budget_usd,
-                settings.cost_per_search_usd,
-            )?;
+            let reservation = state.store.lock().unwrap().reserve(&settings.search_provider, limits)?;
+            warning = warning.take().or(reservation.warning);
             state.audit("web.search_attempt", &settings.search_provider);
             Ok(())
         },
@@ -527,7 +519,7 @@ pub(crate) async fn web_tool(
     )
     .await?;
     state.store.lock().unwrap().cache(&cache_key, &results)?;
-    Ok(results)
+    Ok((results, warning))
 }
 
 /// Runs one approved integration call and summarizes its cards with numbered citations.
@@ -542,9 +534,11 @@ async fn integration_task(
     let tool = integrations::tool(&call.tool).ok_or("Unknown online tool.")?;
     phase(channel, &task.id, "working");
     tool_event(channel, &task.id, &call.tool);
-    if tool.key.is_some() {
-        // Keyed services count toward the monthly request cap; their searches have no estimated fee.
-        state.store.lock().unwrap().reserve_search_budget(settings.monthly_search_limit, settings.monthly_budget_usd, 0.0)?;
+    if let Some(service) = tool.key {
+        // Keyed services have their own counters, so they never use the search provider's allowance.
+        if let Some(warning) = state.store.lock().unwrap().reserve(service, crate::budget::service_limits(settings))?.warning {
+            emit(channel, "notice", &task.id, Some(warning));
+        }
     }
     state.audit("integration.request", &format!("{} {}", task.id, call.tool));
     let outcome = integrations::execute(call, settings, cancel.clone()).await;
@@ -634,7 +628,11 @@ async fn execute_with_settings(
             return integration_task(state, task, channel, cancel, &settings, &call).await;
         }
         tool_event(channel, &task.id, "web_search");
-        task.sources = web_tool(state, &settings, &task.prompt, cancel.clone()).await?;
+        let (sources, warning) = web_tool(state, &settings, &task.prompt, cancel.clone()).await?;
+        task.sources = sources;
+        if let Some(warning) = warning {
+            emit(channel, "notice", &task.id, Some(warning));
+        }
         if task.sources.is_empty() {
             task.answer =
                 "The provider returned no web results for this query. Try more specific terms."
@@ -903,7 +901,7 @@ mod tests {
             .unwrap()
             .cache("brave:test query", &[source])
             .unwrap();
-        let sources = web_tool(
+        let (sources, warning) = web_tool(
             &state,
             &settings,
             "test query",
@@ -912,7 +910,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(sources.len(), 1);
-        assert_eq!(state.store.lock().unwrap().used().unwrap(), 0);
+        assert_eq!(warning, None);
+        assert_eq!(state.store.lock().unwrap().usage(&settings.search_provider).unwrap().month, 0);
     }
     #[tokio::test]
     async fn deterministic_file_results_and_history_survive_restart() {

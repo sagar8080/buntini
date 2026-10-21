@@ -157,7 +157,11 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         task.answer = "Saved search cancelled.".into();
     } else {
         match result {
-            Ok(sources) => {
+            Ok((sources, warning)) => {
+                if let Some(warning) = warning {
+                    let _ = tauri::Emitter::emit(app, "budget-warning", warning.clone());
+                    crate::notifications::deliver(app, "Search budget", &warning).await;
+                }
                 task.state = "completed".into();
                 task.answer = if sources.is_empty() {
                     "No results were returned for this saved search.".into()

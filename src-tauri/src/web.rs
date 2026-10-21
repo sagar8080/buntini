@@ -247,6 +247,7 @@ mod tests {
     use crate::store::Store;
     #[tokio::test]
     async fn transient_transport_fixture_bills_each_attempt_and_budget_stops_retry() {
+        let limits = |budget_usd| crate::budget::Limits { daily: 10, monthly: 10, budget_usd, unit_cost: 0.01 };
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();
         let calls = std::cell::Cell::new(0);
         let result = with_retry(
@@ -259,14 +260,14 @@ mod tests {
                     Ok(vec![])
                 })
             },
-            || store.reserve_search_budget(10, 0.02, 0.01),
+            || store.reserve("brave", limits(0.02)).map(|_| ()),
             Arc::new(AtomicBool::new(false)),
         )
         .await;
         assert!(result.is_ok());
         assert_eq!(calls.get(), 2);
-        assert_eq!(store.used().unwrap(), 2);
-        assert!((store.estimated_spend().unwrap() - 0.02).abs() < 0.000001);
+        assert_eq!(store.usage("brave").unwrap().month, 2);
+        assert!((store.usage("brave").unwrap().spend - 0.02).abs() < 0.000001);
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();
         let calls = std::cell::Cell::new(0);
         let result = with_retry(
@@ -277,13 +278,13 @@ mod tests {
                     std::time::Duration::from_millis(1),
                 )))
             },
-            || store.reserve_search_budget(10, 0.01, 0.01),
+            || store.reserve("brave", limits(0.01)).map(|_| ()),
             Arc::new(AtomicBool::new(false)),
         )
         .await;
         assert!(result.is_err());
         assert_eq!(calls.get(), 1);
-        assert_eq!(store.used().unwrap(), 1);
+        assert_eq!(store.usage("brave").unwrap().month, 1);
     }
     #[tokio::test]
     async fn cancellation_prevents_second_charged_attempt() {

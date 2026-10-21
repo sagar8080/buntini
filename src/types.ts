@@ -31,6 +31,8 @@ export interface Settings {
   whisperModel: string;
   searchProvider: 'brave' | 'tavily';
   monthlySearchLimit: number;
+  dailySearchLimit: number;
+  freeTierOnly: boolean;
   speakResponses: boolean;
   theme: 'system' | 'light' | 'dark';
   reducedMotion: boolean;
@@ -64,6 +66,9 @@ export interface Diagnostics {
   ebayConfigured?: boolean;
   duffelConfigured?: boolean;
   searchesUsed: number;
+  searchesToday?: number;
+  searchLimitMonth?: number;
+  searchLimitDay?: number;
   estimatedSpendUsd?: number;
   remainingBudgetUsd?: number;
 }
@@ -74,4 +79,4 @@ export interface PriceWatch { id: string; url: string; label: string; currency: 
 export interface Voice { id: string; name: string; language: string }
 export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean; tool: string; arguments: Record<string, unknown>; service: string; summary: string; sends: CardField[]; host: string; usesKey: boolean; note?: string }
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[] }
-export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
+export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }

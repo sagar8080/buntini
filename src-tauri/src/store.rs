@@ -16,6 +16,8 @@ impl Store {
           CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, action TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS search_usage (month TEXT PRIMARY KEY, used INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS usage_monthly (month TEXT NOT NULL, provider TEXT NOT NULL, used INTEGER NOT NULL, estimated_spend REAL NOT NULL, PRIMARY KEY (month, provider));
+          CREATE TABLE IF NOT EXISTS usage_daily (day TEXT NOT NULL, provider TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY (day, provider));
           CREATE TABLE IF NOT EXISTS search_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS saved_searches (id TEXT PRIMARY KEY, data TEXT NOT NULL, next_run_at TEXT NOT NULL, enabled INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS price_watches (id TEXT PRIMARY KEY, data TEXT NOT NULL, next_run_at TEXT NOT NULL, enabled INTEGER NOT NULL);
@@ -45,6 +47,7 @@ impl Store {
                 )
                 .map_err(|e| e.to_string())?;
         }
+        store.migrate_search_usage()?;
         for mut task in store.tasks()? {
             if task.state == "running" {
                 task.state = "error".into();
@@ -303,61 +306,76 @@ impl Store {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    pub fn used(&self) -> Result<u32, String> {
+    /// Moves the old single monthly counter into the per-provider tables, once.
+    fn migrate_search_usage(&self) -> Result<(), String> {
+        let migrated: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM usage_monthly)", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if migrated {
+            return Ok(());
+        }
+        let provider = self.settings().map(|settings| settings.search_provider).unwrap_or_else(|_| "brave".into());
         self.db
-            .query_row(
-                "SELECT used FROM search_usage WHERE month=?1",
-                [chrono::Utc::now().format("%Y-%m").to_string()],
-                |r| r.get(0),
+            .execute(
+                "INSERT OR IGNORE INTO usage_monthly(month,provider,used,estimated_spend) SELECT month,?1,used,estimated_spend FROM search_usage",
+                [provider],
             )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    pub fn usage(&self, provider: &str) -> Result<Usage, String> {
+        let now = chrono::Local::now();
+        let (month, spend) = self
+            .db
+            .query_row("SELECT used,estimated_spend FROM usage_monthly WHERE month=?1 AND provider=?2", params![now.format("%Y-%m").to_string(), provider], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, f64>(1)?)))
             .optional()
-            .map(|x| x.unwrap_or(0))
-            .map_err(|e| e.to_string())
-    }
-    #[cfg(test)]
-    pub fn reserve_search(&self, limit: u32) -> Result<(), String> {
-        self.reserve_search_budget(limit, 100000.0, 0.0)
-    }
-    pub fn estimated_spend(&self) -> Result<f64, String> {
-        self.db
-            .query_row(
-                "SELECT estimated_spend FROM search_usage WHERE month=?1",
-                [chrono::Utc::now().format("%Y-%m").to_string()],
-                |r| r.get(0),
-            )
+            .map_err(|e| e.to_string())?
+            .unwrap_or((0, 0.0));
+        let today = self
+            .db
+            .query_row("SELECT used FROM usage_daily WHERE day=?1 AND provider=?2", params![now.format("%Y-%m-%d").to_string(), provider], |r| r.get(0))
             .optional()
-            .map(|value| value.unwrap_or(0.0))
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+            .unwrap_or(0);
+        Ok(Usage { today, month, spend })
     }
-    pub fn reserve_search_budget(
-        &self,
-        limit: u32,
-        budget: f64,
-        unit_cost: f64,
-    ) -> Result<(), String> {
-        if !budget.is_finite() || !unit_cost.is_finite() || budget < 0.0 || unit_cost < 0.0 {
+    /// Reserves one request for `provider` before it is sent: failed or cancelled requests
+    /// may still cost the provider. Checks today's count, this month's count and this
+    /// month's estimated spend together, on local dates.
+    pub fn reserve(&self, provider: &str, limits: crate::budget::Limits) -> Result<Reservation, String> {
+        if !limits.unit_cost.is_finite() || limits.unit_cost < 0.0 || limits.budget_usd.is_nan() || limits.budget_usd < 0.0 {
             return Err("Invalid search budget.".into());
         }
-        // A reservation is charged before dispatch: failed/cancelled requests may still cost the provider.
-        let month = chrono::Utc::now().format("%Y-%m").to_string();
-        self.db
-            .execute(
-                "INSERT OR IGNORE INTO search_usage(month,used) VALUES(?1,0)",
-                [&month],
-            )
-            .map_err(|e| e.to_string())?;
-        let changed = self
-            .db
-            .execute(
-            "UPDATE search_usage SET used=used+1,estimated_spend=estimated_spend+?3 WHERE month=?1 AND used<?2 AND estimated_spend+?3<=?4+0.000000001",
-            params![month, limit,unit_cost,budget],
-            )
-            .map_err(|e| e.to_string())?;
-        if changed == 0 {
-            Err("Your monthly search count or estimated spending budget has been reached. Review the limits in Settings to search again.".into())
-        } else {
-            Ok(())
+        let now = chrono::Local::now();
+        let (month, day) = (now.format("%Y-%m").to_string(), now.format("%Y-%m-%d").to_string());
+        let transaction = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        let usage = self.usage(provider)?;
+        if usage.today >= limits.daily {
+            return Err(format!("Today’s limit of {} online lookups is used up. It resets at midnight, or you can raise it in Settings.", limits.daily));
         }
+        if usage.month >= limits.monthly {
+            return Err(format!("This month’s limit of {} lookups for this service is used up. Review the limits in Settings to search again.", limits.monthly));
+        }
+        if usage.spend + limits.unit_cost > limits.budget_usd + 0.000000001 {
+            return Err(format!("This month’s estimated budget of ${:.2} is used up. Review the limits in Settings to search again.", limits.budget_usd));
+        }
+        transaction
+            .execute(
+                "INSERT INTO usage_monthly(month,provider,used,estimated_spend) VALUES(?1,?2,1,?3) ON CONFLICT(month,provider) DO UPDATE SET used=used+1,estimated_spend=estimated_spend+?3",
+                params![month, provider, limits.unit_cost],
+            )
+            .map_err(|e| e.to_string())?;
+        transaction
+            .execute("INSERT INTO usage_daily(day,provider,used) VALUES(?1,?2,1) ON CONFLICT(day,provider) DO UPDATE SET used=used+1", params![day, provider])
+            .map_err(|e| e.to_string())?;
+        let (month_used, spend) = (usage.month + 1, usage.spend + limits.unit_cost);
+        let ratio = (month_used as f64 / limits.monthly.max(1) as f64).max(if limits.budget_usd.is_finite() && limits.budget_usd > 0.0 { spend / limits.budget_usd } else { 0.0 });
+        let key = format!("budget-warned-{month}-{provider}");
+        let warned: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM preferences WHERE key=?1)", [&key], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let warning = (ratio >= 0.8 && !warned).then(|| crate::budget::warning(provider, month_used, limits, spend));
+        if warning.is_some() {
+            transaction.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,'1')", [&key]).map_err(|e| e.to_string())?;
+        }
+        transaction.commit().map_err(|e| e.to_string())?;
+        Ok(Reservation { warning })
     }
     pub fn save_update_check(&self, check: &OsUpdateCheck) -> Result<(), String> {
         self.db
@@ -434,18 +452,57 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn limit(daily: u32, monthly: u32, budget_usd: f64, unit_cost: f64) -> crate::budget::Limits {
+        crate::budget::Limits { daily, monthly, budget_usd, unit_cost }
+    }
+    #[test]
+    fn daily_monthly_and_spend_limits_are_enforced_per_provider() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        for _ in 0..3 {
+            s.reserve("tavily", limit(3, 100, f64::INFINITY, 0.0)).unwrap();
+        }
+        assert!(s.reserve("tavily", limit(3, 100, f64::INFINITY, 0.0)).unwrap_err().contains("Today’s limit of 3"));
+        // eBay has its own counter, so it never uses up Tavily's allowance.
+        s.reserve("ebay", limit(3, 100, f64::INFINITY, 0.0)).unwrap();
+        assert_eq!(s.usage("tavily").unwrap(), Usage { today: 3, month: 3, spend: 0.0 });
+        assert_eq!(s.usage("ebay").unwrap().month, 1);
+        s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
+        s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
+        assert!(s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap_err().contains("budget of $0.01"));
+    }
+    #[test]
+    fn the_80_percent_warning_fires_once_a_month() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let limits = limit(100, 10, f64::INFINITY, 0.0);
+        let warnings = (0..10).map(|_| s.reserve("tavily", limits).unwrap().warning).collect::<Vec<_>>();
+        assert!(warnings[..7].iter().all(Option::is_none));
+        assert_eq!(warnings[7].as_deref(), Some("Heads up: you’ve used 8 of this month’s 10 Tavily searches."));
+        assert!(warnings[8..].iter().all(Option::is_none));
+    }
+    #[test]
+    fn the_old_monthly_counter_is_migrated_to_the_search_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch("CREATE TABLE search_usage (month TEXT PRIMARY KEY, used INTEGER NOT NULL, estimated_spend REAL NOT NULL DEFAULT 0);").unwrap();
+            db.execute("INSERT INTO search_usage VALUES(?1, 42, 0.21)", [chrono::Local::now().format("%Y-%m").to_string()]).unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.usage("brave").unwrap(), Usage { today: 0, month: 42, spend: 0.21 });
+    }
     #[test]
     fn quota_reservations_survive_reopen_and_cap_atomically() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db.sqlite");
         {
             let s = Store::open(&path).unwrap();
-            s.reserve_search(1).unwrap();
-            assert!(s.reserve_search(1).is_err());
+            s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).unwrap();
+            assert!(s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).is_err());
         }
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.used().unwrap(), 1);
-        assert!(s.reserve_search(1).is_err());
+        assert_eq!(s.usage("brave").unwrap().month, 1);
+        assert!(s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).is_err());
     }
     #[test]
     fn roots_are_data_and_revocation_erases_index() {
@@ -548,7 +605,7 @@ mod tests {
         let path = dir.path().join("db.sqlite");
         {
             let s = Store::open(&path).unwrap();
-            s.reserve_search_budget(10, 0.02, 0.01).unwrap();
+            s.reserve("brave", limit(100, 10, 0.02, 0.01)).unwrap();
             let watch = PriceWatch {
                 id: "watch".into(),
                 url: "https://shop.example.com/product".into(),
@@ -573,7 +630,7 @@ mod tests {
             s.save_price_watch(&watch).unwrap();
         }
         let s = Store::open(&path).unwrap();
-        assert!((s.estimated_spend().unwrap() - 0.01).abs() < 0.00001);
+        assert!((s.usage("brave").unwrap().spend - 0.01).abs() < 0.00001);
         let watch = s.price_watch("watch").unwrap().unwrap();
         assert!(!watch.enabled);
         assert_eq!(watch.history[0].price, "9007199254740993");
