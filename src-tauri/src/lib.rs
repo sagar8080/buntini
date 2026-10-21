@@ -156,6 +156,8 @@ pub fn run() {
             controller::remove_root,
             controller::run_task,
             controller::new_topic,
+            controller::finish_onboarding,
+            controller::restart_onboarding,
             controller::conversation,
             controller::cancel_task,
             controller::clear_history,

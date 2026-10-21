@@ -610,3 +610,26 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .cloud-share input { margin-top: 2px; }
 .cloud-share small { display: block; font-size: 9px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
 .cloud-settings .usage-meter { margin-top: 14px; }
+.setup-thread { padding-top: 12px; }
+.setup-progress { display: flex; align-items: center; justify-content: space-between; font-size: 9px; letter-spacing: .3px; color: var(--muted); }
+.setup-card { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.setup-card > label { display: flex; flex-direction: column; gap: 5px; font-size: 10px; color: var(--muted); }
+.setup-card > label > input, .setup-card > label > select { height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 11px; padding: 0 9px; outline: 0; }
+.setup-card > label > input:focus, .setup-card > label > select:focus { border-color: var(--accent); }
+.setup-card .key-input { margin-top: 0; background: var(--panel); }
+.setup-card .inline-field { flex-direction: row !important; align-items: center; justify-content: space-between; }
+.setup-card .inline-field > input { width: 64px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); text-align: center; }
+.setup-card .brain-options { margin: 0; }
+.setup-card .field-help { margin-top: 0; }
+.setup-card .notification-choice { margin-bottom: 0; font-size: 10px; color: var(--text); }
+.setup-card .label-status { margin-left: auto; }
+.coat-picker { display: flex; flex-wrap: wrap; gap: 5px; }
+.coat-picker button { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 4px 9px 4px 4px; }
+.coat-picker button i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid; }
+.coat-picker button.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.setup-actions { padding: 10px 16px 14px; border-top: 1px solid var(--border); }
+.setup-actions > div { display: flex; align-items: center; justify-content: space-between; }
+.setup-actions .primary-button { display: inline-flex; align-items: center; gap: 6px; }
+.setup-error { margin: 0 0 8px; font-size: 10px; line-height: 1.5; color: var(--danger); }
+.setup-label { display: flex; align-items: baseline; justify-content: space-between; }
+.setup-card > label.notification-choice { flex-direction: row; gap: 8px; }

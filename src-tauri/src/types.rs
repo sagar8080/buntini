@@ -20,6 +20,8 @@ pub struct Settings {
     pub theme: String,
     pub reduced_motion: bool,
     pub assistant_name: String,
+    /// What Buntini calls the user. Shared only with on-device models.
+    pub user_name: String,
     pub personality: String,
     pub avatar: String,
     pub accent: String,
@@ -98,6 +100,7 @@ impl Default for Settings {
             theme: "system".into(),
             reduced_motion: false,
             assistant_name: "Buntini".into(),
+            user_name: String::new(),
             personality: "Warm, concise, practical, and honest.".into(),
             avatar: "cat".into(),
             accent: "ember".into(),
@@ -144,6 +147,9 @@ impl Settings {
             || self.assistant_name.chars().any(char::is_control)
         {
             return Err("Assistant names must contain 1–40 visible characters.".into());
+        }
+        if self.user_name.chars().count() > 40 || self.user_name.chars().any(char::is_control) {
+            return Err("Your name can be up to 40 visible characters.".into());
         }
         if self.personality.chars().count() > 1200 {
             return Err("Personality must be no longer than 1,200 characters.".into());
@@ -466,6 +472,8 @@ pub struct Bootstrap {
     pub os_update_check: Option<OsUpdateCheck>,
     /// When the user last started a new topic; earlier turns are not remembered.
     pub conversation_start: Option<String>,
+    /// Whether first-run setup has finished.
+    pub onboarded: bool,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -11,7 +11,7 @@ npm ci
 npm run desktop
 ```
 
-The desktop command builds the native audio helper and launches Tauri. `npm run dev` is only the browser development preview; local tools, Keychain, audio, and desktop overlay behavior require the native app.
+The desktop command builds the native audio and Apple Intelligence helpers and launches Tauri. `npm run dev` is only the browser development preview; local tools, Keychain, audio, and desktop overlay behavior require the native app.
 
 For a standalone local app:
 
@@ -20,23 +20,26 @@ npm run tauri -- build --debug --bundles app --no-sign
 open src-tauri/target/debug/bundle/macos/Buntini.app
 ```
 
-The debug bundle uses the existing local Python environment. It is not a signed or notarized distribution. To prepare a release build, omit `--debug` and configure your own Apple signing/notarization credentials. No cloud backend is required.
+The debug bundle uses the existing local Python environment. It is not a signed or notarized distribution. To prepare a release build, omit `--debug` and configure your own Apple signing/notarization credentials. No cloud account is required.
 
-## Your existing model
+## First launch
 
-This Mac's confirmed defaults are detected when present:
+Buntini opens its bubble and walks you through setup as a short conversation: what to call you, its name and coat, which brain to use, an optional Brave or Tavily key with free-tier mode and a daily cap, and whether it may roam and notice what you're doing. Keys go straight to the macOS Keychain. You can skip setup, and **Settings → Run setup again** starts it over. Anyone who already chatted with an earlier version skips it automatically.
 
-- Python: `/Users/sagar/projects/pulse-venv/bin/python`
-- Qwen: `/Users/sagar/projects/pulse-venv/models/Qwen3.5-9B-4bit`
+## Choose a brain
 
-Settings can change either path. The approved voice setup now uses a separate project interpreter at `/Users/sagar/projects/nexon/.venv-voice/bin/python`, with a local English Whisper model and Silero VAD; the original environment is preserved. Other machines can set `BUNTINI_PYTHON`, `BUNTINI_MODEL_PATH`, and `BUNTINI_WHISPER_MODEL_PATH` before first launch. Only existing local model folders are accepted. Buntini never downloads a model, installs packages, or falls back to simulated answers in production.
+Settings → Brain picks the model that answers. Every backend gets the same validated tools and the same conversation memory.
 
-The existing MLX environment and Qwen model were verified with real offline generation, a structured `system_info` request, a grounded follow-up, cancellation, and reuse of the persistent worker. Qwen 3.5's native function/parameter tool format and older Qwen JSON tool calls are supported. See [acceptance evidence](docs/acceptance.md) for measured timings and remaining checks.
+- **Apple Intelligence** (default): Apple's on-device Foundation Models through the `native/buntini-fm` helper. Private, about a second per reply, nothing to download. It needs macOS 26 on Apple silicon with Apple Intelligence turned on; Settings explains what to do when it isn't available. Its context is small (about 4K tokens), so Buntini gives it compact tool results and a shorter memory.
+- **Local MLX model:** your own model folder (for example Qwen) run by the Python worker. Bigger and slower, fully offline. This Mac's defaults are detected when present (`/Users/sagar/projects/pulse-venv/bin/python` and `…/models/Qwen3.5-9B-4bit`); other machines can set `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH` before first launch. Existing installs that already used MLX stay on it. Buntini never downloads a model or installs packages.
+- **Cloud model:** Anthropic (suggested `claude-opus-5-5`), OpenAI (`gpt-5-mini`) or Google Gemini (`gemini-2.5-flash`) with your own API key; any model name your key can use works. Replies stream as they are written. Each message reserves a cautious cost estimate against your **monthly spending cap** before it is sent, then settles to the token usage the provider reports, at the per-million-token prices shown in Settings (suggested from published October 2026 prices; check your provider's page, their invoice is authoritative). Rejected requests are refunded, Buntini warns once at 80% and stops at the cap. A cloud model sees only what you allow under *What this model may see* (see Privacy below).
+
+The MLX environment and Qwen model were verified with real offline generation, tool calls, follow-ups, cancellation and worker reuse; Apple Intelligence with live routing, streaming and transcription probes. See [acceptance evidence](docs/acceptance.md).
 
 ## Everyday use
 
 - **The companion:** drag the character to move it; click to open or tuck away the bubble. The menu bar icon can show, hide, or quit Buntini. It floats above other windows and follows desktop Spaces.
-- **Ask anything:** chat with local Qwen. It can request the fixed, validated local tools. It cannot run a shell or modify files.
+- **Ask anything:** one ongoing conversation. Your messages appear on the right and Buntini's replies (with any cards, files and sources) on the left; earlier turns are remembered within the brain's budget. **New topic** starts fresh: older messages stay visible above a divider but are no longer sent to the model. **Load earlier** pages back through history. Buntini can request the fixed, validated local tools; it cannot run a shell or modify files.
 - **My files:** add a folder in Settings first. Search matches names and small text documents within that scope. Revoke access at any time. Hidden files and symlinks are skipped; scans are bounded to 10,000 entries, 40 hits, and 64 KB per text file.
 - **My Mac:** read CPU, memory, storage, process usage, and supported FileVault/Gatekeeper/SIP status. These tools work without a model or network. Buntini does not claim the OS is up to date or perform security changes.
 - **Online lookups:** in Online mode your local model picks one service for the request: weather (Open-Meteo), exchange rates (ECB via Frankfurter), Wikipedia, nearby places (OpenStreetMap/Nominatim), eBay listings, Duffel flight offers, or web search. Before anything is sent, an approval sheet shows the service, host, and the exact values that will leave your Mac; you can allow it once, cancel, or switch to a plain web search. Weather, rates, Wikipedia and places need no key. eBay (your developer app ID and secret) and Duffel (your access token) are optional, stored in macOS Keychain, count toward the monthly request cap, and are search-only: nothing is bought or booked. Results appear as numbered cards with attribution that the answer cites. See [online tools](docs/online-tools.md).
@@ -54,20 +57,13 @@ The companion feels alive without running the model: it blinks at random, picks 
 
 ## Voice setup
 
-Voice is prepared in this project without changing `pulse-venv`:
+Push-to-talk uses Apple's on-device speech recognition (SpeechAnalyzer, macOS 26) by default; macOS may download the language model once. With the local MLX brain and a local Whisper model folder, Buntini uses MLX Whisper instead. This project's optional Whisper setup lives in `.venv-voice/bin/python`, `models/whisper-tiny.en` and `models/silero_vad.onnx`, without changing `pulse-venv`; see [voice setup](docs/voice-setup.md). Runtime never installs packages.
 
-- Interpreter: `.venv-voice/bin/python`
-- English Whisper: `models/whisper-tiny.en`
-- Speech presence filter: `models/silero_vad.onnx`
-- Existing Qwen: `/Users/sagar/projects/pulse-venv/models/Qwen3.5-9B-4bit`
-
-A real synthetic-speech check passed through Silero and MLX Whisper completely offline. The local setup diagnostic checks packages and model files without loading the GPU. See [voice setup](docs/voice-setup.md) for explicit installation/download commands and measured observations. Runtime never installs packages or downloads models.
-
-Buntini requests microphone access only when you deliberately start push-to-talk with a configured model. Hold the mic, release, review the transcript, then send it. Temporary private audio is deleted after success, failure, or cancellation. There is no continuous listening or wake word. Sentence streaming uses installed macOS voices and can be interrupted, including queued speech.
+Buntini requests microphone access only when you deliberately start push-to-talk. Hold the mic, release, review the transcript, then send it. Temporary private audio is deleted after success, failure, or cancellation. There is no continuous listening or wake word. Sentence streaming uses installed macOS voices and can be interrupted, including queued speech.
 
 ## Privacy and limits
 
-**On-device by design.** The local model may use anything Buntini can see on this Mac (activity, approved folders, system state), because none of it leaves the machine. Restrictions apply at egress: search providers and online integrations receive only the exact request you approve, and any future external model backend (a cloud API, Codex, Claude Code, Gemini) receives local data only for the categories you list in `externalShares` (activity, system, files, history), which is empty by default. `src-tauri/src/privacy.rs` makes that decision for every model-facing path.
+**On-device by design.** The local model may use anything Buntini can see on this Mac (activity, approved folders, system state), because none of it leaves the machine. Restrictions apply at egress: search providers and online integrations receive only the exact request you approve. A cloud model receives your messages, and local data only for the categories you switch on under *What this model may see*: what you're doing, Mac health, your files, earlier conversation (all off by default). Earlier turns that used data you haven't shared are left out of its memory, and your own name is only given to on-device models. `src-tauri/src/privacy.rs` makes that decision for every model-facing path.
 
 Rust enforces the allowlist independently of the model: scoped file search, system snapshots, and explicitly authorized web searches. Tool arguments, IPC messages, model context, provider responses, and output sizes are bounded. Private file results cannot be forwarded to a search provider by the model. Remote results and file excerpts are treated as untrusted data.
 
@@ -77,9 +73,9 @@ History, preferences, schedules, audit events, an FTS5 file index, search cache,
 
 Buntini was previously named Nexon. Quit Nexon before the first Buntini launch. On that launch, if `app.buntini.companion` has no database yet, Buntini imports a consistent snapshot of `app.nexon.companion/nexon.sqlite3` (including unsaved WAL changes), renames the default assistant name "Nexon" to "Buntini" (a custom name is kept), and records the result in the audit log. The old folder is left in place with a `migrated-to-buntini` marker, so the import runs once and can be inspected or removed by hand. Leftover Nexon recordings in the old cache are deleted. Brave/Tavily keys move to the new Keychain entry the first time they are read; macOS may ask once whether Buntini can use the old item. macOS ties microphone and notification permissions to the app identity, so Buntini asks for them again. If the import fails, Buntini starts with fresh data, logs the error, and leaves the Nexon data untouched. Indexing is bounded and explicit; only approved folders are included, and indexed hits are reopened within their current permission scope before use. Revoking a folder removes its index entries. Previously saved conversation excerpts remain in history until it is cleared.
 
-The monthly search cap counts requests, not dollars. Failed or cancelled dispatched searches can consume a reservation. Provider pricing and allowances are managed through your own account. No API key is needed for offline tools. Estimated dollar budgets are configured alongside request caps; every dispatched provider attempt is reserved before it runs.
+**Search budgets.** Free-tier mode (on by default) keeps Brave and Tavily inside their free monthly allowance (about 1,000 searches each as of October 2026) and never estimates any spend. A daily lookup limit (30 by default) keeps one busy afternoon from using the month. Turning free-tier mode off reveals a monthly cap, a dollar budget and a per-search cost. Every request is counted before it is sent, eBay and Duffel are counted separately so they never use up the search allowance, and Buntini tells you once a month when usage reaches 80%. Failed or cancelled requests can still use a reservation. No API key is needed for offline tools.
 
-Unsupported actions are unavailable, rather than awaiting approval: file changes, destructive operations, purchases, account changes, and outbound messages. Flight/social APIs, MCP/OAuth adapters, wake words, Pocket TTS, and cloud model providers remain future work as designated in the TDD. A read-only macOS update check is available only after explicit approval; it never installs updates.
+Unsupported actions are unavailable, rather than awaiting approval: file changes, destructive operations, purchases, account changes, and outbound messages. Social APIs, MCP/OAuth adapters, wake words and Pocket TTS remain future work as designated in the TDD. A read-only macOS update check is available only after explicit approval; it never installs updates.
 
 ## Verify
 
@@ -95,8 +91,8 @@ With dependencies already available, this runs the production frontend build, mo
 | --- | --- |
 | `src/` | React command bubble, companion animation, settings and task shelf |
 | `src-tauri/src/` | Rust controller, policy, local tools, SQLite, providers, scheduler, audio and IPC |
-| `worker/` | Persistent offline MLX Qwen/Whisper process and strict JSONL protocol |
-| `native/` | AVAudioEngine capture helper and synthetic audio tests |
+| `worker/` | Persistent offline MLX Qwen/Whisper process, the JSONL protocol and shared tool schemas (`tools.json`) |
+| `native/` | AVAudioEngine capture helper, the `buntini-fm` Apple Intelligence and speech helper, and their tests |
 | `docs/technical-design.md` | Original supplied TDD |
 | `docs/acceptance.md` | Delivered scope, verification and remaining device acceptance |
 

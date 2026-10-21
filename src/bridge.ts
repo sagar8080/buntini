@@ -3,7 +3,7 @@ import type { Bootstrap, Mode, Settings, TaskEvent, TaskRecord } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
-  assistantName: 'Buntini', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'ember', companionScale: 1,
+  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'ember', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
@@ -15,9 +15,12 @@ export async function bootstrap(): Promise<Bootstrap> {
   let settings = defaults;
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
   return {
-    settings, tasks: previewTasks(), roots: [], audit: [], savedSearches: [], priceWatches: [],
+    settings, tasks: previewTasks(), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
     diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
   };
+}
+function previewOnboarded() {
+  try { return localStorage.getItem('buntini-preview-onboarded') === '1' || previewTasks().length > 0; } catch { return true; }
 }
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
 function previewTasks(): TaskRecord[] {
@@ -33,6 +36,10 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     // The browser preview keeps the conversation controls usable without the desktop app.
     if (name === 'new_topic') return new Date().toISOString() as T;
     if (name === 'conversation') return [] as T;
+    if (name === 'finish_onboarding') { localStorage.setItem('buntini-preview-onboarded', '1'); return undefined as T; }
+    if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
+    // Keys can't be kept without the desktop app's Keychain; setup still finishes.
+    if (name === 'set_api_key') return undefined as T;
     throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
   }
   return invoke<T>(name, args);

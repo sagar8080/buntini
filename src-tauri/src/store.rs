@@ -178,6 +178,20 @@ impl Store {
     pub fn conversation_start(&self) -> Result<Option<String>, String> {
         self.db.query_row("SELECT value FROM preferences WHERE key='conversation-start'", [], |r| r.get(0)).optional().map_err(|e| e.to_string())
     }
+    /// Setup counts as done once finished, or for anyone who already chatted before
+    /// onboarding existed. "Run setup again" stores an explicit "no".
+    pub fn onboarded(&self) -> Result<bool, String> {
+        let state: Option<String> = self.db.query_row("SELECT value FROM preferences WHERE key='onboarding'", [], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+        match state.as_deref() {
+            Some("pending") => Ok(false),
+            Some(_) => Ok(true),
+            None => self.db.query_row("SELECT EXISTS(SELECT 1 FROM tasks)", [], |r| r.get(0)).map_err(|e| e.to_string()),
+        }
+    }
+    pub fn set_onboarded(&self, done: bool) -> Result<(), String> {
+        let value = if done { now() } else { "pending".into() };
+        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('onboarding',?1)", [&value]).map(|_| ()).map_err(|e| e.to_string())
+    }
     pub fn start_new_topic(&self) -> Result<String, String> {
         let at = now();
         self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('conversation-start',?1)", [&at]).map_err(|e| e.to_string())?;
@@ -500,6 +514,15 @@ mod tests {
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         assert!(s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap_err().contains("budget of $0.01"));
+    }
+    #[test]
+    fn onboarding_is_needed_once_unless_asked_again() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        assert!(!s.onboarded().unwrap(), "a fresh install starts with setup");
+        s.set_onboarded(true).unwrap();
+        assert!(s.onboarded().unwrap());
+        s.set_onboarded(false).unwrap();
+        assert!(!s.onboarded().unwrap(), "Run setup again");
     }
     #[test]
     fn cloud_reservations_settle_to_reported_usage() {

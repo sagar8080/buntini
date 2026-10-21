@@ -13,6 +13,7 @@ import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
+import Onboarding from './Onboarding';
 import { greeting, mergeTurns } from './thread';
 import { relativeTime } from './format';
 import FileIndexSettings from './FileIndexSettings';
@@ -89,8 +90,11 @@ export default function App() {
     if (!data || threadLoaded.current) return;
     threadLoaded.current = true;
     setTurns(mergeTurns([], data.tasks)); setBoundary(data.conversationStart ?? null); setCanLoadEarlier(data.tasks.length >= 100);
+    // First launch: open the bubble so Buntini can introduce itself.
+    if (data.onboarded === false) void expand(true);
   }, [data]);
-  const chatting = turns.length > 0 || !!live;
+  const onboarding = data?.onboarded === false;
+  const chatting = turns.length > 0 || !!live || onboarding;
   useEffect(() => {
     document.documentElement.dataset.theme = data?.settings.theme || 'system';
     document.documentElement.dataset.motion = data?.settings.reducedMotion ? 'reduced' : 'full';
@@ -303,6 +307,14 @@ export default function App() {
     try { await command('cancel_recording'); } catch (e) { setError(errorMessage(e)); }
     finally { await pendingStart?.catch(() => {}); if (version === voiceVersion.current) { recordPromise.current = null; voiceStoppingRef.current = false; setVoiceStopping(false); } }
   }
+  async function finishSetup(settings: Settings, keys: [KeyProvider, string][]) {
+    for (const [provider, key] of keys) await command('set_api_key', { provider, key });
+    // A scheduled task may briefly hold the settings; try once more before giving up.
+    const saved = await saveSettings(settings).catch(() => new Promise(resolve => setTimeout(resolve, 800)).then(() => saveSettings(settings)));
+    await command('finish_onboarding');
+    setData(previous => previous && { ...previous, settings: saved, onboarded: true });
+    await refresh(); react('happy');
+  }
   async function newTopic() {
     try { setBoundary(await command<string>('new_topic')); setFocusId(''); setNotice('Fresh start. I won’t bring up what we talked about before.'); }
     catch (e) { setError(errorMessage(e)); }
@@ -342,10 +354,11 @@ export default function App() {
           </div>
         </header>
 
-        {page === 'home' && <>
+        {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} />}
+        {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
-            {!chatting ? <div className="overlay-welcome"><span>{greeting(new Date())} What’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button></div></div> : <>
-              <div className="thread-bar"><span>{greeting(new Date())}</span><button className="text-button" onClick={() => void newTopic()} disabled={busy || !!boundary && turns.every(turn => turn.createdAt <= boundary) && !live} title="Start fresh: earlier messages stay here but aren’t sent to the model"><Plus size={11} /> New topic</button></div>
+            {!chatting ? <div className="overlay-welcome"><span>{greeting(new Date(), data?.settings.userName)} What’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button></div></div> : <>
+              <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={busy || !!boundary && turns.every(turn => turn.createdAt <= boundary) && !live} title="Start fresh: earlier messages stay here but aren’t sent to the model"><Plus size={11} /> New topic</button></div>
               <Conversation turns={turns} live={live} boundary={boundary} busy={busy} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={canLoadEarlier} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
                 onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
@@ -375,7 +388,7 @@ export default function App() {
 
         {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
           const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh(); setNotice('Settings saved. All set.');
-        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} />}
+        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><div className="eyebrow">NOTHING BEHIND YOUR BACK</div><h2>The paper trail.</h2><p>Tool calls and permissions, recorded locally.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
@@ -409,10 +422,10 @@ export default function App() {
 }
 
 
-function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice }: {
+function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onPreviewVoice, onRestartSetup }: {
   data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
-  onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void;
+  onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void; onRestartSetup: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(data.settings);
@@ -443,6 +456,7 @@ function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKe
         <Toggle label="Read responses aloud" detail="Uses your Mac’s built-in voice" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
       </section>
       <section className="settings-section"><div className="settings-section-heading"><Sun size={15} /><h3>The little details</h3></div><div className="theme-options" aria-label="Color theme">{[{ id: 'light', icon: Sun, label: 'Light' }, { id: 'dark', icon: Moon, label: 'Dark' }, { id: 'system', icon: Laptop, label: 'System' }].map(item => <button key={item.id} type="button" aria-pressed={draft.theme === item.id} className={draft.theme === item.id ? 'active' : ''} onClick={() => update('theme', item.id as Settings['theme'])}><item.icon size={14} />{item.label}</button>)}</div><Toggle label="A little less motion" detail="Keep companion animations still" checked={draft.reducedMotion} onChange={value => update('reducedMotion', value)} /></section>
+      <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={15} /><span>Run setup again</span><ChevronRight size={14} /></button>
       <button type="button" className="audit-button" onClick={onAudit}><ShieldCheck size={15} /><span>View activity & permission log</span><ChevronRight size={14} /></button>
       <button className="primary-button save-settings" type="submit" disabled={saving}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving ? 'Saving…' : 'Save preferences'}</button>
     </form>
