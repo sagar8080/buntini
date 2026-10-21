@@ -315,6 +315,7 @@ pub fn validate_tool(
     match name {
         "system_info" if mode!="web"=>{if !args.is_empty(){return Err("system_info does not accept arguments.".into());}},
         "search_files" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_files only accepts a query.".into());}let q=args["query"].as_str().ok_or("File query must be text.")?;if q.trim().is_empty()||q.len()>512{return Err("Invalid file query.".into());}},
+        "look_up_online" if mode=="auto"=>{if args.len()!=1{return Err("look_up_online only accepts a query.".into());}let q=args.get("query").and_then(Value::as_str).ok_or("Lookup query must be text.")?;if q.trim().is_empty()||q.len()>512{return Err("Invalid lookup query.".into());}},
         "web_search" if mode=="web"=>{if args.len()!=1 || args.get("query").and_then(Value::as_str)!=Some(user_query){return Err("Web searches must use the user's exact explicit query. Local file contents cannot be sent to search providers.".into());}},
         _=>return Err(format!("The tool '{name}' is not authorized. Buntini only exposes scoped file search, system information, and explicit web search.")),
     }
@@ -798,6 +799,11 @@ async fn execute_with_settings(
     if privacy::allows(locality, &settings, privacy::Share::System) {
         offered.push("system_info");
     }
+    // In everyday chat the model can ask to go online; the app then shows the usual
+    // approval sheet, so nothing leaves the Mac without the user's say-so.
+    if mode == "auto" {
+        offered.push("look_up_online");
+    }
     let tools = tools::offer(&offered);
     // Apple's on-device model has a ~4K-token window: give it text, not raw JSON.
     let compact = state.models.budget(&settings).history_tokens < 4000;
@@ -809,6 +815,10 @@ async fn execute_with_settings(
                 state.audit("tool.denied", &e);
                 e
             })?;
+            if name == "look_up_online" {
+                task.handoff = Some("online".into());
+                return Ok(());
+            }
             phase(channel, &task.id, "working");
             tool_event(channel, &task.id, &name);
             state.audit(&format!("tool.{name}"), &task.id);
@@ -891,6 +901,7 @@ pub async fn run_task(
         cards: vec![],
         backend: String::new(),
         touched: vec![],
+        handoff: None,
     };
     let cancel = Arc::new(AtomicBool::new(false));
     // A scheduled search may briefly hold the slot; wait for it rather than failing the chat.
@@ -957,7 +968,8 @@ pub async fn run_task(
     } else {
         task.state = "completed".into();
     }
-    let saved = state.store.lock().unwrap().save_task(&task);
+    // A hand-off to an online lookup isn't a turn of its own: the approved lookup is.
+    let saved = if task.handoff.is_some() && task.state == "completed" { state.store.lock().unwrap().delete_task(&task.id) } else { state.store.lock().unwrap().save_task(&task) };
     state.active.lock().unwrap().remove(&task.id);
     saved?;
     state.audit("task.finished", &format!("{} ({})", task.id, task.state));
@@ -1048,6 +1060,7 @@ mod tests {
             cards: vec![],
             backend: String::new(),
             touched: vec![],
+            handoff: None,
         };
         let channel = Channel::new(|_| Ok(()));
         execute(
@@ -1114,6 +1127,7 @@ mod tests {
             cards: vec![],
             backend: String::new(),
             touched: vec![],
+            handoff: None,
         };
         execute(
             &state,
@@ -1175,5 +1189,9 @@ mod tests {
             "health"
         )
         .is_ok());
+        // Asking to go online only hands off to the approval sheet, and only in everyday chat.
+        assert!(validate_tool(&json!({"name":"look_up_online","arguments":{"query":"weather in Porto"}}), "auto", "weather?").is_ok());
+        assert!(validate_tool(&json!({"name":"look_up_online","arguments":{"query":"x"}}), "files", "x").is_err());
+        assert!(validate_tool(&json!({"name":"look_up_online","arguments":{"query":"x","url":"y"}}), "auto", "x").is_err());
     }
 }

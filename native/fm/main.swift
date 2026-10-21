@@ -63,6 +63,7 @@ let toolDefinitions = loadTools()
 let toolExamples: [String: String] = [
     "search_files": "find my lease PDF",
     "system_info": "how much memory is free?",
+    "look_up_online": "what's the weather in Porto this weekend?",
     "web_search": "latest news about the elections",
     "weather": "will it rain in Paris tomorrow?",
     "currency": "100 pounds in yen",

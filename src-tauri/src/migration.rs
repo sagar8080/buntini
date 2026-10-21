@@ -102,6 +102,7 @@ mod tests {
                 cards: vec![],
                 backend: String::new(),
                 touched: vec![],
+                handoff: None,
             })
             .unwrap();
         let mut settings = serde_json::to_value(Settings::default()).unwrap();

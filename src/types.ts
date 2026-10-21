@@ -67,6 +67,8 @@ export interface TaskRecord {
   system?: Record<string, unknown>;
   backend?: string;
   touched?: string[];
+  /** 'online' when the model asked to look something up; the app then asks for approval. */
+  handoff?: string;
 }
 export interface Diagnostics {
   modelReady: boolean;

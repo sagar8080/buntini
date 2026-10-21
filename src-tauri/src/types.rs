@@ -281,6 +281,10 @@ pub struct TaskRecord {
     /// only see it again when the user shares all of them.
     #[serde(default)]
     pub touched: Vec<String>,
+    /// Set when the model asked to go online instead of answering: the app then asks the
+    /// user to approve a lookup. Such turns are not kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<String>,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -69,6 +69,7 @@ mod tests {
             cards: vec![],
             backend: "apple".into(),
             touched: touched.iter().map(|id| id.to_string()).collect(),
+            handoff: None,
         }
     }
 

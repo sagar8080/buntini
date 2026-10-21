@@ -135,6 +135,9 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.audit("folder.revoked", root)
     }
+    pub fn delete_task(&self, id: &str) -> Result<(), String> {
+        self.db.execute("DELETE FROM tasks WHERE id=?1", [id]).map(|_| ()).map_err(|e| e.to_string())
+    }
     pub fn save_task(&self, task: &TaskRecord) -> Result<(), String> {
         self.db
             .execute(
