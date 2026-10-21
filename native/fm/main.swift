@@ -64,6 +64,13 @@ let toolExamples: [String: String] = [
     "search_files": "find my lease PDF",
     "system_info": "how much memory is free?",
     "look_up_online": "what's the weather in Porto this weekend?",
+    "add_reminder": "remind me to call mum tomorrow at 6pm",
+    "add_calendar_event": "put lunch with Sam on Friday at 1pm in my calendar",
+    "create_note": "make a note of these packing ideas",
+    "draft_email": "draft an email to my landlord about the leak",
+    "run_shortcut": "run my Morning Routine shortcut",
+    "open_app": "open Safari",
+    "open_link": "open github.com",
     "web_search": "latest news about the elections",
     "weather": "will it rain in Paris tomorrow?",
     "currency": "100 pounds in yen",
@@ -163,7 +170,7 @@ func generate(_ id: String, _ request: [String: Any]) async {
             let decider = LanguageModelSession(model: .default, tools: [], transcript: transcript)
             let menu = offered.map { "- \($0): \(toolDefinitions[$0]?["description"] as? String ?? "")" }.joined(separator: "\n")
             // A small model routes far better from examples than from rules.
-            let examples = (["\"hi, who are you?\" → none", "\"thanks, that helps\" → none", "\"what am I doing right now?\" → none (the context says)"] + offered.compactMap { name in toolExamples[name].map { "\"\($0)\" → \(name)" } }).joined(separator: "\n")
+            let examples = (["\"hi, who are you?\" → none", "\"thanks, that helps\" → none", "\"tell me a joke\" → none", "\"how do I boil an egg?\" → none", "\"what am I doing right now?\" → none (the context says)"] + offered.compactMap { name in toolExamples[name].map { "\"\($0)\" → \(name)" } }).joined(separator: "\n")
             let choice = try GenerationSchema(root: DynamicGenerationSchema(name: "ToolChoice", description: "The tool to use, or none", anyOf: ["none"] + offered), dependencies: [])
             let decided = try await decider.respond(to: "Tools:\n\(menu)\n\nExamples:\n\(examples)\n\nChoose a tool only when the answer needs facts that are not already in the instructions or conversation above. Otherwise choose none.\n\nUser message: \(prompt)", schema: choice, options: GenerationOptions(temperature: 0))
             let name = (try? decided.content.value(String.self)) ?? "none"

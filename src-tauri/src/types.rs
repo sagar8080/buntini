@@ -285,6 +285,9 @@ pub struct TaskRecord {
     /// user to approve a lookup. Such turns are not kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff: Option<String>,
+    /// With handoff "action": the proposal the approval sheet shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<serde_json::Value>,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

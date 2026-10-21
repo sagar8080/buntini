@@ -103,6 +103,7 @@ mod tests {
                 backend: String::new(),
                 touched: vec![],
                 handoff: None,
+                action: None,
             })
             .unwrap();
         let mut settings = serde_json::to_value(Settings::default()).unwrap();

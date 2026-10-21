@@ -1,3 +1,4 @@
+mod actions;
 mod approvals;
 mod budget;
 mod cloud;
@@ -159,6 +160,8 @@ pub fn run() {
             controller::run_task,
             controller::new_topic,
             controller::finish_onboarding,
+            controller::run_action,
+            controller::cancel_action,
             data::export_data,
             data::delete_all_data,
             data::support_info,

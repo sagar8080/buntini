@@ -69,6 +69,7 @@ export interface TaskRecord {
   touched?: string[];
   /** 'online' when the model asked to look something up; the app then asks for approval. */
   handoff?: string;
+  action?: import('./ActionSheet').ActionProposal;
 }
 export interface Diagnostics {
   modelReady: boolean;

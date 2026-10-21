@@ -70,6 +70,7 @@ mod tests {
             backend: "apple".into(),
             touched: touched.iter().map(|id| id.to_string()).collect(),
             handoff: None,
+            action: None,
         }
     }
 

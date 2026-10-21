@@ -28,7 +28,7 @@
   },
   "look_up_online": {
     "name": "look_up_online",
-    "description": "Look something up on the internet when the answer needs current or outside information: weather, news, prices, exchange rates, places, flights, or facts you don't know. The user approves before anything is sent.",
+    "description": "Look something up on the internet when the answer needs current or outside facts you can't know: weather, news, prices, exchange rates, places, flights or recent events. Don't use it for chat, jokes, advice or general knowledge. The user approves before anything is sent.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -40,6 +40,184 @@
       },
       "required": [
         "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "add_reminder": {
+    "name": "add_reminder",
+    "description": "Add a reminder to the Reminders app. The user reviews it before it is added.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "What to be reminded about."
+        },
+        "due": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local date and time as YYYY-MM-DD HH:MM (24-hour)."
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "add_calendar_event": {
+    "name": "add_calendar_event",
+    "description": "Add an event to the Calendar app. The user reviews it before it is added.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Event name."
+        },
+        "start": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local date and time as YYYY-MM-DD HH:MM (24-hour)."
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1440,
+          "description": "How long it lasts, in minutes."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Where it happens."
+        }
+      },
+      "required": [
+        "title",
+        "start"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "create_note": {
+    "name": "create_note",
+    "description": "Write a new note in the Notes app. The user reviews it before it is saved.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Note title."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Note text."
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "draft_email": {
+    "name": "draft_email",
+    "description": "Open a new email draft in Mail for the user to review and send themselves. Never sends.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Recipient email address."
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Subject line."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Email text."
+        }
+      },
+      "required": [
+        "subject",
+        "body"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "run_shortcut": {
+    "name": "run_shortcut",
+    "description": "Run one of the user's own Shortcuts by its exact name. The user approves first.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The shortcut's name."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "open_app": {
+    "name": "open_app",
+    "description": "Open an app installed on this Mac.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The app's name, for example Safari or Notes."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "open_link": {
+    "name": "open_link",
+    "description": "Open a web page in the user's browser.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 2000,
+          "description": "An https:// address."
+        }
+      },
+      "required": [
+        "url"
       ],
       "additionalProperties": false
     }

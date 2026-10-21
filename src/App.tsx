@@ -14,6 +14,7 @@ import Conversation from './Conversation';
 import Onboarding from './Onboarding';
 import SettingsView from './SettingsView';
 import YourData from './YourData';
+import ActionSheet, { type ActionProposal } from './ActionSheet';
 import { greeting, mergeTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
@@ -53,6 +54,8 @@ export default function App() {
   const [menu, setMenu] = useState(false);
   const [approval, setApproval] = useState<WebApproval | null>(null);
   const [approving, setApproving] = useState(false);
+  const [proposal, setProposal] = useState<ActionProposal | null>(null);
+  const [acting, setActing] = useState(false);
   const [planning, setPlanning] = useState(false);
   const activeId = useRef('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -168,6 +171,7 @@ export default function App() {
     const listener = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (approval) { setApproval(null); setPetState('idle'); }
+        else if (proposal && !acting) { void command('cancel_action', { id: proposal.id }).catch(() => {}); setProposal(null); setPetState('idle'); }
         else if (recordHeld.current || recording || transcribing) { void cancelVoice(); }
         else if (speaking) { void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
         else if (page !== 'home') setPage('home');
@@ -179,7 +183,7 @@ export default function App() {
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval]);
+  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval, proposal, acting]);
   useEffect(() => {
     const element = conversationRef.current;
     if (!element || page !== 'home') return;
@@ -223,7 +227,7 @@ export default function App() {
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses;
-    let streamedText = '', answerSoFar = '', liveId = '', goOnline = false;
+    let streamedText = '', answerSoFar = '', liveId = '', goOnline = false, askAction = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
@@ -245,6 +249,7 @@ export default function App() {
       }, approvalId);
       setLive(null);
       if (result.handoff === 'online') { goOnline = true; await speechQueue.current?.cancel(); return; }
+      if (result.handoff === 'action' && result.action) { setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); return; }
       setTurns(previous => mergeTurns(previous, [result]));
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
@@ -260,6 +265,7 @@ export default function App() {
       taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle');
       // The model wants to look this up online: show the approval sheet for the same message.
       if (goOnline) void planOnline(prompt.trim(), false);
+      if (askAction) setPetState('approval');
     }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses]);
   nudgeAction.current = action => {
@@ -398,6 +404,12 @@ export default function App() {
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
         {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={() => { setApproval(null); setPetState('idle'); }} onWebInstead={() => { const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true); }} onAllow={async () => { setApproving(true); try { const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id }); setApproval(null); await submit(allowed.prompt, 'web', allowed.id); } catch (error) { setError(errorMessage(error)); setApproval(null); setPetState('idle'); } finally { setApproving(false); } }} />}
+        {proposal && <ActionSheet proposal={proposal} running={acting} onCancel={() => { void command('cancel_action', { id: proposal.id }).catch(() => {}); setProposal(null); setPetState('idle'); }} onAllow={async args => {
+          setActing(true); setError('');
+          try { const done = await command<TaskRecord>('run_action', { id: proposal.id, args }); setTurns(previous => mergeTurns(previous, [done])); setProposal(null); react('happy'); if (data?.settings.speakResponses) void speak(done.answer); }
+          catch (failure) { setError(errorMessage(failure)); setProposal(null); react('sad'); }
+          finally { setActing(false); setPetState('idle'); }
+        }} />}
         {(error || notice) && <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div>}
         <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · Local-first desktop companion. Shortcut: ⌘ ⇧ Space. No unrestricted shell tools.')}><CircleHelp size={12} /></button></footer>
       </section>}
