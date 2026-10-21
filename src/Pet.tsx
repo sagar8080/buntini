@@ -1,5 +1,6 @@
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import Cat from './Cat';
+import { usePetLife, type PetReaction } from './usePetLife';
 import type { PetLook, PetState, Settings } from './types';
 
 const defaultLook: PetLook = { coat: 'ginger', eyes: 'green', accessory: 'bell', motion: 'playful', accent: 'ember' };
@@ -18,12 +19,15 @@ const tailTips = [
   'M47 30C46 22 48 16 52 12C50 28 58 40 69 47L69 37L74 49C64 57 51 51 47 30Z',
 ];
 
-export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook }) {
+export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook, alive = false, reaction }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook; alive?: boolean; reaction?: PetReaction }) {
   const gradientId = useId().replaceAll(':', '');
+  const element = useRef<HTMLDivElement>(null);
+  const { action, blinking } = usePetLife(element, { alive, state, motion: look.motion, cat: avatar === 'cat', reaction });
   const curious = state === 'listening' || state === 'approval';
   const focused = state === 'thinking' || state === 'working';
 
-  return <div className={`pet pet--${state} pet--motion-${look.motion} ${small ? 'pet--small' : ''}`} aria-hidden="true">
+  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small'];
+  return <div ref={element} className={classes.filter(Boolean).join(' ')} aria-hidden="true">
     <div className="pet-aura" />
     {avatar === 'orb' ? <Orb state={state} id={gradientId} /> : avatar === 'cat' ? <Cat id={gradientId} look={look} /> : <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>

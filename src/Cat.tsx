@@ -38,11 +38,11 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
   </>;
   const eye = (cx: number, iris: string) => <>
     <ellipse cx={cx} cy="94" rx="9" ry="10" fill={iris} stroke="#2A2230" strokeWidth="1.4" />
-    <g className="cat-pupil">
+    <g className="cat-look"><g className="cat-pupil">
       <ellipse cx={cx} cy="94.5" rx="5.3" ry="7.2" fill="#221B27" />
       <circle cx={cx - 3} cy="89.6" r="2.8" fill="#fff" />
       <circle cx={cx + 3.4} cy="98.6" r="1.3" fill="#fff" fillOpacity=".9" />
-    </g>
+    </g></g>
   </>;
 
   return <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -74,8 +74,10 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
         <path d="M99 158V161M105 158V161" stroke={coat.outline} strokeWidth="1.2" strokeLinecap="round" strokeOpacity=".55" />
       </g>
 
-      {/* Ears sit behind the head; each is wrapped so CSS can rotate it without
-          overriding the mirror transform. */}
+      {/* The head turns toward the cursor (outer group) and acts out habits (inner group).
+          Ears sit behind it; each is wrapped so CSS can rotate it without overriding
+          the mirror transform. */}
+      <g className="cat-head-gaze"><g className="cat-head">
       <g className="cat-ear cat-ear-left">{ear(leftEar)}</g>
       <g className="cat-ear cat-ear-right"><g transform="translate(180 0) scale(-1 1)">{ear(rightEar)}</g></g>
 
@@ -95,23 +97,15 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
       <ellipse cx="63" cy="108" rx="6" ry="3.4" fill="#FF8DA1" fillOpacity={coat.blush} />
       <ellipse cx="117" cy="108" rx="6" ry="3.4" fill="#FF8DA1" fillOpacity={coat.blush} />
       <g className="pet-eyes">{eye(74, leftIris)}{eye(106, rightIris)}</g>
-      <path className="cat-eyes-closed" d="M65 95Q74 101 83 95M97 95Q106 101 115 95" stroke={look.coat === 'siamese' || look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : coat.outline} strokeWidth="2.4" strokeLinecap="round" />
+      <path className="cat-eyes-closed" d="M65 95Q74 101 83 95M97 95Q106 101 115 95" stroke={look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : look.coat === 'siamese' ? '#2E1F18' : coat.outline} strokeWidth="2.4" strokeLinecap="round" />
+      <path className="cat-eyes-happy" d="M66 97Q74 88 82 97M98 97Q106 88 114 97" stroke={look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : look.coat === 'siamese' ? '#2E1F18' : coat.outline} strokeWidth="2.4" strokeLinecap="round" />
       <path d="M86.5 106.5C86.5 104.8 93.5 104.8 93.5 106.5C93.5 108.3 91.2 110 90 110C88.8 110 86.5 108.3 86.5 106.5Z" fill={coat.nose} />
       <path className="pet-mouth" d="M90 110V112.5M85 112.5C86.5 115.5 89 115.5 90 112.5C91 115.5 93.5 115.5 95 112.5" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       <path className="pet-speaking-mouth" d="M86 113C88 112 92 112 94 113C94 118 92 120 90 120C88 120 86 118 86 113Z" fill="#7A3B4A" />
+      <path className="cat-frown" d="M85 116Q90 112 95 116" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.7" strokeLinecap="round" />
+      <g className="cat-yawn"><ellipse cx="90" cy="117" rx="5.2" ry="6.8" fill="#7A3B4A" /><ellipse cx="90" cy="120.6" rx="3.2" ry="2.4" fill="#F08A98" /></g>
       <path d="M58 106L42 103M58 110L41 111M59 114L45 118M122 106L138 103M122 110L139 111M121 114L135 118" stroke={coat.whisker} strokeWidth="1.1" strokeLinecap="round" strokeOpacity=".75" />
 
-      {look.accessory === 'bell' && <g>
-        <path d="M67 121Q90 133 113 121" stroke={coat.outline} strokeOpacity=".7" strokeWidth="7" strokeLinecap="round" />
-        <path d="M67 121Q90 133 113 121" stroke={accent} strokeWidth="4.6" strokeLinecap="round" />
-        <circle cx="90" cy="130.5" r="5" fill="#F6C945" stroke="#B5891F" strokeWidth="1.2" />
-        <path d="M87.5 132H92.5" stroke="#8A6614" strokeWidth="1" strokeLinecap="round" />
-        <circle cx="88.4" cy="128.8" r="1.2" fill="#fff" fillOpacity=".75" />
-      </g>}
-      {look.accessory === 'bandana' && <g>
-        <path d="M66 120Q90 132 114 120L108 128Q99 146 90 149Q81 146 72 128Z" fill={accent} stroke="#000" strokeOpacity=".18" strokeWidth="1.2" strokeLinejoin="round" />
-        <circle cx="84" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="96" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="90" cy="140" r="1.4" fill="#fff" fillOpacity=".8" />
-      </g>}
       {look.accessory === 'bow' && <g transform="rotate(18 117 58) translate(117 58) scale(1.25) translate(-117 -58)" stroke="#000" strokeOpacity=".2" strokeWidth="1.1" strokeLinejoin="round">
         <path d="M117 58C111 51 105 53 106 59C107 65 113 63 117 58Z" fill={accent} />
         <path d="M117 58C123 51 129 53 128 59C127 65 121 63 117 58Z" fill={accent} />
@@ -131,7 +125,26 @@ export default function Cat({ id, look }: { id: string; look: PetLook }) {
           <circle cx={x} cy={y} r="1.8" fill="#FFD45C" />
         </g>)}
       </g>}
+      </g></g>
+
+      {look.accessory === 'bell' && <g>
+        <path d="M67 121Q90 133 113 121" stroke={coat.outline} strokeOpacity=".7" strokeWidth="7" strokeLinecap="round" />
+        <path d="M67 121Q90 133 113 121" stroke={accent} strokeWidth="4.6" strokeLinecap="round" />
+        <circle cx="90" cy="130.5" r="5" fill="#F6C945" stroke="#B5891F" strokeWidth="1.2" />
+        <path d="M87.5 132H92.5" stroke="#8A6614" strokeWidth="1" strokeLinecap="round" />
+        <circle cx="88.4" cy="128.8" r="1.2" fill="#fff" fillOpacity=".75" />
+      </g>}
+      {look.accessory === 'bandana' && <g>
+        <path d="M66 120Q90 132 114 120L108 128Q99 146 90 149Q81 146 72 128Z" fill={accent} stroke="#000" strokeOpacity=".18" strokeWidth="1.2" strokeLinejoin="round" />
+        <circle cx="84" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="96" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="90" cy="140" r="1.4" fill="#fff" fillOpacity=".8" />
+      </g>}
+      {/* A copy of the right paw drawn in front of the face, shown only while grooming. */}
+      <g className="cat-groom-paw">
+        <path d="M93 156C93 151 97 149 102 149C107 149 110 151 110 156C110 161 107 163 102 163C97 163 93 161 93 156Z" fill={paws} {...line} />
+        <path d="M99 151V154M105 151V154" stroke={coat.outline} strokeWidth="1.2" strokeLinecap="round" strokeOpacity=".55" />
+      </g>
     </g>
+    <g className="cat-hearts" fill="#FF7A93">{[[124, 68], [137, 54], [113, 50]].map(([x, y], index) => <g key={index} transform={`translate(${x} ${y})`}><path className="cat-heart" style={{ animationDelay: `${index * .28}s` }} d="M0 3C-1.5 0-6-.5-6 3C-6 6.5-1.5 8.5 0 10C1.5 8.5 6 6.5 6 3C6-.5 1.5 0 0 3Z" /></g>)}</g>
     <g className="cat-zzz" fill="#8C7FA6" fontFamily="Manrope, sans-serif" fontWeight="800"><text x="128" y="60" fontSize="12">z</text><text x="137" y="48" fontSize="9">z</text><text x="144" y="38" fontSize="7">z</text></g>
   </svg>;
 }

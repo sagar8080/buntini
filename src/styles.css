@@ -376,8 +376,8 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet--motion-sleepy.pet--idle .pet-body { animation-duration: 7s; }
 .pet--motion-sleepy.pet--idle .pet-eyes { display: none; }
 .pet--motion-sleepy.pet--idle .cat-eyes-closed, .pet--motion-sleepy.pet--idle .cat-zzz { display: block; }
-.pet-button:hover .pet--motion-sleepy.pet--idle .pet-eyes { display: block; }
-.pet-button:hover .pet--motion-sleepy.pet--idle .cat-eyes-closed, .pet-button:hover .pet--motion-sleepy.pet--idle .cat-zzz { display: none; }
+.pet-button:hover .pet--motion-sleepy.pet--idle:not([class*="pet--act-"]) .pet-eyes { display: block; }
+.pet-button:hover .pet--motion-sleepy.pet--idle:not([class*="pet--act-"]) .cat-eyes-closed, .pet-button:hover .pet--motion-sleepy.pet--idle .cat-zzz { display: none; }
 .pet--listening .cat-ear-left, .pet--approval .cat-ear-left { animation: none; transform: rotate(-8deg); }
 .pet--listening .cat-ear-right, .pet--approval .cat-ear-right { animation: none; transform: rotate(8deg); }
 .pet--listening .cat-pupil, .pet--approval .cat-pupil { transform: scale(1.14); }
@@ -412,3 +412,60 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .motion-options button { padding: 7px 4px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 7px; font-size: 10px; }
 .motion-options button[aria-pressed=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .surprise-button { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 9px; color: var(--accent); background: var(--accent-soft); border-radius: 5px; padding: 4px 7px; }
+/* Living pet: JS-driven blinks, cursor gaze and one-shot habits (see usePetLife.ts).
+   `.pet.pet--act-*` outranks the idle motion loops while a habit plays. */
+.pet--alive .pet-eyes { animation: none; transition: transform 70ms ease; }
+.pet--blink .pet-eyes { transform: scaleY(.1); }
+.cat-head, .cat-head-gaze { transform-origin: 90px 124px; }
+.cat-head-gaze { transform: translate(calc(var(--gx, 0) * 1.6px), calc(var(--gy, 0) * 1.1px)) rotate(calc(var(--gx, 0) * 2.5deg)); transition: transform .45s ease-out; }
+.cat-look { transform: translate(calc(var(--gx, 0) * 2.3px), calc(var(--gy, 0) * 2.1px)); transition: transform .25s ease-out; }
+.pet--motion-sleepy.pet--idle:not(:hover) .cat-head-gaze, .pet--motion-sleepy.pet--idle:not(:hover) .cat-look { transform: none; }
+.cat-eyes-happy, .cat-yawn, .cat-frown, .cat-groom-paw, .cat-hearts { display: none; }
+.cat-yawn { transform-box: fill-box; transform-origin: center top; }
+.cat-groom-paw { transform-box: fill-box; transform-origin: center; }
+.cat-heart { transform-box: fill-box; transform-origin: center; opacity: 0; animation: cat-heart 1.6s ease-out infinite; }
+.pet.pet--act-tilt .cat-head { animation: cat-tilt 1.6s ease-in-out; }
+.pet.pet--act-tilt:not(.pet--cat) .pet-body { animation: body-tilt 1.6s ease-in-out; }
+.pet.pet--act-slowblink .pet-eyes { animation: pet-slowblink 1.8s ease-in-out; }
+.pet.pet--act-ear .cat-ear-left { animation: cat-ear-flick .65s ease-in-out; }
+.pet.pet--act-tailcurl .cat-tail { animation: cat-tail-big 1.4s ease-in-out; }
+.pet.pet--act-groom .cat-groom-paw { display: block; animation: cat-groom 2.6s ease-in-out; }
+.pet.pet--act-groom .cat-paw-right { opacity: 0; }
+.pet.pet--act-groom .cat-head { animation: cat-groom-head 2.6s ease-in-out; }
+.pet.pet--act-stretch .pet-body { animation: pet-stretch 1.9s ease-in-out; }
+.pet.pet--act-yawn .cat-head { animation: cat-yawn-head 2s ease-in-out; }
+.pet.pet--act-yawn .cat-yawn { display: block; animation: cat-yawn 2s ease-in-out; }
+.pet.pet--act-yawn .pet-mouth { display: none; }
+.pet.pet--act-wiggle .pet-body { animation: pet-wiggle 1.5s ease-in-out; }
+.pet.pet--act-wiggle .cat-pupil { transform: scale(1.2); }
+.pet.pet--act-nod .cat-head { animation: cat-nod 2.4s ease-in-out; }
+.pet.pet--act-love .pet-body, .pet.pet--act-happy .pet-body { animation: pet-happy 1.4s ease-in-out; }
+.pet.pet--act-purr .pet-body { animation: pet-purr .12s linear infinite; }
+.pet.pet--act-love .cat-hearts, .pet.pet--act-happy .cat-hearts, .pet.pet--act-purr .cat-hearts { display: block; }
+.pet.pet--act-sad .pet-body { animation: pet-sad 1.8s ease-in-out; }
+.pet.pet--act-sad .cat-ear-left { animation: none; transform: rotate(-34deg) translateY(7px); }
+.pet.pet--act-sad .cat-ear-right { animation: none; transform: rotate(34deg) translateY(7px); }
+.pet.pet--act-sad .cat-look { transform: translateY(2.2px); }
+.pet.pet--act-sad .cat-frown { display: block; }
+.pet.pet--act-sad .pet-mouth { display: none; }
+/* Eye swaps: content (closed-up) eyes for affection and grooming, squeezed shut for yawns. */
+.pet--cat.pet--act-groom .pet-eyes, .pet--cat.pet--act-stretch .pet-eyes, .pet--cat.pet--act-love .pet-eyes, .pet--cat.pet--act-happy .pet-eyes, .pet--cat.pet--act-purr .pet-eyes, .pet--cat.pet--act-yawn .pet-eyes { display: none; }
+.pet--cat.pet--act-groom .cat-eyes-happy, .pet--cat.pet--act-stretch .cat-eyes-happy, .pet--cat.pet--act-love .cat-eyes-happy, .pet--cat.pet--act-happy .cat-eyes-happy, .pet--cat.pet--act-purr .cat-eyes-happy { display: block; }
+.pet--cat.pet--act-love .cat-eyes-closed, .pet--cat.pet--act-happy .cat-eyes-closed, .pet--cat.pet--act-purr .cat-eyes-closed, .pet--cat.pet--act-love .cat-zzz, .pet--cat.pet--act-happy .cat-zzz, .pet--cat.pet--act-purr .cat-zzz { display: none; }
+.pet--cat.pet--act-yawn .cat-eyes-closed { display: block; }
+@keyframes cat-tilt { 25%, 70% { transform: rotate(-11deg); } }
+@keyframes body-tilt { 25%, 70% { transform: rotate(-7deg); } }
+@keyframes pet-slowblink { 0%, 100% { transform: scaleY(1); } 35%, 62% { transform: scaleY(.12); } }
+@keyframes cat-ear-flick { 30% { transform: rotate(-12deg); } 60% { transform: rotate(4deg); } }
+@keyframes cat-tail-big { 30% { transform: rotate(-14deg); } 65% { transform: rotate(16deg); } }
+@keyframes cat-groom { 0%, 100% { transform: none; } 20%, 80% { transform: translate(-10px, -40px) rotate(-18deg); } 30%, 50%, 70% { transform: translate(-10px, -42px) rotate(-24deg); } 40%, 60% { transform: translate(-9px, -38px) rotate(-14deg); } }
+@keyframes cat-groom-head { 20%, 80% { transform: rotate(5deg) translateY(2px); } }
+@keyframes pet-stretch { 35%, 60% { transform: translateY(3px) scale(1.07, .92); } 75% { transform: translateY(-1px) scale(.98, 1.03); } }
+@keyframes cat-yawn { 0%, 100% { transform: scale(.3); } 30%, 70% { transform: scale(1); } }
+@keyframes cat-yawn-head { 30%, 70% { transform: rotate(-4deg) translateY(-2px); } }
+@keyframes pet-wiggle { 10%, 30%, 50% { transform: translateX(-1.5px) rotate(-1.5deg); } 20%, 40%, 60% { transform: translateX(1.5px) rotate(1.5deg); } 72% { transform: translateY(2px) scale(1.03, .96); } 84% { transform: translateY(-9px) scale(.98, 1.03); } 94% { transform: scale(1.02, .97); } }
+@keyframes cat-nod { 60% { transform: translateY(3px) rotate(4deg); } 70% { transform: translateY(-1px) rotate(-1deg); } }
+@keyframes pet-happy { 20% { transform: translateY(2px) scale(1.03, .96); } 38% { transform: translateY(-8px) scale(.98, 1.03); } 55% { transform: scale(1.02, .97); } 70% { transform: translateY(-4px); } 85% { transform: none; } }
+@keyframes pet-purr { 50% { transform: translate(.4px, .25px); } }
+@keyframes pet-sad { 20%, 75% { transform: translateY(2px) scale(1.01, .98); } }
+@keyframes cat-heart { 0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-14px) scale(.9); } }

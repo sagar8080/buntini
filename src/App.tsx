@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import Customization from './Customization';
 import { lookFrom } from './petOptions';
+import type { PetReaction } from './usePetLife';
 import PriceWatches from './PriceWatches';
 import SetupChecks from './SetupChecks';
 import FileIndexSettings from './FileIndexSettings';
@@ -43,6 +44,8 @@ export default function App() {
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [petState, setPetState] = useState<PetState>('idle');
+  const [petReaction, setPetReaction] = useState<PetReaction>();
+  const react = (kind: PetReaction['kind']) => setPetReaction(previous => ({ kind, id: (previous?.id ?? 0) + 1 }));
   const [activity, setActivity] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -202,6 +205,7 @@ export default function App() {
         else if (event.type === 'error') setError(event.text || 'The task could not finish.');
       }, approvalId);
       setTask(result);
+      if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
         if (!streamedText && result.answer) speechQueue.current?.append(result.answer, speechToken);
         speechQueue.current?.finish(speechToken);
@@ -209,7 +213,7 @@ export default function App() {
       await refresh();
     } catch (e) {
       const message = errorMessage(e);
-      setError(message); setTask(previous => previous ? { ...previous, state: 'error' } : previous); await speechQueue.current?.cancel().catch(() => {});
+      setError(message); react('sad'); setTask(previous => previous ? { ...previous, state: 'error' } : previous); await speechQueue.current?.cancel().catch(() => {});
     } finally { taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle'); }
   }, [input, mode, busy, recording, transcribing, refresh, data?.settings.speakResponses]);
   async function cancel() {
@@ -353,7 +357,7 @@ export default function App() {
           };
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
-        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} /></button>
+        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} /></button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button></div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>

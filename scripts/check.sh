@@ -9,7 +9,7 @@ if [ "${1:-}" = "--help" ]; then
   cat <<'HELP'
 Usage: ./scripts/check.sh
 
-Runs the frontend production build, speech-queue tests, model-free Python
+Runs the frontend production build, speech-queue and pet-behavior tests, model-free Python
 worker tests, locked offline Rust tests, and synthetic native audio checks.
 
 Prerequisites: existing node_modules, cached Cargo dependencies, npm, cargo,
@@ -45,8 +45,9 @@ fi
 cd "$BUNTINI_CHECK_ROOT"
 echo "Checking frontend production build..."
 npm run build
-echo "Checking sentence streaming and interruption..."
+echo "Checking sentence streaming, interruption and pet behavior..."
 npm run test:speech
+npm run test:pet
 echo "Checking Python JSONL worker without models..."
 "$BUNTINI_CHECK_PYTHON" -m unittest discover -s worker/tests -v
 echo "Checking Rust controller with locked, cached dependencies..."

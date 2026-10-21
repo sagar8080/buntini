@@ -47,6 +47,8 @@ The existing MLX environment and Qwen model were verified with real offline gene
 
 Settings include a local profile: assistant name, personality instructions and presets, four characters (a customizable cat by default, plus nine-tailed fox, fox, or orbit), cat coat (seven, including tabby, tuxedo, calico, and siamese), eye color, accessory (bell collar, bow, bandana, top hat, or flower crown, tinted with the accent color), motion personality (calm, playful, or sleepy; reduced motion still wins), accent color, companion size, installed macOS speaking voice and pace, theme, and reduced motion. The saved profile changes the desktop character and the trusted model context. Custom personality text never grants tools or permissions.
 
+The companion feels alive without running the model: it blinks at random, picks idle habits that match its motion personality (glancing around, slow blinks, head tilts, ear flicks, grooming, stretching, yawning, a playful wiggle-and-hop, or nodding off), and its eyes follow your cursor. Stroke it to make it purr, click it for a happy hop with hearts, and it cheers when a task finishes or droops when one fails. Cursor tracking polls the pointer position locally a few times a second and never stores it. "A little less motion" turns all of this off.
+
 ## Voice setup
 
 Voice is prepared in this project without changing `pulse-venv`:
