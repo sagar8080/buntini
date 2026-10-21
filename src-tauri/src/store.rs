@@ -86,15 +86,8 @@ impl Store {
             }
         }
         if old_schema {
-            let defaults = Settings::default();
-            if settings.whisper_model.is_empty() && !defaults.whisper_model.is_empty() {
-                settings.whisper_model = defaults.whisper_model;
-                let prior = std::env::var("HOME")
-                    .map(|home| format!("{home}/projects/pulse-venv/bin/python"))
-                    .unwrap_or_default();
-                if settings.python_path == prior || settings.python_path == "python3" {
-                    settings.python_path = defaults.python_path;
-                }
+            if settings.python_path == "python3" {
+                settings.python_path.clear();
             }
             self.db
                 .execute(
@@ -102,7 +95,7 @@ impl Store {
                     [serde_json::to_string(&settings).map_err(|e| e.to_string())?],
                 )
                 .map_err(|e| e.to_string())?;
-            self.audit("settings.migrated","Existing preferences preserved; profile defaults and authorized local voice paths initialized")?;
+            self.audit("settings.migrated","Existing preferences preserved; new profile settings use their defaults")?;
         }
         Ok(settings)
     }

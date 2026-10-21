@@ -53,45 +53,15 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        let project = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let voice_python = project.join(".venv-voice/bin/python");
-        let local_whisper = project.join("models/whisper-tiny.en");
-        let local_vad = project.join("models/silero_vad.onnx");
-        let candidate = std::env::var("HOME")
-            .map(|h| format!("{h}/projects/pulse-venv/bin/python"))
-            .unwrap_or_default();
+        // Product defaults never point at a particular Mac. Developers can preset local
+        // model folders with environment variables before the first launch.
+        let preset = |name: &str| std::env::var(name).unwrap_or_default();
         Self {
             model_backend: "apple".into(),
             // Never guess `python3`: on a fresh Mac that launches the Command Line Tools installer.
-            python_path: std::env::var("BUNTINI_PYTHON").unwrap_or_else(|_| {
-                if voice_python.is_file() {
-                    voice_python.to_string_lossy().into_owned()
-                } else if std::path::Path::new(&candidate).is_file() {
-                    candidate
-                } else {
-                    String::new()
-                }
-            }),
-            model_path: std::env::var("BUNTINI_MODEL_PATH").unwrap_or_else(|_| {
-                let local = std::env::var("HOME")
-                    .map(|home| format!("{home}/projects/pulse-venv/models/Qwen3.5-9B-4bit"))
-                    .unwrap_or_default();
-                if std::path::Path::new(&local).join("config.json").is_file() {
-                    local
-                } else {
-                    String::new()
-                }
-            }),
-            whisper_model: std::env::var("BUNTINI_WHISPER_MODEL_PATH").unwrap_or_else(|_| {
-                if local_whisper.join("config.json").is_file() {
-                    local_whisper.to_string_lossy().into_owned()
-                } else {
-                    String::new()
-                }
-            }),
+            python_path: preset("BUNTINI_PYTHON"),
+            model_path: preset("BUNTINI_MODEL_PATH"),
+            whisper_model: preset("BUNTINI_WHISPER_MODEL_PATH"),
             search_provider: "brave".into(),
             monthly_search_limit: 1000,
             daily_search_limit: 30,
@@ -124,13 +94,7 @@ impl Default for Settings {
             cloud_budget_usd: 5.0,
             cloud_input_price: crate::cloud::PROVIDERS[0].input_per_m,
             cloud_output_price: crate::cloud::PROVIDERS[0].output_per_m,
-            vad_model_path: std::env::var("BUNTINI_VAD_MODEL_PATH").unwrap_or_else(|_| {
-                if local_vad.is_file() {
-                    local_vad.to_string_lossy().into_owned()
-                } else {
-                    String::new()
-                }
-            }),
+            vad_model_path: preset("BUNTINI_VAD_MODEL_PATH"),
         }
     }
 }

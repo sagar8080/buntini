@@ -30,17 +30,15 @@ impl AppState {
             std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o700))
                 .map_err(|e| e.to_string())?;
         }
-        let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        // Development builds may run without a resource folder and use the project's
+        // worker/ and native/ folders instead; release builds only use what they ship with.
         let resource = |relative: &str| {
             let bundled = resources.join(relative);
-            if bundled.exists() {
-                bundled
-            } else {
-                dev.join(relative)
+            #[cfg(debug_assertions)]
+            if !bundled.exists() {
+                return PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(relative);
             }
+            bundled
         };
         let imported = migration::import_legacy(&data, &cache);
         let store = Store::open(&data.join(migration::DATABASE))?;

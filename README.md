@@ -20,7 +20,7 @@ npm run tauri -- build --debug --bundles app --no-sign
 open src-tauri/target/debug/bundle/macos/Buntini.app
 ```
 
-The debug bundle uses the existing local Python environment. It is not a signed or notarized distribution. To prepare a release build, omit `--debug` and configure your own Apple signing/notarization credentials. No cloud account is required.
+The debug bundle is not a signed or notarized distribution. To prepare a release build, omit `--debug` and configure your own Apple signing/notarization credentials. No cloud account is required.
 
 ## First launch
 
@@ -31,7 +31,7 @@ Buntini opens its bubble and walks you through setup as a short conversation: wh
 Settings → Brain picks the model that answers. Every backend gets the same validated tools and the same conversation memory.
 
 - **Apple Intelligence** (default): Apple's on-device Foundation Models through the `native/buntini-fm` helper. Private, about a second per reply, nothing to download. It needs macOS 26 on Apple silicon with Apple Intelligence turned on; Settings explains what to do when it isn't available. Its context is small (about 4K tokens), so Buntini gives it compact tool results and a shorter memory.
-- **Local MLX model:** your own model folder (for example Qwen) run by the Python worker. Bigger and slower, fully offline. This Mac's defaults are detected when present (`/Users/sagar/projects/pulse-venv/bin/python` and `…/models/Qwen3.5-9B-4bit`); other machines can set `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH` before first launch. Existing installs that already used MLX stay on it. Buntini never downloads a model or installs packages.
+- **Local MLX model:** your own model folder (for example Qwen) run by the Python worker. Bigger and slower, fully offline. Choose its Python interpreter and model folder under Brain → Advanced; developers can preset them with `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH` before first launch. Existing installs that already used MLX stay on it. Buntini never downloads a model or installs packages.
 - **Cloud model:** Anthropic (suggested `claude-opus-5-5`), OpenAI (`gpt-5-mini`) or Google Gemini (`gemini-2.5-flash`) with your own API key; any model name your key can use works. Replies stream as they are written. Each message reserves a cautious cost estimate against your **monthly spending cap** before it is sent, then settles to the token usage the provider reports, at the per-million-token prices shown in Settings (suggested from published October 2026 prices; check your provider's page, their invoice is authoritative). Rejected requests are refunded, Buntini warns once at 80% and stops at the cap. A cloud model sees only what you allow under *What this model may see* (see Privacy below).
 
 The MLX environment and Qwen model were verified with real offline generation, tool calls, follow-ups, cancellation and worker reuse; Apple Intelligence with live routing, streaming and transcription probes. See [acceptance evidence](docs/acceptance.md).
