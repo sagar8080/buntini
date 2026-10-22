@@ -43,7 +43,8 @@ jobs:
         with:
           node-version: 24
       - name: npm packages
-        run: npm audit --omit=dev --audit-level=high
+        # One retry: npm's audit service sometimes errors; real advisories fail both runs.
+        run: npm audit --omit=dev --audit-level=high || { sleep 30; npm audit --omit=dev --audit-level=high; }
       - name: Rust crates
         run: |
           cargo install cargo-audit --locked
