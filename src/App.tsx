@@ -170,7 +170,7 @@ export default function App() {
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
       void refresh();
       setTurns(previous => mergeTurns(previous, [event.payload.task]));
-      setNotice(event.payload.task.state === 'completed' ? `A saved search has an update: ${event.payload.task.prompt}` : 'A saved search needs attention. Check the task shelf.');
+      setNotice(event.payload.task.state === 'completed' ? `A saved search has an update: ${event.payload.task.prompt}` : 'A saved search couldn’t finish. You’ll find it in History.');
     });
     return () => { void subscription.then(unlisten => unlisten()); };
   }, [refresh]);
@@ -179,7 +179,7 @@ export default function App() {
     const budget = listen<string>('budget-warning', event => setNotice(event.payload));
     const subscription = listen<{ watch: { label: string }; belowThreshold: boolean; changed: boolean }>('price-watch-result', event => {
       void refresh();
-      if (event.payload.belowThreshold) setNotice(`${event.payload.watch.label} reached your target price. Check the task shelf.`);
+      if (event.payload.belowThreshold) setNotice(`${event.payload.watch.label} reached your target price. Details are in History.`);
       else if (event.payload.changed) setNotice(`Price watch updated: ${event.payload.watch.label}`);
     });
     return () => { void subscription.then(unlisten => unlisten()); void budget.then(unlisten => unlisten()); };
@@ -254,7 +254,7 @@ export default function App() {
         if (event.taskId) { activeId.current = event.taskId; liveId = event.taskId; }
         if (event.type === 'state') {
           if (!speechActive.current) setPetState(event.state === 'working' ? 'working' : 'thinking');
-          setActivity(event.text || ({ thinking: 'Thinking locally', working: 'Taking a look', planning: 'Making a plan' }[event.state || ''] || 'Working on it'));
+          setActivity(event.text || ({ thinking: 'Thinking it over', working: 'Taking a look', planning: 'Making a plan' }[event.state || ''] || 'Working on it'));
         } else if (event.type === 'delta') {
           answerSoFar += event.text || '';
           setLive(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });

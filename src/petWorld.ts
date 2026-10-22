@@ -168,7 +168,7 @@ export class NudgeRules {
     if (this.focusEndsAt !== null && now >= this.focusEndsAt) {
       this.focusEndsAt = null;
       this.breakDueAt = now + this.breakAfter;
-      return this.make('focus-done', now, 'Focus session done. Nicely done! Take five?', [{ label: 'Okay', action: 'dismiss' }, { label: 'Another 25 min', action: 'focus' }]);
+      return this.make('focus-done', now, 'Focus session done. Nice work! Take five?', [{ label: 'Okay', action: 'dismiss' }, { label: 'Another 25 min', action: 'focus' }]);
     }
     const battery = world.health?.batteryPercent;
     if (world.health?.charging || battery == null || battery > 20) this.batteryWarned = false;

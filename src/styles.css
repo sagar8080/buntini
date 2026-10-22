@@ -566,8 +566,15 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .cat-walkbody, .cat-walk-shadow { opacity: 0; }
 .cat--walk .cat-sit, .cat--leap .cat-sit, .cat--walk .cat-sit-shadow, .cat--leap .cat-sit-shadow { opacity: 0; transform: scale(.94, .84); }
 .cat--walk .cat-walkbody, .cat--leap .cat-walkbody, .cat--walk .cat-walk-shadow { opacity: 1; }
-.cat--walk .cat-front, .cat--leap .cat-front { transform: translate(-6px, 3px); }
-.cat--walk .cat-look, .cat--leap .cat-look { transform: translate(-2.4px, .6px); }
+/* On the move the head turns toward where the cat is going: the face slides over and
+   the far eye narrows, so head and body read as one cat rather than a face on a card. */
+.cat-front { transform-origin: 98px 126px; }
+.cat-face, .cat-eye-far { transition: transform .24s ease; }
+.cat-eye-far { transform-box: fill-box; transform-origin: center; }
+.cat--walk .cat-front, .cat--leap .cat-front { transform: translate(-6px, 3px) rotate(-3deg); }
+.cat--walk .cat-face, .cat--leap .cat-face { transform: translateX(-4.5px); }
+.cat--walk .cat-eye-far, .cat--leap .cat-eye-far { transform: scaleX(.82); }
+.cat--walk .cat-look, .cat--leap .cat-look { transform: translate(-1.6px, .4px); }
 .cat--walk .cat-head-gaze, .cat--leap .cat-head-gaze { transform: none; }
 .cat--walk .cat-groom-paw, .cat--leap .cat-groom-paw { display: none !important; }
 /* Walking: jointed legs in a cat's lateral gait (back-left, front-left, back-right,
@@ -585,10 +592,13 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .cat--walk .walk-leg.back .walk-shin { animation: shin-back var(--stride, .4s) infinite var(--leg-delay); }
 .cat--walk .walk-paw { animation: paw-step var(--stride, .4s) infinite var(--leg-delay); }
 .walk-tail { transform-origin: 150px 122px; }
+.walk-tail-tip { transform-origin: 166px 90px; }
 .cat--walk .walk-tail { animation: walk-tail calc(var(--stride, .4s) * 2) ease-in-out infinite; }
+/* The tip trails the base by a quarter swing, so the tail waves. */
+.cat--walk .walk-tail-tip { animation: walk-tail-tip calc(var(--stride, .4s) * 2) ease-in-out calc(var(--stride, .4s) * -1.5) infinite; }
 .cat--walk .cat-walkbody { animation: walk-roll calc(var(--stride, .4s) / 2) ease-in-out infinite; transform-origin: 124px 128px; }
-/* The head stays level while the body bobs, as a cat's does. */
-.cat--walk .cat-head-gaze { animation: walk-steady calc(var(--stride, .4s) / 2) ease-in-out infinite; }
+/* The head rides the body's bob a beat late and nods with each step. */
+.cat--walk .cat-head-gaze { animation: walk-nod calc(var(--stride, .4s) / 2) ease-in-out calc(var(--stride, .4s) * .08) infinite; }
 .cat--leap .walk-leg.front { transform: rotate(38deg); }
 .cat--leap .walk-leg.front .walk-shin { transform: rotate(-30deg); }
 .cat--leap .walk-leg.back { transform: rotate(-42deg); }
@@ -624,9 +634,10 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
   94%, 100% { transform: rotate(0deg); }
 }
 @keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.4px); } }
-@keyframes walk-roll { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-.8deg); } }
-@keyframes walk-steady { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.1px); } }
+@keyframes walk-roll { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-.8deg) scale(1.008, .985); } }
+@keyframes walk-nod { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(.8px) rotate(-1.8deg); } }
 @keyframes walk-tail { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(9deg); } }
+@keyframes walk-tail-tip { 0%, 100% { transform: rotate(-14deg); } 50% { transform: rotate(16deg); } }
 /* Search budget meters (SearchBudget.tsx). */
 .search-budget { margin-top: 12px; }
 .usage-meter { margin-bottom: 10px; }

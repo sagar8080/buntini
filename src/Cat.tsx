@@ -62,14 +62,14 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
     <path d="M57 82C53 68 52 54 55 45C56 41 60 40 63 42C71 48 78 55 84 63Z" fill={fill} {...line} />
     <path d="M61 73C59 63 59 55 60 49C66 53 71 58 76 63Z" fill={coat.ear} />
   </>;
-  const eye = (cx: number, iris: string) => <>
+  const eye = (cx: number, iris: string, far = false) => <g className={far ? 'cat-eye cat-eye-far' : 'cat-eye'}>
     <ellipse cx={cx} cy="94" rx="9" ry="10" fill={iris} stroke="#2A2230" strokeWidth="1.4" />
     <g className="cat-look"><g className="cat-pupil">
       <ellipse cx={cx} cy="94.5" rx="5.3" ry="7.2" fill="#221B27" />
       <circle cx={cx - 3} cy="89.6" r="2.8" fill="#fff" />
       <circle cx={cx + 3.4} cy="98.6" r="1.3" fill="#fff" fillOpacity=".9" />
     </g></g>
-  </>;
+  </g>;
 
   return <svg viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg" className={`cat cat--${pose}`}>
     <defs>
@@ -111,10 +111,12 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <g className="cat-walkbody">
         {leg(111, 'ff', 'front', true)}
         {leg(146, 'fb', 'back', true)}
-        <g className="walk-tail">
-          <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={coat.outline} strokeWidth="13" strokeLinecap="round" />
-          <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={tail} strokeWidth="9.5" strokeLinecap="round" />
-          {tabby && <path d="M150 122C164 118 170 104 166 90C164 83 159 81 157 85" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 6" />}
+        <g className="walk-tail">{[coat.outline, tail].map((color, index) => <g key={index}>
+          <path d="M150 122C164 118 170 104 166 90" stroke={color} strokeWidth={index ? 9.5 : 13} strokeLinecap="round" />
+          <g className="walk-tail-tip"><path d="M166 90C164 83 159 81 157 85" stroke={color} strokeWidth={index ? 9.5 : 13} strokeLinecap="round" /></g>
+        </g>)}
+          {tabby && <path d="M150 122C164 118 170 104 166 90" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 6" />}
+          {tabby && <g className="walk-tail-tip"><path d="M166 90C164 83 159 81 157 85" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 5" strokeDashoffset="-2" /></g>}
         </g>
         {leg(101, 'nf', 'front', false)}
         {leg(136, 'nb', 'back', false)}
@@ -123,7 +125,8 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
           <path d="M116 111C124 109 132 111 135 116C129 121 119 121 113 117C112 114 113 112 116 111Z" fill={coat.patchA} />
           <path d="M140 112C148 114 153 120 153 128C147 128 141 124 138 118Z" fill={coat.patchB} />
         </g>}
-        <path d="M104 138C112 145 132 146 145 140C141 145 137 145 133 145H112C108 145 105 142 104 138Z" fill={coat.belly} />
+        <path d="M103 134C113 141 133 142 148 135C146 141 141 145 134 145H112C107 145 104 140 103 134Z" fill={coat.belly} fillOpacity=".75" />
+        <path d="M96.5 124C100 121.5 105.5 123 107 128C108.2 133 106 139 101.5 142.5C98.6 139.6 96.8 133.5 96.5 124Z" fill={coat.belly} />
         {look.coat === 'tuxedo' && <path d="M96 128C96 138 102 144 110 145C113 137 112 124 105 117C100 119 96 123 96 128Z" fill={coat.belly} />}
         {tabby && <path d="M118 111C119 116 118 120 116 123M128 111C129 116 128 120 126 123M138 113C139 117 138 121 136 124" stroke={coat.marks} strokeWidth="2.4" strokeLinecap="round" />}
         {/* Shoulder and haunch: soft shading where the legs join, so they read as part of a body. */}
@@ -147,6 +150,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
         <path d="M100 60C115 62 127 74 128 88C120 88 110 82 104 74C101 70 100 65 100 60Z" fill={coat.patchB} />
       </g>}
       {tabby && <path d="M83 64L85 72M90 61V71M97 64L95 72M54 96L63 98M53 102L62 102M126 96L117 98M127 102L118 102" stroke={coat.marks} strokeWidth="2.4" strokeLinecap="round" />}
+      <g className="cat-face">
       {look.coat === 'tuxedo'
         ? <path d="M86 102C87 92 88 84 90 76C92 84 93 92 94 102C100 99 106 101 106 108C106 118 98 124 90 124C82 124 74 118 74 108C74 101 80 99 86 102Z" fill={coat.belly} />
         : look.coat === 'siamese'
@@ -156,7 +160,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
 
       <ellipse cx="63" cy="108" rx="6" ry="3.4" fill="#FF8DA1" fillOpacity={coat.blush} />
       <ellipse cx="117" cy="108" rx="6" ry="3.4" fill="#FF8DA1" fillOpacity={coat.blush} />
-      <g className="pet-eyes">{eye(74, leftIris)}{eye(106, rightIris)}</g>
+      <g className="pet-eyes">{eye(74, leftIris, true)}{eye(106, rightIris)}</g>
       <path className="cat-eyes-closed" d="M65 95Q74 101 83 95M97 95Q106 101 115 95" stroke={look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : look.coat === 'siamese' ? '#2E1F18' : coat.outline} strokeWidth="2.4" strokeLinecap="round" />
       <path className="cat-eyes-happy" d="M66 97Q74 88 82 97M98 97Q106 88 114 97" stroke={look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : look.coat === 'siamese' ? '#2E1F18' : coat.outline} strokeWidth="2.4" strokeLinecap="round" />
       <path d="M86.5 106.5C86.5 104.8 93.5 104.8 93.5 106.5C93.5 108.3 91.2 110 90 110C88.8 110 86.5 108.3 86.5 106.5Z" fill={coat.nose} />
@@ -165,6 +169,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <path className="cat-frown" d="M85 116Q90 112 95 116" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.7" strokeLinecap="round" />
       <g className="cat-yawn"><ellipse cx="90" cy="117" rx="5.2" ry="6.8" fill="#7A3B4A" /><ellipse cx="90" cy="120.6" rx="3.2" ry="2.4" fill="#F08A98" /></g>
       <path d="M58 106L42 103M58 110L41 111M59 114L45 118M122 106L138 103M122 110L139 111M121 114L135 118" stroke={coat.whisker} strokeWidth="1.1" strokeLinecap="round" strokeOpacity=".75" />
+      </g>
 
       {look.accessory === 'bow' && <g transform="rotate(18 117 58) translate(117 58) scale(1.25) translate(-117 -58)" stroke="#000" strokeOpacity=".2" strokeWidth="1.1" strokeLinejoin="round">
         <path d="M117 58C111 51 105 53 106 59C107 65 113 63 117 58Z" fill={accent} />
