@@ -884,6 +884,20 @@ async fn execute_with_settings(
     settings: Settings,
     approved: Option<integrations::Call>,
 ) -> Result<(), String> {
+    // Everyday music requests are carried out directly: quicker and more dependable than
+    // a small model, which tends to ask permission or reword the song.
+    if mode == "auto" && approved.is_none() {
+        let previous = state.store.lock().unwrap().tasks().ok().and_then(|turns| turns.into_iter().filter(|turn| turn.id != task.id && turn.state == "completed").max_by(|a, b| a.created_at.cmp(&b.created_at)).map(|turn| turn.prompt));
+        if let Some(command) = crate::apps::music_command(&task.prompt, previous.as_deref()) {
+            phase(channel, &task.id, "working");
+            tool_event(channel, &task.id, "control_music");
+            state.audit("app.control_music", command.action);
+            touch(task, privacy::Share::Music);
+            task.answer = crate::apps::play_music(&command, &settings, &task.prompt, state.models.apple_helper()).await?;
+            emit(channel, "delta", &task.id, Some(task.answer.clone()));
+            return Ok(());
+        }
+    }
     let lower = task.prompt.to_lowercase();
     let detected = if mode != "auto" {
         mode

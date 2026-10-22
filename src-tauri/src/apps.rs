@@ -95,6 +95,72 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
     }
 }
 
+/// A playback request Buntini can carry out itself, without asking the model: what to do,
+/// the user's own words for what to play, and the app if they named one.
+#[derive(Debug, PartialEq)]
+pub struct MusicCommand {
+    pub action: &'static str,
+    pub query: Option<String>,
+    pub app: Option<&'static str>,
+}
+
+/// Recognises everyday music requests ("play Hey There Delilah on Spotify", "pause",
+/// "next song", "what's playing?") and a go-ahead ("yes, play it") right after a play
+/// request. Small local models often answer these by asking permission or rewording the
+/// song, so Buntini handles them directly; anything else goes to the model.
+pub fn music_command(prompt: &str, previous: Option<&str>) -> Option<MusicCommand> {
+    let mut text = prompt.to_lowercase().replace(['’', '‘'], "'").replace(|c: char| !(c.is_alphanumeric() || c == '\'' || c == ' '), " ");
+    text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let app = if text.contains("spotify") { Some("spotify") } else if text.contains("apple music") || text.contains("music app") { Some("music") } else { None };
+    // Polite and conversational openings: "hey buntini, can you please…".
+    const OPENINGS: [&str; 22] = ["hey", "hi", "buntini", "yeah", "yes", "ok", "okay", "so", "now", "just", "please", "can", "could", "would", "will", "you", "go", "ahead", "and", "then", "i", "want"];
+    let words: Vec<&str> = text.split(' ').collect();
+    let start = words.iter().position(|word| !OPENINGS.contains(word)).unwrap_or(words.len());
+    let rest = words[start..].join(" ");
+    let command = |action: &'static str, query: Option<String>| Some(MusicCommand { action, query, app });
+    if ["what's playing", "whats playing", "what is playing", "what song is this", "what's this song", "which song is this", "what song is playing"].iter().any(|phrase| text.contains(phrase)) {
+        return command("now_playing", None);
+    }
+    let first = rest.split(' ').next().unwrap_or("");
+    match first {
+        "pause" | "stop" if rest.split(' ').count() <= 4 => return command("pause", None),
+        "skip" | "next" => return command("next", None),
+        "previous" => return command("previous", None),
+        "resume" | "unpause" => return command("play", None),
+        "play" => {
+            let mut query = rest.trim_start_matches("play").trim().to_string();
+            for tail in [" for me", " please", " on spotify", " in spotify", " on apple music", " in apple music", " in the music app", " on the music app", " now", " again"] {
+                while query.ends_with(tail) {
+                    query.truncate(query.len() - tail.len());
+                }
+            }
+            for lead in ["the song ", "song ", "some "] {
+                query = query.strip_prefix(lead).unwrap_or(&query).to_string();
+            }
+            let query = query.trim().to_string();
+            if ["video", "game", "youtube", "movie", "film"].iter().any(|thing| query.split(' ').any(|word| word.starts_with(thing))) {
+                return None;
+            }
+            return match query.as_str() {
+                "" | "music" | "it" | "that" | "spotify" | "something" => match (query.as_str(), previous.and_then(|before| music_command(before, None))) {
+                    ("it" | "that", Some(earlier)) if earlier.query.is_some() => Some(MusicCommand { app: app.or(earlier.app), ..earlier }),
+                    _ => command("play", None),
+                },
+                _ => command("play", Some(query)),
+            };
+        }
+        _ => {}
+    }
+    // "yes", "go ahead", "please do" right after a play request plays that request.
+    let agreed = !text.is_empty() && text.split(' ').count() <= 6 && text.split(' ').all(|word| ["yes", "yeah", "yep", "sure", "ok", "okay", "go", "ahead", "please", "do", "it", "that", "play", "this", "correct", "song", "right"].contains(&word));
+    if agreed {
+        if let Some(earlier) = previous.and_then(|before| music_command(before, None)).filter(|earlier| earlier.action == "play" && earlier.query.is_some()) {
+            return Some(MusicCommand { app: app.or(earlier.app), ..earlier });
+        }
+    }
+    None
+}
+
 /// Allowed, installed browsers a tab call may look in.
 fn browsers_for(settings: &Settings, args: &Map<String, Value>) -> Vec<&'static App> {
     let named = args.get("browser").and_then(Value::as_str);
@@ -650,8 +716,16 @@ async fn control_music(app: &str, action: &str, query: &str, helper_path: &Path)
     let result = osascript(if app == "spotify" { SPOTIFY } else { MUSIC }, &[action.into(), query.clone()], 20).await?;
     if result.trim() == "search" {
         return Ok(match play_on_spotify(helper_path, &words).await {
-            Ok(song) if !song.is_empty() => format!("Playing {song} in Spotify."),
-            Ok(_) => "Started the best match in Spotify.".into(),
+            // Say what Spotify is actually playing, not what was asked for.
+            Ok(pressed) => {
+                tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+                let now = osascript(SPOTIFY, &["now_playing".into(), String::new()], 10).await.unwrap_or_default();
+                match now.trim().split('\t').collect::<Vec<_>>().as_slice() {
+                    ["playing", track, artist, _] => format!("Playing “{track}” by {artist} in Spotify."),
+                    _ if !pressed.is_empty() => format!("Started {pressed} in Spotify."),
+                    _ => "Started the best match in Spotify.".into(),
+                }
+            }
             Err(why) => format!("Opened Spotify’s search for that, but didn’t start it: {why}"),
         });
     }
@@ -726,6 +800,15 @@ async fn read_page() -> Result<String, String> {
     let (title, address) = head.split_once('\t').unwrap_or((head, ""));
     let text: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(2500).collect();
     Ok(format!("The page showing in Safari: “{}” ({address})\n{}", title.trim(), if text.is_empty() { "The page has no readable text." } else { &text }))
+}
+
+/// Runs a playback request Buntini recognised itself (see `music_command`).
+pub async fn play_music(command: &MusicCommand, settings: &Settings, prompt: &str, helper_path: &Path) -> Result<String, String> {
+    let player = player(settings, prompt, command.app);
+    if !app(player).is_some_and(|app| allowed(settings, player) && installed(app)) {
+        return Err(format!("{} isn’t allowed yet. You can allow it in Settings → Apps.", if player == "spotify" { "Spotify" } else { "Music" }));
+    }
+    control_music(player, command.action, command.query.as_deref().unwrap_or(""), helper_path).await
 }
 
 /// Runs a read or playback call (already validated, for an allowed app) and returns
@@ -843,6 +926,22 @@ mod tests {
         let spotify = validate("control_music", &json!({"app":"spotify","action":"next"})).unwrap();
         assert!(!permits(&settings, "control_music", &spotify), "Music being allowed says nothing about Spotify");
         assert_eq!(for_call("add_reminder", &args).unwrap().id, "reminders");
+    }
+
+    #[test]
+    fn everyday_music_requests_are_recognised() {
+        let play = |query: &str, app: Option<&'static str>| Some(MusicCommand { action: "play", query: Some(query.into()), app });
+        assert_eq!(music_command("Hey Buntini, can you play Hey There Delilah on Spotify?", None), play("hey there delilah", Some("spotify")));
+        assert_eq!(music_command("Could you please play the song Here Without You for me", None), play("here without you", None));
+        assert_eq!(music_command("pause the music", None).unwrap().action, "pause");
+        assert_eq!(music_command("skip this song", None).unwrap().action, "next");
+        assert_eq!(music_command("What's playing right now?", None).unwrap().action, "now_playing");
+        assert_eq!(music_command("Yes, please go ahead.", Some("Can you play Hey There Delilah?")), play("hey there delilah", None));
+        assert_eq!(music_command("play it", Some("play Delilah on Spotify")), play("delilah", Some("spotify")));
+        assert_eq!(music_command("Yes, please go ahead.", Some("What's on my calendar?")), None, "a go-ahead for something else goes to the model");
+        assert_eq!(music_command("play a video of cats", None), None);
+        assert_eq!(music_command("what's on my calendar tomorrow?", None), None);
+        assert_eq!(music_command("stop reminding me about the bins every single day", None), None);
     }
 
     #[test]

@@ -368,13 +368,24 @@ enum SpotifyPlay {
         // tree once an assistive app asks for it.
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        // The search results take a moment to load; the best match is the earliest button
-        // whose label shares the most words with the request (most often the top result).
+        // The search results take a moment to load. The best match is the earliest button
+        // whose song title shares the most words with the request; covers, karaoke, live
+        // and other versions only win when the request asks for them.
         let deadline = Date().addingTimeInterval(8)
         try? await Task.sleep(nanoseconds: 700_000_000)
         while Date() < deadline {
-            let scored = playButtons(app).map { ($0, $1, words($1).intersection(wanted).count) }
-            if let best = scored.max(by: { $0.2 < $1.2 }), best.2 * 2 >= wanted.count {
+            let scored = playButtons(app).map { button, label -> (AXUIElement, String, Int) in
+                let title = label.components(separatedBy: " by ").first ?? label
+                let everything = words(label).intersection(wanted).count
+                var score = words(title).intersection(wanted).count * 2 + everything
+                if everything * 2 < wanted.count { score = 0 }
+                let lower = label.lowercased()
+                for other in ["karaoke", "cover", "tribute", "instrumental", "originally performed", "made famous", "remix", "live", "acoustic", "sped up", "slowed", "lofi", "lo-fi", "8d", "version", "piano"] where lower.contains(other) && !wanted.contains(other) {
+                    score -= 4
+                }
+                return (button, label, score)
+            }
+            if let best = scored.max(by: { $0.2 < $1.2 }), best.2 > 0 {
                 let pick = scored.first { $0.2 == best.2 }!
                 if AXUIElementPerformAction(pick.0, kAXPressAction as CFString) == .success {
                     emit(["played": pick.1])
