@@ -23,9 +23,21 @@ struct Recording {
     cancel: Arc<AtomicBool>,
 }
 
+/// A microphone that delivers only silence (muted, the wrong input, or blocked) peaks far
+/// below even a quiet room, which sits around 0.003 and up.
+fn silent(peak: f64) -> bool {
+    peak < 0.0015
+}
+const SILENT: &str = "I couldn’t hear anything: the microphone only sent silence. Check the input in System Settings → Sound, and that Buntini is allowed under Privacy & Security → Microphone.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_silent_microphone_is_told_apart_from_quiet_speech() {
+        assert!(silent(0.0) && silent(0.0004));
+        assert!(!silent(0.004) && !silent(0.3));
+    }
     #[tokio::test]
     async fn stopping_during_preflight_invalidates_the_pending_speech() {
         let dir = tempfile::tempdir().unwrap();
@@ -291,6 +303,8 @@ impl Voice {
             .take()
             .ok_or("No recording is active.")?;
         let _ = rec.input.write_all(b"stop\n").await;
+        // How loud the recording got (0–1); None from older helpers that don't report it.
+        let mut peak: Option<f64> = None;
         let stopped = timeout(Duration::from_secs(8), async {
             loop {
                 if rec.cancel.load(Ordering::Relaxed){return Err("Recording cancelled.".into());}
@@ -308,6 +322,7 @@ impl Voice {
                                 "Audio helper returned an unexpected recording path.".into()
                             );
                         }
+                        peak = message.get("peak").and_then(Value::as_f64);
                         return Ok(());
                     }
                     Some("error") => {
@@ -327,6 +342,7 @@ impl Voice {
         let _ = rec.child.kill().await;
         let result = match stopped {
             Err(e) => Err(e),
+            Ok(()) if peak.is_some_and(silent) => Err(SILENT.into()),
             Ok(()) => {
                 models.transcribe(settings, &rec.path, rec.cancel.clone()).await
             }

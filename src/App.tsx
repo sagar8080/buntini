@@ -65,6 +65,11 @@ export default function App() {
   const conversationRef = useRef<HTMLDivElement>(null);
   const recordPromise = useRef<Promise<void> | null>(null);
   const recordHeld = useRef(false);
+  // A quick tap starts hands-free listening, ended by tapping again; a hold records until release.
+  const pressedAt = useRef(0);
+  const handsFreeRef = useRef(false);
+  const [handsFree, setHandsFree] = useState(false);
+  const setHandsFreeMode = (on: boolean) => { handsFreeRef.current = on; setHandsFree(on); };
   const voiceVersion = useRef(0);
   const voiceStoppingRef = useRef(false);
   const taskBusy = useRef(false);
@@ -305,6 +310,7 @@ export default function App() {
   async function startVoice() {
     if (busy || transcribing || recordHeld.current || voiceStoppingRef.current) return;
     // Recording checks that voice is available: Apple speech, or a local Whisper model.
+    setHandsFreeMode(false);
     playbackOverride.current = null;
     void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)));
     const version = ++voiceVersion.current;
@@ -319,15 +325,17 @@ export default function App() {
   async function finishVoice() {
     if (!recordHeld.current) return;
     const version = voiceVersion.current;
-    recordHeld.current = false;
+    recordHeld.current = false; setHandsFreeMode(false);
     try { await recordPromise.current; } catch { return; }
     if (version !== voiceVersion.current) return;
     setRecording(false); setTranscribing(true); setPetState('thinking');
     try {
       const text = await command<string>('stop_recording');
       if (version !== voiceVersion.current) return;
-      setInput(text); setPage('home'); inputRef.current?.focus();
-      if (!text.trim()) setNotice('No speech detected. Try holding the mic a little longer.');
+      // What was heard is sent right away, as with any voice assistant.
+      setPage('home');
+      if (text.trim()) void submit(text.trim(), mode);
+      else setNotice('I didn’t catch any words. Try again a little closer to the mic.');
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
     finally { if (version === voiceVersion.current) { setTranscribing(false); setPetState('idle'); recordPromise.current = null; } }
   }
@@ -336,7 +344,7 @@ export default function App() {
     voiceStoppingRef.current = true; setVoiceStopping(true);
     const pendingStart = recordPromise.current;
     const version = ++voiceVersion.current;
-    recordHeld.current = false; setRecording(false); setTranscribing(false); setPetState('idle');
+    recordHeld.current = false; setHandsFreeMode(false); setRecording(false); setTranscribing(false); setPetState('idle');
     try { await command('cancel_recording'); } catch (e) { setError(errorMessage(e)); }
     finally { await pendingStart?.catch(() => {}); if (version === voiceVersion.current) { recordPromise.current = null; voiceStoppingRef.current = false; setVoiceStopping(false); } }
   }
@@ -412,8 +420,8 @@ export default function App() {
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
               <textarea ref={inputRef} rows={2} value={input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'I’m listening… release to finish' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> Release to transcribe</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
-                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title="Hold to talk" aria-label="Hold to talk; release to transcribe" disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); void startVoice(); }} onPointerUp={() => void finishVoice()} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {handsFree ? 'Listening… tap the mic when you’re done' : 'Release to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
+                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording && handsFree ? 'Tap to finish' : 'Tap or hold to talk'} aria-label={recording && handsFree ? 'Finish talking' : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? <button type="button" className="send-button stop-button" aria-label="Cancel voice input" onClick={() => void cancelVoice()}><X size={15} /></button> : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>

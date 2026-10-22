@@ -244,7 +244,7 @@ func transcribe(_ id: String, _ request: [String: Any]) async {
         }
         let text = try await words.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
-            return fail(id, Failure(code: "no_speech", message: "No speech was detected. Try holding the mic a little longer."))
+            return fail(id, Failure(code: "no_speech", message: "I didn’t catch any words. Try again a little closer to the mic."))
         }
         emit(["id": id, "type": "done", "text": text, "finish_reason": "stop"])
     } catch {

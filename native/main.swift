@@ -62,6 +62,8 @@ private final class WaveWriter {
     private var file: AVAudioFile?
     private let maxFrames: AVAudioFramePosition
     private(set) var frames: AVAudioFramePosition = 0
+    /// The loudest sample so far (0…1), so a silent microphone can be told apart from quiet speech.
+    private(set) var peak: Float = 0
     private var ownsFile = false
 
     init(output: URL, seconds: Double) throws {
@@ -101,6 +103,9 @@ private final class WaveWriter {
             buffer.frameLength = AVAudioFrameCount(remaining)
         }
         guard buffer.frameLength > 0 else { return }
+        if let samples = buffer.floatChannelData?[0] {
+            for index in 0..<Int(buffer.frameLength) { peak = max(peak, abs(samples[index])) }
+        }
         try file.write(from: buffer)
         frames += AVAudioFramePosition(buffer.frameLength)
     }
@@ -297,7 +302,7 @@ private final class Capture {
             }
             let bytes = try writer.finish()
             finished = true
-            emit("stopped", ["path": options.output.path, "durationMs": writer.durationMs, "bytes": bytes])
+            emit("stopped", ["path": options.output.path, "durationMs": writer.durationMs, "bytes": bytes, "peak": Double(writer.peak)])
             exit(EXIT_SUCCESS)
         } catch { fail(error) }
     }
