@@ -1,6 +1,7 @@
 mod actions;
 mod advisor;
 mod apps;
+mod ax;
 mod approvals;
 mod brief;
 mod budget;
@@ -20,6 +21,7 @@ mod privacy;
 mod pricing;
 mod research;
 mod scheduler;
+mod skills;
 mod store;
 mod tools;
 mod support;
@@ -74,6 +76,8 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 probe.state::<controller::AppState>().models.probe_apple().await;
             });
+            // Finished timers are announced through the app.
+            skills::mac::set_app(app.handle().clone());
             // Have the local model read its instructions now, so the first reply is quick.
             controller::warm_up_soon(app.handle());
             if let Some(window) = app.get_webview_window("main") {
@@ -172,6 +176,7 @@ pub fn run() {
             controller::quit_app,
             apps::app_list,
             apps::check_app,
+            apps::accessibility,
             advisor::mac_profile,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,

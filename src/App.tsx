@@ -29,6 +29,9 @@ const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: strin
   { id: 'system', name: 'My Mac', icon: Laptop, placeholder: 'How is my Mac doing?' },
   { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather, rates, places, prices, flights or the web…' },
 ];
+// What the activity line says while a skill (skills/ in the Rust app) is working.
+const skillActivity: Record<string, string> = { music: 'Getting your music going', browser: 'Working in your browser', mac: 'Adjusting your Mac' };
+
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
   const [page, setPage] = useState<Page>('home');
@@ -242,6 +245,12 @@ export default function App() {
     playbackOverride.current = null;
     try { await speechQueue.current?.speakText(text); } catch (error) { setError(errorMessage(error)); }
   }, []);
+  // A timer set by asking ("set a timer for 10 minutes") is announced out loud when it ends.
+  useEffect(() => {
+    if (!desktop) return;
+    const timers = listen<string>('timer-done', event => { setNotice(event.payload); react('happy'); void speak(event.payload); });
+    return () => { void timers.then(unlisten => unlisten()); };
+  }, [speak]);
   // The local model proposes one online tool; nothing is sent until the user approves the exact request.
   const planOnline = useCallback(async (prompt: string, webOnly: boolean) => {
     const planId = crypto.randomUUID();
@@ -278,7 +287,7 @@ export default function App() {
           setLive(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });
           if (useSpeech) { streamedText += event.text || ''; speechQueue.current?.append(event.text || '', speechToken); }
         }
-        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
+        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
         else if (event.type === 'error') setError(event.text || 'The task could not finish.');
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);

@@ -95,72 +95,6 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
     }
 }
 
-/// A playback request Buntini can carry out itself, without asking the model: what to do,
-/// the user's own words for what to play, and the app if they named one.
-#[derive(Debug, PartialEq)]
-pub struct MusicCommand {
-    pub action: &'static str,
-    pub query: Option<String>,
-    pub app: Option<&'static str>,
-}
-
-/// Recognises everyday music requests ("play Hey There Delilah on Spotify", "pause",
-/// "next song", "what's playing?") and a go-ahead ("yes, play it") right after a play
-/// request. Small local models often answer these by asking permission or rewording the
-/// song, so Buntini handles them directly; anything else goes to the model.
-pub fn music_command(prompt: &str, previous: Option<&str>) -> Option<MusicCommand> {
-    let mut text = prompt.to_lowercase().replace(['’', '‘'], "'").replace(|c: char| !(c.is_alphanumeric() || c == '\'' || c == ' '), " ");
-    text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let app = if text.contains("spotify") { Some("spotify") } else if text.contains("apple music") || text.contains("music app") { Some("music") } else { None };
-    // Polite and conversational openings: "hey buntini, can you please…".
-    const OPENINGS: [&str; 22] = ["hey", "hi", "buntini", "yeah", "yes", "ok", "okay", "so", "now", "just", "please", "can", "could", "would", "will", "you", "go", "ahead", "and", "then", "i", "want"];
-    let words: Vec<&str> = text.split(' ').collect();
-    let start = words.iter().position(|word| !OPENINGS.contains(word)).unwrap_or(words.len());
-    let rest = words[start..].join(" ");
-    let command = |action: &'static str, query: Option<String>| Some(MusicCommand { action, query, app });
-    if ["what's playing", "whats playing", "what is playing", "what song is this", "what's this song", "which song is this", "what song is playing"].iter().any(|phrase| text.contains(phrase)) {
-        return command("now_playing", None);
-    }
-    let first = rest.split(' ').next().unwrap_or("");
-    match first {
-        "pause" | "stop" if rest.split(' ').count() <= 4 => return command("pause", None),
-        "skip" | "next" => return command("next", None),
-        "previous" => return command("previous", None),
-        "resume" | "unpause" => return command("play", None),
-        "play" => {
-            let mut query = rest.trim_start_matches("play").trim().to_string();
-            for tail in [" for me", " please", " on spotify", " in spotify", " on apple music", " in apple music", " in the music app", " on the music app", " now", " again"] {
-                while query.ends_with(tail) {
-                    query.truncate(query.len() - tail.len());
-                }
-            }
-            for lead in ["the song ", "song ", "some "] {
-                query = query.strip_prefix(lead).unwrap_or(&query).to_string();
-            }
-            let query = query.trim().to_string();
-            if ["video", "game", "youtube", "movie", "film"].iter().any(|thing| query.split(' ').any(|word| word.starts_with(thing))) {
-                return None;
-            }
-            return match query.as_str() {
-                "" | "music" | "it" | "that" | "spotify" | "something" => match (query.as_str(), previous.and_then(|before| music_command(before, None))) {
-                    ("it" | "that", Some(earlier)) if earlier.query.is_some() => Some(MusicCommand { app: app.or(earlier.app), ..earlier }),
-                    _ => command("play", None),
-                },
-                _ => command("play", Some(query)),
-            };
-        }
-        _ => {}
-    }
-    // "yes", "go ahead", "please do" right after a play request plays that request.
-    let agreed = !text.is_empty() && text.split(' ').count() <= 6 && text.split(' ').all(|word| ["yes", "yeah", "yep", "sure", "ok", "okay", "go", "ahead", "please", "do", "it", "that", "play", "this", "correct", "song", "right"].contains(&word));
-    if agreed {
-        if let Some(earlier) = previous.and_then(|before| music_command(before, None)).filter(|earlier| earlier.action == "play" && earlier.query.is_some()) {
-            return Some(MusicCommand { app: app.or(earlier.app), ..earlier });
-        }
-    }
-    None
-}
-
 /// Allowed, installed browsers a tab call may look in.
 fn browsers_for(settings: &Settings, args: &Map<String, Value>) -> Vec<&'static App> {
     let named = args.get("browser").and_then(Value::as_str);
@@ -389,8 +323,8 @@ const MUSIC: &str = r#"on run argv
 end run
 "#;
 // argv: action, query (already a spotify:search: address). Spotify can't search from
-// AppleScript, so a request to play something opens its search; `play_on_spotify` then
-// presses play on the best match.
+// AppleScript, so a request to play something opens its search; `skills::music::press_play`
+// then presses play on the best match.
 const SPOTIFY: &str = r#"on run argv
   set act to item 1 of argv
   set q to item 2 of argv
@@ -580,7 +514,7 @@ fn rows(output: &str) -> Vec<Vec<String>> {
     output.lines().filter(|line| !line.trim().is_empty()).map(|line| line.split('\t').map(|part| part.trim().to_string()).collect()).collect()
 }
 
-fn percent(text: &str) -> String {
+pub(crate) fn percent(text: &str) -> String {
     text.bytes().map(|byte| if byte.is_ascii_alphanumeric() { (byte as char).to_string() } else { format!("%{byte:02X}") }).collect()
 }
 
@@ -693,29 +627,13 @@ async fn find_notes(query: &str) -> Result<String, String> {
     Ok(format!("Notes mentioning “{query}”:\n{}", lines.collect::<Vec<_>>().join("\n")))
 }
 
-/// Presses play on the search result that best matches `words` in Spotify's window, through
-/// the helper (macOS accessibility). Returns "Song by Artist", or why it couldn't.
-async fn play_on_spotify(helper_path: &Path, words: &str) -> Result<String, String> {
-    if !helper_path.is_file() {
-        return Err("Playing a song you name needs Buntini’s Apple helper, which isn’t on this Mac.".into());
-    }
-    let mut command = Command::new(helper_path);
-    command.arg("--spotify-play").arg(words);
-    match crate::actions::output(command, 20).await {
-        Ok(output) => Ok(output.lines().find_map(|line| serde_json::from_str::<Value>(line).ok()).map(|line| field(&line, "played")).unwrap_or_default()),
-        Err(error) if error.contains("not-trusted") => Err("To press play for you, allow Buntini under System Settings → Privacy & Security → Accessibility, then ask again.".into()),
-        Err(error) if error.contains("no-result") => Err("I couldn’t find a matching song in Spotify’s results.".into()),
-        Err(error) => Err(error),
-    }
-}
-
-async fn control_music(app: &str, action: &str, query: &str, helper_path: &Path) -> Result<String, String> {
+pub(crate) async fn control_music(app: &str, action: &str, query: &str) -> Result<String, String> {
     let name = if app == "spotify" { "Spotify" } else { "Music" };
     let words = query.to_string();
     let query = if app == "spotify" && !query.is_empty() { format!("spotify:search:{}", percent(query)) } else { query.to_string() };
     let result = osascript(if app == "spotify" { SPOTIFY } else { MUSIC }, &[action.into(), query.clone()], 20).await?;
     if result.trim() == "search" {
-        return Ok(match play_on_spotify(helper_path, &words).await {
+        return Ok(match crate::skills::music::press_play(&words).await {
             // Say what Spotify is actually playing, not what was asked for.
             Ok(pressed) => {
                 tokio::time::sleep(std::time::Duration::from_millis(900)).await;
@@ -754,7 +672,7 @@ fn tab_scripts(app: &App) -> (String, String) {
 }
 
 /// Open tabs in the given browsers, optionally only those whose title or address matches.
-async fn browser_tabs(browsers: &[&App], query: &str) -> Result<String, String> {
+pub(crate) async fn browser_tabs(browsers: &[&App], query: &str) -> Result<String, String> {
     let mut lines = Vec::new();
     let mut problems = Vec::new();
     for app in browsers {
@@ -778,7 +696,7 @@ async fn browser_tabs(browsers: &[&App], query: &str) -> Result<String, String> 
 }
 
 /// Brings the first matching tab to the front, in the first browser that has one.
-async fn switch_tab(browsers: &[&App], query: &str) -> Result<String, String> {
+pub(crate) async fn switch_tab(browsers: &[&App], query: &str) -> Result<String, String> {
     for app in browsers {
         let title = osascript(&tab_scripts(app).1, &[query.into()], 20).await?;
         if !title.trim().is_empty() {
@@ -788,27 +706,25 @@ async fn switch_tab(browsers: &[&App], query: &str) -> Result<String, String> {
     Ok(format!("No open tab mentions “{query}”."))
 }
 
-/// The text of the page showing in Safari, squeezed to single spaces.
-async fn read_page() -> Result<String, String> {
+/// The page showing in Safari's front window as (title, address, text squeezed to single
+/// spaces), or None when Safari isn't open or shows no page.
+pub(crate) async fn safari_page() -> Result<Option<(String, String, String)>, String> {
     let output = osascript(SAFARI_PAGE, &[], 20).await?;
-    match output.trim() {
-        "closed" => return Ok("Safari isn’t open.".into()),
-        "none" => return Ok("No page is open in Safari.".into()),
-        _ => {}
+    if ["closed", "none"].contains(&output.trim()) {
+        return Ok(None);
     }
     let (head, body) = output.split_once('\n').unwrap_or((output.as_str(), ""));
     let (title, address) = head.split_once('\t').unwrap_or((head, ""));
-    let text: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(2500).collect();
-    Ok(format!("The page showing in Safari: “{}” ({address})\n{}", title.trim(), if text.is_empty() { "The page has no readable text." } else { &text }))
+    let text: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(8000).collect();
+    Ok(Some((title.trim().to_string(), address.trim().to_string(), text)))
 }
 
-/// Runs a playback request Buntini recognised itself (see `music_command`).
-pub async fn play_music(command: &MusicCommand, settings: &Settings, prompt: &str, helper_path: &Path) -> Result<String, String> {
-    let player = player(settings, prompt, command.app);
-    if !app(player).is_some_and(|app| allowed(settings, player) && installed(app)) {
-        return Err(format!("{} isn’t allowed yet. You can allow it in Settings → Apps.", if player == "spotify" { "Spotify" } else { "Music" }));
-    }
-    control_music(player, command.action, command.query.as_deref().unwrap_or(""), helper_path).await
+/// The page showing in Safari, for the model.
+async fn read_page() -> Result<String, String> {
+    Ok(match safari_page().await? {
+        None => "No page is open in Safari.".into(),
+        Some((title, address, text)) => format!("The page showing in Safari: “{title}” ({address})\n{}", if text.is_empty() { "The page has no readable text.".to_string() } else { text.chars().take(2500).collect() }),
+    })
 }
 
 /// Runs a read or playback call (already validated, for an allowed app) and returns
@@ -820,7 +736,7 @@ pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path, sett
         "read_calendar" => Ok(describe_events(&get("day"), &events(helper_path, &get("day")).await?)),
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
-        "control_music" => control_music(&get("app"), &get("action"), &get("query"), helper_path).await,
+        "control_music" => control_music(&get("app"), &get("action"), &get("query")).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
         "read_page" => read_page().await,
@@ -847,7 +763,7 @@ pub struct AppList {
     others: Vec<String>,
 }
 
-fn app_names() -> Vec<String> {
+pub(crate) fn app_names() -> Vec<String> {
     let home = std::env::var("HOME").map(|home| PathBuf::from(home).join("Applications")).ok();
     let mut names: Vec<String> = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities"]
         .iter()
@@ -872,6 +788,13 @@ pub fn app_list(state: tauri::State<'_, crate::controller::AppState>) -> Result<
     Ok(AppList { apps, others })
 }
 
+/// Whether Buntini may use Accessibility (pressing play in Spotify, reading pages in
+/// Chrome, Brave, Edge and Arc, locking the screen). With `ask`, macOS shows its prompt.
+#[tauri::command]
+pub async fn accessibility(ask: bool) -> bool {
+    tokio::task::spawn_blocking(move || crate::ax::trusted(ask)).await.unwrap_or(false)
+}
+
 /// Asks macOS for permission right after the user allows Calendar or Reminders, so the
 /// prompt appears in Settings rather than in the middle of a chat. Other apps are asked
 /// the first time Buntini uses them.
@@ -882,14 +805,11 @@ pub async fn check_app(id: String, state: tauri::State<'_, crate::controller::Ap
         "calendar" => events(&helper_path, &chrono::Local::now().format("%Y-%m-%d").to_string()).await.map(|_| "Calendar is ready.".into()),
         "reminders" => reminders(&helper_path).await.map(|_| "Reminders is ready.".into()),
         // Pressing play on a song you name uses Accessibility; ask for it now.
-        "spotify" => {
-            let mut command = Command::new(&helper_path);
-            command.arg("--accessibility");
-            Ok(match crate::actions::output(command, 10).await {
-                Ok(_) => "Spotify is ready, including playing songs you name.".into(),
-                Err(_) => "To play songs you name, allow Buntini under System Settings → Privacy & Security → Accessibility. Play, pause and skip work without it.".into(),
-            })
-        }
+        "spotify" => Ok(if tokio::task::spawn_blocking(|| crate::ax::trusted(true)).await.unwrap_or(false) {
+            "Spotify is ready, including playing songs you name.".into()
+        } else {
+            "To play songs you name, allow Buntini under System Settings → Privacy & Security → Accessibility. Play, pause and skip work without it.".into()
+        }),
         _ => Ok(app(&id).map(|app| format!("macOS will ask you once, the first time Buntini uses {}.", app.name)).unwrap_or_default()),
     }
 }
@@ -926,22 +846,6 @@ mod tests {
         let spotify = validate("control_music", &json!({"app":"spotify","action":"next"})).unwrap();
         assert!(!permits(&settings, "control_music", &spotify), "Music being allowed says nothing about Spotify");
         assert_eq!(for_call("add_reminder", &args).unwrap().id, "reminders");
-    }
-
-    #[test]
-    fn everyday_music_requests_are_recognised() {
-        let play = |query: &str, app: Option<&'static str>| Some(MusicCommand { action: "play", query: Some(query.into()), app });
-        assert_eq!(music_command("Hey Buntini, can you play Hey There Delilah on Spotify?", None), play("hey there delilah", Some("spotify")));
-        assert_eq!(music_command("Could you please play the song Here Without You for me", None), play("here without you", None));
-        assert_eq!(music_command("pause the music", None).unwrap().action, "pause");
-        assert_eq!(music_command("skip this song", None).unwrap().action, "next");
-        assert_eq!(music_command("What's playing right now?", None).unwrap().action, "now_playing");
-        assert_eq!(music_command("Yes, please go ahead.", Some("Can you play Hey There Delilah?")), play("hey there delilah", None));
-        assert_eq!(music_command("play it", Some("play Delilah on Spotify")), play("delilah", Some("spotify")));
-        assert_eq!(music_command("Yes, please go ahead.", Some("What's on my calendar?")), None, "a go-ahead for something else goes to the model");
-        assert_eq!(music_command("play a video of cats", None), None);
-        assert_eq!(music_command("what's on my calendar tomorrow?", None), None);
-        assert_eq!(music_command("stop reminding me about the bins every single day", None), None);
     }
 
     #[test]

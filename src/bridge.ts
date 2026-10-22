@@ -65,6 +65,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;
     if (name === 'stop_recording') return 'What’s on my calendar today?' as T;
+    if (name === 'accessibility') return false as T;
     if (name === 'check_app') return 'macOS will ask you once, the first time Buntini uses it.' as T;
     throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
   }
