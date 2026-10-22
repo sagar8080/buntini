@@ -141,7 +141,7 @@ impl Settings {
         if self.personality.chars().count() > 1200 {
             return Err("Personality must be no longer than 1,200 characters.".into());
         }
-        if !["kyuubi", "fox", "cat", "orb"].contains(&self.avatar.as_str())
+        if !["cat", "orb"].contains(&self.avatar.as_str())
             || !["preset", "ember", "ocean", "violet", "sage", "custom"].contains(&self.accent.as_str())
         {
             return Err("Choose a supported avatar and accent.".into());

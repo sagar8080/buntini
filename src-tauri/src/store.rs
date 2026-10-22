@@ -77,6 +77,10 @@ impl Store {
         let mut settings: Settings = raw
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        // The fox and nine-tailed fox were retired; anyone who chose one gets the cat.
+        if settings.avatar == "fox" || settings.avatar == "kyuubi" {
+            settings.avatar = "cat".into();
+        }
         if needs_backend {
             settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) { "mlx" } else { "apple" }.into();
             if !old_schema {
@@ -737,7 +741,7 @@ mod tests {
         )
         .unwrap();
         let settings = s.settings().unwrap();
-        assert_eq!(settings.avatar, "kyuubi");
+        assert_eq!(settings.avatar, "cat", "the retired nine-tailed fox becomes the cat");
         assert_eq!(settings.cat_coat, "ginger");
         assert_eq!(settings.pet_motion, "playful");
         let mut invalid = settings.clone();

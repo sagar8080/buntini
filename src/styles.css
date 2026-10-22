@@ -104,11 +104,11 @@ button svg { vertical-align: middle; }
 .pet-shadow { transform-origin: 90px 169px; animation: shadow-breathe 4.8s ease-in-out infinite; }
 .pet-speaking-mouth { display: none; }
 .pet-aura { position: absolute; inset: 15% 12% 8%; background: radial-gradient(ellipse, #ed8a3230, transparent 65%); pointer-events: none; }
-.pet--thinking .pet-body { animation: fox-think 1.8s ease-in-out infinite; }
-.pet--working .pet-body { animation: fox-work .8s ease-in-out infinite; }
-.pet--listening .pet-body { animation: fox-listen 2s ease-in-out infinite; }
+.pet--thinking .pet-body { animation: pet-think 1.8s ease-in-out infinite; }
+.pet--working .pet-body { animation: pet-work .8s ease-in-out infinite; }
+.pet--listening .pet-body { animation: pet-listen 2s ease-in-out infinite; }
 .pet--listening .pet-aura { animation: aura-pulse 1.4s infinite; }
-.pet--speaking .pet-speaking-mouth { display: block; animation: fox-speak .3s infinite; transform-origin: 90px 120px; }
+.pet--speaking .pet-speaking-mouth { display: block; animation: pet-speak .3s infinite; transform-origin: 90px 120px; }
 .pet--speaking .pet-mouth { display: none; }
 .pet-caption, .collapsed-label, .shortcut { display: none; }
 .dock-tools { position: absolute; bottom: 30px; right: 4px; }
@@ -288,11 +288,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes pet-breathe { 50% { transform: translateY(-1px) scale(1.006); } }
 @keyframes shadow-breathe { 50% { transform: scaleX(.94); opacity: .7; } }
 @keyframes blink { 0%, 44%, 48%, 100% { transform: scaleY(1); } 46% { transform: scaleY(.12); } }
-@keyframes fox-think { 50% { transform: rotate(-4deg) translateY(-1px); } }
-@keyframes fox-work { 50% { transform: translateY(-2px) rotate(2deg); } }
-@keyframes fox-listen { 50% { transform: rotate(-6deg); } }
+@keyframes pet-think { 50% { transform: rotate(-4deg) translateY(-1px); } }
+@keyframes pet-work { 50% { transform: translateY(-2px) rotate(2deg); } }
+@keyframes pet-listen { 50% { transform: rotate(-6deg); } }
 @keyframes aura-pulse { 50% { opacity: .3; transform: scale(1.15); } }
-@keyframes fox-speak { 50% { transform: scaleY(.4); } }
+@keyframes pet-speak { 50% { transform: scaleY(.4); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 :root[data-motion=reduced] *, :root[data-motion=reduced] *::before, :root[data-motion=reduced] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 @media (max-width: 380px) { .mode-picker button { font-size: 11px; padding: 5px 4px; }.overlay-welcome { padding-left: 14px; padding-right: 14px; }.overlay-welcome button { font-size: 11px; padding: 5px; }.composer-hint { font-size: 11px; } }
@@ -306,7 +306,7 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .custom-profile-preview > div:last-child { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .custom-profile-preview strong { font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .custom-profile-preview span { font-size: 11px; color: var(--muted); }
-.character-options { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-top: 13px; }
+.character-options { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; margin-top: 13px; }
 .character-options > button { min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; padding: 6px 3px 8px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; }
 .character-options > button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .character-options .pet { width: 53px; height: 56px; }
@@ -570,19 +570,63 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .cat--walk .cat-look, .cat--leap .cat-look { transform: translate(-2.4px, .6px); }
 .cat--walk .cat-head-gaze, .cat--leap .cat-head-gaze { transform: none; }
 .cat--walk .cat-groom-paw, .cat--leap .cat-groom-paw { display: none !important; }
-.walk-leg { transform-box: fill-box; transform-origin: 50% 0%; }
-.cat--walk .walk-leg { animation: walk-leg var(--stride, .4s) ease-in-out infinite; }
-.cat--walk .walk-leg.b { animation-delay: calc(var(--stride, .4s) * -.5); }
+/* Walking: jointed legs in a cat's lateral gait (back-left, front-left, back-right,
+   front-right, a quarter-step apart). Each step plants the paw and slides it back at
+   ground speed for 60% of the cycle, then lifts, folds at the knee and reaches forward.
+   Joints sit at each group's local origin. */
+.walk-leg, .walk-shin, .walk-paw { transform-box: view-box; transform-origin: 0 0; }
+.leg-nb { --leg-delay: 0s; }
+.leg-nf { --leg-delay: calc(var(--stride, .4s) * -.25); }
+.leg-fb { --leg-delay: calc(var(--stride, .4s) * -.5); }
+.leg-ff { --leg-delay: calc(var(--stride, .4s) * -.75); }
+.cat--walk .walk-leg.front { animation: leg-front var(--stride, .4s) infinite var(--leg-delay); }
+.cat--walk .walk-leg.back { animation: leg-back var(--stride, .4s) infinite var(--leg-delay); }
+.cat--walk .walk-leg.front .walk-shin { animation: shin-front var(--stride, .4s) infinite var(--leg-delay); }
+.cat--walk .walk-leg.back .walk-shin { animation: shin-back var(--stride, .4s) infinite var(--leg-delay); }
+.cat--walk .walk-paw { animation: paw-step var(--stride, .4s) infinite var(--leg-delay); }
 .walk-tail { transform-origin: 150px 122px; }
 .cat--walk .walk-tail { animation: walk-tail calc(var(--stride, .4s) * 2) ease-in-out infinite; }
-.cat--leap .walk-leg.front { transform: rotate(36deg); }
-.cat--leap .walk-leg.back { transform: rotate(-40deg); }
+.cat--walk .cat-walkbody { animation: walk-roll calc(var(--stride, .4s) / 2) ease-in-out infinite; transform-origin: 124px 128px; }
+/* The head stays level while the body bobs, as a cat's does. */
+.cat--walk .cat-head-gaze { animation: walk-steady calc(var(--stride, .4s) / 2) ease-in-out infinite; }
+.cat--leap .walk-leg.front { transform: rotate(38deg); }
+.cat--leap .walk-leg.front .walk-shin { transform: rotate(-30deg); }
+.cat--leap .walk-leg.back { transform: rotate(-42deg); }
+.cat--leap .walk-leg.back .walk-shin { transform: rotate(28deg); }
 .cat--leap .cat-walkbody { transform: rotate(-6deg); transform-origin: 124px 128px; }
 .pet.pet--walking.pet--cat .pet-body { animation: walk-bob calc(var(--stride, .4s) / 2) ease-in-out infinite; }
 .pet.pet--walking.pet--cat .pet-shadow { animation: none; }
-@keyframes walk-leg { 0%, 100% { transform: rotate(24deg); } 50% { transform: rotate(-24deg); } }
-@keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
-@keyframes walk-tail { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(8deg); } }
+@keyframes leg-front {
+  0% { transform: rotate(21deg); animation-timing-function: linear; }
+  60% { transform: rotate(-19deg); animation-timing-function: cubic-bezier(.35, 0, .25, 1); }
+  100% { transform: rotate(21deg); }
+}
+@keyframes leg-back {
+  0% { transform: rotate(17deg); animation-timing-function: linear; }
+  60% { transform: rotate(-24deg); animation-timing-function: cubic-bezier(.35, 0, .25, 1); }
+  100% { transform: rotate(17deg); }
+}
+@keyframes shin-front {
+  0%, 56% { transform: rotate(0deg); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  78% { transform: rotate(-58deg); animation-timing-function: cubic-bezier(.3, 0, .2, 1); }
+  95%, 100% { transform: rotate(0deg); }
+}
+@keyframes shin-back {
+  0% { transform: rotate(-10deg); animation-timing-function: linear; }
+  56% { transform: rotate(12deg); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  78% { transform: rotate(-34deg); animation-timing-function: cubic-bezier(.3, 0, .2, 1); }
+  100% { transform: rotate(-10deg); }
+}
+@keyframes paw-step {
+  0%, 52% { transform: rotate(0deg); }
+  62% { transform: rotate(18deg); }
+  80% { transform: rotate(-26deg); }
+  94%, 100% { transform: rotate(0deg); }
+}
+@keyframes walk-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.4px); } }
+@keyframes walk-roll { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-.8deg); } }
+@keyframes walk-steady { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.1px); } }
+@keyframes walk-tail { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(9deg); } }
 /* Search budget meters (SearchBudget.tsx). */
 .search-budget { margin-top: 12px; }
 .usage-meter { margin-bottom: 10px; }

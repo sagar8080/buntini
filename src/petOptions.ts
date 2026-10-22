@@ -1,7 +1,7 @@
 import { accentHex } from './themes.ts';
 import type { CatAccessory, CatCoat, CatEyes, PetLook, PetMotion, Settings } from './types';
 
-export const characters: { id: Settings['avatar']; label: string }[] = [{ id: 'cat', label: 'Cat' }, { id: 'kyuubi', label: 'Nine tails' }, { id: 'fox', label: 'Fox' }, { id: 'orb', label: 'Orbit' }];
+export const characters: { id: Settings['avatar']; label: string }[] = [{ id: 'cat', label: 'Cat' }, { id: 'orb', label: 'Orbit' }];
 export const coats: { id: CatCoat; label: string }[] = [{ id: 'ginger', label: 'Ginger tabby' }, { id: 'gray', label: 'Silver tabby' }, { id: 'black', label: 'Midnight' }, { id: 'white', label: 'Snowball' }, { id: 'tuxedo', label: 'Tuxedo' }, { id: 'calico', label: 'Calico' }, { id: 'siamese', label: 'Siamese' }];
 export const eyeColors: Record<Exclude<CatEyes, 'odd'>, string> = { amber: '#F2B33D', green: '#86C46B', blue: '#6DB6E8', copper: '#D9772B' };
 export const eyes: { id: CatEyes; label: string }[] = [{ id: 'amber', label: 'Amber' }, { id: 'green', label: 'Green' }, { id: 'blue', label: 'Blue' }, { id: 'copper', label: 'Copper' }, { id: 'odd', label: 'Odd-eyed' }];

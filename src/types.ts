@@ -14,7 +14,7 @@ export interface Settings {
   assistantName: string;
   userName: string;
   personality: string;
-  avatar: 'kyuubi' | 'fox' | 'cat' | 'orb';
+  avatar: 'cat' | 'orb';
   accent: 'preset' | 'ember' | 'ocean' | 'violet' | 'sage' | 'custom';
   accentColor: string;
   themePreset: 'classic' | 'midnight' | 'paper' | 'sakura' | 'forest' | 'ocean';
