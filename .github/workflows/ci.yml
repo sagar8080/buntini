@@ -21,8 +21,8 @@ jobs:
     # Intelligence helper is built and tested (it skips when the runner can't run it).
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -38,8 +38,8 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: npm packages
@@ -54,8 +54,8 @@ jobs:
     needs: check
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -73,7 +73,7 @@ jobs:
           ditto -c -k --keepParent "$bundle/macos/Buntini.app" dist-release/Buntini-macOS-arm64.zip
           cp "$bundle"/dmg/*.dmg dist-release/Buntini-macOS-arm64.dmg
           (cd dist-release && shasum -a 256 * > SHA256SUMS.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Buntini-macOS-arm64
           path: dist-release/
@@ -87,11 +87,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Buntini-macOS-arm64
           path: dist-release
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist-release/*
           generate_release_notes: true
