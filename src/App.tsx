@@ -253,7 +253,8 @@ export default function App() {
   }, []);
   // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
-    if (!prompt.trim() || busy || planning || recording || transcribing || voiceStoppingRef.current) return;
+    // A spoken question arrives as the recording winds down, so it isn't held back by it.
+    if (!prompt.trim() || busy || planning || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
@@ -303,6 +304,9 @@ export default function App() {
       if (askAction) setPetState('approval');
     }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
+  // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
   nudgeAction.current = action => {
     if (action === 'checkMac') { void expand(true); void submit('How is my Mac doing?', 'system'); }
     else if (action === 'lookUp') { setMode('web'); void expand(true); }
@@ -337,15 +341,17 @@ export default function App() {
     try { await recordPromise.current; } catch { return; }
     if (version !== voiceVersion.current) return;
     setRecording(false); setTranscribing(true); setPetState('thinking');
+    let heard = '';
     try {
       const text = await command<string>('stop_recording');
       if (version !== voiceVersion.current) return;
-      // What was heard is sent right away, as with any voice assistant.
+      heard = text.trim();
       setPage('home');
-      if (text.trim()) void submit(text.trim(), mode, undefined, true);
-      else setNotice('I didn’t catch any words. Try again a little closer to the mic.');
+      if (!heard) setNotice('I didn’t catch any words. Try again a little closer to the mic.');
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
-    finally { if (version === voiceVersion.current) { setTranscribing(false); setPetState('idle'); recordPromise.current = null; } }
+    finally { if (version === voiceVersion.current) { setTranscribing(false); if (!heard) setPetState('idle'); recordPromise.current = null; } }
+    // What was heard is sent right away and answered out loud, as with any voice assistant.
+    if (heard && version === voiceVersion.current) void submitRef.current(heard, undefined, undefined, true);
   }
   async function cancelVoice() {
     if (voiceStoppingRef.current) return;
