@@ -1,10 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { Apple, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
-import SetupChecks from './SetupChecks';
-import ModelAdvisor from './ModelAdvisor';
+import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
 import { errorMessage } from './bridge';
-import { appleStatus, cloudProviders } from './brain.ts';
+import { appleStatus, cloudProviders, friendlyStatus } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
 export { appleStatus, backendLabel, cloudProviders } from './brain.ts';
@@ -24,14 +23,9 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
         {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'Your own ChatGPT plan' : `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
-      {draft.modelBackend === 'mlx' && <>
-        <ModelAdvisor draft={draft} update={update} />
-        <label className="field">Python<input value={draft.pythonPath} onChange={event => update('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
-        <label className="field">Model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
-        <SetupChecks onError={onError} />
-      </>}
+      {draft.modelBackend === 'mlx' && <LocalModel draft={draft} update={update} onError={onError} />}
       {draft.modelBackend === 'cloud' && <CloudSettings draft={draft} update={update} diagnostics={diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
-      <p className="worker-status"><span className={`status-dot ${diagnostics.modelReady ? '' : 'amber'}`} />{diagnostics.workerStatus}</p>
+      <p className="worker-status"><span className={`status-dot ${diagnostics.modelReady ? '' : 'amber'}`} />{friendlyStatus(diagnostics.workerStatus, diagnostics.modelReady, draft.modelBackend)}</p>
     </section>
     <details className="disclosure settings-advanced"><summary>Advanced</summary>
       <label className="field">Whisper model folder<input value={draft.whisperModel} onChange={event => update('whisperModel', event.target.value)} placeholder="Optional, for the local model" spellCheck={false} /></label>

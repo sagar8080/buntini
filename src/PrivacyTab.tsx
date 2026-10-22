@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ChevronRight, Folder, FolderPlus, ShieldCheck, X } from 'lucide-react';
 import Toggle from './Toggle';
 import FileIndexSettings from './FileIndexSettings';
+import MacUpdates from './MacUpdates';
 import type { Memory, Settings } from './types';
 
 const shares: { id: string; label: string }[] = [
@@ -40,6 +41,7 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
       <p className="field-help">Your messages always go to a cloud model. Everything else stays here unless you turn it on.</p>
     </section>
     {children}
+    <MacUpdates onError={onError} />
     <button type="button" className="audit-button" onClick={onAudit}><ShieldCheck size={14} /><span>Activity log</span><ChevronRight size={14} /></button>
     {onPolicy && <button type="button" className="audit-button" onClick={onPolicy}><ShieldCheck size={14} /><span>Privacy policy</span><ChevronRight size={14} /></button>}
   </>;

@@ -167,6 +167,7 @@ pub fn run() {
             controller::finish_onboarding,
             controller::run_action,
             advisor::mac_profile,
+            controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,

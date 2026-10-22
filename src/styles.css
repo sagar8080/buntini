@@ -782,3 +782,15 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .theme-swatch i { flex: 1; }
 .theme-swatch b { position: absolute; right: 6px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; box-shadow: 0 0 0 2px #ffffffb0; }
 .settings-page .inline-field input[type=color] { width: 44px !important; height: 30px; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); cursor: pointer; }
+.local-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.local-choice { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.local-choice > svg { color: var(--muted); flex-shrink: 0; }
+.local-choice > span { flex: 1; min-width: 0; }
+.local-choice strong { display: block; font-size: 13px; font-weight: 550; color: var(--text); }
+.local-choice small { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-choice .secondary-button { font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+.setup-report { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.setup-report li { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.setup-report li strong { color: var(--text); font-weight: 600; margin-right: 4px; }
+.setup-report li.ok > svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.setup-report li.problem > svg { color: var(--danger); flex-shrink: 0; margin-top: 1px; }

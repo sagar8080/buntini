@@ -209,6 +209,33 @@ pub fn set_api_key(
     );
     Ok(())
 }
+/// What a chosen folder is usable as: a Python environment gives its bin/python, a
+/// model folder must hold config.json.
+pub fn local_choice(kind: &str, folder: &std::path::Path) -> Result<String, String> {
+    match kind {
+        "environment" => {
+            let python = folder.join("bin/python");
+            if python.is_file() {
+                Ok(python.to_string_lossy().into_owned())
+            } else {
+                Err("That folder isn’t a Python environment. Choose the folder you created with python3 -m venv (it has a bin folder inside).".into())
+            }
+        }
+        "model" if crate::model::mlx_model_present(&folder.to_string_lossy()) => Ok(folder.to_string_lossy().into_owned()),
+        "model" => Err("That folder doesn’t look like an MLX model (there’s no config.json inside). Choose the folder you downloaded the model into.".into()),
+        _ => Err("Unknown choice.".into()),
+    }
+}
+
+/// Lets the user pick the Python environment or model folder in Finder instead of
+/// typing a path.
+#[tauri::command]
+pub async fn choose_local_folder(kind: String) -> Result<Option<String>, String> {
+    let title = if kind == "environment" { "Choose your Python environment folder" } else { "Choose your MLX model folder" };
+    let Some(folder) = rfd::AsyncFileDialog::new().set_title(title).pick_folder().await else { return Ok(None) };
+    local_choice(&kind, folder.path()).map(Some)
+}
+
 #[tauri::command]
 pub async fn pick_folder() -> Result<Option<String>, String> {
     Ok(rfd::AsyncFileDialog::new()
@@ -1403,6 +1430,14 @@ mod tests {
         }
         assert!(asks_about_files("find my lease pdf") && asks_about_files("What's on my desktop?") && asks_about_files("where's my tax document"));
         assert!(!asks_about_files("what's the weather in Porto?") && !asks_about_files("remind me to call mum"));
+        let env = tempfile::tempdir().unwrap();
+        assert!(local_choice("environment", env.path()).unwrap_err().contains("isn’t a Python environment"));
+        std::fs::create_dir_all(env.path().join("bin")).unwrap();
+        std::fs::write(env.path().join("bin/python"), "").unwrap();
+        assert!(local_choice("environment", env.path()).unwrap().ends_with("bin/python"));
+        assert!(local_choice("model", env.path()).unwrap_err().contains("config.json"));
+        std::fs::write(env.path().join("config.json"), "{}").unwrap();
+        assert!(local_choice("model", env.path()).is_ok());
         // Asking to go online only hands off to the approval sheet, and only in everyday chat.
         assert!(validate_tool(&json!({"name":"look_up_online","arguments":{"query":"weather in Porto"}}), "auto", "weather?").is_ok());
         assert!(validate_tool(&json!({"name":"look_up_online","arguments":{"query":"x"}}), "files", "x").is_err());

@@ -24,3 +24,36 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
 ];
 
 export const backendLabel: Record<ModelBackend, string> = { apple: 'Apple Intelligence', mlx: 'Local MLX model', cloud: 'Cloud model' };
+
+/** A readable name for a chosen folder: the environment for a Python path, else the folder. */
+export function folderName(path: string): string {
+  const parts = path.trim().replace(/\/+$/, '').split('/').filter(Boolean);
+  if (!parts.length) return '';
+  const python = parts.length >= 3 && parts[parts.length - 2] === 'bin' && parts[parts.length - 1].startsWith('python');
+  return python ? parts[parts.length - 3] : parts[parts.length - 1];
+}
+
+/** The model worker's status in plain words. */
+export function friendlyStatus(status: string, ready: boolean, backend: ModelBackend): string {
+  if (backend === 'mlx') {
+    if (!ready) return 'Not set up yet.';
+    if (status.startsWith('Not started')) return 'Ready. The model loads the first time you chat.';
+    if (status.startsWith('Stopped')) return 'Paused. It starts again with your next message.';
+    if (status.startsWith('Ready')) return 'Ready and loaded.';
+  }
+  return status;
+}
+
+export type SetupReport = { dependencies: Record<string, { installed: boolean; version: string | null }>; models: Record<string, { configured: boolean; files_present: boolean; ready_for_load: boolean; error: string | null }> };
+
+/** The local setup check as a few plain lines; optional parts only when they're set up. */
+export function setupLines(report: SetupReport): { label: string; ok: boolean; detail: string }[] {
+  const mlx = report.dependencies.mlx_lm, model = report.models.qwen;
+  const lines = [
+    { label: 'MLX', ok: !!mlx?.installed, detail: mlx?.installed ? `Installed${mlx.version ? ` (${mlx.version})` : ''}` : 'Not installed in this environment. Run the Install MLX step.' },
+    { label: 'Model', ok: !!model?.ready_for_load, detail: model?.ready_for_load ? 'Files are all there' : model?.configured ? model.error || 'Some files are missing. Download it again.' : 'Choose a model folder.' },
+  ];
+  const whisper = report.models.whisper;
+  if (whisper?.configured) lines.push({ label: 'Whisper (voice)', ok: whisper.ready_for_load, detail: whisper.ready_for_load ? 'Files are all there' : whisper.error || 'Incomplete' });
+  return lines;
+}
