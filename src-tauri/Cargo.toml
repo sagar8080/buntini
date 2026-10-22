@@ -1,0 +1,50 @@
+[package]
+name = "buntini"
+version = "0.1.0"
+description = "A private, local-first desktop companion"
+authors = ["Buntini"]
+edition = "2021"
+license = "MIT"
+rust-version = "1.90"
+
+[lib]
+name = "buntini_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.2", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri-plugin-global-shortcut = "2.3.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "rt-multi-thread", "macros", "net"] }
+# Sign in with ChatGPT: PKCE (SHA-256, base64url) and random state, nonce and verifier.
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.36.1"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures-util = "0.3"
+walkdir = "2.5"
+scraper = "0.25"
+libc = "0.2"
+rfd = "0.17.2"
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWindow", "NSColor", "NSApplication", "NSScreen", "NSWorkspace", "NSRunningApplication", "libc"] }
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError", "NSArray", "NSDictionary", "NSValue"] }
+objc2-user-notifications = { version = "0.3.2", features = ["block2"] }
+block2 = "0.6"
+
+[dev-dependencies]
+tempfile = "3"

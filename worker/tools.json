@@ -1,0 +1,499 @@
+{
+  "search_files": {
+    "name": "search_files",
+    "description": "Search file names and indexed text in the folders the user allowed, to find documents or files on this Mac.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "system_info": {
+    "name": "system_info",
+    "description": "Live snapshot of this Mac right now: memory (RAM) use, CPU load, storage space, uptime and the busiest processes.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  "look_up_online": {
+    "name": "look_up_online",
+    "description": "Look something up on the internet when the answer needs current or outside facts you can't know: weather, news, prices, exchange rates, places, flights or recent events. Never for chat, jokes, advice, maths or general knowledge you can answer yourself. The user approves before anything is sent.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "remember": {
+    "name": "remember",
+    "description": "Save a lasting fact or preference the user wants you to remember, such as their name for someone, a diet or a routine. Only when they ask you to remember something or clearly state a lasting preference.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fact": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300,
+          "description": "The fact as a short third-person sentence, for example: The user's sister is Ana."
+        }
+      },
+      "required": [
+        "fact"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "add_reminder": {
+    "name": "add_reminder",
+    "description": "Add a reminder to the Reminders app. The user reviews it before it is added.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "What to be reminded about."
+        },
+        "due": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local date and time as YYYY-MM-DD HH:MM (24-hour)."
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "add_calendar_event": {
+    "name": "add_calendar_event",
+    "description": "Add an event to the Calendar app. The user reviews it before it is added.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Event name."
+        },
+        "start": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local date and time as YYYY-MM-DD HH:MM (24-hour)."
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1440,
+          "description": "How long it lasts, in minutes."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Where it happens."
+        }
+      },
+      "required": [
+        "title",
+        "start"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "create_note": {
+    "name": "create_note",
+    "description": "Write a new note in the Notes app. The user reviews it before it is saved.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Note title."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Note text."
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "draft_email": {
+    "name": "draft_email",
+    "description": "Open a new email draft in Mail for the user to review and send themselves. Never sends.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Recipient email address."
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Subject line."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Email text."
+        }
+      },
+      "required": [
+        "subject",
+        "body"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "run_shortcut": {
+    "name": "run_shortcut",
+    "description": "Run one of the user's own Shortcuts by its exact name. The user approves first.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The shortcut's name."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "open_app": {
+    "name": "open_app",
+    "description": "Open an app installed on this Mac.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The app's name, for example Safari or Notes."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "open_link": {
+    "name": "open_link",
+    "description": "Open a web page in the user's browser.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 2000,
+          "description": "An https:// address."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "web_search": {
+    "name": "web_search",
+    "description": "Search the live web. The controller requires the user's explicit online search intent.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "weather": {
+    "name": "weather",
+    "description": "Current conditions and the 7-day forecast for a named place.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "place": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "City or town, optionally with region or country"
+        },
+        "units": {
+          "type": "string",
+          "enum": [
+            "celsius",
+            "fahrenheit"
+          ]
+        }
+      },
+      "required": [
+        "place"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "currency": {
+    "name": "currency",
+    "description": "Convert money using European Central Bank reference rates.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 1e-06,
+          "maximum": 1000000000000.0
+        },
+        "from": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3,
+          "description": "ISO 4217 code, e.g. USD"
+        },
+        "to": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40,
+          "description": "One or more ISO codes separated by commas"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "wikipedia": {
+    "name": "wikipedia",
+    "description": "Look up an encyclopedia article summary about a person, place, thing or idea.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "en",
+            "de",
+            "fr",
+            "es",
+            "it",
+            "pt",
+            "nl",
+            "sv",
+            "pl",
+            "ru",
+            "uk",
+            "ja",
+            "zh",
+            "ko",
+            "ar",
+            "hi",
+            "tr",
+            "id"
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "places": {
+    "name": "places",
+    "description": "Find nearby places of one kind around a street, district or city using OpenStreetMap.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "cafe",
+            "restaurant",
+            "bar",
+            "pharmacy",
+            "hospital",
+            "atm",
+            "bank",
+            "supermarket",
+            "bakery",
+            "fuel",
+            "charging_station",
+            "parking",
+            "hotel",
+            "museum",
+            "park",
+            "library",
+            "post_office",
+            "gym",
+            "toilets"
+          ]
+        },
+        "near": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "radius_m": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "category",
+        "near"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "ebay_search": {
+    "name": "ebay_search",
+    "description": "Search live eBay listings to compare prices of an item.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "max_price": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 10000000
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "any",
+            "new",
+            "used"
+          ]
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "best_match",
+            "price",
+            "newest"
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "flight_search": {
+    "name": "flight_search",
+    "description": "Search flight offers between two airports or cities on given dates. Search only, never booking.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60,
+          "description": "IATA code like LIS, or a city name"
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "departure_date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "description": "YYYY-MM-DD"
+        },
+        "return_date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "description": "YYYY-MM-DD, only for return trips"
+        },
+        "adults": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "cabin": {
+          "type": "string",
+          "enum": [
+            "economy",
+            "premium_economy",
+            "business",
+            "first"
+          ]
+        }
+      },
+      "required": [
+        "origin",
+        "destination",
+        "departure_date"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# Optional Silero ONNX runtime; no PyTorch or Silero downloader is needed for VAD.
+onnxruntime>=1.20,<2
