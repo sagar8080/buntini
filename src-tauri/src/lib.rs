@@ -1,5 +1,6 @@
 mod actions;
 mod approvals;
+mod brief;
 mod budget;
 mod cloud;
 mod controller;
@@ -161,6 +162,8 @@ pub fn run() {
             controller::new_topic,
             controller::finish_onboarding,
             controller::run_action,
+            controller::morning_brief,
+            controller::forget_memory,
             controller::cancel_action,
             data::export_data,
             data::delete_all_data,

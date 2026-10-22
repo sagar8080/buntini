@@ -28,7 +28,7 @@
   },
   "look_up_online": {
     "name": "look_up_online",
-    "description": "Look something up on the internet when the answer needs current or outside facts you can't know: weather, news, prices, exchange rates, places, flights or recent events. Don't use it for chat, jokes, advice or general knowledge. The user approves before anything is sent.",
+    "description": "Look something up on the internet when the answer needs current or outside facts you can't know: weather, news, prices, exchange rates, places, flights or recent events. Never for chat, jokes, advice, maths or general knowledge you can answer yourself. The user approves before anything is sent.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -40,6 +40,25 @@
       },
       "required": [
         "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "remember": {
+    "name": "remember",
+    "description": "Save a lasting fact or preference the user wants you to remember, such as their name for someone, a diet or a routine. Only when they ask you to remember something or clearly state a lasting preference.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fact": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300,
+          "description": "The fact as a short third-person sentence, for example: The user's sister is Ana."
+        }
+      },
+      "required": [
+        "fact"
       ],
       "additionalProperties": false
     }

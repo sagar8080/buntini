@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn every_tool_the_app_offers_has_a_shared_schema() {
-        for name in ["search_files", "system_info", "look_up_online"].into_iter().chain(crate::actions::TOOLS).chain(crate::integrations::TOOLS.iter().map(|tool| tool.name)) {
+        for name in ["search_files", "system_info", "look_up_online", "remember"].into_iter().chain(crate::actions::TOOLS).chain(crate::integrations::TOOLS.iter().map(|tool| tool.name)) {
             let tool = definition(name).unwrap_or_else(|| panic!("{name} missing from worker/tools.json"));
             assert_eq!(tool["name"], name);
             assert_eq!(tool["parameters"]["type"], "object");

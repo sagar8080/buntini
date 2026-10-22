@@ -13,6 +13,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY);
+          CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, fact TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, action TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS search_usage (month TEXT PRIMARY KEY, used INTEGER NOT NULL);
@@ -134,6 +135,33 @@ impl Store {
             .execute("DELETE FROM file_index WHERE root=?1", [root])
             .map_err(|e| e.to_string())?;
         self.audit("folder.revoked", root)
+    }
+    /// Remembers a fact; repeating one already known changes nothing. Keeps at most 200.
+    pub fn remember(&self, fact: &str) -> Result<bool, String> {
+        let fact = fact.split_whitespace().collect::<Vec<_>>().join(" ");
+        if fact.chars().count() < 3 || fact.chars().count() > 300 {
+            return Err("Memories are 3–300 characters.".into());
+        }
+        let count: i64 = self.db.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if count >= 200 {
+            return Err("Memory is full. Remove a few things in Settings → Privacy.".into());
+        }
+        let added = self.db.execute("INSERT OR IGNORE INTO memories(fact,created_at) VALUES(?1,?2)", params![fact, now()]).map_err(|e| e.to_string())?;
+        Ok(added > 0)
+    }
+    pub fn memories(&self) -> Result<Vec<Memory>, String> {
+        let mut stmt = self.db.prepare("SELECT id,fact,created_at FROM memories ORDER BY id").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| Ok(Memory { id: r.get(0)?, fact: r.get(1)?, created_at: r.get(2)? })).map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+    pub fn forget(&self, id: i64) -> Result<(), String> {
+        self.db.execute("DELETE FROM memories WHERE id=?1", [id]).map(|_| ()).map_err(|e| e.to_string())
+    }
+    pub fn preference(&self, key: &str) -> Result<Option<String>, String> {
+        self.db.query_row("SELECT value FROM preferences WHERE key=?1", [key], |r| r.get(0)).optional().map_err(|e| e.to_string())
+    }
+    pub fn set_preference(&self, key: &str, value: &str) -> Result<(), String> {
+        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,?2)", [key, value]).map(|_| ()).map_err(|e| e.to_string())
     }
     pub fn delete_task(&self, id: &str) -> Result<(), String> {
         self.db.execute("DELETE FROM tasks WHERE id=?1", [id]).map(|_| ()).map_err(|e| e.to_string())
@@ -307,6 +335,7 @@ impl Store {
             "conversation": rows("SELECT data FROM tasks ORDER BY created_at")?,
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
+            "memories": self.memories()?,
             "activityLog": self.audit_entries()?,
         }))
     }
@@ -317,7 +346,7 @@ impl Store {
                 "BEGIN;
                  DELETE FROM tasks; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
                  DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
-                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit;
+                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
                  COMMIT;",
             )
             .map_err(|e| e.to_string())?;
@@ -556,6 +585,18 @@ mod tests {
         assert!(s.roots().unwrap().is_empty());
         assert_eq!(s.settings().unwrap().assistant_name, "Buntini");
         assert!(!s.onboarded().unwrap(), "setup runs again after erasing");
+    }
+    #[test]
+    fn memories_are_kept_once_and_can_be_forgotten() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        assert!(s.remember("Sam is  vegetarian").unwrap());
+        assert!(!s.remember("Sam is vegetarian").unwrap(), "the same fact isn't stored twice");
+        let saved = s.memories().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].fact, "Sam is vegetarian");
+        s.forget(saved[0].id).unwrap();
+        assert!(s.memories().unwrap().is_empty());
+        assert!(s.remember("no").is_err());
     }
     #[test]
     fn onboarding_is_needed_once_unless_asked_again() {

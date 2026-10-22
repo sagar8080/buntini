@@ -72,6 +72,7 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
       <div className="settings-section-heading"><h3>Out and about</h3></div>
       <Toggle label="Wander around the screen" checked={draft.petRoam} onChange={value => update('petRoam', value)} />
       <Toggle label="Offer a hand now and then" detail={draft.petAwareness ? undefined : 'Needs “Notice what I’m doing” in Privacy'} disabled={!draft.petAwareness} checked={draft.petNudges && draft.petAwareness} onChange={value => update('petNudges', value)} />
+      <Toggle label="Morning brief" detail="Today’s calendar and reminders when you first open me" checked={draft.morningBrief} onChange={value => update('morningBrief', value)} />
       <Toggle label="Desktop notifications" detail={notificationStatus === 'denied' ? 'Turned off in System Settings' : undefined} checked={draft.notificationsEnabled} onChange={value => void notifications(value)} />
     </section>
     <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={14} /><span>Run setup again</span><ChevronRight size={14} /></button>

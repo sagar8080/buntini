@@ -15,11 +15,11 @@ type Props = {
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
   onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void; onRestartSetup: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
-  privacyExtras?: React.ReactNode;
+  privacyExtras?: React.ReactNode; onForget: (id: number) => Promise<void>;
 };
 
 /** Settings in four tabs. Changes save on their own a moment after you stop editing. */
-export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras }: Props) {
+export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget }: Props) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('buntini-settings-tab') as Tab) || 'buntini'; } catch { return 'buntini'; } });
   const [draft, setDraft] = useState(data.settings);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -48,7 +48,7 @@ export default function SettingsView({ data, onSave, onError, onAddFolder, onRem
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}
-      {tab === 'privacy' && <PrivacyTab draft={draft} update={update} roots={data.roots} onAddFolder={onAddFolder} onRemoveFolder={onRemoveFolder} onAudit={onAudit} onError={onError}>{privacyExtras}</PrivacyTab>}
+      {tab === 'privacy' && <PrivacyTab draft={draft} update={update} roots={data.roots} onAddFolder={onAddFolder} onRemoveFolder={onRemoveFolder} onAudit={onAudit} onError={onError} memories={data.memories || []} onForget={onForget}>{privacyExtras}</PrivacyTab>}
     </div>
   </div>;
 }

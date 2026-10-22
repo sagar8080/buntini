@@ -36,7 +36,8 @@ pub fn history(turns: &[TaskRecord], boundary: Option<&str>, budget_tokens: usiz
         if boundary.is_some_and(|boundary| turn.created_at.as_str() <= boundary) {
             break;
         }
-        if turn.state != "completed" || turn.answer.trim().is_empty() || !shareable(turn, locality, settings) {
+        // Briefs have no prompt of their own and aren't part of the back-and-forth.
+        if turn.state != "completed" || turn.prompt.trim().is_empty() || turn.answer.trim().is_empty() || !shareable(turn, locality, settings) {
             continue;
         }
         let (prompt, answer) = (clip(turn.prompt.trim(), 1200), clip(turn.answer.trim(), 1500));

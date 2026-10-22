@@ -36,6 +36,8 @@ pub struct Settings {
     pub voice_id: String,
     pub voice_rate: u32,
     pub notifications_enabled: bool,
+    /// A short brief from today's calendar and reminders when you first open Buntini each day.
+    pub morning_brief: bool,
     pub monthly_budget_usd: f64,
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
@@ -85,6 +87,7 @@ impl Default for Settings {
             voice_id: String::new(),
             voice_rate: 180,
             notifications_enabled: false,
+            morning_brief: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
@@ -313,6 +316,13 @@ impl CardField {
         Self { label: label.into(), value: value.into() }
     }
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Memory {
+    pub id: i64,
+    pub fact: String,
+    pub created_at: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEntry {
@@ -445,6 +455,9 @@ pub struct Bootstrap {
     pub conversation_start: Option<String>,
     /// Whether first-run setup has finished.
     pub onboarded: bool,
+    pub memories: Vec<Memory>,
+    /// The morning brief is on and hasn't been shown today.
+    pub brief_due: bool,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
