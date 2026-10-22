@@ -115,9 +115,11 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit Buntini", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
             TrayIconBuilder::with_id("buntini-tray")
+                // A template silhouette, so macOS tints it for light and dark menu bars.
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
-                    "../icons/icon.png"
+                    "../icons/tray.png"
                 ))?)
+                .icon_as_template(true)
                 .tooltip("Buntini · ⌘⇧Space")
                 .menu(&menu)
                 .show_menu_on_left_click(false)

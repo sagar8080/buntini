@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="44 38 92 92">
+  <!-- Menu bar icon: the cat's head as a template silhouette (macOS tints it for light
+       and dark menu bars); eyes and nose are cut out. -->
+  <defs>
+    <mask id="face">
+      <rect x="0" y="0" width="180" height="180" fill="#fff"/>
+      <ellipse cx="74" cy="94" rx="7.5" ry="9" fill="#000"/>
+      <ellipse cx="106" cy="94" rx="7.5" ry="9" fill="#000"/>
+      <path d="M85.5 106C85.5 103.8 94.5 103.8 94.5 106C94.5 108.6 91.6 111 90 111C88.4 111 85.5 108.6 85.5 106Z" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#face)" fill="#000">
+    <path d="M57 82C53 68 52 54 55 45C56 41 60 40 63 42C71 48 78 55 84 63Z"/>
+    <path d="M123 82C127 68 128 54 125 45C124 41 120 40 117 42C109 48 102 55 96 63Z"/>
+    <path d="M52 98C49 76 66 58 90 58C114 58 131 76 128 98C130 112 120 128 90 128C60 128 50 112 52 98Z"/>
+  </g>
+</svg>
