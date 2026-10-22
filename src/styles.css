@@ -115,9 +115,11 @@ button svg { vertical-align: middle; }
 .dock-menu-wrap { position: relative; }
 .dock-menu-button { background: var(--panel); color: var(--accent); border: 1px solid var(--border); width: 18px; height: 18px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
 .dock-menu-button svg { width: 12px; height: 12px; }
-.dock-menu { position: absolute; bottom: 24px; right: 0; width: 150px; padding: 5px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow); }
+.dock-menu { position: absolute; bottom: 24px; right: 0; width: 160px; padding: 5px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow); }
 .dock-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; width: 100%; font-size: 11px; background: transparent; padding: 8px; border-radius: 5px; }
 .dock-menu > button:hover { background: var(--accent-soft); }
+.dock-menu > .dock-menu-quit { border-top: 1px solid var(--border); border-radius: 0 0 5px 5px; margin-top: 3px; }
+.dock-menu-quit kbd { margin-left: auto; font: inherit; font-size: 10px; color: var(--muted); }
 .back-link { display: flex; align-items: center; gap: 5px; background: transparent; font-size: 11px; padding: 0; color: var(--muted); margin-bottom: 16px; }
 .back-link:hover { color: var(--accent); }
 .thread { padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 16px; }

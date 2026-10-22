@@ -9,7 +9,17 @@ mod native {
     };
     use std::{ptr::NonNull, sync::Mutex};
 
+    /// macOS throws (and takes the app down) when a process that isn't inside an .app
+    /// bundle asks for the notification center, as `tauri dev` builds do.
+    fn bundled() -> bool {
+        std::env::current_exe().is_ok_and(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
+    }
+    const UNBUNDLED: &str = "Desktop notifications work in the installed app, not in a development build.";
+
     pub async fn request() -> Result<bool, String> {
+        if !bundled() {
+            return Err(UNBUNDLED.into());
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let tx = Mutex::new(Some(tx));
         {
@@ -30,6 +40,9 @@ mod native {
             .map_err(|_| "Notification permission response was lost.".into())
     }
     pub async fn status() -> Result<String, String> {
+        if !bundled() {
+            return Ok("unavailable".into());
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let tx = Mutex::new(Some(tx));
         {
@@ -56,6 +69,10 @@ mod native {
     }
     pub fn enqueue(title: &str, body: &str) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
+        if !bundled() {
+            let _ = tx.send(Err(UNBUNDLED.into()));
+            return rx;
+        }
         let tx = Mutex::new(Some(tx));
         {
             let content = UNMutableNotificationContent::new();

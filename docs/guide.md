@@ -28,7 +28,7 @@ The MLX environment and Qwen model were verified with real offline generation, t
 
 ## Everyday use
 
-- **The companion:** drag the character to move it; click to open or tuck away the bubble. The menu bar icon can show, hide, or quit Buntini. It floats above other windows and follows desktop Spaces.
+- **The companion:** drag the character to move it; click to open or tuck away the bubble. To quit, choose Quit Buntini in the companion’s ⋯ menu, press ⌘Q while the bubble is open, or right-click the menu bar icon (which can also show or hide Buntini). It floats above other windows and follows desktop Spaces.
 - **Ask anything:** one ongoing conversation. Your messages appear on the right and Buntini's replies (with any cards, files and sources) on the left; earlier turns are remembered within the brain's budget. **New topic** starts fresh: older messages stay visible above a divider but are no longer sent to the model. **Load earlier** pages back through history. Buntini can request the fixed, validated local tools; it cannot run a shell or modify files.
 - **My files:** add a folder in Settings first. Search matches names and small text documents within that scope. Revoke access at any time. Hidden files and symlinks are skipped; scans are bounded to 10,000 entries, 40 hits, and 64 KB per text file.
 - **My Mac:** read CPU, memory, storage, process usage, and supported FileVault/Gatekeeper/SIP status. These tools work without a model or network. Buntini does not claim the OS is up to date or perform security changes.

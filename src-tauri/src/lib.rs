@@ -167,6 +167,7 @@ pub fn run() {
             controller::new_topic,
             controller::finish_onboarding,
             controller::run_action,
+            controller::quit_app,
             apps::app_list,
             apps::check_app,
             advisor::mac_profile,

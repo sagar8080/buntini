@@ -439,6 +439,13 @@ pub async fn run_action(id: String, args: Value, state: State<'_, AppState>) -> 
     state.store.lock().unwrap().save_task(&task)?;
     Ok(task)
 }
+/// Quits Buntini from its own menu or ⌘Q. The exit handler in lib.rs stops the models
+/// and voice first, as the menu bar's Quit does.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 pub fn cancel_action(id: String, state: State<'_, AppState>) {
     state.pending_actions.lock().unwrap().remove(&id);

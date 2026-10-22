@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mic, Minus, MoreHorizontal, Play, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mic, Minus, MoreHorizontal, Play, Plus, Power, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
@@ -193,6 +193,10 @@ export default function App() {
         else if (speaking) { void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
         else if (page !== 'home') setPage('home');
         else if (expanded && !busy && !recording) void expand(false);
+      }
+      // Buntini has no menu bar of its own, so ⌘Q is handled here while the panel has focus.
+      if (desktop && event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'q') {
+        event.preventDefault(); void command('quit_app').catch(error => setError(errorMessage(error)));
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault(); setPage('home'); void expand(true);
@@ -460,7 +464,7 @@ export default function App() {
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} speed={world.speed} /></button>
-        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button></div>}</div></div>}
+        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void command('quit_app').catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>
     </div>
