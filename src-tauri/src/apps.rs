@@ -34,7 +34,7 @@ pub const APPS: [App; 12] = [
     App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
     App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
-    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Open a search in Spotify"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
     App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None, note: None },
     App { id: "safari", name: "Safari", can: &["List and find your open tabs", "Switch to a tab", "Read the page you’re on"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.") },
     App { id: "chrome", name: "Google Chrome", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
@@ -298,7 +298,8 @@ const MUSIC: &str = r#"on run argv
 end run
 "#;
 // argv: action, query (already a spotify:search: address). Spotify can't search from
-// AppleScript, so a request to play something opens its search for the user to pick.
+// AppleScript, so a request to play something opens its search; `play_on_spotify` then
+// presses play on the best match.
 const SPOTIFY: &str = r#"on run argv
   set act to item 1 of argv
   set q to item 2 of argv
@@ -601,10 +602,34 @@ async fn find_notes(query: &str) -> Result<String, String> {
     Ok(format!("Notes mentioning “{query}”:\n{}", lines.collect::<Vec<_>>().join("\n")))
 }
 
-async fn control_music(app: &str, action: &str, query: &str) -> Result<String, String> {
+/// Presses play on the search result that best matches `words` in Spotify's window, through
+/// the helper (macOS accessibility). Returns "Song by Artist", or why it couldn't.
+async fn play_on_spotify(helper_path: &Path, words: &str) -> Result<String, String> {
+    if !helper_path.is_file() {
+        return Err("Playing a song you name needs Buntini’s Apple helper, which isn’t on this Mac.".into());
+    }
+    let mut command = Command::new(helper_path);
+    command.arg("--spotify-play").arg(words);
+    match crate::actions::output(command, 20).await {
+        Ok(output) => Ok(output.lines().find_map(|line| serde_json::from_str::<Value>(line).ok()).map(|line| field(&line, "played")).unwrap_or_default()),
+        Err(error) if error.contains("not-trusted") => Err("To press play for you, allow Buntini under System Settings → Privacy & Security → Accessibility, then ask again.".into()),
+        Err(error) if error.contains("no-result") => Err("I couldn’t find a matching song in Spotify’s results.".into()),
+        Err(error) => Err(error),
+    }
+}
+
+async fn control_music(app: &str, action: &str, query: &str, helper_path: &Path) -> Result<String, String> {
     let name = if app == "spotify" { "Spotify" } else { "Music" };
+    let words = query.to_string();
     let query = if app == "spotify" && !query.is_empty() { format!("spotify:search:{}", percent(query)) } else { query.to_string() };
     let result = osascript(if app == "spotify" { SPOTIFY } else { MUSIC }, &[action.into(), query.clone()], 20).await?;
+    if result.trim() == "search" {
+        return Ok(match play_on_spotify(helper_path, &words).await {
+            Ok(song) if !song.is_empty() => format!("Playing {song} in Spotify."),
+            Ok(_) => "Started the best match in Spotify.".into(),
+            Err(why) => format!("Opened Spotify’s search for that, but didn’t start it: {why}"),
+        });
+    }
     let parts: Vec<&str> = result.trim().split('\t').collect();
     Ok(match (action, parts.as_slice()) {
         (_, ["closed"]) => format!("{name} isn’t open, so nothing is playing."),
@@ -613,7 +638,6 @@ async fn control_music(app: &str, action: &str, query: &str) -> Result<String, S
         (_, ["playlist", playlist]) => format!("Playing the “{playlist}” playlist in {name}."),
         (_, ["track", track, artist]) => format!("Playing “{track}” by {artist} in {name}."),
         (_, ["notfound"]) => format!("Nothing in your {name} library matches that."),
-        (_, ["search"]) => format!("Opened Spotify’s search for that. Pick what to play there; Spotify doesn’t let other apps start a search result."),
         ("pause", _) => format!("Paused {name}."),
         ("next", _) => format!("Skipped to the next track in {name}."),
         ("previous", _) => format!("Went back a track in {name}."),
@@ -688,7 +712,7 @@ pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path, sett
         "read_calendar" => Ok(describe_events(&get("day"), &events(helper_path, &get("day")).await?)),
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
-        "control_music" => control_music(&get("app"), &get("action"), &get("query")).await,
+        "control_music" => control_music(&get("app"), &get("action"), &get("query"), helper_path).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
         "read_page" => read_page().await,
@@ -749,6 +773,15 @@ pub async fn check_app(id: String, state: tauri::State<'_, crate::controller::Ap
     match id.as_str() {
         "calendar" => events(&helper_path, &chrono::Local::now().format("%Y-%m-%d").to_string()).await.map(|_| "Calendar is ready.".into()),
         "reminders" => reminders(&helper_path).await.map(|_| "Reminders is ready.".into()),
+        // Pressing play on a song you name uses Accessibility; ask for it now.
+        "spotify" => {
+            let mut command = Command::new(&helper_path);
+            command.arg("--accessibility");
+            Ok(match crate::actions::output(command, 10).await {
+                Ok(_) => "Spotify is ready, including playing songs you name.".into(),
+                Err(_) => "To play songs you name, allow Buntini under System Settings → Privacy & Security → Accessibility. Play, pause and skip work without it.".into(),
+            })
+        }
         _ => Ok(app(&id).map(|app| format!("macOS will ask you once, the first time Buntini uses {}.", app.name)).unwrap_or_default()),
     }
 }

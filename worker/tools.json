@@ -571,7 +571,7 @@
   },
   "control_music": {
     "name": "control_music",
-    "description": "Control music in the Music app or Spotify: say what's playing, play, pause, skip to the next track or go back. With play and a query, Music plays a matching playlist or song from the library; Spotify opens its search for the user to pick.",
+    "description": "Control music in the Music app or Spotify: say what's playing, play, pause, skip to the next track or go back. With play and a query, Music plays a matching playlist or song from the library, and Spotify plays the best match from its search.",
     "parameters": {
       "type": "object",
       "properties": {

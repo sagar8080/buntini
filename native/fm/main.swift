@@ -5,6 +5,8 @@
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`.
+import AppKit
+import ApplicationServices
 import AVFoundation
 import EventKit
 import Foundation
@@ -309,9 +311,89 @@ enum Agenda {
     }
 }
 
+/// `--spotify-play WORDS`: Spotify can't start a search result from AppleScript, so once
+/// Buntini has opened Spotify's search, this presses play on the result that best matches
+/// the words, as a person would, through the macOS accessibility API. `--accessibility`
+/// only checks (and asks for) that permission. Exit 4: Buntini isn't allowed under
+/// Privacy & Security → Accessibility; 5: nothing matching to play.
+enum SpotifyPlay {
+    static func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var result: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, name as CFString, &result) == .success ? result : nil
+    }
+
+    static func text(_ element: AXUIElement, _ name: String) -> String {
+        value(element, name) as? String ?? ""
+    }
+
+    static func trusted(ask: Bool) -> Bool {
+        AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: ask] as CFDictionary)
+    }
+
+    /// Play buttons in Spotify's window, in page order, labelled "Play <song> by <artist>".
+    static func playButtons(_ app: AXUIElement) -> [(AXUIElement, String)] {
+        var queue = value(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        var found: [(AXUIElement, String)] = []
+        var index = 0
+        while index < queue.count && index < 40_000 {
+            let element = queue[index]
+            index += 1
+            if text(element, kAXRoleAttribute) == kAXButtonRole {
+                let label = [text(element, kAXDescriptionAttribute), text(element, kAXTitleAttribute)].first { $0.hasPrefix("Play ") } ?? ""
+                if label.count > 5 { found.append((element, String(label.dropFirst(5)))) }
+            }
+            queue.append(contentsOf: value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [])
+        }
+        return found
+    }
+
+    static func words(_ text: String) -> Set<String> {
+        Set(text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 1 })
+    }
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        guard trusted(ask: true) else {
+            FileHandle.standardError.write(Data("not-trusted\n".utf8))
+            return 4
+        }
+        if arguments.contains("--accessibility") { return 0 }
+        let index = arguments.firstIndex(of: "--spotify-play")! + 1
+        let wanted = words(index < arguments.count ? arguments[index] : "")
+        guard !wanted.isEmpty, let spotify = NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").first else {
+            FileHandle.standardError.write(Data("no-result\n".utf8))
+            return 5
+        }
+        let app = AXUIElementCreateApplication(spotify.processIdentifier)
+        // Spotify draws its window with Chromium, which only builds its accessibility
+        // tree once an assistive app asks for it.
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        // The search results take a moment to load; the best match is the earliest button
+        // whose label shares the most words with the request (most often the top result).
+        let deadline = Date().addingTimeInterval(8)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        while Date() < deadline {
+            let scored = playButtons(app).map { ($0, $1, words($1).intersection(wanted).count) }
+            if let best = scored.max(by: { $0.2 < $1.2 }), best.2 * 2 >= wanted.count {
+                let pick = scored.first { $0.2 == best.2 }!
+                if AXUIElementPerformAction(pick.0, kAXPressAction as CFString) == .success {
+                    emit(["played": pick.1])
+                    return 0
+                }
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        FileHandle.standardError.write(Data("no-result\n".utf8))
+        return 5
+    }
+}
+
 @main
 struct Helper {
     static func main() async {
+        if CommandLine.arguments.contains("--spotify-play") || CommandLine.arguments.contains("--accessibility") {
+            exit(await SpotifyPlay.run(CommandLine.arguments))
+        }
         if CommandLine.arguments.contains("--events") || CommandLine.arguments.contains("--reminders") {
             exit(await Agenda.run(CommandLine.arguments))
         }
