@@ -47,6 +47,8 @@ export interface Settings {
   dailySearchLimit: number;
   freeTierOnly: boolean;
   speakResponses: boolean;
+  /** Answer out loud when the user asked by voice. */
+  speakVoiceReplies: boolean;
   theme: 'system' | 'light' | 'dark';
   reducedMotion: boolean;
   ebayMarketplace: string;

@@ -251,7 +251,8 @@ export default function App() {
     catch (error) { const message = errorMessage(error); if (message !== 'Task cancelled.') setError(message); setPetState('idle'); }
     finally { setPlanning(false); if (activeId.current === planId) activeId.current = ''; }
   }, []);
-  const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string) => {
+  // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
+  const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
     if (!prompt.trim() || busy || planning || recording || transcribing || voiceStoppingRef.current) return;
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
@@ -259,7 +260,7 @@ export default function App() {
     }
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
-    const useSpeech = !!data?.settings.speakResponses;
+    const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
     let streamedText = '', answerSoFar = '', liveId = '', goOnline = false, askAction = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
@@ -301,7 +302,7 @@ export default function App() {
       if (goOnline) void planOnline(prompt.trim(), false);
       if (askAction) setPetState('approval');
     }
-  }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses]);
+  }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
   nudgeAction.current = action => {
     if (action === 'checkMac') { void expand(true); void submit('How is my Mac doing?', 'system'); }
     else if (action === 'lookUp') { setMode('web'); void expand(true); }
@@ -341,7 +342,7 @@ export default function App() {
       if (version !== voiceVersion.current) return;
       // What was heard is sent right away, as with any voice assistant.
       setPage('home');
-      if (text.trim()) void submit(text.trim(), mode);
+      if (text.trim()) void submit(text.trim(), mode, undefined, true);
       else setNotice('I didn’t catch any words. Try again a little closer to the mic.');
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
     finally { if (version === voiceVersion.current) { setTranscribing(false); setPetState('idle'); recordPromise.current = null; } }

@@ -95,7 +95,8 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
       <div className="voice-row"><select aria-label="Speaking voice" value={draft.voiceId} onChange={event => update('voiceId', event.target.value)}><option value="">System voice</option>{voices.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.language}</option>)}</select>
         <button type="button" className="icon-button" aria-label="Try this voice" title="Try this voice" disabled={previewing || !desktop} onClick={async () => { setPreviewing(true); try { await onPreviewVoice(draft.voiceId, draft.voiceRate, `Hi, I'm ${draft.assistantName || 'your companion'}.`); } catch (error) { onError(errorMessage(error)); } finally { setPreviewing(false); } }}>{previewing ? <LoaderCircle size={14} className="spin" /> : <AudioLines size={14} />}</button></div>
       <label className="range-row"><span>Pace</span><input type="range" min="100" max="300" step="10" value={draft.voiceRate} onChange={event => update('voiceRate', Number(event.target.value))} aria-label="Speaking pace" /><span>{draft.voiceRate}</span></label>
-      <Toggle label="Read replies aloud" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
+      <Toggle label="Answer out loud when I talk" checked={draft.speakVoiceReplies || draft.speakResponses} disabled={draft.speakResponses} onChange={value => update('speakVoiceReplies', value)} />
+      <Toggle label="Read every reply aloud" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Out and about</h3></div>

@@ -17,6 +17,8 @@ pub struct Settings {
     /// Stay inside the search provider's free monthly allowance.
     pub free_tier_only: bool,
     pub speak_responses: bool,
+    /// Answer out loud when the user asked by voice, even if replies aren't always read aloud.
+    pub speak_voice_replies: bool,
     pub theme: String,
     pub reduced_motion: bool,
     pub assistant_name: String,
@@ -82,6 +84,7 @@ impl Default for Settings {
             daily_search_limit: 30,
             free_tier_only: true,
             speak_responses: false,
+            speak_voice_replies: true,
             theme: "system".into(),
             reduced_motion: false,
             assistant_name: "Buntini".into(),
