@@ -34,30 +34,33 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
   const leftEar = coat.point ?? coat.patchA ?? coat.base;
   const rightEar = coat.point ?? coat.patchB ?? coat.base;
   const line = { stroke: coat.outline, strokeWidth: 1.8, strokeLinejoin: 'round' as const };
+  // The outline layer is drawn 3.6 wide under the fills, which shows the same 1.8 line as `line`.
+  const paint = (outline: boolean, color: string) => outline ? { fill: coat.outline, stroke: coat.outline, strokeWidth: 3.6, strokeLinejoin: 'round' as const } : { fill: color };
 
   // A walking leg is jointed: the upper leg turns at the hip (x, 131), the lower leg at
   // the knee and the paw at the ankle, so a step can plant, push, fold and reach.
   // Each joint sits at its group's origin; CSS animates the three groups (styles.css).
-  // The leg is drawn twice, outline underneath and fill on top, so the joints merge into
-  // one smooth silhouette instead of showing seams.
-  const leg = (x: number, id: 'nf' | 'nb' | 'ff' | 'fb', end: 'front' | 'back', far: boolean) => {
+  // Legs are drawn in two layers, outline underneath and fill on top (see `paint`), so
+  // the joints, and the near legs' tops, merge into one silhouette without seams.
+  const leg = (x: number, id: 'nf' | 'nb' | 'ff' | 'fb', end: 'front' | 'back', far: boolean, outline: boolean) => {
     const fill = `url(#${idPrefix}-leg${far ? '-far' : ''})`;
     const pawFill = far ? coat.shade : paws;
-    const layer = (outline: boolean) => {
-      const paint = (color: string) => outline ? { fill: coat.outline, stroke: coat.outline, strokeWidth: 3.6, strokeLinejoin: 'round' as const } : { fill: color };
+    const layer = () => {
       return <g className={`walk-leg leg-${id} ${end}`}>
-        <path d="M-6.6 -4C-6.6 -7 6.6 -7 6.6 -4L4.9 13.2C4.6 16.2 -4.6 16.2 -4.9 13.2Z" {...paint(fill)} />
+        <path d="M-6.6 -4C-6.6 -7 6.6 -7 6.6 -4L4.9 13.2C4.6 16.2 -4.6 16.2 -4.9 13.2Z" {...paint(outline, fill)} />
         <g transform="translate(0 14)"><g className="walk-shin">
-          <path d="M-4.6 -2.6C-4.6 -4.6 4.6 -4.6 4.6 -2.6L3.6 12.2C3.5 14.4 -3.5 14.4 -3.6 12.2Z" {...paint(fill)} />
+          <path d="M-4.6 -2.6C-4.6 -4.6 4.6 -4.6 4.6 -2.6L3.6 12.2C3.5 14.4 -3.5 14.4 -3.6 12.2Z" {...paint(outline, fill)} />
           <g transform="translate(0 13)"><g className="walk-paw">
-            <path d="M-7.4 1.8C-7.4 -1.2 -4.6 -3 -1.2 -3C2.6 -3 4.8 -1.2 4.8 1.8C4.8 4.3 2.4 5.4 -1.4 5.4C-5.1 5.4 -7.4 4.3 -7.4 1.8Z" {...paint(pawFill)} />
+            <path d="M-7.4 1.8C-7.4 -1.2 -4.6 -3 -1.2 -3C2.6 -3 4.8 -1.2 4.8 1.8C4.8 4.3 2.4 5.4 -1.4 5.4C-5.1 5.4 -7.4 4.3 -7.4 1.8Z" {...paint(outline, pawFill)} />
             {!outline && !far && <path d="M-4.6 2.6V4.6M-1.4 2.8V5" stroke={coat.outline} strokeWidth="1" strokeLinecap="round" strokeOpacity=".5" />}
           </g></g>
         </g></g>
       </g>;
     };
-    return <g transform={`translate(${x} 131)`} key={id}>{layer(true)}{layer(false)}</g>;
+    return <g transform={`translate(${x} 131)`} key={id}>{layer()}</g>;
   };
+  const torso = 'M96 128C96 116 106 110 120 110H134C146 110 153 117 153 128C153 139 146 145 134 145H112C102 145 96 139 96 128Z';
+  const tailBase = 'M150 122C164 118 170 104 166 90', tailTip = 'M166 90C164 83 159 81 157 85';
   const ear = (fill: string) => <>
     <path d="M57 82C53 68 52 54 55 45C56 41 60 40 63 42C71 48 78 55 84 63Z" fill={fill} {...line} />
     <path d="M61 73C59 63 59 55 60 49C66 53 71 58 76 63Z" fill={coat.ear} />
@@ -76,6 +79,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <linearGradient id={`${id}-coat`} x1="90" y1="56" x2="90" y2="164" gradientUnits="userSpaceOnUse"><stop stopColor={coat.base} /><stop offset=".62" stopColor={coat.base} /><stop offset="1" stopColor={coat.shade} /></linearGradient>
       <linearGradient id={`${id}-leg`} x1="0" y1="0" x2="1" y2="0"><stop stopColor={coat.point ?? coat.base} /><stop offset=".65" stopColor={coat.point ?? coat.base} /><stop offset="1" stopColor={coat.shade} /></linearGradient>
       <linearGradient id={`${id}-leg-far`} x1="0" y1="0" x2="1" y2="0"><stop stopColor={coat.shade} /><stop offset="1" stopColor={coat.outline} stopOpacity=".3" /></linearGradient>
+      <linearGradient id={`${id}-belly`} x1="100" y1="0" x2="136" y2="0" gradientUnits="userSpaceOnUse"><stop stopColor={coat.belly} /><stop offset=".4" stopColor={coat.belly} /><stop offset="1" stopColor={coat.belly} stopOpacity="0" /></linearGradient>
       <radialGradient id={`${id}-mask`} cx="90" cy="106" r="27" gradientUnits="userSpaceOnUse"><stop stopColor={coat.point} stopOpacity=".92" /><stop offset=".55" stopColor={coat.point} stopOpacity=".55" /><stop offset="1" stopColor={coat.point} stopOpacity="0" /></radialGradient>
     </defs>
     <ellipse className="pet-shadow cat-sit-shadow" cx="90" cy="165" rx="38" ry="5" fill="#1D1720" fillOpacity=".18" />
@@ -109,30 +113,33 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
 
       {/* Walking body, side-on behind the head: far legs, tail, torso, near legs. */}
       <g className="cat-walkbody">
-        {leg(111, 'ff', 'front', true)}
-        {leg(146, 'fb', 'back', true)}
-        <g className="walk-tail">{[coat.outline, tail].map((color, index) => <g key={index}>
-          <path d="M150 122C164 118 170 104 166 90" stroke={color} strokeWidth={index ? 9.5 : 13} strokeLinecap="round" />
-          <g className="walk-tail-tip"><path d="M166 90C164 83 159 81 157 85" stroke={color} strokeWidth={index ? 9.5 : 13} strokeLinecap="round" /></g>
+        {[true, false].map(outline => <g key={String(outline)}>{leg(111, 'ff', 'front', true, outline)}{leg(146, 'fb', 'back', true, outline)}</g>)}
+        {/* Tail, near legs, neck and torso share one outline: every outline goes down
+            first, then every fill, so the parts merge into a single body with no seams. */}
+        {[true, false].map(outline => <g key={String(outline)}>
+          <g className="walk-tail">
+            <path d={tailBase} stroke={outline ? coat.outline : tail} strokeWidth={outline ? 13 : 9.5} strokeLinecap="round" />
+            <g className="walk-tail-tip"><path d={tailTip} stroke={outline ? coat.outline : tail} strokeWidth={outline ? 13 : 9.5} strokeLinecap="round" /></g>
+          </g>
+          {leg(101, 'nf', 'front', false, outline)}
+          {leg(136, 'nb', 'back', false, outline)}
+          <path d="M86 110C94 105 106 108 113 116L115 132C109 140 98 141 92 134C86 127 83 117 86 110Z" {...paint(outline, coat.base)} />
+          <path d={torso} {...paint(outline, `url(#${id}-coat)`)} />
         </g>)}
-          {tabby && <path d="M150 122C164 118 170 104 166 90" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 6" />}
-          {tabby && <g className="walk-tail-tip"><path d="M166 90C164 83 159 81 157 85" stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 5" strokeDashoffset="-2" /></g>}
-        </g>
-        {leg(101, 'nf', 'front', false)}
-        {leg(136, 'nb', 'back', false)}
-        <path d="M96 128C96 116 106 110 120 110H134C146 110 153 117 153 128C153 139 146 145 134 145H112C102 145 96 139 96 128Z" fill={`url(#${id}-coat)`} {...line} />
+        {tabby && <g className="walk-tail">
+          <path d={tailBase} stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 6" />
+          <g className="walk-tail-tip"><path d={tailTip} stroke={coat.marks} strokeWidth="9.5" strokeDasharray="4 5" strokeDashoffset="-2" /></g>
+        </g>}
         {look.coat === 'calico' && <g>
           <path d="M116 111C124 109 132 111 135 116C129 121 119 121 113 117C112 114 113 112 116 111Z" fill={coat.patchA} />
           <path d="M140 112C148 114 153 120 153 128C147 128 141 124 138 118Z" fill={coat.patchB} />
         </g>}
-        <path d="M103 134C113 141 133 142 148 135C146 141 141 145 134 145H112C107 145 104 140 103 134Z" fill={coat.belly} fillOpacity=".75" />
-        <path d="M96.5 124C100 121.5 105.5 123 107 128C108.2 133 106 139 101.5 142.5C98.6 139.6 96.8 133.5 96.5 124Z" fill={coat.belly} />
+        {/* A cream chest that fades along the belly, like the seated cat's front. */}
+        <path d="M96 122C101 119 108 122 110 129C111 133 110 137 108 141C116 143 126 143 136 141C134 144 133 145 130 145H112C104 145 97 140 96 122Z" fill={`url(#${id}-belly)`} />
         {look.coat === 'tuxedo' && <path d="M96 128C96 138 102 144 110 145C113 137 112 124 105 117C100 119 96 123 96 128Z" fill={coat.belly} />}
         {tabby && <path d="M118 111C119 116 118 120 116 123M128 111C129 116 128 120 126 123M138 113C139 117 138 121 136 124" stroke={coat.marks} strokeWidth="2.4" strokeLinecap="round" />}
-        {/* Shoulder and haunch: soft shading where the legs join, so they read as part of a body. */}
-        <path d="M140 120C148 120 152 128 150 137C148 142 143 144 138 144C143 137 144 127 140 120Z" fill={coat.shade} fillOpacity=".45" />
-        <path d="M129 121C137 117 146 121 148 130" stroke={coat.shade} strokeWidth="1.6" strokeLinecap="round" strokeOpacity=".7" />
-        <path d="M107 120C101 123 99 130 101 137" stroke={coat.shade} strokeWidth="1.6" strokeLinecap="round" strokeOpacity=".7" />
+        {/* A soft shadow over the haunch gives the back leg a thigh. */}
+        <path d="M140 120C148 120 152 128 150 137C148 142 143 144 138 144C143 137 144 127 140 120Z" fill={coat.shade} fillOpacity=".3" />
       </g>
 
       {/* Head and collar lean forward a touch while walking. */}
