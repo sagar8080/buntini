@@ -74,6 +74,8 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 probe.state::<controller::AppState>().models.probe_apple().await;
             });
+            // Have the local model read its instructions now, so the first reply is quick.
+            controller::warm_up_soon(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 let profile = app
                     .state::<controller::AppState>()
