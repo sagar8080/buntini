@@ -605,5 +605,73 @@
       ],
       "additionalProperties": false
     }
+  },
+  "browser_tabs": {
+    "name": "browser_tabs",
+    "description": "List the user's open browser tabs (title and address) in Safari, Chrome, Brave, Edge or Arc, or only those mentioning some words. Private windows are skipped.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "browser": {
+          "type": "string",
+          "enum": [
+            "safari",
+            "chrome",
+            "brave",
+            "edge",
+            "arc"
+          ],
+          "description": "Which browser. Leave out to use every allowed browser."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Words from a tab's title or address. Leave out to list every tab."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "switch_tab": {
+    "name": "switch_tab",
+    "description": "Bring an open browser tab to the front: the first tab whose title or address mentions the words.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "browser": {
+          "type": "string",
+          "enum": [
+            "safari",
+            "chrome",
+            "brave",
+            "edge",
+            "arc"
+          ],
+          "description": "Which browser. Leave out to use every allowed browser."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Words from the tab's title or address."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "read_page": {
+    "name": "read_page",
+    "description": "Read the text of the web page showing in Safari's front window, to summarise it or answer questions about it.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
   }
 }

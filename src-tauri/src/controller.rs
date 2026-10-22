@@ -1054,7 +1054,7 @@ async fn execute_with_settings(
                 phase(channel, &task.id, "working");
                 tool_event(channel, &task.id, &name);
                 state.audit(&format!("app.{name}"), app.id);
-                let result = match crate::apps::run(&name, &args, state.models.apple_helper()).await {
+                let result = match crate::apps::run(&name, &args, state.models.apple_helper(), &settings).await {
                     Ok(text) => text,
                     Err(error) => format!("Couldn’t use {}: {error}", app.name),
                 };

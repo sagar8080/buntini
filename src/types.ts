@@ -108,7 +108,7 @@ export interface PriceWatch { id: string; url: string; label: string; currency: 
 export interface Voice { id: string; name: string; language: string }
 export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean; tool: string; arguments: Record<string, unknown>; service: string; summary: string; sends: CardField[]; host: string; usesKey: boolean; note?: string }
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
-export interface AppStatus { id: string; name: string; can: string[]; installed: boolean; allowed: boolean }
+export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
 export interface Memory { id: number; fact: string; createdAt: string }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }

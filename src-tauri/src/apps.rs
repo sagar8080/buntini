@@ -4,9 +4,11 @@
 //! and, for Calendar and Reminders, EventKit in the `buntini-fm` helper so repeating
 //! events are included. macOS still asks once per app before the first use.
 //!
-//! Reading (email, the day's events, open reminders, notes, what's playing) and playback
-//! controls run straight away for an allowed app; anything that adds or writes goes
-//! through the approval sheet in `actions.rs`.
+//! Reading (email, the day's events, open reminders, notes, what's playing, open browser
+//! tabs and the Safari page) plus playback controls and switching tabs run straight away
+//! for an allowed app; anything that adds or writes goes through the approval sheet in
+//! `actions.rs`. Private and incognito browser windows are skipped wherever the browser
+//! says which they are.
 use crate::{privacy::Share, types::Settings};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -22,20 +24,29 @@ pub struct App {
     pub tools: &'static [&'static str],
     /// The kind of data it reads, for what external models may see.
     pub share: Option<Share>,
+    /// Something the user should know before allowing it.
+    pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 7] = [
-    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email"], share: Some(Share::Mail) },
-    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar) },
-    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar) },
-    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes) },
-    App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music) },
-    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Open a search in Spotify"], tools: &["control_music"], share: Some(Share::Music) },
-    App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None },
+pub const APPS: [App; 12] = [
+    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email"], share: Some(Share::Mail), note: None },
+    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar), note: None },
+    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
+    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
+    App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Open a search in Spotify"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None, note: None },
+    App { id: "safari", name: "Safari", can: &["List and find your open tabs", "Switch to a tab", "Read the page you’re on"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.") },
+    App { id: "chrome", name: "Google Chrome", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "brave", name: "Brave Browser", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "edge", name: "Microsoft Edge", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "arc", name: "Arc", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
 ];
 
+pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
+
 /// Tools that read or control an app directly, without an approval sheet.
-pub const READ_TOOLS: [&str; 5] = ["read_mail", "read_calendar", "read_reminders", "find_notes", "control_music"];
+pub const READ_TOOLS: [&str; 8] = ["read_mail", "read_calendar", "read_reminders", "find_notes", "control_music", "browser_tabs", "switch_tab", "read_page"];
 
 pub fn app(id: &str) -> Option<&'static App> {
     APPS.iter().find(|app| app.id == id)
@@ -49,18 +60,27 @@ pub fn allowed(settings: &Settings, id: &str) -> bool {
     settings.apps.iter().any(|allowed| allowed == id)
 }
 
-/// The app a call uses: music controls name theirs; every other tool belongs to one app.
+/// The app a call uses: music and browser calls may name theirs; every other tool
+/// belongs to one app. Tab calls that name no browser use every allowed browser.
 pub fn for_call(tool: &str, args: &Map<String, Value>) -> Option<&'static App> {
-    if tool == "control_music" {
-        return app(args.get("app").and_then(Value::as_str).unwrap_or("music"));
+    match tool {
+        "control_music" => app(args.get("app").and_then(Value::as_str).unwrap_or("music")),
+        "browser_tabs" | "switch_tab" => app(args.get("browser").and_then(Value::as_str).unwrap_or("safari")),
+        _ => APPS.iter().find(|app| app.tools.contains(&tool)),
     }
-    APPS.iter().find(|app| app.tools.contains(&tool))
+}
+
+/// Allowed, installed browsers a tab call may look in.
+fn browsers_for(settings: &Settings, args: &Map<String, Value>) -> Vec<&'static App> {
+    let named = args.get("browser").and_then(Value::as_str);
+    usable(settings).into_iter().filter(|app| BROWSERS.contains(&app.id) && named.is_none_or(|id| id == app.id)).collect()
 }
 
 /// Whether the user allowed the app behind this call, and it is on this Mac.
 pub fn permits(settings: &Settings, tool: &str, args: &Map<String, Value>) -> bool {
     match tool {
         "open_app" | "open_link" => true,
+        "browser_tabs" | "switch_tab" => !browsers_for(settings, args).is_empty(),
         _ => for_call(tool, args).is_some_and(|app| allowed(settings, app.id) && installed(app)),
     }
 }
@@ -101,6 +121,9 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "read_reminders" => &[],
         "find_notes" => &["query"],
         "control_music" => &["app", "action", "query"],
+        "browser_tabs" => &["browser", "query"],
+        "switch_tab" => &["browser", "query"],
+        "read_page" => &[],
         _ => return Err(format!("“{tool}” isn’t an app Buntini can use.")),
     };
     if let Some(extra) = args.keys().find(|key| !allowed.contains(&key.as_str())) {
@@ -145,6 +168,21 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                 if let Some(query) = text(args, "query", 100)? {
                     out.insert("query".into(), query.into());
                 }
+            }
+        }
+        "browser_tabs" | "switch_tab" => {
+            if let Some(browser) = text(args, "browser", 10)? {
+                if !BROWSERS.contains(&browser.as_str()) {
+                    return Err("Tabs work with Safari, Chrome, Brave, Edge and Arc.".into());
+                }
+                out.insert("browser".into(), browser.into());
+            }
+            match text(args, "query", 100)? {
+                Some(query) => {
+                    out.insert("query".into(), query.into());
+                }
+                None if tool == "switch_tab" => return Err("Say which tab to switch to, by words from its title or address.".into()),
+                None => {}
             }
         }
         _ => {}
@@ -280,6 +318,159 @@ const SPOTIFY: &str = r#"on run argv
     end if
   end tell
   return "ok"
+end run
+"#;
+
+// Browser tabs. "APP" is replaced with the browser's name from `APPS`, never user text;
+// the search words arrive in argv. Nothing launches a browser that isn't open. Each line:
+// window number, whether the tab is the one showing, title, address.
+const CHROMIUM_TABS: &str = r#"on run argv
+  set q to item 1 of argv
+  set out to {}
+  if application "APP" is not running then return ""
+  tell application "APP"
+    set wi to 0
+    repeat with w in windows
+      set wi to wi + 1
+      if mode of w is not "incognito" then
+        set showing to active tab index of w
+        set ti to 0
+        repeat with t in tabs of w
+          set ti to ti + 1
+          set n to my clean(title of t)
+          set u to my clean(URL of t)
+          if q is "" or n contains q or u contains q then set end of out to (wi as text) & tab & ((ti = showing) as text) & tab & n & tab & u
+          if (count of out) ≥ 80 then exit repeat
+        end repeat
+      end if
+    end repeat
+  end tell
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+const CHROMIUM_SWITCH: &str = r#"on run argv
+  set q to item 1 of argv
+  if application "APP" is not running then return ""
+  tell application "APP"
+    repeat with w in windows
+      if mode of w is not "incognito" then
+        set ti to 0
+        repeat with t in tabs of w
+          set ti to ti + 1
+          if (title of t contains q) or (URL of t contains q) then
+            set active tab index of w to ti
+            set index of w to 1
+            activate
+            return my clean(title of t)
+          end if
+        end repeat
+      end if
+    end repeat
+  end tell
+  return ""
+end run
+"#;
+const ARC_TABS: &str = r#"on run argv
+  set q to item 1 of argv
+  set out to {}
+  if application "Arc" is not running then return ""
+  tell application "Arc"
+    set wi to 0
+    repeat with w in windows
+      set wi to wi + 1
+      if not (incognito of w) then
+        repeat with t in tabs of w
+          set n to my clean(title of t)
+          set u to my clean(URL of t)
+          if q is "" or n contains q or u contains q then set end of out to (wi as text) & tab & "false" & tab & n & tab & u
+          if (count of out) ≥ 80 then exit repeat
+        end repeat
+      end if
+    end repeat
+  end tell
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+const ARC_SWITCH: &str = r#"on run argv
+  set q to item 1 of argv
+  if application "Arc" is not running then return ""
+  tell application "Arc"
+    repeat with w in windows
+      if not (incognito of w) then
+        repeat with t in tabs of w
+          if (title of t contains q) or (URL of t contains q) then
+            tell t to select
+            activate
+            return my clean(title of t)
+          end if
+        end repeat
+      end if
+    end repeat
+  end tell
+  return ""
+end run
+"#;
+// Safari can't say which windows are private (Settings says so before it's allowed).
+const SAFARI_TABS: &str = r#"on run argv
+  set q to item 1 of argv
+  set out to {}
+  if application "Safari" is not running then return ""
+  tell application "Safari"
+    set wi to 0
+    repeat with w in windows
+      set wi to wi + 1
+      try
+        set showing to index of current tab of w
+        set ti to 0
+        repeat with t in tabs of w
+          set ti to ti + 1
+          set n to my clean(name of t)
+          set u to my clean(URL of t)
+          if q is "" or n contains q or u contains q then set end of out to (wi as text) & tab & ((ti = showing) as text) & tab & n & tab & u
+          if (count of out) ≥ 80 then exit repeat
+        end repeat
+      end try
+    end repeat
+  end tell
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+const SAFARI_SWITCH: &str = r#"on run argv
+  set q to item 1 of argv
+  if application "Safari" is not running then return ""
+  tell application "Safari"
+    repeat with w in windows
+      try
+        repeat with t in tabs of w
+          if (name of t contains q) or (URL of t contains q) then
+            set current tab of w to t
+            set index of w to 1
+            activate
+            return my clean(name of t)
+          end if
+        end repeat
+      end try
+    end repeat
+  end tell
+  return ""
+end run
+"#;
+// The page showing in Safari's front window: title and address, then its text.
+const SAFARI_PAGE: &str = r#"on run argv
+  if application "Safari" is not running then return "closed"
+  tell application "Safari"
+    if (count of documents) is 0 then return "none"
+    set d to front document
+    set n to my clean(name of d)
+    set u to my clean(URL of d)
+    set t to text of d
+  end tell
+  if t is missing value then set t to ""
+  if (length of t) > 8000 then set t to text 1 thru 8000 of t
+  return n & tab & u & linefeed & t
 end run
 "#;
 
@@ -426,9 +617,67 @@ async fn control_music(app: &str, action: &str, query: &str) -> Result<String, S
     })
 }
 
+fn tab_scripts(app: &App) -> (String, String) {
+    let (list, switch) = match app.id {
+        "safari" => (SAFARI_TABS, SAFARI_SWITCH),
+        "arc" => (ARC_TABS, ARC_SWITCH),
+        _ => (CHROMIUM_TABS, CHROMIUM_SWITCH),
+    };
+    (list.replace("APP", app.name), switch.replace("APP", app.name))
+}
+
+/// Open tabs in the given browsers, optionally only those whose title or address matches.
+async fn browser_tabs(browsers: &[&App], query: &str) -> Result<String, String> {
+    let mut lines = Vec::new();
+    let mut problems = Vec::new();
+    for app in browsers {
+        match osascript(&tab_scripts(app).0, &[query.into()], 20).await {
+            Ok(output) => lines.extend(rows(&output).into_iter().filter(|row| row.len() >= 4).map(|row| format!("- {} window {}{}: {} — {}", app.name, row[0], if row[1] == "true" { " (showing)" } else { "" }, row[2], row[3]))),
+            Err(error) => problems.push(format!("{}: {error}", app.name)),
+        }
+    }
+    let names = browsers.iter().map(|app| app.name).collect::<Vec<_>>().join(", ");
+    if lines.is_empty() {
+        if !problems.is_empty() {
+            return Err(problems.join(" "));
+        }
+        return Ok(if query.is_empty() { format!("No open tabs in {names} (private windows are skipped, and closed browsers aren’t opened).") } else { format!("No open tab in {names} mentions “{query}”.") });
+    }
+    let total = lines.len();
+    lines.truncate(40);
+    let more = if total > 40 { format!("\n…and {} more.", total - 40) } else { String::new() };
+    let skipped = if problems.is_empty() { String::new() } else { format!("\nCouldn’t read {}", problems.join(" ")) };
+    Ok(format!("Open browser tabs{}, private windows skipped:\n{}{more}{skipped}", if query.is_empty() { String::new() } else { format!(" mentioning “{query}”") }, lines.join("\n")))
+}
+
+/// Brings the first matching tab to the front, in the first browser that has one.
+async fn switch_tab(browsers: &[&App], query: &str) -> Result<String, String> {
+    for app in browsers {
+        let title = osascript(&tab_scripts(app).1, &[query.into()], 20).await?;
+        if !title.trim().is_empty() {
+            return Ok(format!("Switched to “{}” in {}.", title.trim(), app.name));
+        }
+    }
+    Ok(format!("No open tab mentions “{query}”."))
+}
+
+/// The text of the page showing in Safari, squeezed to single spaces.
+async fn read_page() -> Result<String, String> {
+    let output = osascript(SAFARI_PAGE, &[], 20).await?;
+    match output.trim() {
+        "closed" => return Ok("Safari isn’t open.".into()),
+        "none" => return Ok("No page is open in Safari.".into()),
+        _ => {}
+    }
+    let (head, body) = output.split_once('\n').unwrap_or((output.as_str(), ""));
+    let (title, address) = head.split_once('\t').unwrap_or((head, ""));
+    let text: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(2500).collect();
+    Ok(format!("The page showing in Safari: “{}” ({address})\n{}", title.trim(), if text.is_empty() { "The page has no readable text." } else { &text }))
+}
+
 /// Runs a read or playback call (already validated, for an allowed app) and returns
 /// plain text for the model.
-pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path) -> Result<String, String> {
+pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path, settings: &Settings) -> Result<String, String> {
     let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").to_string();
     match tool {
         "read_mail" => read_mail(&get("query"), args.get("unread").and_then(Value::as_bool).unwrap_or(false), args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize).await,
@@ -436,6 +685,9 @@ pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path) -> R
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
         "control_music" => control_music(&get("app"), &get("action"), &get("query")).await,
+        "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
+        "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
+        "read_page" => read_page().await,
         _ => Err("Unknown app tool.".into()),
     }
 }
@@ -446,6 +698,7 @@ pub struct AppStatus {
     id: &'static str,
     name: &'static str,
     can: &'static [&'static str],
+    note: Option<&'static str>,
     installed: bool,
     allowed: bool,
 }
@@ -478,7 +731,7 @@ fn app_names() -> Vec<String> {
 #[tauri::command]
 pub fn app_list(state: tauri::State<'_, crate::controller::AppState>) -> Result<AppList, String> {
     let settings = state.store.lock().unwrap().settings()?;
-    let apps: Vec<AppStatus> = APPS.iter().map(|app| AppStatus { id: app.id, name: app.name, can: app.can, installed: installed(app), allowed: allowed(&settings, app.id) }).collect();
+    let apps: Vec<AppStatus> = APPS.iter().map(|app| AppStatus { id: app.id, name: app.name, can: app.can, note: app.note, installed: installed(app), allowed: allowed(&settings, app.id) }).collect();
     let others = app_names().into_iter().filter(|name| !APPS.iter().any(|app| app.name == name)).collect();
     Ok(AppList { apps, others })
 }
@@ -531,6 +784,26 @@ mod tests {
     }
 
     #[test]
+    fn tab_calls_use_only_allowed_browsers() {
+        assert!(validate("switch_tab", &json!({})).is_err(), "switching needs words to look for");
+        assert!(validate("browser_tabs", &json!({"browser":"firefox"})).is_err());
+        assert!(validate("read_page", &json!({"url":"https://example.com"})).is_err(), "only the page already showing");
+        let mut settings = Settings::default();
+        let any = validate("browser_tabs", &json!({})).unwrap();
+        assert!(!permits(&settings, "browser_tabs", &any));
+        settings.apps = BROWSERS.iter().map(|id| id.to_string()).collect();
+        let installed_browsers = APPS.iter().filter(|app| BROWSERS.contains(&app.id) && installed(app)).count();
+        assert_eq!(browsers_for(&settings, &any).len(), installed_browsers);
+        let chrome = validate("browser_tabs", &json!({"browser":"chrome"})).unwrap();
+        assert!(browsers_for(&settings, &chrome).iter().all(|app| app.id == "chrome"));
+        for app in APPS.iter().filter(|app| BROWSERS.contains(&app.id)) {
+            let (list, switch) = tab_scripts(app);
+            assert!(list.contains(&format!("application \"{}\"", app.name)) && !list.contains("\"APP\""));
+            assert!(app.id == "safari" || list.contains("incognito") && switch.contains("incognito"), "{} skips private windows", app.name);
+        }
+    }
+
+    #[test]
     fn results_read_plainly() {
         let events = [Event { start: "2026-10-22 09:00".into(), end: "2026-10-22 09:15".into(), all_day: false, title: "Standup".into(), location: String::new() }, Event { start: "2026-10-22 00:00".into(), end: "2026-10-23 00:00".into(), all_day: true, title: "Ana’s birthday".into(), location: "Porto".into() }];
         assert_eq!(describe_events("2026-10-22", &events), "Calendar for Thursday 22 October:\n- 09:00–09:15: Standup\n- all day: Ana’s birthday at Porto");
@@ -542,7 +815,7 @@ mod tests {
 
     #[test]
     fn values_are_arguments_not_script() {
-        for source in [MAIL_LIST, MAIL_TEXT, NOTES_FIND, MUSIC, SPOTIFY] {
+        for source in [MAIL_LIST, MAIL_TEXT, NOTES_FIND, MUSIC, SPOTIFY, CHROMIUM_TABS, CHROMIUM_SWITCH, ARC_TABS, ARC_SWITCH, SAFARI_TABS, SAFARI_SWITCH, SAFARI_PAGE] {
             assert!(source.contains("on run argv"), "every script reads its values from argv");
         }
     }

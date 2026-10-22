@@ -24,6 +24,7 @@ export default function AppsTab({ draft, update, onError }: Props) {
       <p className="field-help">Everything happens on this Mac, with no accounts. Buntini adds or drafts things only after you approve each one.</p>
       {list.apps.map(app => <div key={app.id} className="app-permission">
         <Toggle label={app.name} detail={app.installed ? app.can.join(' · ') : 'Not on this Mac'} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
+        {app.note && app.installed && <p className="field-help app-note">{app.note}</p>}
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
     </section>

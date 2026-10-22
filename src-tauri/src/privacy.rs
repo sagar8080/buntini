@@ -33,10 +33,12 @@ pub enum Share {
     Notes,
     /// What's playing in Music or Spotify.
     Music,
+    /// Open browser tabs and the page showing in Safari.
+    Browser,
 }
 
 impl Share {
-    pub const ALL: [Share; 9] = [Share::Activity, Share::System, Share::Files, Share::History, Share::Memory, Share::Mail, Share::Calendar, Share::Notes, Share::Music];
+    pub const ALL: [Share; 10] = [Share::Activity, Share::System, Share::Files, Share::History, Share::Memory, Share::Mail, Share::Calendar, Share::Notes, Share::Music, Share::Browser];
     pub fn id(self) -> &'static str {
         match self {
             Share::Activity => "activity",
@@ -48,6 +50,7 @@ impl Share {
             Share::Calendar => "calendar",
             Share::Notes => "notes",
             Share::Music => "music",
+            Share::Browser => "browser",
         }
     }
 }
@@ -62,7 +65,7 @@ pub fn allows(locality: Locality, settings: &Settings, share: Share) -> bool {
 pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     for (index, id) in shares.iter().enumerate() {
         if !Share::ALL.iter().any(|share| share.id() == id) || shares[..index].contains(id) {
-            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes or music at most once each.".into());
+            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music or browser at most once each.".into());
         }
     }
     Ok(())
