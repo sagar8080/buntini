@@ -95,6 +95,8 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           files: dist-release/*
+          # Tags like v0.1.0-beta.1 are published as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           body: |
             Download **Buntini-macOS-arm64.dmg**, open it and drag Buntini to Applications.
