@@ -1,4 +1,5 @@
 mod actions;
+mod advisor;
 mod approvals;
 mod brief;
 mod budget;
@@ -162,6 +163,7 @@ pub fn run() {
             controller::new_topic,
             controller::finish_onboarding,
             controller::run_action,
+            advisor::mac_profile,
             controller::morning_brief,
             controller::forget_memory,
             controller::cancel_action,

@@ -21,7 +21,7 @@ if __package__ in {None, ""}:
 from worker.protocol import (
     Cancelled, MAX_GENERATION_TOKENS, MAX_LINE_BYTES, MAX_OUTPUT_CHARS,
     MAX_PROMPT_TOKENS, PROTOCOL_VERSION, QwenStreamParser, WorkerError,
-    local_model_path, request_id, selected_tools, validate_messages,
+    adapt_messages, local_model_path, request_id, selected_tools, validate_messages,
 )
 from worker.voice import SileroVAD, dependency_diagnostics, vad_model_path, whisper_model_path
 
@@ -86,7 +86,7 @@ class MLXBackend:
     def generate(self, request: dict[str, Any], cancel: threading.Event):
         messages = validate_messages(request.get("messages"))
         tools = selected_tools(request.get("tools"))
-        model_path = local_model_path(request.get("model_path"), os.environ.get("BUNTINI_MODEL_PATH"), "Qwen")
+        model_path = local_model_path(request.get("model_path"), os.environ.get("BUNTINI_MODEL_PATH"), "MLX")
         self.load(model_path, cancel)
         # Preserve conversation system instructions while always applying the
         # companion contract first. Files/web results never become system text.
@@ -94,13 +94,18 @@ class MLXBackend:
             messages[0]["content"] = SYSTEM_PROMPT + "\n" + messages[0]["content"]
         else:
             messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+        # Qwen and Gemma 4 templates take tools natively; others (such as Gemma 3) get
+        # them described in the system message instead.
+        template = getattr(self.tokenizer, "chat_template", None)
+        native_tools = not isinstance(template, str) or "tools" in template
+        messages = adapt_messages(messages, tools, native_tools)
         try:
             prompt = self.tokenizer.apply_chat_template(
-                messages, tools=tools or None, tokenize=True,
+                messages, tools=(tools or None) if native_tools else None, tokenize=True,
                 add_generation_prompt=True, enable_thinking=False,
             )
         except Exception as exc:
-            raise WorkerError("chat_template_failed", f"The local model needs a Qwen-compatible chat template: {exc}") from exc
+            raise WorkerError("chat_template_failed", f"This model’s chat template couldn’t be used. Choose a Qwen or Gemma MLX model: {exc}") from exc
         if len(prompt) > MAX_PROMPT_TOKENS:
             raise WorkerError("context_too_large", f"Prompt exceeds {MAX_PROMPT_TOKENS} tokens; start a new task")
         check_cancel(cancel)

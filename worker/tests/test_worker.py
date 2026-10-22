@@ -18,7 +18,7 @@ from worker.main import MLXBackend
 from worker.voice import WHISPER_DIMENSIONS
 from worker.protocol import (
     Cancelled, MAX_LINE_BYTES, MAX_OUTPUT_CHARS, QwenStreamParser, WorkerError,
-    local_model_path, parse_tool_payload, selected_tools, validate_messages, validate_tool_call,
+    adapt_messages, local_model_path, parse_gemma_call, parse_tool_payload, selected_tools, validate_messages, validate_tool_call,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -107,6 +107,37 @@ class ProtocolTests(unittest.TestCase):
                 text = "".join(part for index in range(0, len(raw), size) for part in parser.feed(raw[index : index + size]))
                 self.assertEqual(text, "")
                 self.assertEqual(parser.call, expected)
+
+    def test_gemma4_native_calls_stream_and_parse(self):
+        raw = 'Sure.<|channel>thought\nlooking<channel|><|tool_call>call:add_reminder{due:<|"|>2026-10-23 09:00<|"|>,title:<|"|>Call Ana, then mum<|"|>}<tool_call|>'
+        for size in range(1, 18):
+            parser = QwenStreamParser({"add_reminder"})
+            text = "".join(part for index in range(0, len(raw), size) for part in parser.feed(raw[index : index + size]))
+            text += "".join(parser.feed("", final=True))
+            self.assertEqual(text, "Sure.")
+            self.assertEqual(parser.call, ("add_reminder", {"title": "Call Ana, then mum", "due": "2026-10-23 09:00"}))
+        self.assertEqual(parse_gemma_call("call:system_info{}", {"system_info"}), ("system_info", {}))
+        self.assertEqual(parse_gemma_call("call:add_calendar_event{minutes:45,start:<|\"|>2026-10-24 13:00<|\"|>,title:<|\"|>Lunch<|\"|>}", {"add_calendar_event"})[1]["minutes"], 45)
+        for bad in ["call:run_shell{}", "call:search_files{query:<|\"|>x}", "call:search_files{query:<|\"|>x<|\"|>,query:<|\"|>y<|\"|>}", "search_files{}"]:
+            with self.subTest(bad=bad), self.assertRaises(WorkerError):
+                parse_gemma_call(bad, {"search_files", "system_info"})
+
+    def test_messages_fit_templates_with_and_without_tools(self):
+        conversation = [
+            {"role": "system", "content": "Be brief."},
+            {"role": "user", "content": "find my lease"},
+            {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {"name": "search_files", "arguments": {"query": "lease"}}}]},
+            {"role": "tool", "content": "lease.pdf"},
+        ]
+        tools = selected_tools([{"name": "search_files"}])
+        native = adapt_messages(conversation, tools, True)
+        self.assertEqual(native[3], {"role": "tool", "content": "lease.pdf", "name": "search_files"})
+        plain = adapt_messages(conversation, tools, False)
+        self.assertEqual([item["role"] for item in plain], ["system", "user", "assistant", "user"])
+        self.assertIn('<tool_call>{"name": "search_files", "arguments": {"query": "lease"}}</tool_call>', plain[2]["content"])
+        self.assertTrue(plain[3]["content"].startswith("Result from search_files:"))
+        self.assertIn("You can use these tools", plain[0]["content"])
+        self.assertNotIn("tool_calls", plain[2])
 
     def test_qwen35_tool_grammar_and_schema_are_strict(self):
         invalid = [

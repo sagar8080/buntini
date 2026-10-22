@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Apple, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
 import SetupChecks from './SetupChecks';
+import ModelAdvisor from './ModelAdvisor';
 import { errorMessage } from './bridge';
 import { appleStatus, cloudProviders } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
@@ -18,11 +19,12 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
     <section className="settings-section">
       <div className="brain-options" role="radiogroup" aria-label="Brain">
         {option('apple', <Apple size={18} />, 'Apple Intelligence', 'Private and built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
-        {option('mlx', <Cpu size={18} />, 'Local model', 'Your own MLX model')}
+        {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma, run by MLX')}
         {option('cloud', <Cloud size={18} />, 'Cloud model', `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />Key saved</em> : undefined)}
       </div>
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
       {draft.modelBackend === 'mlx' && <>
+        <ModelAdvisor draft={draft} update={update} />
         <label className="field">Python<input value={draft.pythonPath} onChange={event => update('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
         <label className="field">Model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
         <SetupChecks onError={onError} />

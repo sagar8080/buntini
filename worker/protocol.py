@@ -1,4 +1,4 @@
-"""Bounded JSONL contracts and incremental Qwen/Hermes tool parsing."""
+"""Bounded JSONL contracts and incremental tool parsing for Qwen and Gemma models."""
 
 from __future__ import annotations
 
@@ -170,6 +170,87 @@ def parse_tool_payload(payload: str, allowed: set[str]) -> tuple[str, dict[str, 
     return validate_tool_call({"name": name, "arguments": arguments}, allowed)
 
 
+GEMMA_QUOTE = '<|"|>'
+
+
+def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, Any]]:
+    """Gemma 4's native call syntax: call:name{key:<|"|>text<|"|>,count:3}.
+
+    Flat arguments only (strings, numbers, true/false), which is all Buntini's tools
+    take. Everything still passes the fixed tool schema afterwards.
+    """
+    match = re.fullmatch(r"\s*call:([a-z][a-z0-9_]*)\{(.*)\}\s*", payload, flags=re.DOTALL)
+    if match is None:
+        raise WorkerError("invalid_tool_call", "The model produced malformed Gemma tool syntax")
+    name, body = match.groups()
+    arguments: dict[str, Any] = {}
+    position = 0
+    while position < len(body):
+        key = re.match(r"\s*([a-z][a-z0-9_]*)\s*:\s*", body[position:])
+        if key is None:
+            raise WorkerError("invalid_tool_call", "The model produced malformed Gemma tool arguments")
+        position += key.end()
+        if body.startswith(GEMMA_QUOTE, position):
+            end = body.find(GEMMA_QUOTE, position + len(GEMMA_QUOTE))
+            if end < 0:
+                raise WorkerError("invalid_tool_call", "The model left a Gemma tool argument unfinished")
+            value: Any = body[position + len(GEMMA_QUOTE) : end]
+            position = end + len(GEMMA_QUOTE)
+        else:
+            raw = re.match(r"[^,]*", body[position:]).group(0)
+            position += len(raw)
+            raw = raw.strip()
+            value = {"true": True, "false": False}.get(raw, raw)
+        if key.group(1) in arguments:
+            raise WorkerError("invalid_tool_call", "Duplicate tool parameters are not allowed")
+        arguments[key.group(1)] = value
+        rest = re.match(r"\s*(,|$)", body[position:])
+        if rest is None:
+            raise WorkerError("invalid_tool_call", "The model produced malformed Gemma tool arguments")
+        position += rest.end()
+    return validate_tool_call({"name": name, "arguments": arguments}, allowed)
+
+
+def adapt_messages(messages: list[dict[str, Any]], tools: list[dict[str, Any]], native_tools: bool) -> list[dict[str, Any]]:
+    """Fit the conversation to the model's chat template.
+
+    Templates that understand tools (Qwen, Gemma 4) get each tool result labelled with
+    the tool's name. Templates that don't (such as Gemma 3) get the tools described in
+    the system message, calls written as <tool_call> JSON, and results as user turns,
+    with neighbouring turns of the same role merged so roles keep alternating.
+    """
+    adapted: list[dict[str, Any]] = []
+    last_call = ""
+    for message in messages:
+        item = dict(message)
+        if item.get("tool_calls"):
+            last_call = item["tool_calls"][0]["function"]["name"]
+        if native_tools:
+            if item["role"] == "tool":
+                item["name"] = last_call
+            adapted.append(item)
+            continue
+        if item.get("tool_calls"):
+            call = item.pop("tool_calls")[0]["function"]
+            item["content"] = (item["content"] + "\n" if item["content"].strip() else "") + "<tool_call>" + json.dumps({"name": call["name"], "arguments": call["arguments"]}, ensure_ascii=False) + "</tool_call>"
+        elif item["role"] == "tool":
+            item = {"role": "user", "content": f"Result from {last_call or 'the tool'}:\n{item['content']}"}
+        if adapted and adapted[-1]["role"] == item["role"]:
+            adapted[-1] = {**adapted[-1], "content": adapted[-1]["content"] + "\n\n" + item["content"]}
+        else:
+            adapted.append(item)
+    if not native_tools and tools:
+        menu = "\n".join(json.dumps(tool["function"], ensure_ascii=False) for tool in tools)
+        guide = ("You can use these tools:\n" + menu + "\nTo use one, reply with only "
+                 '<tool_call>{"name": "tool_name", "arguments": {...}}</tool_call> and nothing else. '
+                 "Otherwise answer normally.")
+        if adapted and adapted[0]["role"] == "system":
+            adapted[0] = {**adapted[0], "content": adapted[0]["content"] + "\n\n" + guide}
+        else:
+            adapted.insert(0, {"role": "system", "content": guide})
+    return adapted
+
+
 def local_model_path(value: Any, environment_value: str | None, label: str) -> Path:
     raw = value if value is not None else environment_value
     if not isinstance(raw, str) or not raw.strip():
@@ -182,11 +263,21 @@ def local_model_path(value: Any, environment_value: str | None, label: str) -> P
     return path.resolve()
 
 
+# Opening tag -> (state, closing tag). Qwen writes <think> and <tool_call>; Gemma 4
+# writes <|channel>thought…<channel|> and <|tool_call>call:…<tool_call|>.
+STREAM_TAGS = {
+    "<think>": ("think", "</think>"),
+    "<|channel>": ("think", "<channel|>"),
+    "<tool_call>": ("tool", "</tool_call>"),
+    "<|tool_call>": ("gemma_tool", "<tool_call|>"),
+}
+
+
 class QwenStreamParser:
     """Hide thinking/tool syntax, even when a tag is split across token chunks.
 
-    Qwen Hermes JSON and Qwen 3.5 native function/parameter tags are supported.
-    Only complete, schema-validated calls can become tool events.
+    Qwen Hermes JSON, Qwen 3.5 native function/parameter tags and Gemma 4 native calls
+    are supported. Only complete, schema-validated calls can become tool events.
     """
 
     def __init__(self, allowed: set[str]):
@@ -196,6 +287,7 @@ class QwenStreamParser:
         self.raw_chars = 0
         self.text_chars = 0
         self.call: tuple[str, dict[str, Any]] | None = None
+        self.closing = ""
 
     def feed(self, chunk: str, final: bool = False) -> list[str]:
         self.raw_chars += len(chunk)
@@ -204,29 +296,30 @@ class QwenStreamParser:
         self.buffer += chunk
         output = []
         while self.buffer:
-            if self.state == "tool":
-                end = self.buffer.find("</tool_call>")
+            if self.state in ("tool", "gemma_tool"):
+                end = self.buffer.find(self.closing)
                 if end < 0:
                     break
-                self.call = parse_tool_payload(self.buffer[:end], self.allowed)
+                payload = self.buffer[:end]
+                self.call = parse_gemma_call(payload, self.allowed) if self.state == "gemma_tool" else parse_tool_payload(payload, self.allowed)
                 self.buffer = ""
                 break
             if self.state == "think":
-                end = self.buffer.find("</think>")
+                end = self.buffer.find(self.closing)
                 if end < 0:
                     # Keep a possible partial closing tag, not the reasoning body.
-                    self.buffer = self.buffer[-len("</think>") :]
+                    self.buffer = self.buffer[-len(self.closing) :]
                     break
-                self.buffer = self.buffer[end + len("</think>") :]
+                self.buffer = self.buffer[end + len(self.closing) :]
                 self.state = "text"
                 continue
-            tags = ("<think>", "<tool_call>", "</think>")
-            found = [(self.buffer.find(tag), tag) for tag in tags if tag in self.buffer]
+            tags = (*STREAM_TAGS, "</think>", "<channel|>")
+            found = [(self.buffer.find(tag), -len(tag), tag) for tag in tags if tag in self.buffer]
             if found:
-                index, tag = min(found)
+                index, _, tag = min(found)
                 self._add_text(self.buffer[:index], output)
                 self.buffer = self.buffer[index + len(tag) :]
-                self.state = "tool" if tag == "<tool_call>" else "think" if tag == "<think>" else "text"
+                self.state, self.closing = STREAM_TAGS.get(tag, ("text", ""))
                 continue
             hold = 0
             if not final:
@@ -237,7 +330,7 @@ class QwenStreamParser:
             self._add_text(ready, output)
             self.buffer = self.buffer[-hold:] if hold else ""
             break
-        if final and self.state == "tool" and self.call is None:
+        if final and self.state in ("tool", "gemma_tool") and self.call is None:
             raise WorkerError("invalid_tool_call", "The model ended with an incomplete tool call")
         return output
 

@@ -45,7 +45,16 @@ Buntini opens its bubble and walks you through setup as a short conversation: wh
 Settings → Brain picks the model that answers. Every backend gets the same validated tools and the same conversation memory.
 
 - **Apple Intelligence** (default): Apple's on-device Foundation Models through the `native/buntini-fm` helper. Private, about a second per reply, nothing to download. It needs macOS 26 on Apple silicon with Apple Intelligence turned on; Settings explains what to do when it isn't available. Its context is small (about 4K tokens), so Buntini gives it compact tool results and a shorter memory.
-- **Local MLX model:** your own model folder (for example Qwen) run by the Python worker. Bigger and slower, fully offline. Choose its Python interpreter and model folder under Brain → Advanced; developers can preset them with `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH` before first launch. Existing installs that already used MLX stay on it. Buntini never downloads a model or installs packages.
+- **Local MLX model:** a Qwen3.5 or Gemma 4 model run by MLX on your Mac, fully offline. Brain → Local model shows **Recommended for this Mac**: it reads the chip and memory and suggests a model that fits, keeping it under about half of memory so your apps stay comfortable.
+
+  | Mac | Best fit | Also fits |
+  | --- | --- | --- |
+  | 8–15 GB | Qwen3.5 4B (3.1 GB) | Gemma 4 E2B (3.6 GB) |
+  | 16–35 GB, base M-series chip | Gemma 4 E4B (5.2 GB), quicker on lower memory bandwidth | Qwen3.5 9B (6.0 GB) |
+  | 16–35 GB, Pro, Max or Ultra | Qwen3.5 9B (6.0 GB) | Gemma 4 E4B (5.2 GB) |
+  | 36 GB or more | Qwen3.5 35B-A3B (20.4 GB), fast for its size | Gemma 4 31B (18.4 GB) on Max and Ultra chips, otherwise Qwen3.5 9B |
+
+  It gives the three Terminal commands to copy (create a Python environment, install MLX LM, download the model with `hf`), ticks each step off as it notices it, and fills in the Python and model folder fields once the download is complete. Buntini never installs packages or downloads models itself. Developers can also preset `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH`. Existing installs that already used MLX stay on it.
 - **Cloud model:** Anthropic (suggested `claude-opus-5-5`), OpenAI (`gpt-5-mini`) or Google Gemini (`gemini-2.5-flash`) with your own API key; any model name your key can use works. Replies stream as they are written. Each message reserves a cautious cost estimate against your **monthly spending cap** before it is sent, then settles to the token usage the provider reports, at the per-million-token prices shown in Settings (suggested from published October 2026 prices; check your provider's page, their invoice is authoritative). Rejected requests are refunded, Buntini warns once at 80% and stops at the cap. A cloud model sees only what you allow under *What this model may see* (see Privacy below).
 
 The MLX environment and Qwen model were verified with real offline generation, tool calls, follow-ups, cancellation and worker reuse; Apple Intelligence with live routing, streaming and transcription probes. See [acceptance evidence](docs/acceptance.md).
