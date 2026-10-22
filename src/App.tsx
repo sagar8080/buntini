@@ -15,6 +15,7 @@ import Onboarding from './Onboarding';
 import SettingsView from './SettingsView';
 import YourData from './YourData';
 import ActionSheet, { type ActionProposal } from './ActionSheet';
+import { appearance, idleStatus, panelScale } from './themes.ts';
 import { greeting, mergeTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
@@ -99,13 +100,26 @@ export default function App() {
   }, [data]);
   const onboarding = data?.onboarded === false;
   const chatting = turns.length > 0 || !!live || onboarding;
+  // The look follows settings and, for "Auto", macOS's light or dark mode as it changes.
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
-    document.documentElement.dataset.theme = data?.settings.theme || 'system';
-    document.documentElement.dataset.motion = data?.settings.reducedMotion ? 'reduced' : 'full';
-    document.documentElement.dataset.accent = data?.settings.accent || 'ember';
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const changed = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.motion = data?.settings.reducedMotion ? 'reduced' : 'full';
+    root.style.removeProperty('--accent'); root.style.removeProperty('--accent-soft');
+    if (data) {
+      const look = appearance(data.settings, systemDark);
+      Object.entries(look.attributes).forEach(([key, value]) => { root.dataset[key] = value; });
+      Object.entries(look.variables).forEach(([key, value]) => root.style.setProperty(key, value));
+    }
     document.title = `${data?.settings.assistantName || 'Buntini'} — Desktop companion`;
-    document.documentElement.classList.toggle('is-desktop', desktop);
-  }, [data?.settings.theme, data?.settings.reducedMotion, data?.settings.accent, data?.settings.assistantName]);
+    root.classList.toggle('is-desktop', desktop);
+  }, [data?.settings, systemDark]);
   const expand = useCallback(async (open: boolean) => {
     setExpanded(open); setMenu(false);
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
@@ -127,8 +141,9 @@ export default function App() {
     if (!desktop) return;
     const scale = data?.settings.companionScale || 1;
     // A nudge borrows room above the pet for its speech bubble.
-    const width = expanded ? 420 : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
-    const height = expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
+    const size = panelScale[data?.settings.panelSize || 'standard'] ?? 1;
+    const width = expanded ? Math.round(420 * size) : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
+    const height = expanded ? Math.round((page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) * size) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
     resizeQueue.current = resizeQueue.current.then(async () => {
       const window = getCurrentWindow();
       const [position, before, monitor] = await Promise.all([window.outerPosition(), window.outerSize(), currentMonitor()]);
@@ -144,7 +159,7 @@ export default function App() {
       }
       await window.setPosition(new PhysicalPosition(x, y));
     }).catch(e => setError(errorMessage(e)));
-  }, [expanded, nudging, page, chatting, !!approval, data?.settings.companionScale]);
+  }, [expanded, nudging, page, chatting, !!approval, data?.settings.companionScale, data?.settings.panelSize]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
@@ -366,11 +381,11 @@ export default function App() {
   const companionScale = data?.settings.companionScale || 1;
 
   return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
-    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
+    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 420 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
-          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark"><Sparkles size={15} strokeWidth={1.8} /></span><span>{assistantName}<span className="brand-dot">.</span></span></button>
-          <span className="header-status"><span className={`status-dot ${busy ? 'pulsing' : ''}`} />{recording ? 'Listening' : busy ? 'On it' : speaking ? 'Speaking' : 'Right here'}</span>
+          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span>{assistantName}<span className="brand-dot">.</span></span></button>
+          <span className="header-status"><span className={`status-dot ${busy ? 'pulsing' : ''}`} />{recording ? 'Listening' : busy ? 'On it' : speaking ? 'Speaking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span>
           <div className="header-actions">
             <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title="Task history" aria-label="Task history" onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
             <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title="Settings" aria-label="Settings" onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>

@@ -3,7 +3,7 @@ import Cat from './Cat';
 import { usePetLife, type PetReaction } from './usePetLife';
 import type { PetLook, PetState, Settings } from './types';
 
-const defaultLook: PetLook = { coat: 'ginger', eyes: 'green', accessory: 'bell', motion: 'playful', accent: 'ember' };
+const defaultLook: PetLook = { coat: 'ginger', eyes: 'green', accessory: 'bell', motion: 'playful', accent: '#e9985d' };
 
 const sideTails = [
   'M83 141C57 150 24 149 10 130C6 125 6 119 8 114C12 125 23 129 34 126L28 121C51 119 71 128 83 141Z',

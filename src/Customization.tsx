@@ -3,7 +3,8 @@ import { AudioLines, ChevronRight, LoaderCircle, Moon, Laptop, Shuffle, Sparkles
 import Pet from './Pet';
 import Toggle from './Toggle';
 import { command, desktop, errorMessage } from './bridge';
-import { accents, accessories, characters, coats, eyeColors, eyes, lookFrom, motions } from './petOptions';
+import { accessories, characters, coats, eyeColors, eyes, lookFrom, motions } from './petOptions';
+import { accentChoices, accentHex, idleStatus, isHex, presets } from './themes.ts';
 import type { Settings, Voice } from './types';
 
 const pick = <T,>(items: { id: T }[]) => items[Math.floor(Math.random() * items.length)].id;
@@ -27,6 +28,11 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
     return () => { active = false; };
   }, []);
   const look = lookFrom(draft);
+  // A labelled row of choices for one setting.
+  const chips = <K extends keyof Settings>(label: string, key: K, options: [Settings[K], string][]) => <>
+    <div className="setting-label">{label}</div>
+    <div className="chip-row" role="radiogroup" aria-label={label}>{options.map(([value, text]) => <button type="button" key={String(value)} role="radio" aria-checked={draft[key] === value} className={draft[key] === value ? 'active' : ''} onClick={() => update(key, value)}>{text}</button>)}</div>
+  </>;
   const preset = personalities.find(item => item.text === draft.personality);
   async function notifications(on: boolean) {
     update('notificationsEnabled', on);
@@ -49,11 +55,34 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
       <div className="pet-swatches" aria-label="Accessory">{accessories.map(item => <button type="button" key={item.id} aria-pressed={draft.catAccessory === item.id} className={draft.catAccessory === item.id ? 'active' : ''} onClick={() => update('catAccessory', item.id)} title={item.label}><Pet look={{ ...look, accessory: item.id }} state="idle" /><span>{item.label}</span></button>)}</div>
     </section>}
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Style</h3></div>
-      <div className="chip-row" aria-label="Accent color">{accents.map(item => <button key={item.id} type="button" aria-pressed={draft.accent === item.id} className={draft.accent === item.id ? 'active' : ''} onClick={() => update('accent', item.id)}><i style={{ background: item.color }} />{item.label}</button>)}</div>
+      <div className="settings-section-heading"><h3>Theme</h3></div>
+      <div className="theme-presets" role="radiogroup" aria-label="Theme">{presets.map(item => <button type="button" key={item.id} role="radio" aria-checked={draft.themePreset === item.id} className={draft.themePreset === item.id ? 'active' : ''} onClick={() => update('themePreset', item.id)}>
+        <span className="theme-swatch"><i style={{ background: item.light.panel }} /><i style={{ background: item.dark.panel }} /><b style={{ background: item.dark.accent }} /></span>{item.label}
+      </button>)}</div>
       <div className="chip-row" aria-label="Appearance">{[{ id: 'light', icon: Sun, label: 'Light' }, { id: 'dark', icon: Moon, label: 'Dark' }, { id: 'system', icon: Laptop, label: 'Auto' }].map(item => <button key={item.id} type="button" aria-pressed={draft.theme === item.id} className={draft.theme === item.id ? 'active' : ''} onClick={() => update('theme', item.id as Settings['theme'])}><item.icon size={13} />{item.label}</button>)}</div>
+      <div className="chip-row" aria-label="Accent color">{accentChoices.map(item => <button key={item.id} type="button" aria-pressed={draft.accent === item.id} className={draft.accent === item.id ? 'active' : ''} onClick={() => { update('accent', item.id); if (item.id === 'custom' && !isHex(draft.accentColor)) update('accentColor', accentHex(draft, true)); }}>
+        <i style={{ background: item.id === 'custom' ? (isHex(draft.accentColor) ? draft.accentColor : 'conic-gradient(#e9985d, #bc92df, #71bacb, #9db98b, #e9985d)') : accentHex({ ...draft, accent: item.id }, true) }} />{item.label}
+      </button>)}</div>
+      {draft.accent === 'custom' && <label className="inline-field"><span>Custom colour</span><input type="color" aria-label="Custom accent colour" value={isHex(draft.accentColor) ? draft.accentColor : '#e9985d'} onChange={event => update('accentColor', event.target.value)} /></label>}
+    </section>
+    <section className="settings-section">
+      <div className="settings-section-heading"><h3>Chat</h3></div>
+      {chips('Text size', 'textSize', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']])}
+      {chips('Spacing', 'density', [['compact', 'Compact'], ['comfortable', 'Roomy']])}
+      {chips('Font', 'chatFont', [['sans', 'Default'], ['rounded', 'Rounded'], ['serif', 'Serif'], ['mono', 'Mono']])}
+      {chips('Corners', 'corners', [['round', 'Round'], ['soft', 'Soft'], ['square', 'Square']])}
+    </section>
+    <section className="settings-section">
+      <div className="settings-section-heading"><h3>Panel</h3></div>
+      {chips('Bubble size', 'panelSize', [['compact', 'Compact'], ['standard', 'Standard'], ['large', 'Large']])}
+      <div className="setting-label">Cat size</div>
+      <div className="chip-row" aria-label="Cat size">{[{ value: .8, label: 'Small' }, { value: 1, label: 'Medium' }, { value: 1.2, label: 'Large' }].map(item => <button type="button" key={item.label} aria-pressed={draft.companionScale === item.value} className={draft.companionScale === item.value ? 'active' : ''} onClick={() => update('companionScale', item.value)}>{item.label}</button>)}</div>
+      <label className="field">Status line<input value={draft.statusText} onChange={event => update('statusText', event.target.value)} maxLength={40} placeholder={idleStatus({ ...draft, statusText: '' }, false, new Date().getHours())} aria-label="Status line" /></label>
+      <p className="field-help">Shown next to my name when I’m not busy. Leave it empty and I’ll pick one.</p>
+    </section>
+    <section className="settings-section">
+      <div className="settings-section-heading"><h3>Motion</h3></div>
       <div className="chip-row" aria-label="Liveliness">{motions.map(item => <button type="button" key={item.id} aria-pressed={draft.petMotion === item.id} className={draft.petMotion === item.id ? 'active' : ''} onClick={() => update('petMotion', item.id)} title={item.detail}>{item.label}</button>)}</div>
-      <div className="chip-row" aria-label="Size">{[{ value: .8, label: 'Small' }, { value: 1, label: 'Medium' }, { value: 1.2, label: 'Large' }].map(item => <button type="button" key={item.label} aria-pressed={draft.companionScale === item.value} className={draft.companionScale === item.value ? 'active' : ''} onClick={() => update('companionScale', item.value)}>{item.label}</button>)}</div>
       <Toggle label="Less motion" checked={draft.reducedMotion} onChange={value => update('reducedMotion', value)} />
     </section>
     <section className="settings-section">

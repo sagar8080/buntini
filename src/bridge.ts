@@ -3,7 +3,7 @@ import type { Bootstrap, Mode, Settings, TaskEvent, TaskRecord } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
-  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'ember', companionScale: 1,
+  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',

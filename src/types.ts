@@ -4,7 +4,8 @@ export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico
 export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';
 export type CatAccessory = 'none' | 'bell' | 'bow' | 'bandana' | 'hat' | 'flowers';
 export type PetMotion = 'calm' | 'playful' | 'sleepy';
-export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: Settings['accent'] }
+/** accent is the resolved accessory colour (#RRGGBB). */
+export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: string }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
 export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
@@ -14,7 +15,15 @@ export interface Settings {
   userName: string;
   personality: string;
   avatar: 'kyuubi' | 'fox' | 'cat' | 'orb';
-  accent: 'ember' | 'ocean' | 'violet' | 'sage';
+  accent: 'preset' | 'ember' | 'ocean' | 'violet' | 'sage' | 'custom';
+  accentColor: string;
+  themePreset: 'classic' | 'midnight' | 'paper' | 'sakura' | 'forest' | 'ocean';
+  textSize: 'small' | 'medium' | 'large';
+  density: 'compact' | 'comfortable';
+  chatFont: 'sans' | 'rounded' | 'serif' | 'mono';
+  corners: 'round' | 'soft' | 'square';
+  panelSize: 'compact' | 'standard' | 'large';
+  statusText: string;
   companionScale: number;
   catCoat: CatCoat;
   catEyes: CatEyes;

@@ -25,6 +25,17 @@ pub struct Settings {
     pub personality: String,
     pub avatar: String,
     pub accent: String,
+    /// With accent "custom": a #RRGGBB colour.
+    pub accent_color: String,
+    /// Look and feel: a theme preset and a few adjustments.
+    pub theme_preset: String,
+    pub text_size: String,
+    pub density: String,
+    pub chat_font: String,
+    pub corners: String,
+    pub panel_size: String,
+    /// Shown in the header while Buntini is idle; empty means Buntini picks one.
+    pub status_text: String,
     pub companion_scale: f64,
     pub cat_coat: String,
     pub cat_eyes: String,
@@ -75,7 +86,15 @@ impl Default for Settings {
             user_name: String::new(),
             personality: "Warm, concise, practical, and honest.".into(),
             avatar: "cat".into(),
-            accent: "ember".into(),
+            accent: "preset".into(),
+            accent_color: String::new(),
+            theme_preset: "classic".into(),
+            text_size: "medium".into(),
+            density: "comfortable".into(),
+            chat_font: "sans".into(),
+            corners: "round".into(),
+            panel_size: "standard".into(),
+            status_text: String::new(),
             companion_scale: 1.0,
             cat_coat: "ginger".into(),
             cat_eyes: "green".into(),
@@ -102,6 +121,7 @@ impl Default for Settings {
     }
 }
 
+const THEME_PRESETS: [&str; 6] = ["classic", "midnight", "paper", "sakura", "forest", "ocean"];
 const CAT_COATS: [&str; 7] = ["ginger", "gray", "black", "white", "tuxedo", "calico", "siamese"];
 const CAT_EYES: [&str; 5] = ["amber", "green", "blue", "copper", "odd"];
 const CAT_ACCESSORIES: [&str; 6] = ["none", "bell", "bow", "bandana", "hat", "flowers"];
@@ -122,9 +142,27 @@ impl Settings {
             return Err("Personality must be no longer than 1,200 characters.".into());
         }
         if !["kyuubi", "fox", "cat", "orb"].contains(&self.avatar.as_str())
-            || !["ember", "ocean", "violet", "sage"].contains(&self.accent.as_str())
+            || !["preset", "ember", "ocean", "violet", "sage", "custom"].contains(&self.accent.as_str())
         {
             return Err("Choose a supported avatar and accent.".into());
+        }
+        let hex = self.accent_color.len() == 7 && self.accent_color.starts_with('#') && self.accent_color[1..].chars().all(|c| c.is_ascii_hexdigit());
+        if (self.accent == "custom" && !hex) || (!self.accent_color.is_empty() && !hex) {
+            return Err("Choose a custom accent colour like #E9985D.".into());
+        }
+        let choices: [(&str, &[&str]); 6] = [
+            (self.theme_preset.as_str(), &THEME_PRESETS),
+            (self.text_size.as_str(), &["small", "medium", "large"]),
+            (self.density.as_str(), &["compact", "comfortable"]),
+            (self.chat_font.as_str(), &["sans", "rounded", "serif", "mono"]),
+            (self.corners.as_str(), &["round", "soft", "square"]),
+            (self.panel_size.as_str(), &["compact", "standard", "large"]),
+        ];
+        if choices.iter().any(|(value, allowed)| !allowed.contains(value)) {
+            return Err("Choose a supported theme, text size, spacing, font, corner style and panel size.".into());
+        }
+        if self.status_text.chars().count() > 40 || self.status_text.chars().any(char::is_control) {
+            return Err("The status line can be up to 40 characters.".into());
         }
         crate::privacy::validate_shares(&self.external_shares)?;
         if !crate::integrations::ebay::MARKETPLACES
@@ -500,4 +538,25 @@ pub struct Usage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reservation {
     pub warning: Option<String>,
+}
+
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+
+    #[test]
+    fn appearance_choices_are_checked() {
+        assert!(Settings::default().validate().is_ok());
+        let custom = Settings { accent: "custom".into(), accent_color: "#E9985D".into(), theme_preset: "sakura".into(), text_size: "large".into(), density: "compact".into(), chat_font: "serif".into(), corners: "square".into(), panel_size: "large".into(), status_text: "Purring nearby".into(), ..Settings::default() };
+        assert!(custom.validate().is_ok());
+        for broken in [
+            Settings { accent: "custom".into(), ..Settings::default() },
+            Settings { accent: "custom".into(), accent_color: "red".into(), ..Settings::default() },
+            Settings { theme_preset: "neon".into(), ..Settings::default() },
+            Settings { corners: "wavy".into(), ..Settings::default() },
+            Settings { status_text: "x".repeat(41), ..Settings::default() },
+        ] {
+            assert!(broken.validate().is_err());
+        }
+    }
 }

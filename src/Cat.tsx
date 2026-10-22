@@ -1,5 +1,5 @@
 import type { CatCoat, PetLook } from './types';
-import { accentColor, eyeColors } from './petOptions';
+import { eyeColors } from './petOptions';
 
 export interface Coat {
   base: string; shade: string; outline: string; belly: string; ear: string; nose: string; whisker: string;
@@ -24,7 +24,7 @@ export type CatPose = 'sit' | 'walk' | 'leap';
 
 export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetLook; pose?: CatPose }) {
   const coat = palettes[look.coat];
-  const accent = accentColor(look.accent);
+  const accent = look.accent;
   const tabby = look.coat === 'ginger' || look.coat === 'gray';
   const leftIris = look.eyes === 'odd' ? eyeColors.blue : eyeColors[look.eyes];
   const rightIris = look.eyes === 'odd' ? eyeColors.amber : eyeColors[look.eyes];
