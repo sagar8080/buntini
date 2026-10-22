@@ -92,13 +92,17 @@ pub fn usable(settings: &Settings) -> Vec<&'static App> {
 
 /// One line for the model: which apps it can use, and which the user could still allow.
 pub fn prompt_line(settings: &Settings) -> String {
-    let (yes, no): (Vec<&App>, Vec<&App>) = APPS.iter().filter(|app| installed(app)).partition(|app| allowed(settings, app.id));
+    let (here, missing): (Vec<&App>, Vec<&App>) = APPS.iter().partition(|app| installed(app));
+    let (yes, no): (Vec<&App>, Vec<&App>) = here.into_iter().partition(|app| allowed(settings, app.id));
     let mut line = String::new();
     if !yes.is_empty() {
         line += &format!(" Apps you may use for the user: {}.", yes.iter().map(|app| app.name).collect::<Vec<_>>().join(", "));
     }
     if !no.is_empty() {
         line += &format!(" Not allowed yet: {}. If they ask for one of those, say they can allow it in Settings → Apps.", no.iter().map(|app| app.name).collect::<Vec<_>>().join(", "));
+    }
+    if !missing.is_empty() {
+        line += &format!(" Not installed on this Mac: {}. If they ask for one of those, say it isn’t installed.", missing.iter().map(|app| app.name).collect::<Vec<_>>().join(", "));
     }
     line
 }

@@ -85,7 +85,13 @@ button svg { vertical-align: middle; }
 .composer-bottom > span { font-size: 11px; color: var(--muted); display: flex; gap: 4px; align-items: center; min-width: 0; }
 .composer-bottom > div { display: flex; align-items: center; gap: 6px; }
 .mic-button { background: transparent; color: var(--muted); width: 25px; height: 27px; padding: 0; border-radius: 6px; display: grid; place-items: center; }
-.mic-button:hover, .mic-button.active { color: var(--accent); background: var(--accent-soft); }
+.mic-button:hover { color: var(--accent); background: var(--accent-soft); }
+/* While listening the mic is the primary button: tap (or let go) to send. */
+.mic-button.active { width: 27px; color: var(--panel); background: var(--accent); animation: mic-listening 1.6s ease-out infinite; }
+@keyframes mic-listening { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+.voice-cancel { background: transparent; color: var(--muted); width: 25px; height: 27px; padding: 0; border-radius: 6px; display: grid; place-items: center; }
+.voice-cancel:hover { color: var(--text); background: var(--surface-soft); }
+@media (prefers-reduced-motion: reduce) { .mic-button.active { animation: none; } }
 .send-button { background: var(--accent); color: var(--panel); width: 27px; height: 27px; padding: 0; border-radius: 7px; display: grid; place-items: center; }
 .send-button:disabled { opacity: .35; }
 .composer-hint { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 8px; }
