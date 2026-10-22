@@ -197,7 +197,7 @@ func generate(_ id: String, _ request: [String: Any]) async {
         // Step 3: stream the answer. Snapshots are cumulative, so send only what is new.
         let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
         var sent = ""
-        let question = context.isEmpty ? prompt : "\(known)This is real and current. Use it when the message is about what the user is doing, their apps, time or Mac health, and don't say you can't see it.\n\nUser message: \(prompt)"
+        let question = context.isEmpty ? prompt : "\(known)You noticed this yourself on the user's Mac; it's real and current. Mention it only if the message asks about what they're doing, their apps, their time at the Mac or its battery, CPU or disk. Reply in one or two friendly, natural sentences, with no headings, lists or bold, and never say the user told you.\n\nUser message: \(prompt)"
         for try await snapshot in session.streamResponse(to: question, options: GenerationOptions(maximumResponseTokens: maxTokens)) {
             let current = snapshot.content
             if current.hasPrefix(sent) {

@@ -56,6 +56,19 @@ pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether a message asks about the user's own activity or Mac health, which the local
+/// context answers directly. Apple's small model routes these to tools unreliably, so for
+/// it Buntini answers them from the context alone.
+pub fn asks_about_activity(prompt: &str) -> bool {
+    let text = prompt.to_lowercase().replace(['’', '\''], "");
+    const PHRASES: [&str; 17] = [
+        "what am i doing", "what was i doing", "what im doing", "what i am doing", "what have i been", "what was i working", "what am i working",
+        "how long have i been", "how long was i", "which apps", "what apps", "what app am i", "am i away", "time at my desk", "at my desk",
+        "my battery", "battery level",
+    ];
+    PHRASES.iter().any(|phrase| text.contains(phrase))
+}
+
 /// Context given to a model with every chat: what the user is doing and how the Mac is
 /// doing, limited to what this model may see. `None` when there is nothing to share.
 pub fn context(locality: Locality, settings: &Settings) -> Option<String> {
@@ -152,6 +165,12 @@ mod tests {
         let away = Activity { seconds_since_last_input: Some(600), ..activity };
         assert!(describe(Some((now, Some(away))), None).unwrap().contains("Away from the keyboard for 10 minutes."));
         assert_eq!(describe(None, None), None);
+        for question in ["hi buntini what am i doing now?", "What have I been working on today?", "how long have I been at my desk?", "Which apps did I use?", "How's my battery?", "What I’m doing right now?"] {
+            assert!(asks_about_activity(question), "{question}");
+        }
+        for other in ["find my lease pdf", "remind me to stretch", "how much memory am I using?", "tell me a joke"] {
+            assert!(!asks_about_activity(other), "{other}");
+        }
     }
 
     #[test]

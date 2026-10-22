@@ -141,6 +141,7 @@ pub fn parse_battery(output: &str) -> Option<(u8, bool)> {
 }
 
 const MINUTE: i64 = 60;
+const DETOUR_SECONDS: i64 = 20;
 
 /// Extends the current visit or starts a new one; a short detour keeps one visit going.
 pub fn record_visit(timeline: &mut Vec<Visit>, name: &str, category: &'static str, now: chrono::DateTime<chrono::Local>) {
@@ -173,7 +174,9 @@ pub fn summarize(timeline: &[Visit], now: chrono::DateTime<chrono::Local>, idle:
     totals.retain(|total| total.minutes > 0);
     totals.sort_by(|a, b| b.minutes.cmp(&a.minutes));
     totals.truncate(8);
-    let last = timeline.last();
+    // The app the user was really in: brief detours on the way to Buntini (clicking the
+    // desktop brings Finder forward for a moment) don't count.
+    let last = timeline.iter().rev().find(|visit| (visit.until - visit.since).num_seconds() >= DETOUR_SECONDS).or(timeline.last());
     Activity {
         local_time: now.format("%A %-d %B, %H:%M").to_string(),
         current_app: last.map(|visit| visit.name.clone()),
@@ -638,6 +641,10 @@ mod tests {
         assert_eq!(summary.apps_last_two_hours, vec![AppTime { name: "Xcode".into(), category: "code", minutes: 58 }, AppTime { name: "Safari".into(), category: "browser", minutes: 10 }]);
         assert_eq!(summary.battery_percent, Some(64));
         assert!(summary.local_time.starts_with("Wednesday 21 October, 17:10"));
+        // Clicking the desktop to reach Buntini brings Finder forward for a moment.
+        let mut detour = timeline.clone();
+        record_visit(&mut detour, "Finder", "files", at(70) + chrono::Duration::seconds(4));
+        assert_eq!(summarize(&detour, at(70) + chrono::Duration::seconds(6), None, None, None).current_app.as_deref(), Some("Xcode"), "a few seconds in Finder is a detour");
         // Only the last two hours count, and entries older than three hours are dropped.
         record_visit(&mut timeline, "Notes", "writing", at(250));
         assert_eq!(timeline.len(), 1);

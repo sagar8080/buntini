@@ -5,6 +5,7 @@ import { ResultCards } from './Online';
 import { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
 import { threadItems } from './thread';
+import { parse, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
 import type { ModelBackend, Settings, TaskRecord } from './types';
 
@@ -36,7 +37,7 @@ export default function Conversation({ turns, live, boundary, busy, activity, se
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>
-          {item.answer && item.state !== 'error' && <div className="answer-text">{item.answer}</div>}
+          {item.answer && item.state !== 'error' && <Reply text={item.answer} onOpen={onOpen} />}
           {working && !item.answer && <div className="typing" role="status" aria-label={activity || 'Thinking'}><i /><i /><i /><span>{activity}</span></div>}
           {item.system && <SystemCard snapshot={item.system} />}
           {!!item.cards?.length && <ResultCards cards={item.cards} onOpen={onOpen} />}
@@ -60,6 +61,23 @@ export default function Conversation({ turns, live, boundary, busy, activity, se
     {threadItems(turns, boundary).map(item => item.kind === 'topic' ? <div className="topic-divider" key={`topic-${item.at}`} title="Earlier messages are no longer sent to the model"><span>New topic</span></div> : turn(item.turn, false))}
     {live && turn(live, true)}
   </div>;
+}
+
+function Spans({ spans, onOpen }: { spans: Span[]; onOpen: (url: string) => void }) {
+  return <>{spans.map((span, index) => span.href ? <a key={index} href={span.href} onClick={event => { event.preventDefault(); onOpen(span.href!); }}>{span.text}</a>
+    : span.code ? <code key={index}>{span.text}</code> : span.bold ? <strong key={index}>{span.text}</strong> : span.italic ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
+}
+
+/** A reply with its light formatting shown: paragraphs, lists, headings and emphasis. */
+function Reply({ text, onOpen }: { text: string; onOpen: (url: string) => void }) {
+  return <div className="answer-text">{parse(text).map((block, index) => {
+    if (block.kind === 'heading') return <p key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></p>;
+    if (block.kind === 'list') {
+      const items = block.items.map((item, at) => <li key={at}><Spans spans={item} onOpen={onOpen} /></li>);
+      return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
+    }
+    return <p key={index}>{block.lines.map((line, at) => <span key={at}>{at > 0 && <br />}<Spans spans={line} onOpen={onOpen} /></span>)}</p>;
+  })}</div>;
 }
 
 export function SystemCard({ snapshot }: { snapshot: Record<string, unknown> }) {
