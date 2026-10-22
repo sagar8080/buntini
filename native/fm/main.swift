@@ -140,6 +140,10 @@ func generate(_ id: String, _ request: [String: Any]) async {
         (item as? [String: Any])?["name"] as? String ?? (((item as? [String: Any])?["function"] as? [String: Any])?["name"] as? String)
     }.filter { toolDefinitions[$0] != nil }
     let maxTokens = (request["max_tokens"] as? NSNumber)?.intValue ?? 512
+    // What Buntini can see on this Mac right now (activity, Mac health). Kept apart from
+    // the instructions: the small on-device model only uses it when it sits by the question.
+    let context = (request["context"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let known = context.isEmpty ? "" : "What you can see on this Mac right now: \(context)\n\n"
     let instructions = messages.filter { $0["role"] as? String == "system" }.compactMap { $0["content"] as? String }.joined(separator: "\n\n")
     let conversation = messages.filter { $0["role"] as? String != "system" }
     guard let lastUser = conversation.lastIndex(where: { $0["role"] as? String == "user" }) else {
@@ -171,9 +175,14 @@ func generate(_ id: String, _ request: [String: Any]) async {
             let decider = LanguageModelSession(model: .default, tools: [], transcript: transcript)
             let menu = offered.map { "- \($0): \(toolDefinitions[$0]?["description"] as? String ?? "")" }.joined(separator: "\n")
             // A small model routes far better from examples than from rules.
-            let examples = (["\"hi, who are you?\" → none", "\"thanks, that helps\" → none", "\"tell me a joke\" → none", "\"how do I boil an egg?\" → none", "\"what is 15% of 80?\" → none", "\"what am I doing right now?\" → none (the context says)"] + offered.compactMap { name in toolExamples[name].map { "\"\($0)\" → \(name)" } }).joined(separator: "\n")
+            var answeredHere = ["\"hi, who are you?\" → none", "\"thanks, that helps\" → none", "\"tell me a joke\" → none", "\"how do I boil an egg?\" → none", "\"what is 15% of 80?\" → none"]
+            if !context.isEmpty {
+                answeredHere += ["\"what am I doing right now?\" → none (you can see it)", "\"what have I been working on?\" → none (you can see it)"]
+                if context.contains("battery") { answeredHere.append("\"how's my battery?\" → none (you can see it)") }
+            }
+            let examples = (answeredHere + offered.compactMap { name in toolExamples[name].map { "\"\($0)\" → \(name)" } }).joined(separator: "\n")
             let choice = try GenerationSchema(root: DynamicGenerationSchema(name: "ToolChoice", description: "The tool to use, or none", anyOf: ["none"] + offered), dependencies: [])
-            let decided = try await decider.respond(to: "Tools:\n\(menu)\n\nExamples:\n\(examples)\n\nChoose a tool only when the answer needs facts that are not already in the instructions or conversation above. Otherwise choose none.\n\nUser message: \(prompt)", schema: choice, options: GenerationOptions(temperature: 0))
+            let decided = try await decider.respond(to: "\(known)Tools:\n\(menu)\n\nExamples:\n\(examples)\n\nChoose a tool only when the answer needs facts that you can't already see above or in the conversation. Otherwise choose none.\n\nUser message: \(prompt)", schema: choice, options: GenerationOptions(temperature: 0))
             let name = (try? decided.content.value(String.self)) ?? "none"
             if name != "none", let parameters = toolDefinitions[name]?["parameters"] as? [String: Any] {
                 let filler = LanguageModelSession(model: .default, tools: [], transcript: transcript)
@@ -188,7 +197,8 @@ func generate(_ id: String, _ request: [String: Any]) async {
         // Step 3: stream the answer. Snapshots are cumulative, so send only what is new.
         let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
         var sent = ""
-        for try await snapshot in session.streamResponse(to: prompt, options: GenerationOptions(maximumResponseTokens: maxTokens)) {
+        let question = context.isEmpty ? prompt : "\(known)This is real and current. Use it when the message is about what the user is doing, their apps, time or Mac health, and don't say you can't see it.\n\nUser message: \(prompt)"
+        for try await snapshot in session.streamResponse(to: question, options: GenerationOptions(maximumResponseTokens: maxTokens)) {
             let current = snapshot.content
             if current.hasPrefix(sent) {
                 let delta = String(current.dropFirst(sent.count))

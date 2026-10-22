@@ -882,7 +882,12 @@ async fn execute_with_settings(
     if context.is_some() {
         touch(task, privacy::Share::Activity);
     }
+    // Apple's on-device model only uses this when it sits next to the question, so its
+    // helper gets it as a separate field; other models get it in the instructions.
+    let apple = crate::model::backend(&settings) == crate::model::Backend::Apple;
+    let separate_context = if apple { context.clone() } else { None };
     let context = context
+        .filter(|_| !apple)
         .map(|context| format!(" Local context from this Mac. Answer questions about what the user is doing or has been doing, and about battery, CPU or disk, directly from it without tools. It knows app names and times, never window contents: {context}"))
         .unwrap_or_default();
     // Things the user asked Buntini to remember, for models allowed to see them.
@@ -930,7 +935,11 @@ async fn execute_with_settings(
     let compact = state.models.budget(&settings).history_tokens < 4000;
     for _ in 0..4 {
         phase(channel, &task.id, "thinking");
-        let turn=state.models.generate(&settings,json!({"messages":messages,"tools":tools,"max_tokens":state.models.budget(&settings).max_tokens}),cancel.clone(),|text|emit(channel,"delta",&task.id,Some(text))).await?;
+        let mut request = json!({"messages":messages,"tools":tools,"max_tokens":state.models.budget(&settings).max_tokens});
+        if let Some(context) = &separate_context {
+            request["context"] = context.clone().into();
+        }
+        let turn=state.models.generate(&settings,request,cancel.clone(),|text|emit(channel,"delta",&task.id,Some(text))).await?;
         if let Some(call) = turn.tool {
             let (name, args) = validate_tool(&call, mode, &task.prompt).map_err(|e| {
                 state.audit("tool.denied", &e);
