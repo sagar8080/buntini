@@ -304,7 +304,7 @@ export default function App() {
   }
   async function startVoice() {
     if (busy || transcribing || recordHeld.current || voiceStoppingRef.current) return;
-    if (!data?.settings.whisperModel) { setError('Choose a local Whisper model in Settings before using voice input.'); setPage('settings'); return; }
+    // Recording checks that voice is available: Apple speech, or a local Whisper model.
     playbackOverride.current = null;
     void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)));
     const version = ++voiceVersion.current;
