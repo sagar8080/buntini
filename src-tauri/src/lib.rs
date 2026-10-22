@@ -3,6 +3,7 @@ mod advisor;
 mod approvals;
 mod brief;
 mod budget;
+mod chatgpt;
 mod cloud;
 mod controller;
 mod data;
@@ -164,6 +165,10 @@ pub fn run() {
             controller::finish_onboarding,
             controller::run_action,
             advisor::mac_profile,
+            chatgpt::chatgpt_sign_in,
+            chatgpt::chatgpt_cancel_sign_in,
+            chatgpt::chatgpt_sign_out,
+            chatgpt::chatgpt_models,
             controller::morning_brief,
             controller::forget_memory,
             controller::cancel_action,

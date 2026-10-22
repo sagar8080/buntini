@@ -2,16 +2,17 @@ import { useState, type ReactNode } from 'react';
 import { Apple, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
 import SetupChecks from './SetupChecks';
 import ModelAdvisor from './ModelAdvisor';
+import ChatGPTAccount from './ChatGPTAccount';
 import { errorMessage } from './bridge';
 import { appleStatus, cloudProviders } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
 export { appleStatus, backendLabel, cloudProviders } from './brain.ts';
 
-type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; diagnostics: Diagnostics; onError: (error: string) => void; onKey: (provider: KeyProvider, key: string) => Promise<void> };
+type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; diagnostics: Diagnostics; onError: (error: string) => void; onKey: (provider: KeyProvider, key: string) => Promise<void>; onRefresh: () => Promise<void>; onNotice: (message: string) => void };
 
 /** The Brain tab: which model answers, with the technical parts folded under Advanced. */
-export default function BrainSettings({ draft, update, diagnostics, onError, onKey }: Props) {
+export default function BrainSettings({ draft, update, diagnostics, onError, onKey, onRefresh, onNotice }: Props) {
   const apple = appleStatus(diagnostics.appleIntelligence);
   const provider = cloudProviders.find(item => item.id === draft.cloudProvider) || cloudProviders[0];
   const option = (id: ModelBackend, icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={draft.modelBackend === id} className={draft.modelBackend === id ? 'active' : ''} onClick={() => update('modelBackend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
@@ -20,7 +21,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
       <div className="brain-options" role="radiogroup" aria-label="Brain">
         {option('apple', <Apple size={18} />, 'Apple Intelligence', 'Private and built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
         {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma, run by MLX')}
-        {option('cloud', <Cloud size={18} />, 'Cloud model', `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />Key saved</em> : undefined)}
+        {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'Your own ChatGPT plan' : `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
       {draft.modelBackend === 'mlx' && <>
@@ -29,7 +30,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
         <label className="field">Model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
         <SetupChecks onError={onError} />
       </>}
-      {draft.modelBackend === 'cloud' && <CloudSettings draft={draft} update={update} diagnostics={diagnostics} onError={onError} onKey={onKey} />}
+      {draft.modelBackend === 'cloud' && <CloudSettings draft={draft} update={update} diagnostics={diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       <p className="worker-status"><span className={`status-dot ${diagnostics.modelReady ? '' : 'amber'}`} />{diagnostics.workerStatus}</p>
     </section>
     <details className="disclosure settings-advanced"><summary>Advanced</summary>
@@ -40,7 +41,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
   </>;
 }
 
-function CloudSettings({ draft, update, diagnostics, onError, onKey }: Props) {
+function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, onNotice }: Props) {
   const [key, setKey] = useState('');
   const [saving, setSaving] = useState(false);
   const provider = cloudProviders.find(item => item.id === draft.cloudProvider) || cloudProviders[0];
@@ -55,8 +56,14 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey }: Props) {
     setSaving(true);
     try { await onKey(provider.id, value); setKey(''); } catch (error) { onError(errorMessage(error)); } finally { setSaving(false); }
   }
+  const providers = <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{cloudProviders.map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.name}</button>)}</div>;
+  if (provider.id === 'chatgpt') return <div className="cloud-settings">
+    {providers}
+    <ChatGPTAccount account={diagnostics.chatgptAccount} model={draft.cloudModel} onModel={slug => update('cloudModel', slug)} onChange={onRefresh} onError={onError} onNotice={onNotice} />
+    <p className="field-help">It sees only what you allow in Privacy.</p>
+  </div>;
   return <div className="cloud-settings">
-    <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{cloudProviders.map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.name}</button>)}</div>
+    {providers}
     <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? 'Key saved · paste to replace' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /><button type="button" disabled={!key.trim() || saving} onClick={() => void save(key.trim())}>{saving ? <LoaderCircle size={13} className="spin" /> : 'Save'}</button></div>
     {saved && <button type="button" className="text-button danger" onClick={() => void save('')}>Remove key</button>}
     <div className="usage-meter">

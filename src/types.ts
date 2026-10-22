@@ -6,7 +6,7 @@ export type CatAccessory = 'none' | 'bell' | 'bow' | 'bandana' | 'hat' | 'flower
 export type PetMotion = 'calm' | 'playful' | 'sleepy';
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: Settings['accent'] }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
-export type CloudProvider = 'anthropic' | 'openai' | 'gemini';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
@@ -88,6 +88,7 @@ export interface Diagnostics {
   remainingBudgetUsd?: number;
   cloudKeys?: string[];
   cloudSpendUsd?: number;
+  chatgptAccount?: string | null;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 export interface SavedSearch { id: string; query: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastResultTaskId?: string; lastError?: string }

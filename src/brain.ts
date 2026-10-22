@@ -19,6 +19,8 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
   { id: 'anthropic', name: 'Anthropic', model: 'claude-opus-5-5', input: 4, output: 20, keys: 'console.anthropic.com' },
   { id: 'openai', name: 'OpenAI', model: 'gpt-5-mini', input: 0.25, output: 2, keys: 'platform.openai.com' },
   { id: 'gemini', name: 'Google Gemini', model: 'gemini-2.5-flash', input: 0.3, output: 2.5, keys: 'aistudio.google.com' },
+  // Your own ChatGPT plan through Sign in with ChatGPT: no key, no per-token price.
+  { id: 'chatgpt', name: 'ChatGPT', model: '', input: 0, output: 0, keys: 'chatgpt.com' },
 ];
 
 export const backendLabel: Record<ModelBackend, string> = { apple: 'Apple Intelligence', mlx: 'Local MLX model', cloud: 'Cloud model' };

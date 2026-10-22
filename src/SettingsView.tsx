@@ -16,10 +16,11 @@ type Props = {
   onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void; onRestartSetup: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
   privacyExtras?: React.ReactNode; onForget: (id: number) => Promise<void>; onPolicy?: () => void;
+  onRefresh: () => Promise<void>; onNotice: (message: string) => void;
 };
 
 /** Settings in four tabs. Changes save on their own a moment after you stop editing. */
-export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget, onPolicy }: Props) {
+export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget, onPolicy, onRefresh, onNotice }: Props) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('buntini-settings-tab') as Tab) || 'buntini'; } catch { return 'buntini'; } });
   const [draft, setDraft] = useState(data.settings);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -54,7 +55,7 @@ export default function SettingsView({ data, onSave, onError, onAddFolder, onRem
     {status === 'error' && problem && <p className="settings-problem" role="alert">{problem}</p>}
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
-      {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} />}
+      {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}
       {tab === 'privacy' && <PrivacyTab draft={draft} update={update} roots={data.roots} onAddFolder={onAddFolder} onRemoveFolder={onRemoveFolder} onAudit={onAudit} onError={onError} memories={data.memories || []} onForget={onForget} onPolicy={onPolicy}>{privacyExtras}</PrivacyTab>}
     </div>

@@ -11,7 +11,7 @@ Everything Buntini keeps is stored in its folder under `~/Library/Application Su
 - **Your conversation**, settings, saved searches, price watches, and the things you ask it to remember.
 - **The file index** for folders you choose to allow. Buntini reads only those folders, and you can remove access at any time.
 - **What you're doing:** if "Notice what I'm doing" is on, the name of the app in front, how long you've been active, window positions (never titles or contents) and battery, CPU and disk levels. This is kept in memory for at most three hours and never saved.
-- **API keys** you add, in the macOS Keychain.
+- **API keys** you add, and your **ChatGPT sign-in** if you use one, in the macOS Keychain.
 - **An activity log** of tools used and permissions given, and a **crash log** (time, error and code location only).
 - **Voice recordings**, only while you hold the mic. They are deleted once they've been transcribed.
 
@@ -22,6 +22,7 @@ On-device brains (Apple Intelligence and local MLX models) can use all of this, 
 | When | Sent to | What is sent |
 | --- | --- | --- |
 | You use a **cloud brain** (Anthropic, OpenAI or Google Gemini) with your own key | That provider | Your messages and Buntini's replies. Local data is included only for what you switch on under *Settings → Privacy → Cloud models may see*: what you're doing, Mac health, your files, earlier messages, things you asked it to remember. All of these are off by default. The name you gave Buntini to call you is not sent. |
+| You **sign in with ChatGPT** and use it as the brain | OpenAI | Sign-in happens on OpenAI’s own page in your browser. Then the same as a cloud brain above: your messages and replies, plus only what you’ve switched on. Requests are sent with `store: false`, asking OpenAI not to keep them. Your sign-in tokens stay in your Keychain. |
 | You approve an **online lookup** | The service shown on the approval sheet: Brave Search, Tavily, Open-Meteo, Frankfurter (ECB rates), Wikipedia, OpenStreetMap Nominatim, eBay or Duffel | Exactly the values shown on the sheet, and nothing from your files or conversation. Public pages from search results may be fetched to cite them. |
 | You approve an **action** | The app on your Mac that carries it out (Reminders, Calendar, Notes, Mail, Shortcuts, your browser) | The details you approved. Mail drafts are never sent by Buntini. |
 | You check for **macOS updates** | Apple's Software Update service, through macOS | Nothing from Buntini. |

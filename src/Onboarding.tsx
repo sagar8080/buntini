@@ -6,12 +6,13 @@ import { appleStatus, cloudProviders } from './brain.ts';
 import { coats, lookFrom } from './petOptions';
 import { applyAnswers, blocker, initialAnswers, keysToSave, message, next, previous, reply, steps, type Answers, type Step } from './setupSteps';
 import { errorMessage } from './bridge';
+import ChatGPTAccount from './ChatGPTAccount';
 import type { Bootstrap, CatCoat, CloudProvider, KeyProvider, Settings } from './types';
 
-type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void> };
+type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void> };
 
 /** First-run setup as a conversation: Buntini asks, the user answers with inline controls. */
-export default function Onboarding({ data, onFinish, onSkip }: Props) {
+export default function Onboarding({ data, onFinish, onSkip, onRefresh }: Props) {
   const [step, setStep] = useState<Step>('hello');
   const [answers, setAnswers] = useState<Answers>(() => initialAnswers(data.settings, data.diagnostics));
   const [said, setSaid] = useState<{ step: Step; buntini: string; you: string }[]>([]);
@@ -61,7 +62,7 @@ export default function Onboarding({ data, onFinish, onSkip }: Props) {
         {typing ? <div className="bubble-row is-buntini"><span className="bubble-avatar"><Pet state="thinking" avatar="cat" look={look} /></span><div className="bubble bubble-buntini"><div className="typing" role="status" aria-label="Typing"><i /><i /><i /></div></div></div>
           : bubble(message(step, answers, data.diagnostics), step, step !== 'done' && <form className="setup-card" onSubmit={event => { event.preventDefault(); void advance(); }}>
             {step === 'hello' && <Hello answers={answers} set={set} />}
-            {step === 'brain' && <Brain answers={answers} set={set} data={data} />}
+            {step === 'brain' && <Brain answers={answers} set={set} data={data} onRefresh={onRefresh} onError={setError} />}
             {step === 'online' && <Online answers={answers} set={set} />}
             {step === 'roam' && <Roam answers={answers} set={set} />}
             <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
@@ -98,7 +99,7 @@ function Hello({ answers, set }: StepProps) {
   </>;
 }
 
-function Brain({ answers, set, data }: StepProps & { data: Bootstrap }) {
+function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: Bootstrap; onRefresh: () => Promise<void>; onError: (message: string) => void }) {
   const apple = appleStatus(data.diagnostics.appleIntelligence);
   const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
   const saved = !!data.diagnostics.cloudKeys?.includes(provider.id);
@@ -114,7 +115,11 @@ function Brain({ answers, set, data }: StepProps & { data: Bootstrap }) {
       <label>Python interpreter<input value={answers.pythonPath} onChange={event => set('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
       <label>Model folder<input value={answers.modelPath} onChange={event => set('modelPath', event.target.value)} placeholder="/path/to/local/model" spellCheck={false} /></label>
     </>}
-    {answers.backend === 'cloud' && <>
+    {answers.backend === 'cloud' && provider.id === 'chatgpt' && <>
+      <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudModel', ''); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <ChatGPTAccount account={data.diagnostics.chatgptAccount} model="" onChange={onRefresh} onError={onError} />
+    </>}
+    {answers.backend === 'cloud' && provider.id !== 'chatgpt' && <>
       <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudModel', ''); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `Paste your ${provider.name} key`} aria-label={`${provider.name} API key`} /></div></label>
       <label className="inline-field"><span>Monthly spending cap<small>I stop using {provider.name} when it’s reached</small></span><input aria-label="Monthly cloud spending cap in USD" type="number" min="0" max="10000" step="0.5" value={answers.cloudBudget} onChange={event => set('cloudBudget', Number(event.target.value))} /></label>

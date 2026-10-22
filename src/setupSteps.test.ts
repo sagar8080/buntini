@@ -54,4 +54,8 @@ test('answers read naturally and become settings and keys', () => {
   assert.equal(saved.petNudges, false, 'nudges need awareness');
   assert.deepEqual(keysToSave(answers), [['openai', 'sk-1'], ['brave', 'bsk']]);
   assert.deepEqual(keysToSave({ ...answers, backend: 'apple', searchKey: '' }), [], 'a cloud key is only saved for the cloud brain');
+  const chatgpt = { ...answers, cloudProvider: 'chatgpt' as const, cloudKey: '' };
+  assert.match(blocker('brain', chatgpt, diagnostics('available')), /Sign in with ChatGPT/);
+  assert.equal(blocker('brain', chatgpt, { ...diagnostics('available'), chatgptAccount: 'sam@example.com' }), '', 'signed in is enough; no key or cap');
+  assert.equal(reply('brain', chatgpt), 'Use ChatGPT with my own plan.');
 });

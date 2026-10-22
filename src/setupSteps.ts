@@ -44,7 +44,9 @@ export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics):
   if (step === 'brain') {
     if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return `${appleStatus(diagnostics.appleIntelligence).advice || 'Apple Intelligence can’t run here.'} Choose a local or cloud model instead.`;
     if (answers.backend === 'mlx' && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Add the Python interpreter and the model folder for your local model.';
-    if (answers.backend === 'cloud') {
+    if (answers.backend === 'cloud' && answers.cloudProvider === 'chatgpt') {
+      if (!diagnostics.chatgptAccount) return 'Sign in with ChatGPT, or choose another brain.';
+    } else if (answers.backend === 'cloud') {
       if (!answers.cloudKey.trim() && !diagnostics.cloudKeys?.includes(answers.cloudProvider)) return 'Paste your API key, or choose another brain.';
       if (!(answers.cloudBudget > 0)) return 'Set a monthly spending cap above $0.';
     }
@@ -80,6 +82,7 @@ export function reply(step: Step, answers: Answers): string {
       if (answers.backend === 'apple') return 'Use Apple Intelligence.';
       if (answers.backend === 'mlx') return 'Use my local MLX model.';
       const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
+      if (provider.id === 'chatgpt') return 'Use ChatGPT with my own plan.';
       return `Use ${provider.name} (${answers.cloudModel.trim() || provider.model}), up to $${answers.cloudBudget} a month.`;
     }
     case 'online': return answers.searchKey.trim() ? `Look things up with ${searchNames[answers.searchProvider]}, up to ${answers.dailyLimit} a day.` : 'Skip online lookups for now.';
@@ -106,7 +109,7 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
 /** Keys typed during setup, saved to the Keychain before the settings. */
 export function keysToSave(answers: Answers): [KeyProvider, string][] {
   const keys: [KeyProvider, string][] = [];
-  if (answers.backend === 'cloud' && answers.cloudKey.trim()) keys.push([answers.cloudProvider, answers.cloudKey.trim()]);
+  if (answers.backend === 'cloud' && answers.cloudProvider !== 'chatgpt' && answers.cloudKey.trim()) keys.push([answers.cloudProvider, answers.cloudKey.trim()]);
   if (answers.searchKey.trim()) keys.push([answers.searchProvider, answers.searchKey.trim()]);
   return keys;
 }

@@ -392,6 +392,8 @@ pub struct Diagnostics {
     /// Cloud providers with a saved key, and this month's estimated spend on the chosen one.
     pub cloud_keys: Vec<String>,
     pub cloud_spend_usd: f64,
+    /// The ChatGPT account Buntini is signed in to, if any.
+    pub chatgpt_account: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -26,10 +26,13 @@ pub struct Provider {
     pub output_per_m: f64,
 }
 
-pub const PROVIDERS: [Provider; 3] = [
+pub const PROVIDERS: [Provider; 4] = [
     Provider { id: "anthropic", name: "Anthropic", model: "claude-opus-5-5", input_per_m: 4.0, output_per_m: 20.0 },
     Provider { id: "openai", name: "OpenAI", model: "gpt-5-mini", input_per_m: 0.25, output_per_m: 2.0 },
     Provider { id: "gemini", name: "Google Gemini", model: "gemini-2.5-flash", input_per_m: 0.30, output_per_m: 2.50 },
+    // Your own ChatGPT plan through Sign in with ChatGPT: no key and no per-token cost;
+    // the model comes from the account's own list.
+    Provider { id: "chatgpt", name: "ChatGPT", model: "", input_per_m: 0.0, output_per_m: 0.0 },
 ];
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
@@ -234,7 +237,52 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
             // The key goes in a header, never in the URL where logs could keep it.
             Ok(Request { url: format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"), headers: vec![("x-goog-api-key", key.to_string())], body })
         }
-        _ => Err("Choose Anthropic, OpenAI or Gemini.".into()),
+        "chatgpt" => {
+            // OpenAI's Responses API as Sign in with ChatGPT requires it: system text goes
+            // in `instructions`, nothing is stored, and the reply always streams.
+            let mut input: Vec<Value> = Vec::new();
+            let mut call = 0;
+            for message in &messages {
+                match message["role"].as_str().unwrap_or("") {
+                    "system" => {}
+                    "assistant" => match &message["provider_content"] {
+                        Value::Array(items) => {
+                            if items.iter().any(|item| item["type"] == "function_call") {
+                                call += 1;
+                            }
+                            input.extend(items.iter().cloned());
+                        }
+                        _ => {
+                            let said = text(&message["content"]);
+                            if !said.trim().is_empty() {
+                                input.push(json!({"role":"assistant","content":said}));
+                            }
+                            if let Some((name, arguments)) = assistant_call(message) {
+                                call += 1;
+                                input.push(json!({"type":"function_call","call_id":format!("call_{call}"),"name":name,"arguments":arguments.to_string()}));
+                            }
+                        }
+                    },
+                    "tool" => {
+                        let id = input.iter().rev().find(|item| item["type"] == "function_call").and_then(|item| item["call_id"].as_str()).map(str::to_string).unwrap_or_else(|| format!("call_{call}"));
+                        input.push(json!({"type":"function_call_output","call_id":id,"output":text(&message["content"])}));
+                    }
+                    _ => input.push(json!({"role":"user","content":text(&message["content"])})),
+                }
+            }
+            if model.is_empty() || !model_valid(model) {
+                return Err("Choose a ChatGPT model in Settings → Brain.".into());
+            }
+            let mut body = json!({"model":model,"instructions":system,"input":input,"stream":true,"store":false,"include":["reasoning.encrypted_content"]});
+            if !tools.is_empty() {
+                body["tools"] = tools.iter().map(|tool| json!({"type":"function","name":tool["name"],"description":tool["description"],"parameters":tool["parameters"]})).collect();
+                body["tool_choice"] = "auto".into();
+                body["parallel_tool_calls"] = false.into();
+            }
+            let _ = max_tokens; // A reply-length cap isn't accepted on this route.
+            Ok(Request { url: format!("{}/responses", crate::chatgpt::RESOURCE), headers: vec![("authorization", format!("Bearer {key}"))], body })
+        }
+        _ => Err("Choose Anthropic, OpenAI, Gemini or ChatGPT.".into()),
     }
 }
 
@@ -446,6 +494,41 @@ impl Decoder {
                     self.usage = Usage { input: usage["promptTokenCount"].as_u64().unwrap_or(0), output: usage["candidatesTokenCount"].as_u64().unwrap_or(0) + usage["thoughtsTokenCount"].as_u64().unwrap_or(0) };
                 }
             }
+            "chatgpt" => match value["type"].as_str().unwrap_or("") {
+                "response.output_text.delta" => {
+                    let piece = value["delta"].as_str().unwrap_or("").to_string();
+                    self.say(&piece, on_token)?;
+                }
+                "response.output_item.done" => {
+                    let item = value["item"].clone();
+                    // One tool per step: later calls in the same reply are dropped.
+                    let extra_call = item["type"] == "function_call" && self.parts.iter().any(|kept| kept["type"] == "function_call");
+                    if !extra_call {
+                        if self.parts.len() >= 64 {
+                            return Err("The cloud model sent too many parts.".into());
+                        }
+                        self.parts.push(item);
+                    }
+                }
+                "response.completed" => {
+                    let usage = &value["response"]["usage"];
+                    self.usage = Usage { input: usage["input_tokens"].as_u64().unwrap_or(0), output: usage["output_tokens"].as_u64().unwrap_or(0) };
+                    self.stop = "completed".into();
+                    self.done = true;
+                    return Ok(true);
+                }
+                "response.incomplete" => {
+                    self.stop = value["response"]["incomplete_details"]["reason"].as_str().unwrap_or("incomplete").to_string();
+                    self.done = true;
+                    return Ok(true);
+                }
+                "response.failed" | "error" => {
+                    let error = if value["type"] == "error" { &value } else { &value["response"]["error"] };
+                    let code = error["code"].as_str().unwrap_or("unknown_error");
+                    return Err(crate::chatgpt::plan_error(code, error["param"].as_str().unwrap_or("")).unwrap_or_else(|| format!("ChatGPT couldn’t answer ({code}).")));
+                }
+                _ => {}
+            },
             _ => return Err("Unknown cloud provider.".into()),
         }
         Ok(false)
@@ -491,6 +574,20 @@ impl Decoder {
                 }
                 Ok((Turn { text: self.text, tool, raw: Some(Value::Array(blocks)) }, usage))
             }
+            "chatgpt" => {
+                if self.stop != "completed" {
+                    return Err(match self.stop.as_str() {
+                        "content_filter" => REFUSED.into(),
+                        "" => "ChatGPT stopped before finishing. Try again.".into(),
+                        _ => "ChatGPT stopped before finishing that reply. Try again.".into(),
+                    });
+                }
+                let tool = self.parts.iter().find(|item| item["type"] == "function_call").map(|item| {
+                    let arguments = item["arguments"].as_str().and_then(|raw| serde_json::from_str::<Value>(raw).ok()).unwrap_or_else(|| json!({}));
+                    json!({"name":item["name"],"arguments":arguments})
+                });
+                Ok((Turn { text: self.text, tool, raw: Some(Value::Array(self.parts)) }, usage))
+            }
             _ => {
                 if ["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"].contains(&self.stop.as_str()) {
                     return Err(REFUSED.into());
@@ -518,6 +615,18 @@ fn append(block: &mut Value, key: &str, piece: &str) {
 /// Plain-language advice for a rejected request.
 fn rejection(name: &str, status: u16, body: &str) -> String {
     let detail: Value = serde_json::from_str(body).unwrap_or_default();
+    if let Some(advice) = detail["error"]["code"].as_str().and_then(|code| crate::chatgpt::plan_error(code, detail["error"]["param"].as_str().unwrap_or(""))) {
+        return advice;
+    }
+    if name == "ChatGPT" {
+        return match status {
+            401 => "ChatGPT didn’t accept your sign-in. Sign in again in Settings → Brain.".into(),
+            403 => "ChatGPT doesn’t allow this request from your account or region.".into(),
+            429 => "You’ve reached the limit for using your ChatGPT plan in apps like Buntini. Check ChatGPT → Settings → Usage.".into(),
+            503 => "ChatGPT is busy right now. Try again in a moment.".into(),
+            _ => format!("ChatGPT couldn’t answer ({status})."),
+        };
+    }
     let message = detail["error"]["message"].as_str().or_else(|| detail[0]["error"]["message"].as_str()).unwrap_or("").chars().take(300).collect::<String>();
     match status {
         401 | 403 => format!("{name} didn’t accept the API key. Check it in Settings → Brain."),
@@ -730,6 +839,46 @@ mod tests {
         assert_eq!(usage, Usage { input: 12, output: 10 });
         let blocked = "data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}\n\n";
         assert_eq!(decode("gemini", blocked).0.unwrap_err(), REFUSED);
+    }
+
+    #[test]
+    fn chatgpt_uses_the_responses_api_without_storing_anything() {
+        let raw = json!([{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"search_files","arguments":"{\"query\":\"lease\"}"}]);
+        let request = build("chatgpt", "gpt-6.1-sol", "token", &payload(Some(raw.clone()))).unwrap();
+        assert_eq!(request.url, "https://api.openai.com/v1/responses");
+        assert_eq!(request.headers[0], ("authorization", "Bearer token".to_string()));
+        assert_eq!((request.body["store"].clone(), request.body["stream"].clone()), (json!(false), json!(true)));
+        assert_eq!(request.body["instructions"], "Be brief.");
+        assert!(request.body.get("max_output_tokens").is_none() && request.body.get("temperature").is_none(), "unsupported on this route");
+        let input = request.body["input"].as_array().unwrap();
+        assert!(input.iter().all(|item| item["role"] != "system"), "system text goes in instructions");
+        assert_eq!(input[3], raw[0], "reasoning goes back as received");
+        assert_eq!(input[5], json!({"type":"function_call_output","call_id":"call_abc","output":"lease.pdf"}));
+        assert_eq!(request.body["tools"][0]["name"], "search_files");
+        assert!(build("chatgpt", "", "token", &payload(None)).is_err(), "a model must be chosen");
+        let plain = build("chatgpt", "gpt-6.1-sol", "t", &payload(None)).unwrap();
+        assert_eq!(plain.body["input"][3]["type"], "function_call", "an empty assistant message adds no item");
+        assert_eq!(plain.body["input"][4]["call_id"], plain.body["input"][3]["call_id"]);
+
+        let stream = concat!(
+            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n",
+            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n",
+            "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}}\n\n",
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":30,\"output_tokens\":5}}}\n\n",
+        );
+        let (result, streamed) = decode("chatgpt", stream);
+        let (turn, usage) = result.unwrap();
+        assert_eq!((turn.text.as_str(), streamed.as_str(), usage), ("Hello", "Hello", Usage { input: 30, output: 5 }));
+        let call = "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"system_info\",\"arguments\":\"{}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{}}}\n\n";
+        let (turn, _) = decode("chatgpt", call).0.unwrap();
+        assert_eq!(turn.tool.unwrap(), json!({"name":"system_info","arguments":{}}));
+        assert_eq!(turn.raw.unwrap()[0]["call_id"], "c1");
+        let limit = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"}}}\n\n";
+        let mut decoder = Decoder::new("chatgpt");
+        let error = Sse::default().push(limit.as_bytes()).unwrap().into_iter().map(|(_, data)| decoder.event(&data, &mut |_| {})).find_map(Result::err).unwrap();
+        assert!(error.contains("Settings → Usage"));
+        assert!(rejection("ChatGPT", 429, "{}").contains("ChatGPT plan"));
+        assert!(decode("chatgpt", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n").0.is_err(), "no completed event, no answer");
     }
 
     #[test]

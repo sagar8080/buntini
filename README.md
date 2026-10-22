@@ -2,6 +2,10 @@
 
 A local-first desktop companion for macOS and Apple Silicon. Buntini lives directly on the desktop as a small animated cat you can dress up. Click it or press **⌘⇧Space** to open an attached command bubble. It starts tucked away, without a Dock icon or a normal application window.
 
+## License
+
+Buntini is open source under the [MIT License](LICENSE).
+
 ## Install
 
 1. Download **Buntini-macOS-arm64.dmg** from the [latest release](https://github.com/sagar8080/nexon/releases/latest) (Apple silicon, macOS 13 or later; Apple Intelligence needs macOS 26).
@@ -56,6 +60,7 @@ Settings → Brain picks the model that answers. Every backend gets the same val
 
   It gives the three Terminal commands to copy (create a Python environment, install MLX LM, download the model with `hf`), ticks each step off as it notices it, and fills in the Python and model folder fields once the download is complete. Buntini never installs packages or downloads models itself. Developers can also preset `BUNTINI_PYTHON` and `BUNTINI_MODEL_PATH`. Existing installs that already used MLX stay on it.
 - **Cloud model:** Anthropic (suggested `claude-opus-5-5`), OpenAI (`gpt-5-mini`) or Google Gemini (`gemini-2.5-flash`) with your own API key; any model name your key can use works. Replies stream as they are written. Each message reserves a cautious cost estimate against your **monthly spending cap** before it is sent, then settles to the token usage the provider reports, at the per-million-token prices shown in Settings (suggested from published October 2026 prices; check your provider's page, their invoice is authoritative). Rejected requests are refunded, Buntini warns once at 80% and stops at the cap. A cloud model sees only what you allow under *What this model may see* (see Privacy below).
+- **ChatGPT:** choose ChatGPT under Cloud model and press **Sign in with ChatGPT**. Your browser opens to OpenAI's sign-in, you allow Buntini to use your plan, and the browser hands the result back to Buntini on `127.0.0.1`. Each person uses their own ChatGPT account and plan; there's no API key and no per-message cost, and OpenAI sets the limits (Buntini explains when one is reached). The sign-in is kept in the Keychain and renewed automatically; Sign out revokes it with OpenAI. This uses OpenAI's [Sign in with ChatGPT flow for open-source, locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source), which registers Buntini on first sign-in; it's a preview, so details may change.
 
 The MLX environment and Qwen model were verified with real offline generation, tool calls, follow-ups, cancellation and worker reuse; Apple Intelligence with live routing, streaming and transcription probes. See [acceptance evidence](docs/acceptance.md).
 

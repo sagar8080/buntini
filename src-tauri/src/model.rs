@@ -100,7 +100,14 @@ impl ModelHub {
                 None => Err(apple_advice("missing")),
             },
             Backend::Cloud => {
-                let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose Anthropic, OpenAI or Gemini in Settings → Brain.")?;
+                let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose a cloud model in Settings → Brain.")?;
+                if provider.id == "chatgpt" {
+                    return match crate::chatgpt::load() {
+                        Some(session) if session.plan_allowed() => Ok(()),
+                        Some(_) => Err("Your ChatGPT sign-in doesn’t allow Buntini to use your plan. Sign in again and allow plan usage.".into()),
+                        None => Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()),
+                    };
+                }
                 if crate::web::credential(provider.id).is_err() {
                     return Err(format!("Add your {} API key in Settings → Brain to use the cloud model.", provider.name));
                 }
@@ -253,6 +260,18 @@ impl ModelHub {
         F: FnMut(String) + Send,
     {
         let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose a cloud provider in Settings → Brain.")?;
+        // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
+        if provider.id == "chatgpt" {
+            let token = crate::chatgpt::access_token().await?;
+            let model = match settings.cloud_model.trim() {
+                "" => crate::chatgpt::models().await?.into_iter().next().map(|model| model.slug).ok_or("Your ChatGPT plan didn’t list any models.")?,
+                chosen => chosen.to_string(),
+            };
+            return match cloud::generate(provider, &model, &token, &payload, cancel, on_token).await {
+                Ok((turn, _)) => Ok(turn),
+                Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => Err(message),
+            };
+        }
         let ledger = self.ledger.get().ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
         let key = crate::web::credential(provider.id)?;
         let (input_price, output_price) = (settings.cloud_input_price, settings.cloud_output_price);

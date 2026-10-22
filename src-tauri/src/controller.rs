@@ -132,6 +132,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             remaining_budget_usd,
             cloud_keys,
             cloud_spend_usd,
+            chatgpt_account: crate::chatgpt::load().map(|session| if session.email.is_empty() { "your ChatGPT account".into() } else { session.email }),
         },
     })
 }
@@ -186,6 +187,10 @@ pub fn set_api_key(
     key: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // The ChatGPT sign-in is written only by the sign-in flow, never pasted in.
+    if provider == crate::chatgpt::KEYCHAIN_ID {
+        return Err("Use Sign in with ChatGPT in Settings → Brain.".into());
+    }
     if !key.trim().is_empty() {
         match provider.as_str() {
             "ebay" => {

@@ -93,6 +93,7 @@ pub async fn delete_all_data(confirm: String, state: State<'_, AppState>) -> Res
     if !state.active.lock().unwrap().is_empty() {
         return Err("Stop the current task first.".into());
     }
+    crate::chatgpt::sign_out().await;
     state.store.lock().unwrap().erase_everything()?;
     for provider in ["brave", "tavily", "ebay", "duffel"].into_iter().chain(crate::cloud::PROVIDERS.iter().map(|provider| provider.id)) {
         let _ = crate::web::set_credential(provider, "");
