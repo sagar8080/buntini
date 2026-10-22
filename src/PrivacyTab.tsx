@@ -14,11 +14,11 @@ const shares: { id: string; label: string }[] = [
 type Props = {
   draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; roots: string[];
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>; onAudit: () => void; onError: (error: string) => void; children?: ReactNode;
-  memories: Memory[]; onForget: (id: number) => Promise<void>;
+  memories: Memory[]; onForget: (id: number) => Promise<void>; onPolicy?: () => void;
 };
 
 /** The Privacy tab: what Buntini notices, which folders it can read, and what cloud models may see. */
-export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemoveFolder, onAudit, onError, children, memories, onForget }: Props) {
+export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemoveFolder, onAudit, onError, children, memories, onForget, onPolicy }: Props) {
   const toggle = (id: string, on: boolean) => update('externalShares', on ? [...new Set([...draft.externalShares, id])] : draft.externalShares.filter(item => item !== id));
   return <>
     <section className="settings-section">
@@ -41,5 +41,6 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
     </section>
     {children}
     <button type="button" className="audit-button" onClick={onAudit}><ShieldCheck size={14} /><span>Activity log</span><ChevronRight size={14} /></button>
+    {onPolicy && <button type="button" className="audit-button" onClick={onPolicy}><ShieldCheck size={14} /><span>Privacy policy</span><ChevronRight size={14} /></button>}
   </>;
 }

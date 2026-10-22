@@ -47,6 +47,8 @@ export default function App() {
   const [activity, setActivity] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Read out finished replies for VoiceOver without announcing every streamed word.
+  const [announcement, setAnnouncement] = useState('');
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [voiceStopping, setVoiceStopping] = useState(false);
@@ -251,6 +253,7 @@ export default function App() {
       if (result.handoff === 'online') { goOnline = true; await speechQueue.current?.cancel(); return; }
       if (result.handoff === 'action' && result.action) { setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); return; }
       setTurns(previous => mergeTurns(previous, [result]));
+      if (result.state === 'completed') setAnnouncement(`${data?.settings.assistantName || 'Buntini'}: ${result.answer.slice(0, 400)}`);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
         if (!streamedText && result.answer) speechQueue.current?.append(result.answer, speechToken);
@@ -403,13 +406,13 @@ export default function App() {
           <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { setTurns(previous => mergeTurns(previous, [result])); setFocusId(result.id); setPage('home'); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">PAST CONVERSATIONS</div>
-          {data?.tasks.length ? <><div className="history-list">{data.tasks.map(item => <button key={item.id} className="history-item" onClick={() => { setTurns(previous => mergeTurns(previous, [item])); setFocusId(item.id); setError(''); setPage('home'); }}><span className="history-icon">{item.sources.length ? <Globe2 size={16} /> : <Clock3 size={16} />}</span><span><strong>{item.prompt}</strong><small>{relativeTime(item.createdAt)} · {item.state}</small></span><ChevronRight size={14} /></button>)}</div><button className="text-button danger clear-history" onClick={() => void safeAction(async () => { await command('clear_history'); setTurns([]); setLive(null); setCanLoadEarlier(false); }, 'Task history cleared.')}><Trash2 size={13} /> Clear task history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
+          {data?.tasks.length ? <><div className="history-list">{data.tasks.map(item => <button key={item.id} className="history-item" onClick={() => { setTurns(previous => mergeTurns(previous, [item])); setFocusId(item.id); setError(''); setPage('home'); }}><span className="history-icon">{item.sources.length ? <Globe2 size={16} /> : <Clock3 size={16} />}</span><span><strong>{item.prompt || 'Morning brief'}</strong><small>{relativeTime(item.createdAt)} · {item.state}</small></span><ChevronRight size={14} /></button>)}</div><button className="text-button danger clear-history" onClick={() => void safeAction(async () => { await command('clear_history'); setTurns([]); setLive(null); setCanLoadEarlier(false); }, 'Task history cleared.')}><Trash2 size={13} /> Clear task history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
           <div className="history-privacy"><ShieldCheck size={13} /> Stored in SQLite. Never synced to a cloud.</div>
         </div>}
 
         {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
           const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh();
-        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setBoundary(null); setCanLoadEarlier(false); setPage('home'); await refresh(); }} />} />}
+        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setBoundary(null); setCanLoadEarlier(false); setPage('home'); await refresh(); }} />} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
@@ -420,6 +423,7 @@ export default function App() {
           catch (failure) { setError(errorMessage(failure)); setProposal(null); react('sad'); }
           finally { setActing(false); setPetState('idle'); }
         }} />}
+        <div className="sr-only" aria-live="polite">{announcement}</div>
         {(error || notice) && <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div>}
         <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · Local-first desktop companion. Shortcut: ⌘ ⇧ Space. No unrestricted shell tools.')}><CircleHelp size={12} /></button></footer>
       </section>}

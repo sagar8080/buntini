@@ -2,6 +2,20 @@
 
 A local-first desktop companion for macOS and Apple Silicon. Buntini lives directly on the desktop as a small animated cat you can dress up. Click it or press **⌘⇧Space** to open an attached command bubble. It starts tucked away, without a Dock icon or a normal application window.
 
+## Install
+
+1. Download **Buntini-macOS-arm64.dmg** from the [latest release](https://github.com/sagar8080/nexon/releases/latest) (Apple silicon, macOS 13 or later; Apple Intelligence needs macOS 26).
+2. Open it and drag **Buntini** to Applications.
+3. Buntini isn't notarized by Apple yet, so macOS stops the first launch. Open it once from Applications, then go to **System Settings → Privacy & Security** and choose **Open Anyway**. You only do this once.
+
+Prefer the terminal? After copying it to Applications:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Buntini.app
+```
+
+Every push to `main` builds the app in GitHub Actions (download it from the run's artifacts), and pushing a tag such as `v0.2.0` publishes a release with the disk image, a zip and SHA-256 checksums.
+
 ## Run the desktop companion
 
 Requires macOS 13+, Apple Silicon, Node.js 24+, Rust, and Xcode Command Line Tools.
@@ -63,6 +77,9 @@ Buntini requests microphone access only when you deliberately start push-to-talk
 
 ## Privacy and limits
 
+The full [privacy policy](PRIVACY.md) lists what stays on your Mac, what leaves it and when, and your controls.
+
+
 **On-device by design.** The local model may use anything Buntini can see on this Mac (activity, approved folders, system state), because none of it leaves the machine. Restrictions apply at egress: search providers and online integrations receive only the exact request you approve. A cloud model receives your messages, and local data only for the categories you switch on under *What this model may see*: what you're doing, Mac health, your files, earlier conversation (all off by default). Earlier turns that used data you haven't shared are left out of its memory, and your own name is only given to on-device models. `src-tauri/src/privacy.rs` makes that decision for every model-facing path.
 
 Rust enforces the allowlist independently of the model: scoped file search, system snapshots, and explicitly authorized web searches. Tool arguments, IPC messages, model context, provider responses, and output sizes are bounded. Private file results cannot be forwarded to a search provider by the model. Remote results and file excerpts are treated as untrusted data.
@@ -82,6 +99,8 @@ Unsupported actions are unavailable, rather than awaiting approval: file changes
 ```sh
 ./scripts/check.sh
 ```
+
+The same checks run in CI (`.github/workflows/ci.yml`) on a macOS 26 runner, alongside `npm audit` and `cargo audit`.
 
 With dependencies already available, this runs the production frontend build, model-free worker tests, Rust policy/persistence/IPC tests, and synthetic Swift audio checks without accessing the microphone or downloading anything. Real microphone capture needs the user’s normal macOS permission. Whisper has been checked with synthetic speech; live provider acceptance still requires an API key. See [the acceptance matrix](docs/acceptance.md).
 

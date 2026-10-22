@@ -713,3 +713,5 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .action-fields input, .action-fields textarea { width: 100%; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; }
 .action-fields input:focus, .action-fields textarea:focus { outline: none; border-color: var(--accent); }
 .action-fields textarea { resize: vertical; line-height: 1.5; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
