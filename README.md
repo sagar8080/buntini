@@ -17,6 +17,7 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 - **Lives on your desktop.** A cat you can dress up. It roams, naps on your windows and offers a hand when it’s useful.
 - **Your choice of brain.** Apple Intelligence, a local Qwen or Gemma model, or Anthropic, OpenAI, Gemini or your own ChatGPT plan.
 - **Private by default.** On-device models can use what Buntini sees on your Mac; cloud models only see what you allow.
+- **Works with your apps.** Mail, Calendar, Reminders, Notes, Music, Spotify and Shortcuts, on your Mac with no accounts, once you allow each one.
 - **Gets things done, with your OK.** Reminders, calendar events, notes, Mail drafts, Shortcuts, apps and links. You approve every one.
 - **Looks things up.** Weather, exchange rates, Wikipedia, places, flights, eBay and web search, inside a budget you set.
 - **Remembers.** One ongoing conversation, the facts you ask it to keep, and an optional morning brief.

@@ -495,5 +495,115 @@
       ],
       "additionalProperties": false
     }
+  },
+  "read_mail": {
+    "name": "read_mail",
+    "description": "Read the user's recent email in the Mail app: newest inbox messages with sender, subject and the start of each, or ones matching a sender or subject. Read-only; to reply, use draft_email.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "A sender name, address or words from the subject. Leave out for the latest mail."
+        },
+        "unread": {
+          "type": "boolean",
+          "description": "Only unread messages."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "description": "How many messages, 5 if not given."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "read_calendar": {
+    "name": "read_calendar",
+    "description": "See the events on the user's calendar for a day, including repeating ones. Read-only; to add an event, use add_calendar_event.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "description": "The day as YYYY-MM-DD. Leave out for today."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "read_reminders": {
+    "name": "read_reminders",
+    "description": "List the user's open reminders in the Reminders app, soonest due first. Read-only; to add one, use add_reminder.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "find_notes": {
+    "name": "find_notes",
+    "description": "Find notes in the Notes app whose title or text mentions something, and show their start.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Words to look for."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "control_music": {
+    "name": "control_music",
+    "description": "Control music in the Music app or Spotify: say what's playing, play, pause, skip to the next track or go back. With play and a query, Music plays a matching playlist or song from the library; Spotify opens its search for the user to pick.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "enum": [
+            "music",
+            "spotify"
+          ],
+          "description": "Which app. Music if not given."
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "now_playing",
+            "play",
+            "pause",
+            "next",
+            "previous"
+          ]
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "With play: a playlist, song or artist to play."
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
   }
 }

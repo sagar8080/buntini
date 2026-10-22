@@ -65,6 +65,15 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(WorkerError):
             validate_tool_call({"name": "wikipedia", "arguments": {"query": "Turing"}}, allowed)
 
+    def test_app_tools_follow_their_schemas(self):
+        allowed = {"read_mail", "control_music", "read_reminders"}
+        self.assertEqual(validate_tool_call({"name": "read_mail", "arguments": {"unread": "true", "limit": "3"}}, allowed), ("read_mail", {"unread": True, "limit": 3}))
+        self.assertEqual(validate_tool_call({"name": "control_music", "arguments": {"app": "Spotify", "action": "Now Playing"}}, allowed)[1], {"app": "spotify", "action": "now_playing"})
+        self.assertEqual(validate_tool_call({"name": "read_reminders", "arguments": {}}, allowed), ("read_reminders", {}))
+        for call in [{"name": "read_mail", "arguments": {"unread": "maybe"}}, {"name": "control_music", "arguments": {"action": "shuffle"}}, {"name": "read_mail", "arguments": {"folder": "Sent"}}]:
+            with self.subTest(call=call), self.assertRaises(WorkerError):
+                validate_tool_call(call, allowed)
+
     def test_native_tags_carry_integration_numbers_as_text(self):
         payload = "<function=places>\n<parameter=category>\ncafe\n</parameter>\n<parameter=near>\nPorto\n</parameter>\n<parameter=radius_m>\n800\n</parameter>\n</function>"
         self.assertEqual(parse_tool_payload(payload, {"places"}), ("places", {"category": "cafe", "near": "Porto", "radius_m": 800}))

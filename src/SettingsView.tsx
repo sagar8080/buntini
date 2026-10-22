@@ -4,11 +4,12 @@ import Customization from './Customization';
 import BrainSettings from './BrainSettings';
 import Connections from './Connections';
 import PrivacyTab from './PrivacyTab';
+import AppsTab from './AppsTab';
 import { errorMessage } from './bridge';
 import type { Bootstrap, KeyProvider, Settings } from './types';
 
-type Tab = 'buntini' | 'brain' | 'connections' | 'privacy';
-const tabs: { id: Tab; label: string }[] = [{ id: 'buntini', label: 'Buntini' }, { id: 'brain', label: 'Brain' }, { id: 'connections', label: 'Connections' }, { id: 'privacy', label: 'Privacy' }];
+type Tab = 'buntini' | 'brain' | 'apps' | 'connections' | 'privacy';
+const tabs: { id: Tab; label: string }[] = [{ id: 'buntini', label: 'Buntini' }, { id: 'brain', label: 'Brain' }, { id: 'apps', label: 'Apps' }, { id: 'connections', label: 'Connections' }, { id: 'privacy', label: 'Privacy' }];
 
 type Props = {
   data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
@@ -19,7 +20,7 @@ type Props = {
   onRefresh: () => Promise<void>; onNotice: (message: string) => void;
 };
 
-/** Settings in four tabs. Changes save on their own a moment after you stop editing. */
+/** Settings in five tabs. Changes save on their own a moment after you stop editing. */
 export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget, onPolicy, onRefresh, onNotice }: Props) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('buntini-settings-tab') as Tab) || 'buntini'; } catch { return 'buntini'; } });
   const [draft, setDraft] = useState(data.settings);
@@ -56,6 +57,7 @@ export default function SettingsView({ data, onSave, onError, onAddFolder, onRem
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
+      {tab === 'apps' && <AppsTab draft={draft} update={update} onError={onError} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}
       {tab === 'privacy' && <PrivacyTab draft={draft} update={update} roots={data.roots} onAddFolder={onAddFolder} onRemoveFolder={onRemoveFolder} onAudit={onAudit} onError={onError} memories={data.memories || []} onForget={onForget} onPolicy={onPolicy}>{privacyExtras}</PrivacyTab>}
     </div>

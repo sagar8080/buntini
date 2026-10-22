@@ -222,7 +222,7 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
     }
 }
 
-async fn output(mut command: Command, seconds: u64) -> Result<String, String> {
+pub async fn output(mut command: Command, seconds: u64) -> Result<String, String> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let result = tokio::time::timeout(Duration::from_secs(seconds), command.output()).await.map_err(|_| "That took too long and was stopped.".to_string())?.map_err(|_| "Couldn’t start the helper for that.".to_string())?;
     if result.status.success() {
@@ -237,7 +237,7 @@ async fn output(mut command: Command, seconds: u64) -> Result<String, String> {
     }
 }
 
-fn find_app(name: &str) -> Option<PathBuf> {
+pub fn find_app(name: &str) -> Option<PathBuf> {
     if name.contains(['/', '\\']) || name.starts_with('.') {
         return None;
     }

@@ -25,6 +25,7 @@ On-device brains (Apple Intelligence and local MLX models) can use all of this, 
 | You **sign in with ChatGPT** and use it as the brain | OpenAI | Sign-in happens on OpenAI’s own page in your browser. Then the same as a cloud brain above: your messages and replies, plus only what you’ve switched on. Requests are sent with `store: false`, asking OpenAI not to keep them. Your sign-in tokens stay in your Keychain. |
 | You approve an **online lookup** | The service shown on the approval sheet: Brave Search, Tavily, Open-Meteo, Frankfurter (ECB rates), Wikipedia, OpenStreetMap Nominatim, eBay or Duffel | Exactly the values shown on the sheet, and nothing from your files or conversation. Public pages from search results may be fetched to cite them. |
 | You approve an **action** | The app on your Mac that carries it out (Reminders, Calendar, Notes, Mail, Shortcuts, your browser) | The details you approved. Mail drafts are never sent by Buntini. |
+| You allow an **app** in Settings → Apps and ask about it | Nobody. Mail, Calendar, Reminders, Notes, Music and Spotify are read on this Mac | Email, events, reminders, notes and what’s playing reach a cloud brain only if you turn on that kind of data in Privacy. |
 | You check for **macOS updates** | Apple's Software Update service, through macOS | Nothing from Buntini. |
 
 Each provider handles your data under its own terms and privacy policy. Buntini sends requests only with the keys you add, and it counts and limits them before they go out.

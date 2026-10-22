@@ -6,6 +6,7 @@
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`.
 import AVFoundation
+import EventKit
 import Foundation
 #if canImport(FoundationModels)
 import FoundationModels
@@ -95,6 +96,8 @@ func schema(for name: String, parameters: [String: Any]) -> DynamicGenerationSch
             let low = (spec["minimum"] as? NSNumber)?.intValue ?? Int.min
             let high = (spec["maximum"] as? NSNumber)?.intValue ?? Int.max
             field = DynamicGenerationSchema(type: Int.self, guides: [.range(low...high)])
+        case "boolean":
+            field = DynamicGenerationSchema(type: Bool.self)
         case "number":
             let low = (spec["minimum"] as? NSNumber)?.doubleValue ?? -Double.greatestFiniteMagnitude
             let high = (spec["maximum"] as? NSNumber)?.doubleValue ?? Double.greatestFiniteMagnitude
@@ -261,9 +264,57 @@ func selfTest() async {
     #endif
 }
 
+/// `--events YYYY-MM-DD` and `--reminders`: the day's events (repeating ones included) and
+/// open reminders, read with EventKit for Buntini's Apps integrations and morning brief.
+/// One JSON object per line; exit 3 when macOS (or the user) hasn't allowed access.
+enum Agenda {
+    static func run(_ arguments: [String]) async -> Int32 {
+        let store = EKEventStore()
+        let events = arguments.contains("--events")
+        var granted = false
+        if #available(macOS 14.0, *) {
+            granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
+        } else {
+            granted = (try? await store.requestAccess(to: events ? .event : .reminder)) ?? false
+        }
+        guard granted else {
+            FileHandle.standardError.write(Data("not-authorized\n".utf8))
+            return 3
+        }
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.dateFormat = "yyyy-MM-dd HH:mm"
+        if events {
+            let day = DateFormatter()
+            day.locale = Locale(identifier: "en_US_POSIX")
+            day.dateFormat = "yyyy-MM-dd"
+            let index = arguments.firstIndex(of: "--events")! + 1
+            let start = Calendar.current.startOfDay(for: index < arguments.count ? day.date(from: arguments[index]) ?? Date() : Date())
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+            let found = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: nil)).sorted { $0.startDate < $1.startDate }
+            for event in found.prefix(40) {
+                emit(["start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate), "allDay": event.isAllDay, "title": event.title ?? "", "location": event.location ?? "", "calendar": event.calendar?.title ?? ""])
+            }
+        } else {
+            let found: [EKReminder] = await withCheckedContinuation { done in
+                store.fetchReminders(matching: store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)) { done.resume(returning: $0 ?? []) }
+            }
+            let due = { (reminder: EKReminder) in reminder.dueDateComponents.flatMap { Calendar.current.date(from: $0) } }
+            let sorted = found.sorted { (due($0) ?? .distantFuture) < (due($1) ?? .distantFuture) }
+            for reminder in sorted.prefix(50) {
+                emit(["title": reminder.title ?? "", "due": due(reminder).map { stamp.string(from: $0) } ?? "", "list": reminder.calendar?.title ?? ""])
+            }
+        }
+        return 0
+    }
+}
+
 @main
 struct Helper {
     static func main() async {
+        if CommandLine.arguments.contains("--events") || CommandLine.arguments.contains("--reminders") {
+            exit(await Agenda.run(CommandLine.arguments))
+        }
         if CommandLine.arguments.contains("--self-test") {
             await selfTest()
             return

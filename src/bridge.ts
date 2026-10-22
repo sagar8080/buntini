@@ -7,7 +7,7 @@ const defaults: Settings = {
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
-  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [],
+  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
 };
 export async function bootstrap(): Promise<Bootstrap> {
@@ -36,6 +36,12 @@ function previewProfile(model?: string | null) {
     ],
   };
 }
+// Preview-only stand-in for the apps on a Mac.
+function previewApps() {
+  const can: Record<string, string[]> = { mail: ['Read and search your recent email', 'Draft replies for you to send'], calendar: ['See what’s on any day', 'Add events you approve'], reminders: ['See your open reminders', 'Add reminders you approve'], notes: ['Find your notes', 'Write notes you approve'], music: ['See what’s playing', 'Play, pause and skip', 'Play songs and playlists from your library'], spotify: ['See what’s playing', 'Play, pause and skip', 'Open a search in Spotify'], shortcuts: ['Run your shortcuts after you approve'] };
+  const names: Record<string, string> = { mail: 'Mail', calendar: 'Calendar', reminders: 'Reminders', notes: 'Notes', music: 'Music', spotify: 'Spotify', shortcuts: 'Shortcuts' };
+  return { apps: Object.keys(names).map(id => ({ id, name: names[id], can: can[id], installed: id !== 'spotify', allowed: false })), others: ['Figma', 'Safari', 'Slack', 'Visual Studio Code', 'Xcode'] };
+}
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
 function previewTasks(): TaskRecord[] {
   try { return JSON.parse(localStorage.getItem('buntini-preview-tasks') || '[]'); } catch { return []; }
@@ -55,6 +61,8 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
+    if (name === 'app_list') return previewApps() as T;
+    if (name === 'check_app') return 'macOS will ask you once, the first time Buntini uses it.' as T;
     throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
   }
   return invoke<T>(name, args);

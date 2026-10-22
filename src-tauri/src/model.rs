@@ -66,6 +66,11 @@ impl ModelHub {
         Self { mlx: WorkerManager::new("local MLX model"), apple: WorkerManager::new("Apple Intelligence helper"), mlx_script, apple_helper, apple_state: std::sync::Mutex::new(None), ledger: OnceLock::new(), notice: OnceLock::new() }
     }
 
+    /// The Swift helper, which also reads Calendar and Reminders (`apps.rs`).
+    pub fn apple_helper(&self) -> &Path {
+        &self.apple_helper
+    }
+
     pub fn set_ledger(&self, store: Arc<Mutex<Store>>) {
         let _ = self.ledger.set(store);
     }

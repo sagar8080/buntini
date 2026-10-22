@@ -121,6 +121,11 @@ def validate_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 value = value.lower().replace(" ", "_").replace("-", "_")
                 if value not in spec["enum"]:
                     raise WorkerError("invalid_tool_call", f"{name}.{key} must be one of {', '.join(spec['enum'])}")
+        elif spec["type"] == "boolean":
+            if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+                value = value.strip().lower() == "true"
+            if not isinstance(value, bool):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} must be true or false")
         else:
             if isinstance(value, str):
                 try:

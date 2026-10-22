@@ -1,5 +1,6 @@
 mod actions;
 mod advisor;
+mod apps;
 mod approvals;
 mod brief;
 mod budget;
@@ -166,6 +167,8 @@ pub fn run() {
             controller::new_topic,
             controller::finish_onboarding,
             controller::run_action,
+            apps::app_list,
+            apps::check_app,
             advisor::mac_profile,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,

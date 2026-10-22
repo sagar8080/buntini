@@ -11,6 +11,10 @@ const shares: { id: string; label: string }[] = [
   { id: 'files', label: 'Your files' },
   { id: 'history', label: 'Earlier messages' },
   { id: 'memory', label: 'Things I remember' },
+  { id: 'mail', label: 'Your email' },
+  { id: 'calendar', label: 'Calendar and reminders' },
+  { id: 'notes', label: 'Your notes' },
+  { id: 'music', label: 'What’s playing' },
 ];
 type Props = {
   draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; roots: string[];

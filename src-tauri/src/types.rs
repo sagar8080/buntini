@@ -55,6 +55,8 @@ pub struct Settings {
     pub ebay_marketplace: String,
     /// Local data categories an external model backend may receive. On-device models see everything.
     pub external_shares: Vec<String>,
+    /// Apps the user allowed Buntini to use (ids from `apps::APPS`). None until they choose.
+    pub apps: Vec<String>,
     /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
     /// prices per million tokens used to estimate spending.
     pub cloud_provider: String,
@@ -111,6 +113,7 @@ impl Default for Settings {
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
             external_shares: Vec::new(),
+            apps: Vec::new(),
             cloud_provider: "anthropic".into(),
             cloud_model: String::new(),
             cloud_budget_usd: 5.0,
@@ -165,6 +168,11 @@ impl Settings {
             return Err("The status line can be up to 40 characters.".into());
         }
         crate::privacy::validate_shares(&self.external_shares)?;
+        for (index, id) in self.apps.iter().enumerate() {
+            if crate::apps::app(id).is_none() || self.apps[..index].contains(id) {
+                return Err("Choose apps from the list in Settings → Apps.".into());
+            }
+        }
         if !crate::integrations::ebay::MARKETPLACES
             .iter()
             .any(|(id, _)| *id == self.ebay_marketplace)
