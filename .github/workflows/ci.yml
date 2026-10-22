@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Tests
+    # macOS 26 runners ship the SDK with Apple's Foundation Models, so the Apple
+    # Intelligence helper is built and tested (it skips when the runner can't run it).
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+      - run: ./scripts/check.sh
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm packages
+        run: npm audit --omit=dev --audit-level=high
+      - name: Rust crates
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file src-tauri/Cargo.lock
+
+  build:
+    name: Build Buntini.app
+    needs: check
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      # Ad-hoc signed (signingIdentity "-"), not notarized: see "Install" in the README.
+      - run: npm run tauri -- build --bundles app,dmg
+      - name: Collect the app and disk image
+        run: |
+          mkdir -p dist-release
+          bundle=src-tauri/target/release/bundle
+          ditto -c -k --keepParent "$bundle/macos/Buntini.app" dist-release/Buntini-macOS-arm64.zip
+          cp "$bundle"/dmg/*.dmg dist-release/Buntini-macOS-arm64.dmg
+          (cd dist-release && shasum -a 256 * > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Buntini-macOS-arm64
+          path: dist-release/
+          retention-days: 30
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, audit]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Buntini-macOS-arm64
+          path: dist-release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*
+          generate_release_notes: true
+          body: |
+            Download **Buntini-macOS-arm64.dmg**, open it and drag Buntini to Applications.
+            This build isn't notarized by Apple yet. The first time, open it from Finder and choose
+            **System Settings → Privacy & Security → Open Anyway**. Checksums are in SHA256SUMS.txt.
