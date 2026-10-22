@@ -46,7 +46,7 @@ pub fn words(prompt: &str) -> String {
 pub fn from_verb<'a>(text: &'a str, verbs: &[&str]) -> Option<(&'a str, &'a str)> {
     let mut offset = 0;
     for (index, word) in text.split(' ').enumerate() {
-        if index > 6 || ["don't", "dont", "not", "never", "how", "why", "when", "where", "who", "if"].contains(&word) {
+        if index > 6 || ["don't", "dont", "didn't", "didnt", "doesn't", "doesnt", "isn't", "isnt", "wasn't", "wasnt", "won't", "wont", "can't", "cant", "couldn't", "not", "never", "how", "why", "when", "where", "who", "if"].contains(&word) {
             return None;
         }
         if verbs.contains(&word) {
@@ -57,10 +57,12 @@ pub fn from_verb<'a>(text: &'a str, verbs: &[&str]) -> Option<(&'a str, &'a str)
     None
 }
 
-pub fn recognise(prompt: &str, previous: Option<&str>) -> Option<Skill> {
+/// `recent`: the user's last few messages, newest first, for follow-ups such as "yes, play
+/// it" or "that's the wrong song".
+pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
     let text = words(prompt);
-    let previous = previous.map(words);
-    music::recognise(&text, previous.as_deref())
+    let recent: Vec<String> = recent.iter().map(|before| words(before)).collect();
+    music::recognise(&text, &recent)
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
         .or_else(|| browser::recognise(&text).map(Skill::Browser))
@@ -96,7 +98,7 @@ mod tests {
 
     #[test]
     fn requests_reach_the_right_skill_or_the_model() {
-        let skill = |prompt: &str| recognise(prompt, None).map(|skill| label(&skill));
+        let skill = |prompt: &str| recognise(prompt, &[]).map(|skill| label(&skill));
         assert_eq!(skill("Hey Buntini, can you play Hey There Delilah on Spotify?"), Some("music"));
         assert_eq!(skill("turn the volume down a bit"), Some("mac"));
         assert_eq!(skill("open youtube"), Some("browser"));

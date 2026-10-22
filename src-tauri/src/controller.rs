@@ -908,8 +908,13 @@ async fn execute_with_settings(
     // skill: quicker and more dependable than a small model, and the reply says what
     // actually happened. Everything else goes to the model.
     if mode == "auto" && approved.is_none() {
-        let previous = state.store.lock().unwrap().tasks().ok().and_then(|turns| turns.into_iter().filter(|turn| turn.id != task.id && turn.state == "completed").max_by(|a, b| a.created_at.cmp(&b.created_at)).map(|turn| turn.prompt));
-        if let Some(skill) = crate::skills::recognise(&task.prompt, previous.as_deref()) {
+        let recent: Vec<String> = {
+            let mut turns = state.store.lock().unwrap().tasks().unwrap_or_default();
+            turns.retain(|turn| turn.id != task.id && turn.state == "completed");
+            turns.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            turns.into_iter().take(4).map(|turn| turn.prompt).collect()
+        };
+        if let Some(skill) = crate::skills::recognise(&task.prompt, &recent) {
             let label = crate::skills::label(&skill);
             phase(channel, &task.id, "working");
             tool_event(channel, &task.id, label);

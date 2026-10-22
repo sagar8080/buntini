@@ -627,21 +627,33 @@ async fn find_notes(query: &str) -> Result<String, String> {
     Ok(format!("Notes mentioning “{query}”:\n{}", lines.collect::<Vec<_>>().join("\n")))
 }
 
-pub(crate) async fn control_music(app: &str, action: &str, query: &str) -> Result<String, String> {
+pub(crate) async fn control_music(app: &str, action: &str, query: &str, retry: bool) -> Result<String, String> {
     let name = if app == "spotify" { "Spotify" } else { "Music" };
     let words = query.to_string();
+    // On a retry, the song playing now is the wrong one.
+    let avoid = if retry && app == "spotify" {
+        osascript(SPOTIFY, &["now_playing".into(), String::new()], 10).await.ok().and_then(|now| now.split('\t').nth(1).map(str::to_string))
+    } else {
+        None
+    };
     let query = if app == "spotify" && !query.is_empty() { format!("spotify:search:{}", percent(query)) } else { query.to_string() };
     let result = osascript(if app == "spotify" { SPOTIFY } else { MUSIC }, &[action.into(), query.clone()], 20).await?;
     if result.trim() == "search" {
-        return Ok(match crate::skills::music::press_play(&words).await {
+        return Ok(match crate::skills::music::press_play(&words, avoid).await {
             // Say what Spotify is actually playing, not what was asked for.
             Ok(pressed) => {
-                tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-                let now = osascript(SPOTIFY, &["now_playing".into(), String::new()], 10).await.unwrap_or_default();
+                // Spotify takes a moment to switch; wait until it reports the new song.
+                let mut now = String::new();
+                for _ in 0..8 {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    now = osascript(SPOTIFY, &["now_playing".into(), String::new()], 10).await.unwrap_or_default();
+                    if now.starts_with("playing") && pressed.to_lowercase().starts_with(&now.split('\t').nth(1).unwrap_or("\u{0}").to_lowercase()) {
+                        break;
+                    }
+                }
                 match now.trim().split('\t').collect::<Vec<_>>().as_slice() {
                     ["playing", track, artist, _] => format!("Playing “{track}” by {artist} in Spotify."),
-                    _ if !pressed.is_empty() => format!("Started {pressed} in Spotify."),
-                    _ => "Started the best match in Spotify.".into(),
+                    _ => format!("Started {pressed} in Spotify, but it hasn’t said it’s playing yet."),
                 }
             }
             Err(why) => format!("Opened Spotify’s search for that, but didn’t start it: {why}"),
@@ -736,7 +748,7 @@ pub async fn run(tool: &str, args: &Map<String, Value>, helper_path: &Path, sett
         "read_calendar" => Ok(describe_events(&get("day"), &events(helper_path, &get("day")).await?)),
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
-        "control_music" => control_music(&get("app"), &get("action"), &get("query")).await,
+        "control_music" => control_music(&get("app"), &get("action"), &get("query"), false).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
         "read_page" => read_page().await,
