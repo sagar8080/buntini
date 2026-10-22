@@ -70,6 +70,31 @@ pub fn for_call(tool: &str, args: &Map<String, Value>) -> Option<&'static App> {
     }
 }
 
+/// Which music app a playback call means. Saying "Spotify" or "Apple Music" decides it;
+/// otherwise the model's choice if it made one; otherwise the allowed app that's open,
+/// preferring Spotify. Small models often leave the app out or pick the wrong one.
+pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'static str {
+    let said = prompt.to_lowercase();
+    if said.contains("spotify") {
+        return "spotify";
+    }
+    if said.contains("apple music") || said.contains("music app") || said.contains("itunes") {
+        return "music";
+    }
+    let usable = |id: &str| app(id).is_some_and(|app| allowed(settings, id) && installed(app));
+    match chosen {
+        Some("spotify") if usable("spotify") => return "spotify",
+        Some("music") if usable("music") && !usable("spotify") => return "music",
+        _ => {}
+    }
+    let running = |bundle: &str| std::process::Command::new("/usr/bin/pgrep").args(["-xq", bundle]).status().is_ok_and(|status| status.success());
+    match (usable("spotify"), usable("music")) {
+        (true, true) if running("Music") && !running("Spotify") => "music",
+        (false, true) => "music",
+        _ => "spotify",
+    }
+}
+
 /// Allowed, installed browsers a tab call may look in.
 fn browsers_for(settings: &Settings, args: &Map<String, Value>) -> Vec<&'static App> {
     let named = args.get("browser").and_then(Value::as_str);
