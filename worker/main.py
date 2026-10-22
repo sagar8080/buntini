@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import importlib
 import json
 import os
@@ -58,6 +59,11 @@ class MLXBackend:
         self.stream_generate: Any = None
         self.make_sampler: Any = None
         self.vad = SileroVAD()
+        # The instructions and tool definitions are the same turn after turn, so the model
+        # reads them once and later requests only read what follows (see reusable_prefix).
+        self.mx: Any = None
+        self.make_prompt_cache: Any = None
+        self.prefixes: dict[str, tuple[list[int], Any]] = {}
 
     def load(self, model_path: Path, cancel: threading.Event) -> None:
         check_cancel(cancel)
@@ -70,6 +76,7 @@ class MLXBackend:
             raise WorkerError("dependency_unavailable", f"MLX is unavailable in this Python environment: {exc}") from exc
         # Release the previous model before loading another large set of weights.
         self.model, self.tokenizer, self.model_path = None, None, None
+        self.prefixes = {}
         try:
             model, tokenizer = mlx_lm.load(
                 str(model_path),
@@ -82,10 +89,53 @@ class MLXBackend:
         self.model, self.tokenizer, self.model_path = model, tokenizer, model_path
         self.stream_generate = mlx_lm.stream_generate
         self.make_sampler = sample_utils.make_sampler
+        try:
+            self.mx = importlib.import_module("mlx.core")
+            self.make_prompt_cache = importlib.import_module("mlx_lm.models.cache").make_prompt_cache
+        except Exception:
+            # Older MLX releases: every request reads the whole prompt, which still works.
+            self.mx, self.make_prompt_cache = None, None
+
+    def reusable_prefix(self, system: dict[str, Any], tools: Any, cancel: threading.Event) -> tuple[list[int], Any] | None:
+        """Tokens shared by every prompt with these instructions and tools, and the model
+        state after reading them once, or None when this model can't reuse them. Rendering the instructions before
+        two different questions shows exactly where the shared part ends, whatever the
+        chat template looks like."""
+        if self.make_prompt_cache is None or system.get("role") != "system":
+            return None
+        key = json.dumps([system, tools], sort_keys=True)
+        if key in self.prefixes:
+            return self.prefixes[key]
+        render = lambda question: self.tokenizer.apply_chat_template([system, {"role": "user", "content": question}], tools=tools, tokenize=True, add_generation_prompt=True, enable_thinking=False)
+        first, second = render("a"), render("b")
+        shared = 0
+        while shared < min(len(first), len(second)) and first[shared] == second[shared]:
+            shared += 1
+        prefix = list(first[:shared])
+        if len(prefix) < 64:
+            return None
+        cache = self.make_prompt_cache(self.model)
+        tokens = self.mx.array(prefix)
+        for start in range(0, len(prefix), 512):
+            check_cancel(cancel)
+            self.model(tokens[start:start + 512][None], cache=cache)
+            self.mx.eval([layer.state for layer in cache])
+        # Keep the latest two (for example with and without tools for small talk).
+        self.prefixes = dict(list(self.prefixes.items())[-1:])
+        self.prefixes[key] = (prefix, cache)
+        return self.prefixes[key]
 
     def generate(self, request: dict[str, Any], cancel: threading.Event):
         messages = validate_messages(request.get("messages"))
         tools = selected_tools(request.get("tools"))
+        # Live context (the time, what the user is doing) sits beside the latest question
+        # rather than in the instructions, so the instructions stay the same and reusable.
+        context = request.get("context")
+        if isinstance(context, str) and context.strip():
+            for message in reversed(messages):
+                if message["role"] == "user":
+                    message["content"] = f"(Live context from this Mac; use it only if it helps: {context.strip()[:4000]})\n\n{message['content']}"
+                    break
         model_path = local_model_path(request.get("model_path"), os.environ.get("BUNTINI_MODEL_PATH"), "MLX")
         self.load(model_path, cancel)
         # Preserve conversation system instructions while always applying the
@@ -109,12 +159,22 @@ class MLXBackend:
         if len(prompt) > MAX_PROMPT_TOKENS:
             raise WorkerError("context_too_large", f"Prompt exceeds {MAX_PROMPT_TOKENS} tokens; start a new task")
         check_cancel(cancel)
-        stream = self.stream_generate(
-            self.model, self.tokenizer, prompt,
-            max_tokens=request["max_tokens"], sampler=self.make_sampler(temp=0.2),
-            max_kv_size=MAX_PROMPT_TOKENS, prefill_step_size=256,
-            prompt_progress_callback=lambda *_: check_cancel(cancel),
-        )
+        reusable = self.reusable_prefix(messages[0], (tools or None) if native_tools else None, cancel)
+        if reusable and len(prompt) > len(reusable[0]) and list(prompt[:len(reusable[0])]) == reusable[0]:
+            prefix, state = reusable
+            # A copy, so this answer never changes the kept state for the next one.
+            stream = self.stream_generate(
+                self.model, self.tokenizer, list(prompt[len(prefix):]), prompt_cache=copy.deepcopy(state),
+                max_tokens=request["max_tokens"], sampler=self.make_sampler(temp=0.2), prefill_step_size=512,
+                prompt_progress_callback=lambda *_: check_cancel(cancel),
+            )
+        else:
+            stream = self.stream_generate(
+                self.model, self.tokenizer, prompt,
+                max_tokens=request["max_tokens"], sampler=self.make_sampler(temp=0.2),
+                max_kv_size=MAX_PROMPT_TOKENS, prefill_step_size=256,
+                prompt_progress_callback=lambda *_: check_cancel(cancel),
+            )
         try:
             for response in stream:
                 check_cancel(cancel)

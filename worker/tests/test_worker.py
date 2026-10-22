@@ -226,6 +226,43 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(calls["template"][1]["tools"][0]["function"]["name"], "system_info")
         self.assertEqual(calls["stream"]["prefill_step_size"], 256)
 
+    def test_instructions_are_read_once_and_context_sits_beside_the_question(self):
+        calls = {"model": 0, "streams": []}
+
+        class Array(list):
+            def __getitem__(self, index):
+                return Array(list.__getitem__(self, index)) if isinstance(index, slice) else self
+
+        def template(messages, **kwargs):
+            # 100 tokens of instructions and tools, then one token per character of each later message.
+            return list(range(100)) + [ord(c) for m in messages[1:] for c in m["content"]] + [-1]
+
+        def model(tokens, cache):
+            calls["model"] += 1
+
+        def stream(model, tokenizer, prompt, **kwargs):
+            calls["streams"].append((list(prompt), kwargs))
+            yield SimpleNamespace(text="Hi")
+
+        modules = {
+            "mlx_lm": SimpleNamespace(load=lambda path, **kwargs: (model, SimpleNamespace(apply_chat_template=template)), stream_generate=stream),
+            "mlx_lm.sample_utils": SimpleNamespace(make_sampler=lambda **kwargs: kwargs),
+            "mlx.core": SimpleNamespace(array=Array, eval=lambda states: None),
+            "mlx_lm.models.cache": SimpleNamespace(make_prompt_cache=lambda model: [SimpleNamespace(state=[])]),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "config.json").write_text("{}")
+            backend = MLXBackend()
+            for question, context in [("hello", "Time: 09:00."), ("and now?", "Time: 09:01.")]:
+                request = {"messages": [{"role": "system", "content": "Be warm."}, {"role": "user", "content": question}], "context": context, "model_path": directory, "max_tokens": 10, "tools": [{"name": "system_info"}]}
+                with patch("worker.main.importlib.import_module", side_effect=lambda name: modules[name]):
+                    self.assertEqual(list(backend.generate(request, threading.Event())), ["Hi"])
+        self.assertEqual(calls["model"], 1, "the shared instructions are read once, in one chunk")
+        for (prompt, kwargs), (question, time) in zip(calls["streams"], [("hello", "09:00"), ("and now?", "09:01")]):
+            self.assertIn("prompt_cache", kwargs)
+            text = "".join(chr(t) for t in prompt if t > 0)
+            self.assertTrue(text.endswith(question) and time in text, "only the new part is read, with the live context beside the question")
+
     def test_dependency_failure_is_recoverable(self):
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / "config.json").write_text("{}")
