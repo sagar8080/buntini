@@ -10,6 +10,8 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![macOS 13+ on Apple silicon](https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20silicon-black)
 
+<img src="docs/media/buntini-demo.webp" alt="Buntini playing a song, summarising a web page, reading tomorrow's calendar, asking before it adds a reminder, setting a timer, and its Apps settings" width="860">
+
 </div>
 
 ## Highlights
