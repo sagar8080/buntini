@@ -74,6 +74,19 @@ export class SpeechQueue {
     this.completeIfIdle();
   }
 
+  /** Finish with the authoritative result. A failed summary may have streamed a
+   * partial draft before the controller fell back to the original evidence. */
+  completeAnswer(token: number, answer: string, streamed: string): void {
+    if (token !== this.generation || this.closed) return;
+    if (answer === streamed) {
+      this.finish(token);
+    } else {
+      const replacement = this.begin();
+      this.append(answer, replacement);
+      this.finish(replacement);
+    }
+  }
+
   /** Invalidates pending text synchronously, then waits for active audio to stop. */
   cancel(): Promise<void> {
     const stopped = this.invalidate();

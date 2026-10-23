@@ -19,11 +19,12 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 - **Lives on your desktop.** A cat you can dress up. It roams, naps on your windows and offers a hand when it’s useful.
 - **Your choice of brain.** Apple Intelligence, a local Qwen or Gemma model, or Anthropic, OpenAI, Gemini or your own ChatGPT plan.
 - **Private by default.** On-device models can use what Buntini sees on your Mac; cloud models only see what you allow.
-- **Does things, fast.** “Play Hey There Delilah”, “open YouTube”, “summarise this page”, “volume 30%”, “set a timer for 10 minutes” happen in about a second and Buntini tells you what actually happened.
+- **Handles everyday commands.** Play music, open a site, summarise a page, adjust volume or set a persistent timer. Results and unresolved failures stay visible.
 - **Works with your apps.** Mail, Calendar, Reminders, Notes, Music, Spotify, Shortcuts and your browser tabs, on your Mac with no accounts, once you allow each one.
-- **Gets things done, with your OK.** Reminders, calendar events, notes, Mail drafts, Shortcuts, apps and links. You approve every one.
+- **Gets things done, with your OK.** Review reminders, calendar events, notes, Mail drafts, Shortcuts and model-proposed apps/links before they run. Direct commands such as “open YouTube” run immediately.
+- **Continues saved tasks.** Multi-step tasks retain approvals, inputs and verified receipts across restarts. Review the next step or add missing details; uncertain writes stop without automatic replay.
 - **Looks things up.** Weather, exchange rates, Wikipedia, places, flights, eBay and web search, inside a budget you set.
-- **Remembers.** One ongoing conversation, the facts you ask it to keep, and an optional morning brief.
+- **Remembers.** Saved conversation threads, the facts you ask it to keep, and an optional morning brief.
 
 ## Install
 
@@ -55,7 +56,7 @@ Switch any time in **Settings → Brain**.
 ## Privacy
 
 - Your conversation, settings and memories stay on your Mac. API keys and sign-ins live in the macOS Keychain.
-- Nothing goes online without your say-so: every lookup and action shows exactly what will be sent or done first.
+- Online lookups show the exact request for approval. Direct browser commands such as “google weather in Porto” navigate immediately; cloud chat uses the brain you selected.
 - Cloud models only receive the local data you switch on in **Settings → Privacy**. All of it is off by default.
 
 Read the full [privacy policy](PRIVACY.md).
@@ -85,6 +86,8 @@ Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). Pushin
 - [Privacy policy](PRIVACY.md)
 - [Online tools](docs/online-tools.md) and [voice setup](docs/voice-setup.md)
 - [Acceptance checklist](docs/acceptance.md): what’s been verified, and how to check the rest
+- [Capability map](docs/capabilities.md) and [reliability review](docs/reliability.md): current limits, fixes and the path toward a dependable personal assistant
+- [Scenario evaluations](docs/evaluations.md): measured model failures and release gates
 - [Technical design](docs/technical-design.md)
 
 ## License

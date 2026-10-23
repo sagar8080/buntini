@@ -111,21 +111,74 @@ struct MotionEvent {
 /// Groups apps by what the user is probably doing; the bundle id never leaves Rust.
 pub fn category(bundle: &str) -> &'static str {
     let starts = |prefixes: &[&str]| prefixes.iter().any(|prefix| bundle.starts_with(prefix));
-    if starts(&["us.zoom.", "com.microsoft.teams", "com.apple.FaceTime", "com.cisco.webex", "com.skype.", "com.hnc.Discord"]) {
+    if starts(&[
+        "us.zoom.",
+        "com.microsoft.teams",
+        "com.apple.FaceTime",
+        "com.cisco.webex",
+        "com.skype.",
+        "com.hnc.Discord",
+    ]) {
         "meeting"
-    } else if starts(&["com.microsoft.VSCode", "com.apple.dt.Xcode", "com.jetbrains.", "dev.zed.", "com.sublimetext.", "com.googlecode.iterm2", "com.apple.Terminal", "dev.warp.", "com.todesktop.", "com.github.GitHubClient"]) {
+    } else if starts(&[
+        "com.microsoft.VSCode",
+        "com.apple.dt.Xcode",
+        "com.jetbrains.",
+        "dev.zed.",
+        "com.sublimetext.",
+        "com.googlecode.iterm2",
+        "com.apple.Terminal",
+        "dev.warp.",
+        "com.todesktop.",
+        "com.github.GitHubClient",
+    ]) {
         "code"
-    } else if starts(&["com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "company.thebrowser.", "com.brave.Browser", "com.microsoft.edgemac", "com.operasoftware."]) {
+    } else if starts(&[
+        "com.apple.Safari",
+        "com.google.Chrome",
+        "org.mozilla.firefox",
+        "company.thebrowser.",
+        "com.brave.Browser",
+        "com.microsoft.edgemac",
+        "com.operasoftware.",
+    ]) {
         "browser"
-    } else if starts(&["com.apple.iWork.", "com.microsoft.Word", "com.microsoft.Excel", "com.microsoft.Powerpoint", "notion.id", "md.obsidian", "com.apple.Notes", "com.ulyssesapp.", "net.shinyfrog.bear"]) {
+    } else if starts(&[
+        "com.apple.iWork.",
+        "com.microsoft.Word",
+        "com.microsoft.Excel",
+        "com.microsoft.Powerpoint",
+        "notion.id",
+        "md.obsidian",
+        "com.apple.Notes",
+        "com.ulyssesapp.",
+        "net.shinyfrog.bear",
+    ]) {
         "writing"
     } else if starts(&["com.apple.finder"]) {
         "files"
-    } else if starts(&["com.apple.Music", "com.spotify.client", "com.apple.TV", "org.videolan.vlc", "com.apple.podcasts"]) {
+    } else if starts(&[
+        "com.apple.Music",
+        "com.spotify.client",
+        "com.apple.TV",
+        "org.videolan.vlc",
+        "com.apple.podcasts",
+    ]) {
         "media"
-    } else if starts(&["com.figma.", "com.adobe.", "com.bohemiancoding.sketch3", "com.pixelmatorteam."]) {
+    } else if starts(&[
+        "com.figma.",
+        "com.adobe.",
+        "com.bohemiancoding.sketch3",
+        "com.pixelmatorteam.",
+    ]) {
         "design"
-    } else if starts(&["com.tinyspeck.slackmacgap", "com.apple.MobileSMS", "com.apple.mail", "ru.keepcoder.Telegram", "net.whatsapp."]) {
+    } else if starts(&[
+        "com.tinyspeck.slackmacgap",
+        "com.apple.MobileSMS",
+        "com.apple.mail",
+        "ru.keepcoder.Telegram",
+        "net.whatsapp.",
+    ]) {
         "chat"
     } else {
         "other"
@@ -134,20 +187,46 @@ pub fn category(bundle: &str) -> &'static str {
 
 /// Parses `pmset -g batt`, e.g. "-InternalBattery-0 (id=…)\t85%; discharging; 7:50 remaining".
 pub fn parse_battery(output: &str) -> Option<(u8, bool)> {
-    let line = output.lines().find(|line| line.contains("InternalBattery"))?;
-    let percent = line.split('%').next()?.rsplit(|c: char| !c.is_ascii_digit()).next()?.parse::<u8>().ok()?;
+    let line = output
+        .lines()
+        .find(|line| line.contains("InternalBattery"))?;
+    let percent = line
+        .split('%')
+        .next()?
+        .rsplit(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse::<u8>()
+        .ok()?;
     let state = line.split(';').nth(1).unwrap_or("").trim();
-    Some((percent.min(100), state == "charging" || state == "charged" || state.starts_with("finishing") || output.contains("'AC Power'")))
+    Some((
+        percent.min(100),
+        state == "charging"
+            || state == "charged"
+            || state.starts_with("finishing")
+            || output.contains("'AC Power'"),
+    ))
 }
 
 const MINUTE: i64 = 60;
 const DETOUR_SECONDS: i64 = 20;
 
 /// Extends the current visit or starts a new one; a short detour keeps one visit going.
-pub fn record_visit(timeline: &mut Vec<Visit>, name: &str, category: &'static str, now: chrono::DateTime<chrono::Local>) {
+pub fn record_visit(
+    timeline: &mut Vec<Visit>,
+    name: &str,
+    category: &'static str,
+    now: chrono::DateTime<chrono::Local>,
+) {
     match timeline.last_mut() {
-        Some(last) if last.name == name && (now - last.until).num_seconds() < 5 * MINUTE => last.until = now,
-        _ => timeline.push(Visit { name: name.into(), category, since: now, until: now }),
+        Some(last) if last.name == name && (now - last.until).num_seconds() < 5 * MINUTE => {
+            last.until = now
+        }
+        _ => timeline.push(Visit {
+            name: name.into(),
+            category,
+            since: now,
+            until: now,
+        }),
     }
     timeline.retain(|visit| (now - visit.until).num_hours() < 3);
     let excess = timeline.len().saturating_sub(200);
@@ -160,28 +239,46 @@ fn minutes(seconds: i64) -> i64 {
 
 /// Summarizes the timeline for the model: the latest app (Buntini itself is never
 /// recorded, so this is what the user was doing before asking) and time per app.
-pub fn summarize(timeline: &[Visit], now: chrono::DateTime<chrono::Local>, idle: Option<f64>, active_since: Option<chrono::DateTime<chrono::Local>>, health: Option<Health>) -> Activity {
+pub fn summarize(
+    timeline: &[Visit],
+    now: chrono::DateTime<chrono::Local>,
+    idle: Option<f64>,
+    active_since: Option<chrono::DateTime<chrono::Local>>,
+    health: Option<Health>,
+) -> Activity {
     let window = now - chrono::Duration::hours(2);
     let mut totals: Vec<AppTime> = Vec::new();
     for visit in timeline.iter().filter(|visit| visit.until > window) {
         let seconds = (visit.until - visit.since.max(window)).num_seconds().max(0);
         match totals.iter_mut().find(|total| total.name == visit.name) {
             Some(total) => total.minutes += seconds,
-            None => totals.push(AppTime { name: visit.name.clone(), category: visit.category, minutes: seconds }),
+            None => totals.push(AppTime {
+                name: visit.name.clone(),
+                category: visit.category,
+                minutes: seconds,
+            }),
         }
     }
-    totals.iter_mut().for_each(|total| total.minutes = minutes(total.minutes));
+    totals
+        .iter_mut()
+        .for_each(|total| total.minutes = minutes(total.minutes));
     totals.retain(|total| total.minutes > 0);
     totals.sort_by(|a, b| b.minutes.cmp(&a.minutes));
     totals.truncate(8);
     // The app the user was really in: brief detours on the way to Buntini (clicking the
     // desktop brings Finder forward for a moment) don't count.
-    let last = timeline.iter().rev().find(|visit| (visit.until - visit.since).num_seconds() >= DETOUR_SECONDS).or(timeline.last());
+    let last = timeline
+        .iter()
+        .rev()
+        .find(|visit| (visit.until - visit.since).num_seconds() >= DETOUR_SECONDS)
+        .or(timeline.last());
     Activity {
         local_time: now.format("%A %-d %B, %H:%M").to_string(),
         current_app: last.map(|visit| visit.name.clone()),
         current_category: last.map(|visit| visit.category),
-        minutes_in_current_app: last.map(|visit| minutes((visit.until - visit.since).num_seconds())).unwrap_or(0),
+        minutes_in_current_app: last
+            .map(|visit| minutes((visit.until - visit.since).num_seconds()))
+            .unwrap_or(0),
         seconds_since_last_input: idle.map(|idle| idle as i64),
         minutes_active: active_since.map(|since| minutes((now - since).num_seconds())),
         apps_last_two_hours: totals,
@@ -198,7 +295,9 @@ fn record(world: &World) {
     let mut active = ACTIVE_SINCE.lock().unwrap();
     match world.idle_seconds {
         Some(idle) if idle >= 180.0 => *active = None,
-        Some(idle) if active.is_none() => *active = Some(now - chrono::Duration::milliseconds((idle * 1000.0) as i64)),
+        Some(idle) if active.is_none() => {
+            *active = Some(now - chrono::Duration::milliseconds((idle * 1000.0) as i64))
+        }
         _ => {}
     }
 }
@@ -212,7 +311,13 @@ pub fn activity() -> Result<Activity, String> {
     let idle = Some(mac::idle_seconds());
     #[cfg(not(target_os = "macos"))]
     let idle = None;
-    Ok(summarize(&TIMELINE.lock().unwrap(), chrono::Local::now(), idle, *ACTIVE_SINCE.lock().unwrap(), *HEALTH.lock().unwrap()))
+    Ok(summarize(
+        &TIMELINE.lock().unwrap(),
+        chrono::Local::now(),
+        idle,
+        *ACTIVE_SINCE.lock().unwrap(),
+        *HEALTH.lock().unwrap(),
+    ))
 }
 
 /// The latest battery, CPU and disk reading, refreshed once a minute while aware.
@@ -221,7 +326,10 @@ pub fn health_now() -> Option<Health> {
 }
 
 fn same(a: Rect, b: Rect) -> bool {
-    (a.x - b.x).abs() < 2.0 && (a.y - b.y).abs() < 2.0 && (a.width - b.width).abs() < 2.0 && (a.height - b.height).abs() < 2.0
+    (a.x - b.x).abs() < 2.0
+        && (a.y - b.y).abs() < 2.0
+        && (a.width - b.width).abs() < 2.0
+        && (a.height - b.height).abs() < 2.0
 }
 
 #[cfg(target_os = "macos")]
@@ -255,27 +363,43 @@ mod mac {
 
     fn number(dict: &NSDictionary<NSString, AnyObject>, key: &str) -> Option<f64> {
         let value = dict.objectForKey(&NSString::from_str(key))?;
-        value.downcast::<NSNumber>().ok().map(|number| number.doubleValue())
+        value
+            .downcast::<NSNumber>()
+            .ok()
+            .map(|number| number.doubleValue())
     }
 
     /// On-screen windows front to back: owner pid, layer and frame only. Titles are
     /// withheld by macOS without Screen Recording permission and are never requested.
     pub fn windows() -> Vec<Window> {
         let raw = unsafe { CGWindowListCopyWindowInfo(ON_SCREEN_ONLY | EXCLUDE_DESKTOP, 0) };
-        let Some(list) = (unsafe { Retained::<NSArray<AnyObject>>::from_raw(raw.cast()) }) else { return vec![] };
+        let Some(list) = (unsafe { Retained::<NSArray<AnyObject>>::from_raw(raw.cast()) }) else {
+            return vec![];
+        };
         (0..list.count())
             .filter_map(|index| {
                 // CoreGraphics documents string keys, so the checked dictionaries can be
                 // viewed with NSString keys.
                 let dict = list.objectAtIndex(index).downcast::<NSDictionary>().ok()?;
-                let dict = unsafe { Retained::cast_unchecked::<NSDictionary<NSString, AnyObject>>(dict) };
-                let bounds = dict.objectForKey(&NSString::from_str("kCGWindowBounds"))?.downcast::<NSDictionary>().ok()?;
-                let bounds = unsafe { Retained::cast_unchecked::<NSDictionary<NSString, AnyObject>>(bounds) };
+                let dict =
+                    unsafe { Retained::cast_unchecked::<NSDictionary<NSString, AnyObject>>(dict) };
+                let bounds = dict
+                    .objectForKey(&NSString::from_str("kCGWindowBounds"))?
+                    .downcast::<NSDictionary>()
+                    .ok()?;
+                let bounds = unsafe {
+                    Retained::cast_unchecked::<NSDictionary<NSString, AnyObject>>(bounds)
+                };
                 Some(Window {
                     number: number(&dict, "kCGWindowNumber")? as u32,
                     pid: number(&dict, "kCGWindowOwnerPID")? as i32,
                     layer: number(&dict, "kCGWindowLayer").unwrap_or(0.0) as i64,
-                    rect: Rect { x: number(&bounds, "X")?, y: number(&bounds, "Y")?, width: number(&bounds, "Width")?, height: number(&bounds, "Height")? },
+                    rect: Rect {
+                        x: number(&bounds, "X")?,
+                        y: number(&bounds, "Y")?,
+                        width: number(&bounds, "Width")?,
+                        height: number(&bounds, "Height")?,
+                    },
                 })
             })
             .collect()
@@ -285,8 +409,14 @@ mod mac {
     pub fn frontmost() -> Option<(i32, String, String)> {
         let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
         let app = workspace.frontmostApplication()?;
-        let name = app.localizedName().map(|name| name.to_string()).unwrap_or_default();
-        let bundle = app.bundleIdentifier().map(|bundle| bundle.to_string()).unwrap_or_default();
+        let name = app
+            .localizedName()
+            .map(|name| name.to_string())
+            .unwrap_or_default();
+        let bundle = app
+            .bundleIdentifier()
+            .map(|bundle| bundle.to_string())
+            .unwrap_or_default();
         Some((app.processIdentifier(), name, bundle))
     }
 }
@@ -295,7 +425,12 @@ fn window_rect(window: &tauri::WebviewWindow) -> Option<Rect> {
     let scale = window.scale_factor().ok()?;
     let position = window.outer_position().ok()?;
     let size = window.outer_size().ok()?;
-    Some(Rect { x: f64::from(position.x) / scale, y: f64::from(position.y) / scale, width: f64::from(size.width) / scale, height: f64::from(size.height) / scale })
+    Some(Rect {
+        x: f64::from(position.x) / scale,
+        y: f64::from(position.y) / scale,
+        width: f64::from(size.width) / scale,
+        height: f64::from(size.height) / scale,
+    })
 }
 
 fn work_area(window: &tauri::WebviewWindow) -> Option<(Rect, Rect)> {
@@ -304,8 +439,18 @@ fn work_area(window: &tauri::WebviewWindow) -> Option<(Rect, Rect)> {
     let area = monitor.work_area();
     let (position, size) = (monitor.position(), monitor.size());
     Some((
-        Rect { x: f64::from(area.position.x) / scale, y: f64::from(area.position.y) / scale, width: f64::from(area.size.width) / scale, height: f64::from(area.size.height) / scale },
-        Rect { x: f64::from(position.x) / scale, y: f64::from(position.y) / scale, width: f64::from(size.width) / scale, height: f64::from(size.height) / scale },
+        Rect {
+            x: f64::from(area.position.x) / scale,
+            y: f64::from(area.position.y) / scale,
+            width: f64::from(area.size.width) / scale,
+            height: f64::from(area.size.height) / scale,
+        },
+        Rect {
+            x: f64::from(position.x) / scale,
+            y: f64::from(position.y) / scale,
+            width: f64::from(size.width) / scale,
+            height: f64::from(size.height) / scale,
+        },
     ))
 }
 
@@ -318,15 +463,32 @@ fn sample(window: &tauri::WebviewWindow) -> Option<World> {
         let front = mac::frontmost();
         let own = std::process::id() as i32;
         let windows = mac::windows();
-        let front_window = front.as_ref().filter(|(pid, _, _)| *pid != own).and_then(|(pid, _, _)| {
-            windows.iter().find(|w| w.pid == *pid && w.layer == 0 && w.rect.width >= 160.0 && w.rect.height >= 100.0)
-        });
+        let front_window =
+            front
+                .as_ref()
+                .filter(|(pid, _, _)| *pid != own)
+                .and_then(|(pid, _, _)| {
+                    windows.iter().find(|w| {
+                        w.pid == *pid
+                            && w.layer == 0
+                            && w.rect.width >= 160.0
+                            && w.rect.height >= 100.0
+                    })
+                });
         let fullscreen = front_window.is_some_and(|w| same(w.rect, screen));
-        let category = front.as_ref().map(|(_, _, bundle)| category(bundle)).unwrap_or("other");
+        let category = front
+            .as_ref()
+            .map(|(_, _, bundle)| category(bundle))
+            .unwrap_or("other");
         Some(World {
             idle_seconds: aware.then(mac::idle_seconds),
-            app: front.filter(|(pid, _, _)| aware && *pid != own).map(|(_, name, _)| FrontApp { name, category }),
-            front_window: front_window.map(|w| FrontWindow { number: w.number, rect: w.rect }),
+            app: front
+                .filter(|(pid, _, _)| aware && *pid != own)
+                .map(|(_, name, _)| FrontApp { name, category }),
+            front_window: front_window.map(|w| FrontWindow {
+                number: w.number,
+                rect: w.rect,
+            }),
             work_area: area,
             pet,
             fullscreen,
@@ -336,7 +498,17 @@ fn sample(window: &tauri::WebviewWindow) -> Option<World> {
         })
     }
     #[cfg(not(target_os = "macos"))]
-    Some(World { idle_seconds: None, app: None, front_window: None, work_area: area, pet, fullscreen: false, meeting: false, health: None, perched: false })
+    Some(World {
+        idle_seconds: None,
+        app: None,
+        front_window: None,
+        work_area: area,
+        pet,
+        fullscreen: false,
+        meeting: false,
+        health: None,
+        perched: false,
+    })
 }
 
 fn health() -> Health {
@@ -346,10 +518,26 @@ fn health() -> Health {
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     system.refresh_cpu_usage();
     let disks = Disks::new_with_refreshed_list();
-    let root = disks.list().iter().find(|disk| disk.mount_point() == std::path::Path::new("/")).or_else(|| disks.list().first());
-    let disk_free_percent = root.filter(|disk| disk.total_space() > 0).map(|disk| disk.available_space() as f32 / disk.total_space() as f32 * 100.0).unwrap_or(100.0);
-    let battery = std::process::Command::new("/usr/bin/pmset").args(["-g", "batt"]).output().ok().and_then(|output| parse_battery(&String::from_utf8_lossy(&output.stdout)));
-    Health { battery_percent: battery.map(|(percent, _)| percent), charging: battery.is_none_or(|(_, charging)| charging), cpu_percent: system.global_cpu_usage(), disk_free_percent }
+    let root = disks
+        .list()
+        .iter()
+        .find(|disk| disk.mount_point() == std::path::Path::new("/"))
+        .or_else(|| disks.list().first());
+    let disk_free_percent = root
+        .filter(|disk| disk.total_space() > 0)
+        .map(|disk| disk.available_space() as f32 / disk.total_space() as f32 * 100.0)
+        .unwrap_or(100.0);
+    let battery = std::process::Command::new("/usr/bin/pmset")
+        .args(["-g", "batt"])
+        .output()
+        .ok()
+        .and_then(|output| parse_battery(&String::from_utf8_lossy(&output.stdout)));
+    Health {
+        battery_percent: battery.map(|(percent, _)| percent),
+        charging: battery.is_none_or(|(_, charging)| charging),
+        cpu_percent: system.global_cpu_usage(),
+        disk_free_percent,
+    }
 }
 
 /// Samples the world once a second while roaming or awareness is on, glues the pet to
@@ -366,7 +554,9 @@ pub fn start(app: tauri::AppHandle) {
             if !roam && !aware {
                 continue;
             }
-            let Some(window) = glue.get_webview_window("main") else { continue };
+            let Some(window) = glue.get_webview_window("main") else {
+                continue;
+            };
             if roam && !MOVING.load(Ordering::Relaxed) && !crate::overlay::is_expanded() {
                 follow_perch(&glue, &window);
             }
@@ -386,15 +576,24 @@ pub fn start(app: tauri::AppHandle) {
 }
 
 fn follow_perch(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
-    let Some(perch) = *PERCH.lock().unwrap() else { return };
+    let Some(perch) = *PERCH.lock().unwrap() else {
+        return;
+    };
     #[cfg(target_os = "macos")]
     {
-        let Some(pet) = window_rect(window) else { return };
-        let target = mac::windows().into_iter().find(|w| w.number == perch.number).map(|w| w.rect);
+        let Some(pet) = window_rect(window) else {
+            return;
+        };
+        let target = mac::windows()
+            .into_iter()
+            .find(|w| w.number == perch.number)
+            .map(|w| w.rect);
         let center = pet.x + pet.width / 2.0;
         // A window that leaps (a Space switch, a resize to another screen) drops the pet
         // instead of teleporting it.
-        let leapt = target.is_some_and(|rect| (rect.x - perch.last.x).abs() > 240.0 || (rect.y - perch.last.y).abs() > 240.0);
+        let leapt = target.is_some_and(|rect| {
+            (rect.x - perch.last.x).abs() > 240.0 || (rect.y - perch.last.y).abs() > 240.0
+        });
         match target {
             Some(rect) if !leapt && center > rect.x + 8.0 && center < rect.x + rect.width - 8.0 => {
                 if let Some(slot) = PERCH.lock().unwrap().as_mut() {
@@ -420,14 +619,22 @@ fn follow_perch(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
 /// off a side, and it never sinks below the usable area.
 pub fn clamp_to_area(x: f64, y: f64, pet: Rect, area: Rect) -> (f64, f64) {
     (
-        x.clamp(area.x - pet.width * 0.25, (area.x + area.width - pet.width * 0.75).max(area.x)),
-        y.clamp(area.y - pet.height * 0.5, (area.y + area.height - pet.height * 0.8).max(area.y)),
+        x.clamp(
+            area.x - pet.width * 0.25,
+            (area.x + area.width - pet.width * 0.75).max(area.x),
+        ),
+        y.clamp(
+            area.y - pet.height * 0.5,
+            (area.y + area.height - pet.height * 0.8).max(area.y),
+        ),
     )
 }
 
 /// The only way this module moves the window.
 fn place(window: &tauri::WebviewWindow, x: f64, y: f64) {
-    let (Some(pet), Some((area, _))) = (window_rect(window), work_area(window)) else { return };
+    let (Some(pet), Some((area, _))) = (window_rect(window), work_area(window)) else {
+        return;
+    };
     let (x, y) = clamp_to_area(x, y, pet, area);
     let _ = window.set_position(tauri::LogicalPosition::new(x, y));
 }
@@ -470,14 +677,26 @@ pub fn path(kind: &str, from: (f64, f64), to: (f64, f64), t: f64) -> (f64, f64) 
     match kind {
         "jump" => {
             // Quadratic curve through an apex above the higher end.
-            let control = ((from.0 + to.0) / 2.0, from.1.min(to.1) - 70.0 - (from.1 - to.1).abs() * 0.15);
+            let control = (
+                (from.0 + to.0) / 2.0,
+                from.1.min(to.1) - 70.0 - (from.1 - to.1).abs() * 0.15,
+            );
             let u = 1.0 - t;
-            (u * u * from.0 + 2.0 * u * t * control.0 + t * t * to.0, u * u * from.1 + 2.0 * u * t * control.1 + t * t * to.1)
+            (
+                u * u * from.0 + 2.0 * u * t * control.0 + t * t * to.0,
+                u * u * from.1 + 2.0 * u * t * control.1 + t * t * to.1,
+            )
         }
-        "fall" => (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t * t),
+        "fall" => (
+            from.0 + (to.0 - from.0) * t,
+            from.1 + (to.1 - from.1) * t * t,
+        ),
         _ => {
             let eased = t * t * (3.0 - 2.0 * t) * 0.25 + t * 0.75;
-            (from.0 + (to.0 - from.0) * eased, from.1 + (to.1 - from.1) * eased)
+            (
+                from.0 + (to.0 - from.0) * eased,
+                from.1 + (to.1 - from.1) * eased,
+            )
         }
     }
 }
@@ -488,7 +707,10 @@ pub fn duration(kind: &str, from: (f64, f64), to: (f64, f64), speed: f64) -> f64
     let (dx, dy) = ((to.0 - from.0).abs(), (to.1 - from.1).abs());
     match kind {
         "jump" => (0.45 + dy / 1200.0).max(dx / 450.0),
-        "fall" => (2.0 * dy.max(1.0) / 2600.0).sqrt().max(dx / 400.0).max(0.15),
+        "fall" => (2.0 * dy.max(1.0) / 2600.0)
+            .sqrt()
+            .max(dx / 400.0)
+            .max(0.15),
         _ => (dx.hypot(dy) / speed.clamp(20.0, 400.0)).max(0.05),
     }
 }
@@ -496,14 +718,26 @@ pub fn duration(kind: &str, from: (f64, f64), to: (f64, f64), speed: f64) -> f64
 /// Moves the companion window to (x, y) in logical screen points. Ends any perch;
 /// the frontend perches again after landing on a window.
 #[tauri::command]
-pub async fn pet_move(app: tauri::AppHandle, x: f64, y: f64, kind: String, speed: f64) -> Result<u64, String> {
+pub async fn pet_move(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    kind: String,
+    speed: f64,
+) -> Result<u64, String> {
     if !ROAM.load(Ordering::Relaxed) {
         return Err("Roaming is off.".into());
     }
-    if !x.is_finite() || !y.is_finite() || !speed.is_finite() || !["walk", "jump", "fall"].contains(&kind.as_str()) {
+    if !x.is_finite()
+        || !y.is_finite()
+        || !speed.is_finite()
+        || !["walk", "jump", "fall"].contains(&kind.as_str())
+    {
         return Err("Invalid pet motion.".into());
     }
-    let window = app.get_webview_window("main").ok_or("The companion window is unavailable.")?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("The companion window is unavailable.")?;
     let start = window_rect(&window).ok_or("The companion position is unavailable.")?;
     let (area, _) = work_area(&window).ok_or("The screen is unavailable.")?;
     let to = clamp_to_area(x, y, start, area);
@@ -511,8 +745,19 @@ pub async fn pet_move(app: tauri::AppHandle, x: f64, y: f64, kind: String, speed
     *PERCH.lock().unwrap() = None;
     let id = MOTION.fetch_add(1, Ordering::SeqCst) + 1;
     MOVING.store(true, Ordering::Relaxed);
-    let direction = if to.0 > from.0 + 0.5 { 1 } else if to.0 < from.0 - 0.5 { -1 } else { 0 };
-    let event = |phase: &'static str| MotionEvent { id, phase, kind: kind.clone(), direction };
+    let direction = if to.0 > from.0 + 0.5 {
+        1
+    } else if to.0 < from.0 - 0.5 {
+        -1
+    } else {
+        0
+    };
+    let event = |phase: &'static str| MotionEvent {
+        id,
+        phase,
+        kind: kind.clone(),
+        direction,
+    };
     let _ = app.emit_to("main", "pet-motion", event("start"));
     let seconds = duration(&kind, from, to, speed);
     let began = std::time::Instant::now();
@@ -539,10 +784,21 @@ pub async fn pet_move(app: tauri::AppHandle, x: f64, y: f64, kind: String, speed
 pub fn pet_perch(app: tauri::AppHandle, number: u32) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let window = app.get_webview_window("main").ok_or("The companion window is unavailable.")?;
+        let window = app
+            .get_webview_window("main")
+            .ok_or("The companion window is unavailable.")?;
         let pet = window_rect(&window).ok_or("The companion position is unavailable.")?;
-        let rect = mac::windows().into_iter().find(|w| w.number == number).map(|w| w.rect).ok_or("That window is no longer on screen.")?;
-        *PERCH.lock().unwrap() = Some(Perch { number, dx: pet.x - rect.x, dy: pet.y - rect.y, last: rect });
+        let rect = mac::windows()
+            .into_iter()
+            .find(|w| w.number == number)
+            .map(|w| w.rect)
+            .ok_or("That window is no longer on screen.")?;
+        *PERCH.lock().unwrap() = Some(Perch {
+            number,
+            dx: pet.x - rect.x,
+            dy: pet.y - rect.y,
+            last: rect,
+        });
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -579,29 +835,58 @@ mod tests {
     #[test]
     fn motion_paths_start_and_end_where_asked() {
         for kind in ["walk", "jump", "fall"] {
-            assert_eq!(path(kind, (10.0, 500.0), (300.0, 200.0), 0.0), (10.0, 500.0));
+            assert_eq!(
+                path(kind, (10.0, 500.0), (300.0, 200.0), 0.0),
+                (10.0, 500.0)
+            );
             let end = path(kind, (10.0, 500.0), (300.0, 200.0), 1.0);
-            assert!((end.0 - 300.0).abs() < 1e-9 && (end.1 - 200.0).abs() < 1e-9, "{kind}");
+            assert!(
+                (end.0 - 300.0).abs() < 1e-9 && (end.1 - 200.0).abs() < 1e-9,
+                "{kind}"
+            );
         }
         let apex = path("jump", (0.0, 500.0), (200.0, 500.0), 0.5);
         assert!(apex.1 < 500.0 - 30.0, "jumps arc upward");
-        assert!(path("fall", (0.0, 0.0), (0.0, 400.0), 0.5).1 < 200.0, "falls accelerate");
+        assert!(
+            path("fall", (0.0, 0.0), (0.0, 400.0), 0.5).1 < 200.0,
+            "falls accelerate"
+        );
         assert!(duration("walk", (0.0, 0.0), (300.0, 0.0), 100.0) > 2.9);
         assert!(duration("jump", (0.0, 300.0), (40.0, 0.0), 100.0) < 1.0);
         // Sideways speed stays cat-like even when a jump or fall covers the whole screen.
         for kind in ["jump", "fall"] {
             let seconds = duration(kind, (1648.0, 951.0), (-32.0, 951.0), 95.0);
-            assert!(1680.0 / seconds <= 450.0, "{kind} crossed at {:.0} pt/s", 1680.0 / seconds);
+            assert!(
+                1680.0 / seconds <= 450.0,
+                "{kind} crossed at {:.0} pt/s",
+                1680.0 / seconds
+            );
         }
     }
 
     #[test]
     fn positions_stay_on_the_usable_screen() {
-        let pet = Rect { x: 0.0, y: 0.0, width: 128.0, height: 136.0 };
-        let area = Rect { x: 0.0, y: 33.0, width: 1800.0, height: 1038.0 };
+        let pet = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 128.0,
+            height: 136.0,
+        };
+        let area = Rect {
+            x: 0.0,
+            y: 33.0,
+            width: 1800.0,
+            height: 1038.0,
+        };
         assert_eq!(clamp_to_area(-213.0, 951.0, pet, area), (-32.0, 951.0));
-        assert_eq!(clamp_to_area(5000.0, 5000.0, pet, area), (1704.0, 33.0 + 1038.0 - 108.8));
-        assert_eq!(clamp_to_area(600.0, -400.0, pet, area), (600.0, 33.0 - 68.0));
+        assert_eq!(
+            clamp_to_area(5000.0, 5000.0, pet, area),
+            (1704.0, 33.0 + 1038.0 - 108.8)
+        );
+        assert_eq!(
+            clamp_to_area(600.0, -400.0, pet, area),
+            (600.0, 33.0 - 68.0)
+        );
         assert_eq!(clamp_to_area(600.0, 500.0, pet, area), (600.0, 500.0));
     }
 
@@ -612,7 +897,13 @@ mod tests {
         let (pid, name, bundle) = mac::frontmost().expect("a frontmost app");
         let windows = mac::windows();
         let front = windows.iter().find(|w| w.pid == pid && w.layer == 0);
-        println!("front app: {name} ({}) idle {:.1}s, {} windows, front window {:?}", category(&bundle), mac::idle_seconds(), windows.len(), front.map(|w| w.rect));
+        println!(
+            "front app: {name} ({}) idle {:.1}s, {} windows, front window {:?}",
+            category(&bundle),
+            mac::idle_seconds(),
+            windows.len(),
+            front.map(|w| w.rect)
+        );
         println!("health: {:?}", health());
         assert!(mac::idle_seconds() >= 0.0);
         assert!(!windows.is_empty());
@@ -621,7 +912,12 @@ mod tests {
     #[test]
     fn the_timeline_merges_visits_and_summarizes_recent_apps() {
         use chrono::TimeZone;
-        let at = |minute: i64| chrono::Local.with_ymd_and_hms(2026, 10, 21, 16, 0, 0).unwrap() + chrono::Duration::minutes(minute);
+        let at = |minute: i64| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, 21, 16, 0, 0)
+                .unwrap()
+                + chrono::Duration::minutes(minute)
+        };
         let mut timeline = Vec::new();
         for minute in 0..=40 {
             record_visit(&mut timeline, "Xcode", "code", at(minute));
@@ -632,28 +928,77 @@ mod tests {
         for minute in 52..=70 {
             record_visit(&mut timeline, "Xcode", "code", at(minute));
         }
-        assert_eq!(timeline.len(), 3, "a return to Xcode after a detour starts a new visit");
-        let health = Health { battery_percent: Some(64), charging: false, cpu_percent: 12.0, disk_free_percent: 30.0 };
+        assert_eq!(
+            timeline.len(),
+            3,
+            "a return to Xcode after a detour starts a new visit"
+        );
+        let health = Health {
+            battery_percent: Some(64),
+            charging: false,
+            cpu_percent: 12.0,
+            disk_free_percent: 30.0,
+        };
         let summary = summarize(&timeline, at(70), Some(4.0), Some(at(0)), Some(health));
         assert_eq!(summary.current_app.as_deref(), Some("Xcode"));
         assert_eq!(summary.minutes_in_current_app, 18);
         assert_eq!(summary.minutes_active, Some(70));
-        assert_eq!(summary.apps_last_two_hours, vec![AppTime { name: "Xcode".into(), category: "code", minutes: 58 }, AppTime { name: "Safari".into(), category: "browser", minutes: 10 }]);
+        assert_eq!(
+            summary.apps_last_two_hours,
+            vec![
+                AppTime {
+                    name: "Xcode".into(),
+                    category: "code",
+                    minutes: 58
+                },
+                AppTime {
+                    name: "Safari".into(),
+                    category: "browser",
+                    minutes: 10
+                }
+            ]
+        );
         assert_eq!(summary.battery_percent, Some(64));
-        assert!(summary.local_time.starts_with("Wednesday 21 October, 17:10"));
+        assert!(summary
+            .local_time
+            .starts_with("Wednesday 21 October, 17:10"));
         // Clicking the desktop to reach Buntini brings Finder forward for a moment.
         let mut detour = timeline.clone();
-        record_visit(&mut detour, "Finder", "files", at(70) + chrono::Duration::seconds(4));
-        assert_eq!(summarize(&detour, at(70) + chrono::Duration::seconds(6), None, None, None).current_app.as_deref(), Some("Xcode"), "a few seconds in Finder is a detour");
+        record_visit(
+            &mut detour,
+            "Finder",
+            "files",
+            at(70) + chrono::Duration::seconds(4),
+        );
+        assert_eq!(
+            summarize(
+                &detour,
+                at(70) + chrono::Duration::seconds(6),
+                None,
+                None,
+                None
+            )
+            .current_app
+            .as_deref(),
+            Some("Xcode"),
+            "a few seconds in Finder is a detour"
+        );
         // Only the last two hours count, and entries older than three hours are dropped.
         record_visit(&mut timeline, "Notes", "writing", at(250));
         assert_eq!(timeline.len(), 1);
-        assert!(summarize(&[], at(0), None, None, None).current_app.is_none());
+        assert!(summarize(&[], at(0), None, None, None)
+            .current_app
+            .is_none());
     }
 
     #[test]
     fn rects_compare_with_tolerance() {
-        let a = Rect { x: 0.0, y: 0.0, width: 1512.0, height: 982.0 };
+        let a = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1512.0,
+            height: 982.0,
+        };
         assert!(same(a, Rect { x: 1.0, ..a }));
         assert!(!same(a, Rect { height: 950.0, ..a }));
     }

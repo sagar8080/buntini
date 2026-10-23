@@ -1,0 +1,17 @@
+{
+  "kind": "public_browser_smoke",
+  "observedAt": "2026-10-22T23:27:10.338835+00:00",
+  "query": "Rust programming language official documentation",
+  "searchHost": "www.google.com",
+  "search": {
+    "status": "blocked_by_google_verification",
+    "detail": "Google redirected the isolated public search to its unusual-traffic verification page. No challenge was submitted. Approved API fallback remains available."
+  },
+  "read": {
+    "status": "succeeded",
+    "url": "https://doc.rust-lang.org/book/"
+  },
+  "isolation": "fresh_nonpersistent_store_required",
+  "passed": false,
+  "note": "Search-engine availability observation; Google remains the user-selected primary browser engine. The unrelated fixed public source-read fixture succeeded."
+}

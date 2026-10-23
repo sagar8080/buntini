@@ -4,23 +4,27 @@ import Pet from './Pet';
 import { ResultCards } from './Online';
 import { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
-import { threadItems } from './thread';
+import { ProgressDetails } from './TaskProgress';
+import { taskRecovery, missingTaskFields } from './taskRecovery';
 import { parse, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
-import type { ModelBackend, Settings, TaskRecord } from './types';
+import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
 
 type Props = {
-  turns: TaskRecord[]; live: TaskRecord | null; boundary?: string | null; busy: boolean; activity: string;
+  turns: TaskRecord[]; live: TaskRecord | null; busy: boolean; activity: string;
   settings?: Settings; focusId: string; speaking: boolean; scroller: RefObject<HTMLDivElement | null>;
   canLoadEarlier: boolean; onLoadEarlier: () => Promise<void>;
   onOpen: (url: string) => void; onSpeak: (text: string) => void; onStopSpeaking: () => void;
+  progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, boundary, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
+  const [clarifications, setClarifications] = useState<Record<string, string>>({});
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   async function loadEarlier() {
     const element = scroller.current;
     const before = element?.scrollHeight ?? 0;
@@ -32,6 +36,19 @@ export default function Conversation({ turns, live, boundary, busy, activity, se
   const turn = (item: TaskRecord, isLive: boolean) => {
     const done = !isLive && item.state === 'completed';
     const working = isLive && busy;
+    const savedProgress = progress?.find(flow => flow.id === item.id);
+    const recovery = taskRecovery(item.state, savedProgress);
+    const missing = missingTaskFields(savedProgress);
+    const continueWithDetails = () => {
+      const updates: Record<string, TaskFieldUpdate> = {};
+      for (const field of missing) {
+        const value = fieldValues[`${item.id}:${field.key}`]?.trim();
+        if (!value) continue;
+        const update = updates[field.outcomeId] ??= { outcomeId: field.outcomeId, fields: {} };
+        update.fields[field.field] = field.date ? value.replace('T', ' ') : value;
+      }
+      onContinue(item, clarifications[item.id], Object.values(updates));
+    };
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
       {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
@@ -47,6 +64,13 @@ export default function Conversation({ turns, live, boundary, busy, activity, se
           {!!item.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {item.research.length} pages</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
           {working && !!item.answer && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity || 'Still going'}</span></div>}
           {item.state === 'cancelled' && <div className="muted-note"><Square size={11} /> Stopped. You’re in control.</div>}
+          <ProgressDetails progress={savedProgress} />
+          {!working && recovery.canContinue && missing.map(field => <label className="task-clarification" key={field.key}>{field.label}{field.field === 'body'
+            ? <textarea aria-label={field.label} value={fieldValues[`${item.id}:${field.key}`] || ''} maxLength={8000} disabled={busy} onChange={event => setFieldValues(previous => ({ ...previous, [`${item.id}:${field.key}`]: event.target.value }))} />
+            : <input aria-label={field.label} type={field.date ? 'datetime-local' : 'text'} value={fieldValues[`${item.id}:${field.key}`] || ''} maxLength={8000} disabled={busy} onChange={event => setFieldValues(previous => ({ ...previous, [`${item.id}:${field.key}`]: event.target.value }))} />}</label>)}
+          {!working && recovery.canContinue && <label className="task-clarification">Add details for this task<textarea aria-label="Additional task details" value={clarifications[item.id] || ''} maxLength={4000} disabled={busy} onChange={event => setClarifications(previous => ({ ...previous, [item.id]: event.target.value }))} placeholder="For example: tomorrow at 3 pm" /></label>}
+          {!working && (recovery.canContinue || recovery.canReview) && <div className="task-controls"><button disabled={busy} onClick={continueWithDetails}>{recovery.canReview ? 'Review next step' : recovery.retryRead ? 'Retry read and continue' : 'Continue task'}</button><button disabled={busy} className="text-button" onClick={() => onCancel(item)}>Stop task</button></div>}
+          {item.state === 'unknown' && <p role="status">Check the destination app before making another request. This task will not repeat an uncertain action.</p>}
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'This one didn’t finish. Please try again.'}</p>}
         </div>
       </div>
@@ -58,7 +82,7 @@ export default function Conversation({ turns, live, boundary, busy, activity, se
   };
   return <div className="thread">
     {canLoadEarlier && <button className="load-earlier" onClick={() => void loadEarlier()} disabled={loading}>{loading ? <LoaderCircle size={11} className="spin" /> : null}{loading ? 'Loading…' : 'Load earlier'}</button>}
-    {threadItems(turns, boundary).map(item => item.kind === 'topic' ? <div className="topic-divider" key={`topic-${item.at}`} title="Earlier messages are no longer sent to the model"><span>New topic</span></div> : turn(item.turn, false))}
+    {turns.map(item => turn(item, false))}
     {live && turn(live, true)}
   </div>;
 }

@@ -27,13 +27,41 @@ pub struct Tool {
     pub key: Option<&'static str>,
 }
 pub const TOOLS: [Tool; 7] = [
-    Tool { name: "web_search", provider: "Web search", key: None },
-    Tool { name: "weather", provider: "Open-Meteo", key: None },
-    Tool { name: "currency", provider: "Frankfurter (ECB)", key: None },
-    Tool { name: "wikipedia", provider: "Wikipedia", key: None },
-    Tool { name: "places", provider: "OpenStreetMap", key: None },
-    Tool { name: "ebay_search", provider: "eBay", key: Some("ebay") },
-    Tool { name: "flight_search", provider: "Duffel", key: Some("duffel") },
+    Tool {
+        name: "web_search",
+        provider: "Web search",
+        key: None,
+    },
+    Tool {
+        name: "weather",
+        provider: "Open-Meteo",
+        key: None,
+    },
+    Tool {
+        name: "currency",
+        provider: "Frankfurter (ECB)",
+        key: None,
+    },
+    Tool {
+        name: "wikipedia",
+        provider: "Wikipedia",
+        key: None,
+    },
+    Tool {
+        name: "places",
+        provider: "OpenStreetMap",
+        key: None,
+    },
+    Tool {
+        name: "ebay_search",
+        provider: "eBay",
+        key: Some("ebay"),
+    },
+    Tool {
+        name: "flight_search",
+        provider: "Duffel",
+        key: Some("duffel"),
+    },
 ];
 
 /// A validated, normalized tool call. `arguments` include filled-in defaults so the
@@ -88,7 +116,10 @@ pub fn validate(tool_name: &str, arguments: &Value, prompt: &str) -> Result<Call
         "flight_search" => duffel::validate(arguments, today)?,
         _ => return Err(format!("The tool '{tool_name}' is not available.")),
     };
-    Ok(Call { tool: tool_name.into(), arguments })
+    Ok(Call {
+        tool: tool_name.into(),
+        arguments,
+    })
 }
 
 pub fn preview(call: &Call, settings: &Settings) -> Preview {
@@ -107,11 +138,15 @@ pub fn preview(call: &Call, settings: &Settings) -> Preview {
                 ("Brave Search", "api.search.brave.com")
             };
             Preview {
-                provider: provider.into(),
-                host: host.into(),
-                summary: "Search the web".into(),
-                sends: vec![CardField::new("Query", text_of(args, "query"))],
-                uses_key: true,
+                provider: format!("Google in your browser; {provider} fallback"),
+                host: format!("{}; {host} only if needed", crate::browser_session::SEARCH_HOST),
+                summary: "Search Google in a dedicated tab in your existing or default browser, read relevant sources, and produce a sourced answer".into(),
+                sends: vec![
+                    CardField::new("Query", text_of(args, "query")),
+                    CardField::new("Browser", "Uses your browser's normal profile. Existing cookies and sign-ins may apply, and pages may enter its history. Buntini reads only its research tab when permitted."),
+                    CardField::new("Page reads", "Up to six selected public HTTPS result pages. If browser reading is unavailable, use the selected search API and public page retrieval."),
+                ],
+                uses_key: false,
             }
         }
     }
@@ -124,7 +159,10 @@ pub async fn execute(
 ) -> Result<Outcome, String> {
     let key = match tool(&call.tool).and_then(|tool| tool.key) {
         Some(name) => Some(web::credential(name).map_err(|_| {
-            format!("Add your {} credentials in Settings first.", tool(&call.tool).unwrap().provider)
+            format!(
+                "Add your {} credentials in Settings first.",
+                tool(&call.tool).unwrap().provider
+            )
         })?),
         None => None,
     };
@@ -137,7 +175,14 @@ pub async fn execute(
             "currency" => everyday::currency(args).await,
             "wikipedia" => everyday::wikipedia(args).await,
             "places" => places::search(args, cancel.clone()).await,
-            "ebay_search" => ebay::search(args, key.as_deref().unwrap_or(""), &settings.ebay_marketplace).await,
+            "ebay_search" => {
+                ebay::search(
+                    args,
+                    key.as_deref().unwrap_or(""),
+                    &settings.ebay_marketplace,
+                )
+                .await
+            }
             "flight_search" => duffel::search(args, key.as_deref().unwrap_or("")).await,
             other => Err(format!("The tool '{other}' cannot run here.")),
         }
@@ -147,8 +192,9 @@ pub async fn execute(
     Ok(Outcome { cards })
 }
 
-/// Asks the local model to route the request to one tool. Falls back to an exact web
-/// search when no model is configured or its proposal fails validation.
+/// Explicit online research has one route: the integrated browser-first web
+/// workflow. A narrow direct request such as a forecast or conversion may still
+/// use its specific API. Invalid proposals fall back to the exact public query.
 pub async fn plan(
     state: &AppState,
     settings: &Settings,
@@ -156,17 +202,27 @@ pub async fn plan(
     cancel: Arc<AtomicBool>,
 ) -> Result<(Call, Option<String>), String> {
     let web = || validate("web_search", &Value::Null, prompt).map(|call| (call, None));
+    if crate::search_intent::explicit_request(prompt).is_some() {
+        return web();
+    }
     if state.models.ready(settings).is_err() {
         return web();
     }
-    let tools: Vec<Value> = available().into_iter().map(|name| json!({ "name": name })).collect();
+    let tools: Vec<Value> = available()
+        .into_iter()
+        .map(|name| json!({ "name": name }))
+        .collect();
     let today = chrono::Local::now().format("%A %-d %B %Y");
     let messages = json!([
         {"role":"system","content":format!("Route the user's request to exactly one read-only online lookup and reply only with that tool call. Today is {today}. Prefer the most specific tool: weather for forecasts, currency for exchange rates, wikipedia for encyclopedic facts about a topic, places for nearby businesses or amenities, ebay_search for buying or pricing items, flight_search for flights (use IATA codes when you know them). Use web_search for news and everything else. Fill arguments only with details the user wrote; never invent dates, places or personal information.")},
         {"role":"user","content":prompt}
     ]);
     let request = json!({"messages":messages,"tools":tools,"max_tokens":256});
-    match state.models.generate(settings, request, cancel, |_| {}).await {
+    match state
+        .models
+        .generate(settings, request, cancel, |_| {})
+        .await
+    {
         Ok(turn) => {
             let Some(call) = turn.tool else { return web() };
             let name = call.get("name").and_then(Value::as_str).unwrap_or("");
@@ -182,7 +238,12 @@ pub async fn plan(
             }
         }
         Err(error) if error == "Task cancelled." => Err(error),
-        Err(_) => web().map(|(call, _)| (call, Some("The local model is unavailable, so this will be a plain web search.".into()))),
+        Err(_) => web().map(|(call, _)| {
+            (
+                call,
+                Some("The local model is unavailable, so this will be a plain web search.".into()),
+            )
+        }),
     }
 }
 
@@ -247,9 +308,13 @@ pub(crate) async fn json_response(
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(match status {
-            401 | 403 => format!("{provider} rejected the saved credentials. Check them in Settings."),
+            401 | 403 => {
+                format!("{provider} rejected the saved credentials. Check them in Settings.")
+            }
             404 => format!("{provider} found nothing for this request."),
-            400 | 422 => format!("{provider} could not use these details. Check the values and try again."),
+            400 | 422 => {
+                format!("{provider} could not use these details. Check the values and try again.")
+            }
             429 => format!("{provider} is limiting requests right now. Try again in a minute."),
             _ => format!("{provider} is temporarily unavailable (HTTP {status})."),
         });
@@ -259,14 +324,24 @@ pub(crate) async fn json_response(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| format!("The {provider} response was interrupted."))?;
         if bytes.len() + chunk.len() > cap {
-            return Err(format!("The {provider} response exceeded the safe size limit."));
+            return Err(format!(
+                "The {provider} response exceeded the safe size limit."
+            ));
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).map_err(|_| format!("{provider} returned an unreadable response."))
+    serde_json::from_slice(&bytes)
+        .map_err(|_| format!("{provider} returned an unreadable response."))
 }
 
-pub(crate) fn card(kind: &str, title: impl Into<String>, subtitle: impl Into<String>, fields: Vec<CardField>, url: Option<String>, attribution: &str) -> ResultCard {
+pub(crate) fn card(
+    kind: &str,
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+    fields: Vec<CardField>,
+    url: Option<String>,
+    attribution: &str,
+) -> ResultCard {
     ResultCard {
         kind: kind.into(),
         title: clip(&title.into(), 160),
@@ -286,7 +361,13 @@ pub(crate) fn card(kind: &str, title: impl Into<String>, subtitle: impl Into<Str
 /// Only plain public HTTPS links become clickable.
 pub(crate) fn safe_link(url: &str) -> bool {
     reqwest::Url::parse(url)
-        .map(|parsed| parsed.scheme() == "https" && parsed.host_str().is_some() && parsed.username().is_empty() && parsed.password().is_none() && url.len() <= 2048)
+        .map(|parsed| {
+            parsed.scheme() == "https"
+                && parsed.host_str().is_some()
+                && parsed.username().is_empty()
+                && parsed.password().is_none()
+                && url.len() <= 2048
+        })
         .unwrap_or(false)
 }
 
@@ -309,15 +390,24 @@ pub(crate) fn text_of(value: &Value, key: &str) -> String {
 
 // Argument validation. Models emit Qwen tags where every value is a string, so
 // numbers are accepted as JSON numbers or numeric strings.
-pub(crate) fn object<'a>(value: &'a Value, allowed: &[&str]) -> Result<&'a Map<String, Value>, String> {
-    let map = value.as_object().ok_or("Tool arguments must be an object.")?;
+pub(crate) fn object<'a>(
+    value: &'a Value,
+    allowed: &[&str],
+) -> Result<&'a Map<String, Value>, String> {
+    let map = value
+        .as_object()
+        .ok_or("Tool arguments must be an object.")?;
     if let Some(unknown) = map.keys().find(|key| !allowed.contains(&key.as_str())) {
         return Err(format!("Unexpected argument '{unknown}'."));
     }
     Ok(map)
 }
 
-pub(crate) fn text(map: &Map<String, Value>, key: &str, max: usize) -> Result<Option<String>, String> {
+pub(crate) fn text(
+    map: &Map<String, Value>,
+    key: &str,
+    max: usize,
+) -> Result<Option<String>, String> {
     match map.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => {
@@ -338,7 +428,12 @@ pub(crate) fn required(map: &Map<String, Value>, key: &str, max: usize) -> Resul
     text(map, key, max)?.ok_or_else(|| format!("'{key}' is required."))
 }
 
-pub(crate) fn number(map: &Map<String, Value>, key: &str, min: f64, max: f64) -> Result<Option<f64>, String> {
+pub(crate) fn number(
+    map: &Map<String, Value>,
+    key: &str,
+    min: f64,
+    max: f64,
+) -> Result<Option<f64>, String> {
     let value = match map.get(key) {
         None | Some(Value::Null) => return Ok(None),
         Some(Value::Number(number)) => number.as_f64(),
@@ -352,15 +447,26 @@ pub(crate) fn number(map: &Map<String, Value>, key: &str, min: f64, max: f64) ->
     }
 }
 
-pub(crate) fn integer(map: &Map<String, Value>, key: &str, min: i64, max: i64) -> Result<Option<i64>, String> {
+pub(crate) fn integer(
+    map: &Map<String, Value>,
+    key: &str,
+    min: i64,
+    max: i64,
+) -> Result<Option<i64>, String> {
     match number(map, key, min as f64, max as f64) {
         Ok(Some(value)) if value.fract() == 0.0 => Ok(Some(value as i64)),
         Ok(None) => Ok(None),
-        _ => Err(format!("'{key}' must be a whole number between {min} and {max}.")),
+        _ => Err(format!(
+            "'{key}' must be a whole number between {min} and {max}."
+        )),
     }
 }
 
-pub(crate) fn choice(map: &Map<String, Value>, key: &str, options: &[&str]) -> Result<Option<String>, String> {
+pub(crate) fn choice(
+    map: &Map<String, Value>,
+    key: &str,
+    options: &[&str],
+) -> Result<Option<String>, String> {
     match text(map, key, 40)? {
         None => Ok(None),
         Some(value) => {
@@ -380,7 +486,12 @@ mod tests {
 
     #[test]
     fn web_search_always_uses_the_exact_prompt() {
-        let call = validate("web_search", &json!({"query":"something the model rewrote"}), "  latest rust release ").unwrap();
+        let call = validate(
+            "web_search",
+            &json!({"query":"something the model rewrote"}),
+            "  latest rust release ",
+        )
+        .unwrap();
         assert_eq!(call.arguments, json!({"query":"latest rust release"}));
         assert!(validate("web_search", &Value::Null, " ").is_err());
     }
@@ -388,13 +499,21 @@ mod tests {
     #[test]
     fn unknown_tools_and_arguments_are_rejected() {
         assert!(validate("run_shell", &json!({}), "x").is_err());
-        assert!(validate("weather", &json!({"place":"Lisbon","url":"https://evil.example"}), "x").is_err());
+        assert!(validate(
+            "weather",
+            &json!({"place":"Lisbon","url":"https://evil.example"}),
+            "x"
+        )
+        .is_err());
         assert!(validate("weather", &json!("Lisbon"), "x").is_err());
     }
 
     #[test]
     fn numbers_accept_model_strings_but_stay_bounded() {
-        let map = json!({"a":"3","b":2,"c":"2.5","d":"lots","e":true}).as_object().unwrap().clone();
+        let map = json!({"a":"3","b":2,"c":"2.5","d":"lots","e":true})
+            .as_object()
+            .unwrap()
+            .clone();
         assert_eq!(integer(&map, "a", 1, 7).unwrap(), Some(3));
         assert_eq!(integer(&map, "b", 1, 7).unwrap(), Some(2));
         assert!(integer(&map, "c", 1, 7).is_err());
@@ -406,7 +525,10 @@ mod tests {
 
     #[test]
     fn text_is_trimmed_bounded_and_free_of_control_characters() {
-        let map = json!({"a":"  New   York ","b":"x\u{7}y","c":"   "}).as_object().unwrap().clone();
+        let map = json!({"a":"  New   York ","b":"x\u{7}y","c":"   "})
+            .as_object()
+            .unwrap()
+            .clone();
         assert_eq!(text(&map, "a", 20).unwrap().as_deref(), Some("New York"));
         assert!(text(&map, "a", 3).is_err());
         assert!(text(&map, "b", 20).is_err());
@@ -416,11 +538,28 @@ mod tests {
 
     #[test]
     fn cards_drop_unsafe_links_and_render_numbered_text() {
-        let unsafe_card = card("place", "Café", "", vec![CardField::new("Hours", "9–5")], Some("javascript:alert(1)".into()), "OSM");
+        let unsafe_card = card(
+            "place",
+            "Café",
+            "",
+            vec![CardField::new("Hours", "9–5")],
+            Some("javascript:alert(1)".into()),
+            "OSM",
+        );
         assert_eq!(unsafe_card.url, None);
-        let http = card("place", "Café", "", vec![], Some("http://example.com".into()), "OSM");
+        let http = card(
+            "place",
+            "Café",
+            "",
+            vec![],
+            Some("http://example.com".into()),
+            "OSM",
+        );
         assert_eq!(http.url, None);
-        let text = cards_text(&[unsafe_card.clone(), card("rate", "1 USD = 0.9 EUR", "ECB", vec![], None, "ECB")]);
+        let text = cards_text(&[
+            unsafe_card.clone(),
+            card("rate", "1 USD = 0.9 EUR", "ECB", vec![], None, "ECB"),
+        ]);
         assert!(text.starts_with("[1] Café\nHours: 9–5"));
         assert!(text.contains("[2] 1 USD = 0.9 EUR — ECB"));
     }
@@ -432,12 +571,20 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         for (tool, args) in [
             ("weather", json!({"place":"Lisbon, Portugal"})),
-            ("currency", json!({"from":"USD","to":"EUR,GBP","amount":100})),
+            (
+                "currency",
+                json!({"from":"USD","to":"EUR,GBP","amount":100}),
+            ),
             ("wikipedia", json!({"query":"Alan Turing"})),
-            ("places", json!({"category":"cafe","near":"Baixa, Lisbon","radius_m":600})),
+            (
+                "places",
+                json!({"category":"cafe","near":"Baixa, Lisbon","radius_m":600}),
+            ),
         ] {
             let call = validate(tool, &args, "x").unwrap();
-            let outcome = execute(&call, &settings, cancel.clone()).await.unwrap_or_else(|error| panic!("{tool}: {error}"));
+            let outcome = execute(&call, &settings, cancel.clone())
+                .await
+                .unwrap_or_else(|error| panic!("{tool}: {error}"));
             assert!(!outcome.cards.is_empty(), "{tool}");
             println!("--- {tool}\n{}", cards_text(&outcome.cards));
         }
@@ -447,7 +594,13 @@ mod tests {
     fn every_catalog_tool_validates_or_previews() {
         let settings = Settings::default();
         for tool in TOOLS {
-            let preview = preview(&Call { tool: tool.name.into(), arguments: json!({"query":"x"}) }, &settings);
+            let preview = preview(
+                &Call {
+                    tool: tool.name.into(),
+                    arguments: json!({"query":"x"}),
+                },
+                &settings,
+            );
             assert!(!preview.provider.is_empty() && !preview.host.is_empty());
         }
     }

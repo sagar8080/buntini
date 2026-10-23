@@ -68,6 +68,42 @@ test('cancel immediately invalidates queued text and stops active audio', async 
   assert.deepEqual(played, ['Play this.']);
 });
 
+test('a summary fallback replaces queued draft speech with the authoritative answer', async () => {
+  const played: string[] = [];
+  const old = deferred();
+  let stops = 0;
+  const speech = new SpeechQueue({
+    play(text) { played.push(text); return text === 'Partial draft.' ? old.promise : Promise.resolve(); },
+    async stop() { stops += 1; old.resolve(); },
+    onActive() {},
+  });
+  const token = speech.begin();
+  const draft = 'Partial draft. Unverified continuation. Unfinished tail';
+  speech.append(draft, token);
+  await tick();
+  speech.completeAnswer(token, 'Original source evidence.', draft);
+  speech.append(' Stale delta.', token);
+  await tick();
+  await tick();
+  assert.equal(stops, 1);
+  assert.deepEqual(played, ['Partial draft.', 'Original source evidence.']);
+});
+
+test('authoritative completion neither replays matching streams nor revives cancelled speech', async () => {
+  const played: string[] = [];
+  const speech = new SpeechQueue({ play: async text => { played.push(text); }, stop: async () => {}, onActive() {} });
+  const token = speech.begin();
+  speech.append('A complete answer.', token);
+  speech.completeAnswer(token, 'A complete answer.', 'A complete answer.');
+  await tick();
+  assert.deepEqual(played, ['A complete answer.']);
+  const cancelled = speech.begin();
+  await speech.cancel();
+  speech.completeAnswer(cancelled, 'Do not restart me.', '');
+  await tick();
+  assert.deepEqual(played, ['A complete answer.']);
+});
+
 test('supersession waits for stop and old play completion before new audio', async () => {
   const played: string[] = [];
   const oldPlay = deferred();

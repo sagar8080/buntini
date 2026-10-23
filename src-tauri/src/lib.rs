@@ -1,41 +1,70 @@
 mod actions;
 mod advisor;
+mod approvals;
 mod apps;
 mod ax;
-mod approvals;
 mod brief;
+mod browser_workspace;
+mod browser_session;
 mod budget;
+mod chat_threads;
 mod chatgpt;
 mod cloud;
+mod completion;
+mod control_actions;
 mod controller;
-mod data;
 mod conversation;
+mod data;
+mod delivery;
+mod explicit_fields;
 mod indexer;
 mod integrations;
 mod local;
 mod migration;
 mod model;
+mod monitor_actions;
 mod notifications;
 mod overlay;
-mod privacy;
+mod planning;
 mod pricing;
+mod privacy;
 mod research;
+mod search_intent;
+#[cfg(test)]
+mod search_intent_tests;
+mod search_pipeline;
+#[cfg(test)]
+mod search_pipeline_tests;
+#[cfg(test)]
+mod scenario_evals;
 mod scheduler;
 mod skills;
 mod store;
-mod tools;
 mod support;
+mod task_contract;
+mod tools;
 mod types;
 mod voice;
 mod watches;
 mod web;
 mod worker;
+mod workflows;
 mod world;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub fn run_public_browser_smoke() {
+    browser_workspace::run_public_smoke(app_context());
+}
+
+#[cfg(debug_assertions)]
+pub fn run_public_desktop_browser_smoke() {
+    browser_session::run_public_smoke();
+}
 
 fn show_companion(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -44,6 +73,10 @@ fn show_companion(app: &tauri::AppHandle) {
         let _ = app.emit("companion-toggle", ());
     }
 }
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -68,16 +101,23 @@ pub fn run() {
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
             let notices = app.handle().clone();
-            app.state::<controller::AppState>().models.on_notice(move |text| {
-                let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
-            });
+            app.state::<controller::AppState>()
+                .models
+                .on_notice(move |text| {
+                    let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
+                });
             // Learn whether Apple Intelligence can run here before the first chat.
             let probe = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                probe.state::<controller::AppState>().models.probe_apple().await;
+                probe
+                    .state::<controller::AppState>()
+                    .models
+                    .probe_apple()
+                    .await;
             });
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
+            browser_workspace::set_app(app.handle().clone());
             // Have the local model read its instructions now, so the first reply is quick.
             controller::warm_up_soon(app.handle());
             if let Some(window) = app.get_webview_window("main") {
@@ -173,6 +213,13 @@ pub fn run() {
             controller::new_topic,
             controller::finish_onboarding,
             controller::run_action,
+            controller::resume_task,
+            controller::task_progress,
+            controller::plan_task_online,
+            controller::continue_task_online,
+            delivery::background_status,
+            delivery::list_timers,
+            delivery::cancel_timer,
             controller::quit_app,
             apps::app_list,
             apps::check_app,
@@ -191,6 +238,8 @@ pub fn run() {
             data::support_info,
             controller::restart_onboarding,
             controller::conversation,
+            controller::conversations,
+            controller::open_conversation,
             controller::cancel_task,
             controller::clear_history,
             controller::speak,
@@ -224,7 +273,7 @@ pub fn run() {
             watches::delete_price_watch,
             watches::run_price_watch
         ])
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("Buntini could not start")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Ready) {

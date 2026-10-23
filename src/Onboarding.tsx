@@ -130,7 +130,7 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
 
 function Online({ answers, set }: StepProps) {
   return <>
-    <label>Search provider<select value={answers.searchProvider} onChange={event => { set('searchProvider', event.target.value as Answers['searchProvider']); set('searchKey', ''); }}><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></label>
+    <label>Fallback search provider<select value={answers.searchProvider} onChange={event => { set('searchProvider', event.target.value as Answers['searchProvider']); set('searchKey', ''); }}><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></label>
     <label><span className="setup-label">API key <span className="label-status">Optional</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.searchKey} onChange={event => set('searchKey', event.target.value)} placeholder="Paste your key, or skip" aria-label="Search API key" /></div></label>
     <div className="field-help">Get one at {answers.searchProvider === 'brave' ? 'brave.com/search/api' : 'app.tavily.com'}. It stays in your Mac’s Keychain.</div>
     <label className="notification-choice"><input type="checkbox" checked={answers.freeTier} onChange={event => set('freeTier', event.target.checked)} />Stay within the free allowance</label>

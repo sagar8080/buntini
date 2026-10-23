@@ -291,11 +291,7 @@ impl Voice {
         });
         Ok(())
     }
-    pub async fn stop(
-        &self,
-        models: &ModelHub,
-        settings: &Settings,
-    ) -> Result<String, String> {
+    pub async fn stop(&self, models: &ModelHub, settings: &Settings) -> Result<String, String> {
         let mut rec = self
             .recording
             .lock()
@@ -344,7 +340,9 @@ impl Voice {
             Err(e) => Err(e),
             Ok(()) if peak.is_some_and(silent) => Err(SILENT.into()),
             Ok(()) => {
-                models.transcribe(settings, &rec.path, rec.cancel.clone()).await
+                models
+                    .transcribe(settings, &rec.path, rec.cancel.clone())
+                    .await
             }
         };
         let _ = std::fs::remove_file(&rec.path);

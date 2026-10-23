@@ -38,7 +38,18 @@ pub enum Share {
 }
 
 impl Share {
-    pub const ALL: [Share; 10] = [Share::Activity, Share::System, Share::Files, Share::History, Share::Memory, Share::Mail, Share::Calendar, Share::Notes, Share::Music, Share::Browser];
+    pub const ALL: [Share; 10] = [
+        Share::Activity,
+        Share::System,
+        Share::Files,
+        Share::History,
+        Share::Memory,
+        Share::Mail,
+        Share::Calendar,
+        Share::Notes,
+        Share::Music,
+        Share::Browser,
+    ];
     pub fn id(self) -> &'static str {
         match self {
             Share::Activity => "activity",
@@ -77,23 +88,73 @@ pub fn validate_shares(shares: &[String]) -> Result<(), String> {
 pub fn asks_about_activity(prompt: &str) -> bool {
     let text = prompt.to_lowercase().replace(['’', '\''], "");
     const PHRASES: [&str; 17] = [
-        "what am i doing", "what was i doing", "what im doing", "what i am doing", "what have i been", "what was i working", "what am i working",
-        "how long have i been", "how long was i", "which apps", "what apps", "what app am i", "am i away", "time at my desk", "at my desk",
-        "my battery", "battery level",
+        "what am i doing",
+        "what was i doing",
+        "what im doing",
+        "what i am doing",
+        "what have i been",
+        "what was i working",
+        "what am i working",
+        "how long have i been",
+        "how long was i",
+        "which apps",
+        "what apps",
+        "what app am i",
+        "am i away",
+        "time at my desk",
+        "at my desk",
+        "my battery",
+        "battery level",
     ];
     PHRASES.iter().any(|phrase| text.contains(phrase))
 }
 
 /// Context given to a model with every chat: what the user is doing and how the Mac is
 /// doing, limited to what this model may see. `None` when there is nothing to share.
+#[cfg(test)]
 pub fn context(locality: Locality, settings: &Settings) -> Option<String> {
-    let activity = allows(locality, settings, Share::Activity).then(|| (chrono::Local::now(), crate::world::activity().ok()));
-    let health = allows(locality, settings, Share::System).then(crate::world::health_now).flatten();
-    describe(activity, health)
+    context_with_shares(locality, settings).map(|(text, _)| text)
+}
+
+/// Context and the categories actually included in it. Keep this provenance beside
+/// the text so conversation history cannot later re-share a category unnoticed.
+pub fn context_with_shares(
+    locality: Locality,
+    settings: &Settings,
+) -> Option<(String, Vec<Share>)> {
+    let activity = allows(locality, settings, Share::Activity)
+        .then(|| (chrono::Local::now(), crate::world::activity().ok()));
+    let health = allows(locality, settings, Share::System)
+        .then(crate::world::health_now)
+        .flatten();
+    describe_with_shares(activity, health)
+}
+
+fn describe_with_shares(
+    activity: Option<(
+        chrono::DateTime<chrono::Local>,
+        Option<crate::world::Activity>,
+    )>,
+    health: Option<crate::world::Health>,
+) -> Option<(String, Vec<Share>)> {
+    let mut shares = Vec::new();
+    if activity.is_some() {
+        shares.push(Share::Activity);
+    }
+    if health.is_some() {
+        shares.push(Share::System);
+    }
+    describe(activity, health).map(|text| (text, shares))
 }
 
 /// Plain sentences rather than JSON: small local models mix up similarly named fields.
-pub fn describe(activity: Option<(chrono::DateTime<chrono::Local>, Option<crate::world::Activity>)>, health: Option<crate::world::Health>) -> Option<String> {
+pub fn describe(
+    activity: Option<(
+        chrono::DateTime<chrono::Local>,
+        Option<crate::world::Activity>,
+    )>,
+    health: Option<crate::world::Health>,
+) -> Option<String> {
     let mut lines = Vec::new();
     if let Some((now, activity)) = activity {
         lines.push(format!("Time: {}.", now.format("%A %-d %B %Y, %H:%M")));
@@ -113,22 +174,43 @@ pub fn describe(activity: Option<(chrono::DateTime<chrono::Local>, Option<crate:
                 lines.push(format!("Right now (the app in front before Buntini was opened): {app}{doing}, for {} minutes in a row.", activity.minutes_in_current_app));
             }
             match (activity.seconds_since_last_input, activity.minutes_active) {
-                (Some(idle), _) if idle >= 180 => lines.push(format!("Away from the keyboard for {} minutes.", idle / 60)),
-                (_, Some(active)) => lines.push(format!("Active at the Mac for {active} minutes without a break.")),
+                (Some(idle), _) if idle >= 180 => {
+                    lines.push(format!("Away from the keyboard for {} minutes.", idle / 60))
+                }
+                (_, Some(active)) => lines.push(format!(
+                    "Active at the Mac for {active} minutes without a break."
+                )),
                 _ => {}
             }
             if !activity.apps_last_two_hours.is_empty() {
-                let apps = activity.apps_last_two_hours.iter().map(|app| format!("{} {} min", app.name, app.minutes)).collect::<Vec<_>>().join(", ");
-                lines.push(format!("Total time per app over the last two hours: {apps}."));
+                let apps = activity
+                    .apps_last_two_hours
+                    .iter()
+                    .map(|app| format!("{} {} min", app.name, app.minutes))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!(
+                    "Total time per app over the last two hours: {apps}."
+                ));
             }
         }
     }
     if let Some(health) = health {
         let battery = match health.battery_percent {
-            Some(percent) => format!("battery {percent}% ({})", if health.charging { "charging or plugged in" } else { "not charging" }),
+            Some(percent) => format!(
+                "battery {percent}% ({})",
+                if health.charging {
+                    "charging or plugged in"
+                } else {
+                    "not charging"
+                }
+            ),
             None => "no battery (desktop Mac)".into(),
         };
-        lines.push(format!("Mac: {battery}, CPU {:.0}%, disk {:.0}% free.", health.cpu_percent, health.disk_free_percent));
+        lines.push(format!(
+            "Mac: {battery}, CPU {:.0}%, disk {:.0}% free.",
+            health.cpu_percent, health.disk_free_percent
+        ));
     }
     (!lines.is_empty()).then(|| lines.join(" "))
 }
@@ -140,27 +222,37 @@ mod tests {
     #[test]
     fn on_device_models_see_everything() {
         let settings = Settings::default();
-        assert!(Share::ALL.iter().all(|share| allows(Locality::OnDevice, &settings, *share)));
-        assert!(context(Locality::OnDevice, &settings).unwrap().starts_with("Time: "));
+        assert!(Share::ALL
+            .iter()
+            .all(|share| allows(Locality::OnDevice, &settings, *share)));
+        assert!(context(Locality::OnDevice, &settings)
+            .unwrap()
+            .starts_with("Time: "));
     }
 
     #[test]
     fn external_models_see_only_what_the_user_approved() {
         let mut settings = Settings::default();
-        assert!(Share::ALL.iter().all(|share| !allows(Locality::External, &settings, *share)));
+        assert!(Share::ALL
+            .iter()
+            .all(|share| !allows(Locality::External, &settings, *share)));
         assert_eq!(context(Locality::External, &settings), None);
         settings.external_shares = vec!["activity".into()];
         assert!(allows(Locality::External, &settings, Share::Activity));
         assert!(!allows(Locality::External, &settings, Share::Files));
         assert!(!allows(Locality::External, &settings, Share::System));
-        assert!(context(Locality::External, &settings).unwrap().starts_with("Time: "));
+        assert!(context(Locality::External, &settings)
+            .unwrap()
+            .starts_with("Time: "));
     }
 
     #[test]
     fn context_reads_as_plain_sentences() {
         use crate::world::{Activity, AppTime, Health};
         use chrono::TimeZone;
-        let now = chrono::Local.with_ymd_and_hms(2026, 10, 21, 18, 40, 0).unwrap();
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 10, 21, 18, 40, 0)
+            .unwrap();
         let activity = Activity {
             local_time: String::new(),
             current_app: Some("Visual Studio Code".into()),
@@ -168,22 +260,55 @@ mod tests {
             minutes_in_current_app: 34,
             seconds_since_last_input: Some(3),
             minutes_active: Some(71),
-            apps_last_two_hours: vec![AppTime { name: "Visual Studio Code".into(), category: "code", minutes: 52 }, AppTime { name: "Slack".into(), category: "chat", minutes: 5 }],
+            apps_last_two_hours: vec![
+                AppTime {
+                    name: "Visual Studio Code".into(),
+                    category: "code",
+                    minutes: 52,
+                },
+                AppTime {
+                    name: "Slack".into(),
+                    category: "chat",
+                    minutes: 5,
+                },
+            ],
             battery_percent: None,
             charging: None,
         };
-        let health = Health { battery_percent: Some(41), charging: false, cpu_percent: 23.5, disk_free_percent: 20.7 };
+        let health = Health {
+            battery_percent: Some(41),
+            charging: false,
+            cpu_percent: 23.5,
+            disk_free_percent: 20.7,
+        };
         assert_eq!(
             describe(Some((now, Some(activity.clone()))), Some(health)).unwrap(),
             "Time: Wednesday 21 October 2026, 18:40. Right now (the app in front before Buntini was opened): Visual Studio Code, coding, for 34 minutes in a row. Active at the Mac for 71 minutes without a break. Total time per app over the last two hours: Visual Studio Code 52 min, Slack 5 min. Mac: battery 41% (not charging), CPU 24%, disk 21% free."
         );
-        let away = Activity { seconds_since_last_input: Some(600), ..activity };
-        assert!(describe(Some((now, Some(away))), None).unwrap().contains("Away from the keyboard for 10 minutes."));
+        let away = Activity {
+            seconds_since_last_input: Some(600),
+            ..activity
+        };
+        assert!(describe(Some((now, Some(away))), None)
+            .unwrap()
+            .contains("Away from the keyboard for 10 minutes."));
         assert_eq!(describe(None, None), None);
-        for question in ["hi buntini what am i doing now?", "What have I been working on today?", "how long have I been at my desk?", "Which apps did I use?", "How's my battery?", "What I’m doing right now?"] {
+        for question in [
+            "hi buntini what am i doing now?",
+            "What have I been working on today?",
+            "how long have I been at my desk?",
+            "Which apps did I use?",
+            "How's my battery?",
+            "What I’m doing right now?",
+        ] {
             assert!(asks_about_activity(question), "{question}");
         }
-        for other in ["find my lease pdf", "remind me to stretch", "how much memory am I using?", "tell me a joke"] {
+        for other in [
+            "find my lease pdf",
+            "remind me to stretch",
+            "how much memory am I using?",
+            "tell me a joke",
+        ] {
             assert!(!asks_about_activity(other), "{other}");
         }
     }
@@ -194,5 +319,33 @@ mod tests {
         assert!(validate_shares(&["files".into(), "history".into()]).is_ok());
         assert!(validate_shares(&["files".into(), "files".into()]).is_err());
         assert!(validate_shares(&["passwords".into()]).is_err());
+    }
+
+    #[test]
+    fn context_provenance_tracks_every_category_in_the_text() {
+        let now = chrono::Local::now();
+        let health = crate::world::Health {
+            battery_percent: Some(80),
+            charging: true,
+            cpu_percent: 10.0,
+            disk_free_percent: 30.0,
+        };
+        let (text, shares) = describe_with_shares(Some((now, None)), Some(health.clone())).unwrap();
+        assert!(text.contains("Time:") && text.contains("Mac:"));
+        assert_eq!(shares, vec![Share::Activity, Share::System]);
+        let (text, shares) = describe_with_shares(None, Some(health)).unwrap();
+        assert!(!text.contains("Time:") && text.contains("Mac:"));
+        assert_eq!(shares, vec![Share::System]);
+        assert_eq!(describe_with_shares(None, None), None);
+
+        let mut settings = Settings::default();
+        assert!(context_with_shares(Locality::External, &settings).is_none());
+        settings.external_shares = vec!["activity".into()];
+        assert_eq!(
+            context_with_shares(Locality::External, &settings)
+                .unwrap()
+                .1,
+            vec![Share::Activity]
+        );
     }
 }

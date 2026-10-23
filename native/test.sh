@@ -47,6 +47,12 @@ PY
 # Machines without Apple Intelligence still pass; the helper must answer either way.
 "$BUNTINI_NATIVE_DIR/build-fm.sh"
 if [ -x "$BUNTINI_NATIVE_DIR/buntini-fm" ]; then
+  "$BUNTINI_NATIVE_DIR/buntini-fm" --self-test-contracts | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+assert result["check"] == "contracts" and result["ok"] and result["assertions"] >= 35, result
+print("Apple helper contract checks passed:", result["assertions"], "assertions; no model or app permissions needed")
+'
   "$BUNTINI_NATIVE_DIR/buntini-fm" --self-test --tools "$BUNTINI_NATIVE_DIR/../worker/tools.json" | python3 -c '
 import json, sys
 lines = [json.loads(line) for line in sys.stdin]

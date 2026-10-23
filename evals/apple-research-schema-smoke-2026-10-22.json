@@ -1,0 +1,38 @@
+{
+  "kind": "apple_typed_research_schema_smoke",
+  "syntheticEvidence": true,
+  "passed": true,
+  "events": [
+    {
+      "model_loaded": true,
+      "id": null,
+      "type": "ready",
+      "protocol": 1,
+      "backend": "apple"
+    },
+    {
+      "id": "research-schema-smoke",
+      "type": "done",
+      "finish_reason": "stop",
+      "text": "{\"claims\":[{\"sources\":[\"1\"],\"text\":\"Museum A adult admission costs $20.\"},{\"sources\":[\"2\"],\"text\":\"Museum B adult admission costs $15.\"}],\"coverage\":\"complete\",\"missing\":[]}"
+    }
+  ],
+  "parsed": {
+    "claims": [
+      {
+        "sources": [
+          "1"
+        ],
+        "text": "Museum A adult admission costs $20."
+      },
+      {
+        "sources": [
+          "2"
+        ],
+        "text": "Museum B adult admission costs $15."
+      }
+    ],
+    "coverage": "complete",
+    "missing": []
+  }
+}

@@ -63,7 +63,15 @@ pub fn mlx_model_present(path: &str) -> bool {
 
 impl ModelHub {
     pub fn new(mlx_script: PathBuf, apple_helper: PathBuf) -> Self {
-        Self { mlx: WorkerManager::new("local MLX model"), apple: WorkerManager::new("Apple Intelligence helper"), mlx_script, apple_helper, apple_state: std::sync::Mutex::new(None), ledger: OnceLock::new(), notice: OnceLock::new() }
+        Self {
+            mlx: WorkerManager::new("local MLX model"),
+            apple: WorkerManager::new("Apple Intelligence helper"),
+            mlx_script,
+            apple_helper,
+            apple_state: std::sync::Mutex::new(None),
+            ledger: OnceLock::new(),
+            notice: OnceLock::new(),
+        }
     }
 
     /// The Swift helper, which also reads Calendar and Reminders (`apps.rs`).
@@ -105,7 +113,8 @@ impl ModelHub {
                 None => Err(apple_advice("missing")),
             },
             Backend::Cloud => {
-                let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose a cloud model in Settings → Brain.")?;
+                let provider = cloud::provider(&settings.cloud_provider)
+                    .ok_or("Choose a cloud model in Settings → Brain.")?;
                 if provider.id == "chatgpt" {
                     return match crate::chatgpt::load() {
                         Some(session) if session.plan_allowed() => Ok(()),
@@ -114,7 +123,10 @@ impl ModelHub {
                     };
                 }
                 if crate::web::credential(provider.id).is_err() {
-                    return Err(format!("Add your {} API key in Settings → Brain to use the cloud model.", provider.name));
+                    return Err(format!(
+                        "Add your {} API key in Settings → Brain to use the cloud model.",
+                        provider.name
+                    ));
                 }
                 if settings.cloud_budget_usd <= 0.0 {
                     return Err("Set a monthly spending cap above $0 in Settings → Brain to use the cloud model.".into());
@@ -126,17 +138,29 @@ impl ModelHub {
 
     pub fn cloud_model(settings: &Settings) -> String {
         match settings.cloud_model.trim() {
-            "" => cloud::provider(&settings.cloud_provider).map(|provider| provider.model).unwrap_or_default().to_string(),
+            "" => cloud::provider(&settings.cloud_provider)
+                .map(|provider| provider.model)
+                .unwrap_or_default()
+                .to_string(),
             model => model.to_string(),
         }
     }
 
     pub fn budget(&self, settings: &Settings) -> Budget {
         match backend(settings) {
-            Backend::Apple => Budget { history_tokens: 1200, max_tokens: 512 },
-            Backend::Mlx => Budget { history_tokens: 6000, max_tokens: 1024 },
+            Backend::Apple => Budget {
+                history_tokens: 1200,
+                max_tokens: 512,
+            },
+            Backend::Mlx => Budget {
+                history_tokens: 6000,
+                max_tokens: 1024,
+            },
             // Thinking counts toward the reply allowance on current cloud models.
-            Backend::Cloud => Budget { history_tokens: 12000, max_tokens: 4096 },
+            Backend::Cloud => Budget {
+                history_tokens: 12000,
+                max_tokens: 4096,
+            },
         }
     }
 
@@ -157,7 +181,13 @@ impl ModelHub {
                 None => "Checking Apple Intelligence…".into(),
             },
             Backend::Cloud => match self.ready(settings) {
-                Ok(()) => format!("Ready · {} {}", cloud::provider(&settings.cloud_provider).map(|provider| provider.name).unwrap_or("Cloud"), Self::cloud_model(settings)),
+                Ok(()) => format!(
+                    "Ready · {} {}",
+                    cloud::provider(&settings.cloud_provider)
+                        .map(|provider| provider.name)
+                        .unwrap_or("Cloud"),
+                    Self::cloud_model(settings)
+                ),
                 Err(advice) => advice,
             },
         }
@@ -165,7 +195,9 @@ impl ModelHub {
 
     fn mlx_launch(&self, settings: &Settings) -> Result<Launch, String> {
         if settings.python_path.trim().is_empty() {
-            return Err("Choose the Python environment that has MLX installed in Settings → Brain.".into());
+            return Err(
+                "Choose the Python environment that has MLX installed in Settings → Brain.".into(),
+            );
         }
         if !self.mlx_script.is_file() {
             return Err("The MLX worker is missing from this installation.".into());
@@ -185,7 +217,13 @@ impl ModelHub {
         }
         Ok(Launch {
             program: self.apple_helper.clone(),
-            args: vec!["--tools".into(), self.mlx_script.with_file_name("tools.json").to_string_lossy().into_owned()],
+            args: vec![
+                "--tools".into(),
+                self.mlx_script
+                    .with_file_name("tools.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
             env: vec![],
             key: "apple".into(),
             start_error: apple_advice("missing"),
@@ -201,10 +239,22 @@ impl ModelHub {
     pub async fn probe_apple(&self) -> (bool, String) {
         let status = match self.apple_launch() {
             Err(_) => (false, "missing".to_string()),
-            Ok(launch) => match self.apple.request(&launch, serde_json::json!({"type":"ping"}), Arc::new(AtomicBool::new(false)), |_| {}).await {
+            Ok(launch) => match self
+                .apple
+                .request(
+                    &launch,
+                    serde_json::json!({"type":"ping"}),
+                    Arc::new(AtomicBool::new(false)),
+                    |_| {},
+                )
+                .await
+            {
                 Ok(turn) => {
                     let pong: Value = serde_json::from_str(&turn.text).unwrap_or_default();
-                    (pong["available"].as_bool().unwrap_or(false), pong["reason"].as_str().unwrap_or("unavailable").to_string())
+                    (
+                        pong["available"].as_bool().unwrap_or(false),
+                        pong["reason"].as_str().unwrap_or("unavailable").to_string(),
+                    )
                 }
                 Err(_) => (false, "unsupported".to_string()),
             },
@@ -230,9 +280,21 @@ impl ModelHub {
         }
     }
 
-    pub async fn transcribe(&self, settings: &Settings, audio_path: &Path, cancel: Arc<AtomicBool>) -> Result<String, String> {
+    pub async fn transcribe(
+        &self,
+        settings: &Settings,
+        audio_path: &Path,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<String, String> {
         let request = if self.apple_speech(settings) {
-            self.apple.request(&self.apple_launch()?, serde_json::json!({"type":"transcribe","audio_path":audio_path}), cancel, |_| {}).await
+            self.apple
+                .request(
+                    &self.apple_launch()?,
+                    serde_json::json!({"type":"transcribe","audio_path":audio_path}),
+                    cancel,
+                    |_| {},
+                )
+                .await
         } else {
             self.mlx_request(settings, serde_json::json!({"type":"transcribe","audio_path":audio_path,"model_path":settings.whisper_model,"vad_model_path":settings.vad_model_path}), cancel).await
         };
@@ -241,7 +303,13 @@ impl ModelHub {
 
     /// Generates with the chosen backend. Callers send the generic payload
     /// (`messages`, `tools`, `max_tokens`); backend-specific fields are added here.
-    pub async fn generate<F>(&self, settings: &Settings, mut payload: Value, cancel: Arc<AtomicBool>, on_token: F) -> Result<Turn, String>
+    pub async fn generate<F>(
+        &self,
+        settings: &Settings,
+        mut payload: Value,
+        cancel: Arc<AtomicBool>,
+        on_token: F,
+    ) -> Result<Turn, String>
     where
         F: FnMut(String) + Send,
     {
@@ -250,48 +318,89 @@ impl ModelHub {
         match backend(settings) {
             Backend::Mlx => {
                 payload["model_path"] = settings.model_path.clone().into();
-                self.mlx.request(&self.mlx_launch(settings)?, payload, cancel, on_token).await
+                self.mlx
+                    .request(&self.mlx_launch(settings)?, payload, cancel, on_token)
+                    .await
             }
-            Backend::Apple => self.apple.request(&self.apple_launch()?, payload, cancel, on_token).await,
-            Backend::Cloud => self.cloud_generate(settings, payload, cancel, on_token).await,
+            Backend::Apple => {
+                self.apple
+                    .request(&self.apple_launch()?, payload, cancel, on_token)
+                    .await
+            }
+            Backend::Cloud => {
+                self.cloud_generate(settings, payload, cancel, on_token)
+                    .await
+            }
         }
     }
 
     /// One cloud call: reserve the estimated cost, stream, then settle with real usage.
     /// Rejected requests cost nothing; anything accepted keeps at least its reservation
     /// until the provider reports usage.
-    async fn cloud_generate<F>(&self, settings: &Settings, payload: Value, cancel: Arc<AtomicBool>, on_token: F) -> Result<Turn, String>
+    async fn cloud_generate<F>(
+        &self,
+        settings: &Settings,
+        payload: Value,
+        cancel: Arc<AtomicBool>,
+        on_token: F,
+    ) -> Result<Turn, String>
     where
         F: FnMut(String) + Send,
     {
-        let provider = cloud::provider(&settings.cloud_provider).ok_or("Choose a cloud provider in Settings → Brain.")?;
+        let provider = cloud::provider(&settings.cloud_provider)
+            .ok_or("Choose a cloud provider in Settings → Brain.")?;
         // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
         if provider.id == "chatgpt" {
             let token = crate::chatgpt::access_token().await?;
             let model = match settings.cloud_model.trim() {
-                "" => crate::chatgpt::models().await?.into_iter().next().map(|model| model.slug).ok_or("Your ChatGPT plan didn’t list any models.")?,
+                "" => crate::chatgpt::models()
+                    .await?
+                    .into_iter()
+                    .next()
+                    .map(|model| model.slug)
+                    .ok_or("Your ChatGPT plan didn’t list any models.")?,
                 chosen => chosen.to_string(),
             };
-            return match cloud::generate(provider, &model, &token, &payload, cancel, on_token).await {
+            return match cloud::generate(provider, &model, &token, &payload, cancel, on_token).await
+            {
                 Ok((turn, _)) => Ok(turn),
-                Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => Err(message),
+                Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => {
+                    Err(message)
+                }
             };
         }
-        let ledger = self.ledger.get().ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
+        let ledger = self
+            .ledger
+            .get()
+            .ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
         let key = crate::web::credential(provider.id)?;
         let (input_price, output_price) = (settings.cloud_input_price, settings.cloud_output_price);
         let estimate = cloud::price(cloud::estimate(&payload), input_price, output_price);
         let account = cloud::ledger_key(provider.id);
-        let reservation = ledger.lock().unwrap().reserve(&account, crate::budget::cloud_limits(settings, estimate))?;
+        let reservation = ledger
+            .lock()
+            .unwrap()
+            .reserve(&account, crate::budget::cloud_limits(settings, estimate))?;
         if let (Some(warning), Some(notify)) = (reservation.warning, self.notice.get()) {
             notify(warning);
         }
         let settle = |actual: f64| {
             let _ = ledger.lock().unwrap().settle(&account, estimate, actual);
         };
-        match cloud::generate(provider, &Self::cloud_model(settings), &key, &payload, cancel, on_token).await {
+        match cloud::generate(
+            provider,
+            &Self::cloud_model(settings),
+            &key,
+            &payload,
+            cancel,
+            on_token,
+        )
+        .await
+        {
             Ok((turn, usage)) => {
-                settle(cloud::price(usage, input_price, output_price));
+                if let Some(usage) = usage {
+                    settle(cloud::price(usage, input_price, output_price));
+                }
                 Ok(turn)
             }
             Err(cloud::Failure::Rejected(message)) => {
@@ -303,8 +412,15 @@ impl ModelHub {
     }
 
     /// Sends a raw protocol request (ping, transcribe) to the Python worker.
-    pub async fn mlx_request(&self, settings: &Settings, payload: Value, cancel: Arc<AtomicBool>) -> Result<Turn, String> {
-        self.mlx.request(&self.mlx_launch(settings)?, payload, cancel, |_| {}).await
+    pub async fn mlx_request(
+        &self,
+        settings: &Settings,
+        payload: Value,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Turn, String> {
+        self.mlx
+            .request(&self.mlx_launch(settings)?, payload, cancel, |_| {})
+            .await
     }
 
     pub async fn reset(&self) {
@@ -336,7 +452,13 @@ mod tests {
     use super::*;
 
     fn settings(backend: &str) -> Settings {
-        Settings { model_backend: backend.into(), python_path: String::new(), model_path: String::new(), whisper_model: String::new(), ..Settings::default() }
+        Settings {
+            model_backend: backend.into(),
+            python_path: String::new(),
+            model_path: String::new(),
+            whisper_model: String::new(),
+            ..Settings::default()
+        }
     }
 
     #[test]
@@ -347,7 +469,10 @@ mod tests {
         assert_eq!(hub.locality(&settings("cloud")), Locality::External);
         assert!(hub.system_preamble(&settings("mlx")).contains("private"));
         assert!(!hub.system_preamble(&settings("cloud")).contains("private"));
-        assert!(hub.budget(&settings("apple")).history_tokens < hub.budget(&settings("mlx")).history_tokens);
+        assert!(
+            hub.budget(&settings("apple")).history_tokens
+                < hub.budget(&settings("mlx")).history_tokens
+        );
     }
 
     #[test]
@@ -356,7 +481,10 @@ mod tests {
         let apple = settings("apple");
         assert!(hub.ready(&apple).unwrap_err().contains("missing"));
         *hub.apple_state.lock().unwrap() = Some((false, "appleIntelligenceNotEnabled".into()));
-        assert!(hub.ready(&apple).unwrap_err().contains("Turn on Apple Intelligence"));
+        assert!(hub
+            .ready(&apple)
+            .unwrap_err()
+            .contains("Turn on Apple Intelligence"));
         *hub.apple_state.lock().unwrap() = Some((true, "available".into()));
         assert!(hub.ready(&apple).is_ok());
         assert!(hub.apple_speech(&apple));
@@ -371,7 +499,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "uses Apple Intelligence on this Mac; build native/buntini-fm first, run with --ignored live_apple"]
     async fn live_apple_routes_tools_and_streams_answers() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let hub = ModelHub::new(root.join("worker/main.py"), root.join("native/buntini-fm"));
         let (available, reason) = hub.probe_apple().await;
         if !available {
@@ -380,10 +511,32 @@ mod tests {
         }
         let apple = settings("apple");
         let ask = |prompt: &str, tools: Value| serde_json::json!({"messages":[{"role":"system","content":"You are a concise desktop companion."},{"role":"user","content":prompt}],"tools":tools,"max_tokens":120});
-        let turn = hub.generate(&apple, ask("how much memory is my mac using right now?", crate::tools::offer(&["search_files", "system_info"])), Arc::new(AtomicBool::new(false)), |_| {}).await.unwrap();
-        assert_eq!(turn.tool.as_ref().and_then(|call| call["name"].as_str()), Some("system_info"));
+        let turn = hub
+            .generate(
+                &apple,
+                ask(
+                    "how much memory is my mac using right now?",
+                    crate::tools::offer(&["search_files", "system_info"]),
+                ),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            turn.tool.as_ref().and_then(|call| call["name"].as_str()),
+            Some("system_info")
+        );
         let mut streamed = String::new();
-        let turn = hub.generate(&apple, ask("Say hello in five words.", Value::Array(vec![])), Arc::new(AtomicBool::new(false)), |token| streamed.push_str(&token)).await.unwrap();
+        let turn = hub
+            .generate(
+                &apple,
+                ask("Say hello in five words.", Value::Array(vec![])),
+                Arc::new(AtomicBool::new(false)),
+                |token| streamed.push_str(&token),
+            )
+            .await
+            .unwrap();
         assert!(turn.tool.is_none() && !turn.text.is_empty());
         assert_eq!(streamed, turn.text, "streamed tokens add up to the answer");
         hub.shutdown().await;

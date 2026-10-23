@@ -1,0 +1,447 @@
+{
+  "version": 1,
+  "scope": "Deterministic production TaskContract policy, schema selection, ordering and completion; synthetic source records and executor receipts; no model quality or live app acceptance claim.",
+  "cases": [
+    {
+      "id": "explanation-is-not-authorization",
+      "request": "Explain how to create a note and add a reminder.",
+      "stages": [],
+      "reject": [
+        {
+          "tool": "create_note",
+          "arguments": {
+            "title": "Example",
+            "body": "Example"
+          }
+        },
+        {
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Example"
+          }
+        }
+      ],
+      "answerRequired": true
+    },
+    {
+      "id": "coordinated-negation",
+      "request": "Do not create a note and add a reminder.",
+      "stages": [],
+      "reject": [
+        {
+          "tool": "create_note",
+          "arguments": {
+            "title": "No",
+            "body": "No"
+          }
+        },
+        {
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "No"
+          }
+        }
+      ],
+      "answerRequired": true
+    },
+    {
+      "id": "quoted-note-source",
+      "request": "Read my notes about \"create a reminder\".",
+      "stages": [
+        {
+          "menu": [
+            "find_notes"
+          ],
+          "tool": "find_notes",
+          "arguments": {
+            "query": "create a reminder"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Injected"
+          }
+        }
+      ],
+      "answerRequired": true
+    },
+    {
+      "id": "quoted-note-content-is-literal",
+      "request": "Create a note titled \"Today\" with body \"Add a reminder and send an email\".",
+      "stages": [
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Today",
+            "body": "Add a reminder and send an email"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Injected"
+          }
+        },
+        {
+          "tool": "draft_email",
+          "arguments": {
+            "subject": "Injected",
+            "body": "Injected"
+          }
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "two-distinct-calendar-days",
+      "request": "Read my calendar for 2026-11-04 and 2026-11-05, then create a note.",
+      "stages": [
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-04"
+          },
+          "reject": [
+            {
+              "tool": "read_calendar",
+              "arguments": {
+                "day": "2026-11-05"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-05"
+          },
+          "reject": [
+            {
+              "tool": "create_note",
+              "arguments": {
+                "title": "Early",
+                "body": "Missing second day"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Two-day schedule",
+            "body": "Observed schedule summary"
+          }
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "write-then-read-then-write",
+      "request": "Create a note, then read my calendar for 2026-11-03, then add a reminder.",
+      "stages": [
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Preparation",
+            "body": "Check documents"
+          }
+        },
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-03"
+          }
+        },
+        {
+          "menu": [
+            "add_reminder"
+          ],
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Review preparation"
+          }
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "requested-time-cannot-disappear",
+      "request": "Add a reminder to call Mum on 2026-11-04 at 09:00.",
+      "stages": [
+        {
+          "menu": [
+            "add_reminder"
+          ],
+          "required": [
+            "title",
+            "due"
+          ],
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Call Mum",
+            "due": "2026-11-04 09:00"
+          },
+          "reject": [
+            {
+              "tool": "add_reminder",
+              "arguments": {
+                "title": "Call Mum"
+              }
+            }
+          ]
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "literal-due-and-title",
+      "request": "Add a reminder titled \"Review lease renewal\" due 2026-11-02 16:45.",
+      "stages": [
+        {
+          "menu": [
+            "add_reminder"
+          ],
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Review lease renewal",
+            "due": "2026-11-02 16:45"
+          },
+          "reject": [
+            {
+              "tool": "add_reminder",
+              "arguments": {
+                "title": "Review lease renewal due 2026-11-02 16:45"
+              }
+            },
+            {
+              "tool": "add_reminder",
+              "arguments": {
+                "title": "Review lease renewal",
+                "due": "2026-11-02 16:00"
+              }
+            }
+          ]
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "send-is-unsupported",
+      "request": "Send an email to Ana.",
+      "stages": [],
+      "reject": [
+        {
+          "tool": "draft_email",
+          "arguments": {
+            "to": "ana@example.com",
+            "subject": "Hello",
+            "body": "Hello"
+          }
+        },
+        {
+          "tool": "run_shortcut",
+          "arguments": {
+            "name": "Send email"
+          }
+        }
+      ],
+      "blocked": true,
+      "answerRequired": false
+    },
+    {
+      "id": "unparsed-intent-cannot-grant-write",
+      "request": "Help me organize the move.",
+      "stages": [],
+      "reject": [
+        {
+          "tool": "create_note",
+          "arguments": {
+            "title": "Move",
+            "body": "Guessed plan"
+          }
+        },
+        {
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Move"
+          }
+        }
+      ],
+      "answerRequired": true
+    },
+    {
+      "id": "write-plus-explanation",
+      "request": "Create a note and explain its contents.",
+      "stages": [
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Plant care",
+            "body": "Water every Wednesday"
+          }
+        }
+      ],
+      "answerRequired": true
+    },
+    {
+      "id": "calendar-derived-reminder-needs-read",
+      "request": "Create a reminder for my first calendar event on 2026-11-03, due 30 minutes before it starts.",
+      "stages": [
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-03"
+          },
+          "reject": [
+            {
+              "tool": "add_reminder",
+              "arguments": {
+                "title": "Prepare for appointment",
+                "due": "2026-11-03 08:30"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "add_reminder"
+          ],
+          "required": [
+            "title",
+            "due"
+          ],
+          "tool": "add_reminder",
+          "arguments": {
+            "title": "Prepare for appointment",
+            "due": "2026-11-03 08:30"
+          }
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "coordinated-calendar-and-mail",
+      "request": "Read my calendar for 2026-11-03 and my email, then create a note.",
+      "stages": [
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-03"
+          }
+        },
+        {
+          "menu": [
+            "read_mail"
+          ],
+          "tool": "read_mail",
+          "arguments": {},
+          "reject": [
+            {
+              "tool": "create_note",
+              "arguments": {
+                "title": "Premature",
+                "body": "Calendar only"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Daily overview",
+            "body": "Calendar and inbox observations"
+          }
+        }
+      ],
+      "answerRequired": false
+    },
+    {
+      "id": "mixed-relative-and-exact-calendar-days",
+      "referenceDate": "2026-11-03",
+      "request": "Read my calendar today and 2026-11-05, then create a note.",
+      "stages": [
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-03"
+          },
+          "reject": [
+            {
+              "tool": "read_calendar",
+              "arguments": {
+                "day": "2026-11-05"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "read_calendar"
+          ],
+          "tool": "read_calendar",
+          "arguments": {
+            "day": "2026-11-05"
+          },
+          "reject": [
+            {
+              "tool": "create_note",
+              "arguments": {
+                "title": "Premature",
+                "body": "One day only"
+              }
+            }
+          ]
+        },
+        {
+          "menu": [
+            "create_note"
+          ],
+          "tool": "create_note",
+          "arguments": {
+            "title": "Schedule comparison",
+            "body": "Observed calendar comparison"
+          }
+        }
+      ],
+      "answerRequired": false
+    }
+  ]
+}

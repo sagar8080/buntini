@@ -1,0 +1,23 @@
+{
+  "isolation": "fresh_nonpersistent_store_required",
+  "kind": "public_browser_smoke",
+  "observedAt": "2026-10-22T22:57:38.809859+00:00",
+  "passed": false,
+  "query": "Rust programming language official documentation",
+  "read": {
+    "page": {
+      "retrievedAt": "2026-10-22T22:57:38.809805+00:00",
+      "text": "The Rust Programming Language\nby Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the Rust Community\nThis version of the text assumes you’re using Rust 1.97.0 (released 2026-07-09) or later with\nedition = \"2024\"\nin the\nCargo.toml\nfile of all projects to configure them to use Rust 2024 Edition idioms. See the\n“Installation” section of Chapter 1\nfor instructions on installing or updating Rust, and see\nAppendix E\nfor information on editions.\nThe HTML format is available online at\nhttps://doc.rust-lang.org/stable/book/\nand offline with installations of Rust made with\nrustup\n; run\nrustup doc --book\nto open.\nSeveral community\ntranslations\nare also available.\nThis text is available in\npaperback and ebook format from No Starch Press\n.\n🚨 Want a more interactive learning experience? Try out a different version of the Rust Book, featuring: quizzes, highlighting, visualizations, and more\n:\nhttps://rust-book.cs.brown.edu",
+      "title": "The Rust Programming Language - The Rust Programming Language",
+      "truncated": false,
+      "url": "https://doc.rust-lang.org/book/"
+    },
+    "status": "succeeded"
+  },
+  "search": {
+    "error": "The page changed during readback or left the approved origin. Its contents were not accepted.",
+    "status": "failed"
+  },
+  "searchHost": "www.google.com",
+  "searchSnapshot": {}
+}

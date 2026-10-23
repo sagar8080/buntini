@@ -226,6 +226,23 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(calls["template"][1]["tools"][0]["function"]["name"], "system_info")
         self.assertEqual(calls["stream"]["prefill_step_size"], 256)
 
+    def test_mlx_token_exhaustion_is_not_reported_as_a_complete_answer(self):
+        def stream(*args, **kwargs):
+            yield SimpleNamespace(text="Partial answer ", finish_reason=None)
+            yield SimpleNamespace(text="cut off", finish_reason="length")
+
+        modules = {
+            "mlx_lm": SimpleNamespace(load=lambda *args, **kwargs: (object(), SimpleNamespace(apply_chat_template=lambda *args, **kwargs: [1, 2, 3])), stream_generate=stream),
+            "mlx_lm.sample_utils": SimpleNamespace(make_sampler=lambda **kwargs: kwargs),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "config.json").write_text("{}")
+            request = {"messages": [{"role": "user", "content": "hello"}], "model_path": directory, "max_tokens": 10, "tools": []}
+            with patch("worker.main.importlib.import_module", side_effect=lambda name: modules[name]):
+                with self.assertRaises(WorkerError) as failure:
+                    list(MLXBackend().generate(request, threading.Event()))
+        self.assertEqual(failure.exception.code, "response_incomplete")
+
     def test_instructions_are_read_once_and_context_sits_beside_the_question(self):
         calls = {"model": 0, "streams": []}
 

@@ -1,0 +1,59 @@
+{
+  "kind": "existing_browser_validation",
+  "observedAt": "2026-10-22T23:49:42.692761+00:00",
+  "behavior": {
+    "engine": "Google",
+    "selection": "recognized frontmost browser or default HTTPS browser",
+    "managedReaders": [
+      "Chrome",
+      "Brave",
+      "Edge"
+    ],
+    "researchTab": "one owned tab in an existing normal window, reused for selected sources; create a normal window only when needed",
+    "unavailableAutomation": "nonmutating preflight followed by one OS-open Google dispatch and configured API fallback",
+    "embeddedBrowserUsedForResearch": false,
+    "permissionsChanged": false
+  },
+  "automated": {
+    "fullCheckPassed": true,
+    "fullCheckRustPassed": 354,
+    "finalRustPassed": 355,
+    "rustFailed": 0,
+    "rustIgnored": 8,
+    "pythonPassed": 71,
+    "frontendPassed": 43,
+    "nativeContractAssertionsPassed": 75,
+    "nativeSyntheticAudio": "passed",
+    "productionFrontendBuild": "passed",
+    "diffWhitespaceCheck": "passed",
+    "newBrowserTransportTests": 6
+  },
+  "live": {
+    "report": "desktop-browser-research-smoke-2026-10-22.json",
+    "defaultChromeSelectionVerified": true,
+    "googleOpenDispatchVerified": true,
+    "managedSourceReadVerified": false,
+    "reason": "macOS denied Automation (-1743) to the separate test process; installed-app source reading remains unverified",
+    "apiFallbackNetworkCall": "not performed; fixture coverage only"
+  },
+  "sourceSha256": {
+    "src-tauri/src/browser_session.rs": "27cee411d02c5941292b5025df0de3a0846e8ed25077d54e238d85ed4b343841",
+    "src-tauri/src/ax.rs": "d66cb25ee0dc4daa7a9d2e91716fe918096a4f77ff3014f09302f338b96b97b5",
+    "src-tauri/src/controller.rs": "f1257584c9965b403c71f0f6f087ed5a99f81bae599d2739aed2a87e5380fff4",
+    "src-tauri/src/integrations/mod.rs": "dcb777913fade65920b107bf094c85c5630b01c1fe15d01eceb65c9bb2989f6a",
+    "src/Online.tsx": "36776224cb3696ccf1eeda3cb49d49e07b578f5effaee3e494db07706af7a0f4",
+    "worker/tools.json": "42500f2536fab1043ccaf9c4a53e11a81b9c8eb489f34e76d343302c50a1ae3f"
+  },
+  "release": {
+    "status": "installed_and_launched",
+    "installedAt": "2026-10-22T23:50:49.648639+00:00",
+    "app": "/Applications/Buntini.app",
+    "version": "0.1.0",
+    "executableSha256": "029e8d398d2d1e59250113f1d4adcc47cbbf425da36da026e32d120ef3cfc30e",
+    "backup": "/private/tmp/buntini-previous-wl2qgnhq/Buntini.app",
+    "signatureValid": true,
+    "installedExecutableAndHelpersMatchBuild": true,
+    "appData": "preserved; only the application bundle was replaced"
+  },
+  "scope": "Automated regressions and a bounded public browser dispatch check, not a measured general real-life task success rate."
+}

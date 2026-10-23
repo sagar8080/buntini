@@ -98,6 +98,7 @@ mod tests {
                 files: vec![],
                 system: None,
                 research: vec![],
+        research_report: None,
                 prices: vec![],
                 cards: vec![],
                 backend: String::new(),

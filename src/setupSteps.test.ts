@@ -44,8 +44,8 @@ test('answers read naturally and become settings and keys', () => {
   const answers = { ...initialAnswers(settings, diagnostics('available')), userName: ' Sam ', assistantName: 'Miso', coat: 'calico' as const, backend: 'cloud' as const, cloudProvider: 'openai' as const, cloudKey: ' sk-1 ', cloudBudget: 3, searchKey: 'bsk', dailyLimit: 20, awareness: false };
   assert.equal(reply('hello', answers), 'Call me Sam. You’re Miso, my calico.');
   assert.equal(reply('brain', answers), 'Use OpenAI (gpt-5-mini), up to $3 a month.');
-  assert.equal(reply('online', answers), 'Look things up with Brave Search, up to 20 a day.');
-  assert.equal(reply('online', { ...answers, searchKey: '' }), 'Skip online lookups for now.');
+  assert.equal(reply('online', answers), 'Use Brave Search as fallback, up to 20 API requests a day.');
+  assert.equal(reply('online', { ...answers, searchKey: '' }), 'Use browser search without an API fallback for now.');
   assert.match(message('done', answers, diagnostics('available')), /All set, Sam!/);
   const saved = applyAnswers(settings, answers);
   assert.equal(saved.userName, 'Sam');

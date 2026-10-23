@@ -861,3 +861,14 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .app-permission > .field-help { margin: -4px 0 8px; }
 .app-permission > .app-note { color: var(--text); }
 .other-apps { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+/* Saved task evidence and background delivery are part of the conversation. */
+.task-progress pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; max-height: 260px; overflow: auto; }
+.task-progress li { margin: 10px 0; }
+.task-progress small, .background-work span, .background-work small { display: block; opacity: .75; margin-top: 4px; }
+.task-controls { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+.task-clarification { display: block; margin-top: 14px; font-size: 12px; }
+.task-clarification textarea { display: block; width: 100%; min-height: 60px; margin-top: 6px; padding: 8px; color: inherit; font: inherit; border-radius: 8px; border: 1px solid var(--border); background: transparent; }
+.task-clarification input { display: block; width: 100%; margin-top: 6px; padding: 8px; color: inherit; font: inherit; border-radius: 8px; border: 1px solid var(--border); background: transparent; }
+.background-work { margin: 12px 0 20px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; font-size: 12px; }
+.background-work article { margin: 12px 0; }
+.background-work summary, .task-progress summary { cursor: pointer; }

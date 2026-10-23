@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 import re
 from typing import Any
@@ -74,20 +75,63 @@ def validate_messages(value: Any) -> list[dict[str, Any]]:
 
 def selected_tools(value: Any = None) -> list[dict[str, Any]]:
     if value is None:
-        return [{"type": "function", "function": item} for item in TOOL_DEFINITIONS.values()]
+        return [{"type": "function", "function": model_definition(name)} for name in TOOL_DEFINITIONS]
     if not isinstance(value, list) or len(value) > len(TOOL_DEFINITIONS):
         raise WorkerError("invalid_request", "tools must be a list of the supported tools")
-    names = []
+    definitions = {}
     for item in value:
         if not isinstance(item, dict):
             raise WorkerError("invalid_request", "Each tool definition must be an object")
         definition = item.get("function", item)
         name = definition.get("name") if isinstance(definition, dict) else None
-        if not isinstance(name, str) or name not in TOOL_DEFINITIONS or name in names:
+        if not isinstance(name, str) or name not in TOOL_DEFINITIONS or name in definitions:
             raise WorkerError("invalid_request", "Unknown or duplicate tool in tools")
-        names.append(name)
-    # The caller may narrow tool availability, but cannot weaken built-in schemas.
-    return [{"type": "function", "function": TOOL_DEFINITIONS[name]} for name in names]
+        definitions[name] = model_definition(name, definition.get("parameters"))
+    # The caller may narrow availability/choices and require existing optional
+    # fields, but cannot weaken fixed schemas or introduce new arguments.
+    return [{"type": "function", "function": definition} for definition in definitions.values()]
+
+
+def model_definition(name: str, restrictions: Any = None) -> dict[str, Any]:
+    """Provider schemas contain only fixed public keys, never private routing policy.
+
+    Copy nested schemas as well so a caller adapting one provider's declaration
+    cannot mutate the catalog used by subsequent calls or argument validation.
+    """
+    fixed = TOOL_DEFINITIONS[name]
+    definition = deepcopy({key: fixed[key] for key in ("name", "description", "parameters")})
+    if not isinstance(restrictions, dict):
+        return definition
+    parameters = definition["parameters"]
+    offered_properties = restrictions.get("properties", {})
+    if isinstance(offered_properties, dict):
+        for key, spec in parameters["properties"].items():
+            restriction = offered_properties.get(key)
+            if not isinstance(restriction, dict) or "enum" not in restriction:
+                continue
+            allowed = restriction["enum"]
+            if spec["type"] != "string" or not isinstance(allowed, list) or not allowed or any(not isinstance(choice, str) for choice in allowed):
+                raise WorkerError("invalid_request", f"{name}.{key} enum restriction must be a nonempty string array for an existing string field")
+            if "enum" in spec:
+                spec["enum"] = [choice for choice in spec["enum"] if choice in allowed]
+            else:
+                # A task can pin a free-text argument (for example Calendar day)
+                # while retaining every fixed type and length constraint.
+                if any(not spec.get("minLength", 0) <= len(choice) <= spec.get("maxLength", MAX_QUERY_CHARS) for choice in allowed):
+                    raise WorkerError("invalid_request", f"{name}.{key} enum choices violate its fixed length limits")
+                spec["enum"] = list(dict.fromkeys(allowed))
+            if not spec["enum"]:
+                raise WorkerError("invalid_request", f"{name}.{key} has no supported choices")
+    if "required" in restrictions:
+        requested = restrictions["required"]
+        if not isinstance(requested, list) or any(not isinstance(key, str) or key not in parameters["properties"] for key in requested):
+            raise WorkerError("invalid_request", f"{name} required fields must already exist in its fixed schema")
+        required = parameters.get("required", [])
+        for key in requested:
+            if key not in required:
+                required.append(key)
+        parameters["required"] = required
+    return definition
 
 
 def validate_tool_call(value: Any, allowed: set[str]) -> tuple[str, dict[str, Any]]:

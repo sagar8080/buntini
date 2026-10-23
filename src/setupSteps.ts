@@ -65,7 +65,7 @@ export function message(step: Step, answers: Answers, diagnostics: Diagnostics):
       const nudge = apple.ready ? 'Apple Intelligence is built into your Mac: private, quick and nothing to set up.' : `Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}), so a local or cloud model might suit you better.`;
       return `Nice to meet you${you ? `, ${you}` : ''}! Which brain should I think with? ${nudge}`;
     }
-    case 'online': return 'Want me to look things up online too? Add a Brave or Tavily key and I’ll stay inside the free allowance. I always ask before anything leaves your Mac, and you can skip this.';
+    case 'online': return 'I search in the browser first and read relevant pages. You can add an optional Brave or Tavily key for fallback searches and saved searches, with a request limit. I ask you to approve online research before it starts.';
     case 'roam': return `Last one: may I wander around your screen and notice which apps you’re using? That stays on this Mac${answers.backend === 'cloud' ? ', and the cloud model only sees it if you allow it in Settings' : ''}. Hold the mic to talk to me any time.`;
     case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything. I’ll remember our chat until you start a new topic.`;
   }
@@ -85,7 +85,7 @@ export function reply(step: Step, answers: Answers): string {
       if (provider.id === 'chatgpt') return 'Use ChatGPT with my own plan.';
       return `Use ${provider.name} (${answers.cloudModel.trim() || provider.model}), up to $${answers.cloudBudget} a month.`;
     }
-    case 'online': return answers.searchKey.trim() ? `Look things up with ${searchNames[answers.searchProvider]}, up to ${answers.dailyLimit} a day.` : 'Skip online lookups for now.';
+    case 'online': return answers.searchKey.trim() ? `Use ${searchNames[answers.searchProvider]} as fallback, up to ${answers.dailyLimit} API requests a day.` : 'Use browser search without an API fallback for now.';
     case 'roam': return answers.roam ? `Roam around${answers.awareness ? ' and notice what I’m up to' : ''}.` : 'Stay put for now.';
     case 'done': return '';
   }

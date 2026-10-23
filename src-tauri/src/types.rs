@@ -128,7 +128,9 @@ impl Default for Settings {
 }
 
 const THEME_PRESETS: [&str; 6] = ["classic", "midnight", "paper", "sakura", "forest", "ocean"];
-const CAT_COATS: [&str; 7] = ["ginger", "gray", "black", "white", "tuxedo", "calico", "siamese"];
+const CAT_COATS: [&str; 7] = [
+    "ginger", "gray", "black", "white", "tuxedo", "calico", "siamese",
+];
 const CAT_EYES: [&str; 5] = ["amber", "green", "blue", "copper", "odd"];
 const CAT_ACCESSORIES: [&str; 6] = ["none", "bell", "bow", "bandana", "hat", "flowers"];
 const PET_MOTIONS: [&str; 3] = ["calm", "playful", "sleepy"];
@@ -148,11 +150,16 @@ impl Settings {
             return Err("Personality must be no longer than 1,200 characters.".into());
         }
         if !["cat", "orb"].contains(&self.avatar.as_str())
-            || !["preset", "ember", "ocean", "violet", "sage", "custom"].contains(&self.accent.as_str())
+            || !["preset", "ember", "ocean", "violet", "sage", "custom"]
+                .contains(&self.accent.as_str())
         {
             return Err("Choose a supported avatar and accent.".into());
         }
-        let hex = self.accent_color.len() == 7 && self.accent_color.starts_with('#') && self.accent_color[1..].chars().all(|c| c.is_ascii_hexdigit());
+        let hex = self.accent_color.len() == 7
+            && self.accent_color.starts_with('#')
+            && self.accent_color[1..]
+                .chars()
+                .all(|c| c.is_ascii_hexdigit());
         if (self.accent == "custom" && !hex) || (!self.accent_color.is_empty() && !hex) {
             return Err("Choose a custom accent colour like #E9985D.".into());
         }
@@ -160,12 +167,21 @@ impl Settings {
             (self.theme_preset.as_str(), &THEME_PRESETS),
             (self.text_size.as_str(), &["small", "medium", "large"]),
             (self.density.as_str(), &["compact", "comfortable"]),
-            (self.chat_font.as_str(), &["sans", "rounded", "serif", "mono"]),
+            (
+                self.chat_font.as_str(),
+                &["sans", "rounded", "serif", "mono"],
+            ),
             (self.corners.as_str(), &["round", "soft", "square"]),
             (self.panel_size.as_str(), &["compact", "standard", "large"]),
         ];
-        if choices.iter().any(|(value, allowed)| !allowed.contains(value)) {
-            return Err("Choose a supported theme, text size, spacing, font, corner style and panel size.".into());
+        if choices
+            .iter()
+            .any(|(value, allowed)| !allowed.contains(value))
+        {
+            return Err(
+                "Choose a supported theme, text size, spacing, font, corner style and panel size."
+                    .into(),
+            );
         }
         if self.status_text.chars().count() > 40 || self.status_text.chars().any(char::is_control) {
             return Err("The status line can be up to 40 characters.".into());
@@ -229,15 +245,26 @@ impl Settings {
         if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
             return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
         }
-        if crate::cloud::provider(&self.cloud_provider).is_none() || !crate::cloud::model_valid(self.cloud_model.trim()) {
+        if crate::cloud::provider(&self.cloud_provider).is_none()
+            || !crate::cloud::model_valid(self.cloud_model.trim())
+        {
             return Err("Choose Anthropic, OpenAI or Gemini, and a model name of letters, numbers, dots and dashes.".into());
         }
-        if [self.cloud_budget_usd, self.cloud_input_price, self.cloud_output_price].iter().any(|value| !value.is_finite() || *value < 0.0)
+        if [
+            self.cloud_budget_usd,
+            self.cloud_input_price,
+            self.cloud_output_price,
+        ]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
             || self.cloud_budget_usd > 10_000.0
             || self.cloud_input_price > 1_000.0
             || self.cloud_output_price > 1_000.0
         {
-            return Err("Set a cloud spending cap up to $10,000 and token prices up to $1,000 per million.".into());
+            return Err(
+                "Set a cloud spending cap up to $10,000 and token prices up to $1,000 per million."
+                    .into(),
+            );
         }
         if self.python_path.len() > 4096 || self.python_path.chars().any(char::is_control) {
             return Err("The Python path is not valid.".into());
@@ -322,6 +349,8 @@ pub struct TaskRecord {
     pub system: Option<SystemSnapshot>,
     #[serde(default)]
     pub research: Vec<crate::research::ResearchContent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_report: Option<crate::search_pipeline::Report>,
     #[serde(default)]
     pub prices: Vec<crate::pricing::PriceOffer>,
     #[serde(default)]
@@ -362,7 +391,10 @@ pub struct CardField {
 }
 impl CardField {
     pub fn new(label: &str, value: impl Into<String>) -> Self {
-        Self { label: label.into(), value: value.into() }
+        Self {
+            label: label.into(),
+            value: value.into(),
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -496,6 +528,8 @@ pub struct IndexMetadata {
 pub struct Bootstrap {
     pub settings: Settings,
     pub tasks: Vec<TaskRecord>,
+    pub conversation: ConversationPage,
+    pub conversations: ConversationList,
     pub roots: Vec<String>,
     pub diagnostics: Diagnostics,
     pub audit: Vec<AuditEntry>,
@@ -509,6 +543,30 @@ pub struct Bootstrap {
     pub memories: Vec<Memory>,
     /// The morning brief is on and hasn't been shown today.
     pub brief_due: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub legacy: bool,
+    pub turn_count: usize,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub conversation: ConversationSummary,
+    /// Newest first. The UI reverses this into reading order.
+    pub turns: Vec<TaskRecord>,
+    pub next_cursor: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationList {
+    pub items: Vec<ConversationSummary>,
+    pub next_cursor: Option<String>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -558,14 +616,41 @@ mod appearance_tests {
     #[test]
     fn appearance_choices_are_checked() {
         assert!(Settings::default().validate().is_ok());
-        let custom = Settings { accent: "custom".into(), accent_color: "#E9985D".into(), theme_preset: "sakura".into(), text_size: "large".into(), density: "compact".into(), chat_font: "serif".into(), corners: "square".into(), panel_size: "large".into(), status_text: "Purring nearby".into(), ..Settings::default() };
+        let custom = Settings {
+            accent: "custom".into(),
+            accent_color: "#E9985D".into(),
+            theme_preset: "sakura".into(),
+            text_size: "large".into(),
+            density: "compact".into(),
+            chat_font: "serif".into(),
+            corners: "square".into(),
+            panel_size: "large".into(),
+            status_text: "Purring nearby".into(),
+            ..Settings::default()
+        };
         assert!(custom.validate().is_ok());
         for broken in [
-            Settings { accent: "custom".into(), ..Settings::default() },
-            Settings { accent: "custom".into(), accent_color: "red".into(), ..Settings::default() },
-            Settings { theme_preset: "neon".into(), ..Settings::default() },
-            Settings { corners: "wavy".into(), ..Settings::default() },
-            Settings { status_text: "x".repeat(41), ..Settings::default() },
+            Settings {
+                accent: "custom".into(),
+                ..Settings::default()
+            },
+            Settings {
+                accent: "custom".into(),
+                accent_color: "red".into(),
+                ..Settings::default()
+            },
+            Settings {
+                theme_preset: "neon".into(),
+                ..Settings::default()
+            },
+            Settings {
+                corners: "wavy".into(),
+                ..Settings::default()
+            },
+            Settings {
+                status_text: "x".repeat(41),
+                ..Settings::default()
+            },
         ] {
             assert!(broken.validate().is_err());
         }

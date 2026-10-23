@@ -1,0 +1,35 @@
+{
+  "isolation": "fresh_nonpersistent_store_required",
+  "kind": "public_browser_smoke",
+  "observedAt": "2026-10-22T22:55:20.144698+00:00",
+  "passed": false,
+  "query": "Rust programming language official documentation",
+  "read": {
+    "page": {
+      "retrievedAt": "2026-10-22T22:55:20.144647+00:00",
+      "text": "The Rust Programming Language\nForeword\nIntroduction\n1.\nGetting Started\n1.1.\nInstallation\n1.2.\nHello, World!\n1.3.\nHello, Cargo!\n2.\nProgramming a Guessing Game\n3.\nCommon Programming Concepts\n3.1.\nVariables and Mutability\n3.2.\nData Types\n3.3.\nFunctions\n3.4.\nComments\n3.5.\nControl Flow\n4.\nUnderstanding Ownership\n4.1.\nWhat is Ownership?\n4.2.\nReferences and Borrowing\n4.3.\nThe Slice Type\n5.\nUsing Structs to Structure Related Data\n5.1.\nDefining and Instantiating Structs\n5.2.\nAn Example Program Using Structs\n5.3.\nMethods\n6.\nEnums and Pattern Matching\n6.1.\nDefining an Enum\n6.2.\nThe match Control Flow Construct\n6.3.\nConcise Control Flow with if let and let...else\n7.\nPackages, Crates, and Modules\n7.1.\nPackages and Crates\n7.2.\nControl Scope and Privacy with Modules\n7.3.\nPaths for Referring to an Item in the Module Tree\n7.4.\nBringing Paths Into Scope with the use Keyword\n7.5.\nSeparating Modules into Different Files\n8.\nCommon Collections\n8.1.\nStoring Lists of Values with Vectors\n8.2.\nStoring UTF-8 Encoded Text with Strings\n8.3.\nStoring Keys with Associated Values in Hash Maps\n9.\nError Handling\n9.1.\nUnrecoverable Errors with panic!\n9.2.\nRecoverable Errors with Result\n9.3.\nTo panic! or Not to panic!\n10.\nGeneric Types, Traits, and Lifetimes\n10.1.\nGeneric Data Types\n10.2.\nDefining Shared Behavior with Traits\n10.3.\nValidating References with Lifetimes\n11.\nWriting Automated Tests\n11.1.\nHow to Write Tests\n11.2.\nControlling How Tests Are Run\n11.3.\nTest Organization\n12.\nAn I/O Project: Building a Command Line Program\n12.1.\nAccepting Command Line Arguments\n12.2.\nReading a File\n12.3.\nRefactoring to Improve Modularity and Error Handling\n12.4.\nAdding Functionality with Test Driven Development\n12.5.\nWorking with Environment Variables\n12.6.\nRedirecting Errors to Standard Error\n13.\nFunctional Language Features: Iterators and Closures\n13.1.\nClosures\n13.2.\nProcessing a Series of Items with Iterators\n13.3.\nImproving Our I/O Project\n13.4.\nPerformance in Loops vs. Iterators\n14.\nMore about Cargo and Crates.io\n14.1.\nCustomizing Builds with Release Profiles\n14.2.\nPublishing a Crate to Crates.io\n14.3.\nCargo Workspaces\n14.4.\nInstalling Binaries with cargo install\n14.5.\nExtending Cargo with Custom Commands\n15.\nSmart Pointers\n15.1.\nUsing Box<T> to Point to Data on the Heap\n15.2.\nTreating Smart Pointers Like Regular References\n15.3.\nRunning Code on Cleanup with the Drop Trait\n15.4.\nRc<T>, the Reference Counted Smart Pointer\n15.5.\nRefCell<T> and the Interior Mutability Pattern\n15.6.\nReference Cycles Can Leak Memory\n16.\nFearless Concurrency\n16.1.\nUsing Threads to Run Code Simultaneously\n16.2.\nTransfer Data Between Threads with Message Passing\n16.3.\nShared-State Concurrency\n16.4.\nExtensible Concurrency with Send and Sync\n17.\nFundamentals of Asynchronous Programming: Async, Await, Futures, and Streams\n17.1.\nFutures and the Async Syntax\n17.2.\nApplying Concurrency with Async\n17.3.\nWorking With Any Number of Futures\n17.4.\nStreams: Futures in Sequence\n17.5.\nA Closer Look at the Traits for Async\n17.6.\nFutures, Tasks, and Threads\n18.\nObject Oriented Programming Features\n18.1.\nCharacteristics of Object-Oriented Languages\n18.2.\nUsing Trait Objects to Abstract over Shared Behavior\n18.3.\nImplementing an Object-Oriented Design Pattern\n19.\nPatterns and Matching\n19.1.\nAll the Places Patterns Can Be Used\n19.2.\nRefutability: Whether a Pattern Might Fail to Match\n19.3.\nPattern Syntax\n20.\nAdvanced Features\n20.1.\nUnsafe Rust\n20.2.\nAdvanced Traits\n20.3.\nAdvanced Types\n20.4.\nAdvanced Functions and Closures\n20.5.\nMacros\n21.\nFinal Project: Building a Multithreaded Web Server\n21.1.\nBuilding a Single-Threaded Web Server\n21.2.\nFrom Single-Threaded to Multithreaded Server\n21.3.\nGraceful Shutdown and Cleanup\n22.\nAppendix\n22.1.\nA - Keywords\n22.2.\nB - Operators and Symbols\n22.3.\nC - Derivable Traits\n22.4.\nD - Useful Development Tools\n22.5.\nE - Editions\n22.6.\nF - Translations of the Book\n22.7.\nG - How Rust is Made and “Nightly Rust”\nThe Rust Programming Language\nThe Rust Programming Language\nby Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the Rust Community\nThis version of the text assumes you’re using Rust 1.97.0 (released 2026-07-09) or later with\nedition = \"2024\"\nin the\nCargo.toml\nfile of all projects to configure them to use Rust 2024 Edition idioms. See the\n“Installation” section of Chapter 1\nfor instructions on installing or updating Rust, and see\nAppendix E\nfor information on editions.\nThe HTML format is available online at\nhttps://doc.rust-lang.org/stable/book/\nand offline with installations of Rust made with\nrustup\n; run\nrustup doc --book\nto open.\nSeveral community\ntranslations\nare also available.\nThis text is available in\npaperback and ebook format from No Starch Press\n.\n🚨 Want a more interactive learning experience? Try out a different version of the Rust Book, featuring: quizzes, highlighting, visualizations, and more\n:\nhttps://rust-book.cs.brown.edu",
+      "title": "The Rust Programming Language - The Rust Programming Language",
+      "truncated": false,
+      "url": "https://doc.rust-lang.org/book/"
+    },
+    "status": "succeeded"
+  },
+  "search": {
+    "error": "The browser search did not yield readable public result links. It may be blocked, require sign-in, or use an unsupported page layout.",
+    "status": "failed"
+  },
+  "searchSnapshot": {
+    "authentication": "not_verified",
+    "intentId": "research-search",
+    "links": [],
+    "linksTruncated": false,
+    "profileScope": "https://search.brave.com",
+    "sourceKind": "untrusted_web_page",
+    "text": "Verifying you're not a bot\nQuick check before you continue searching.\nVerify\nSwitch to traditional CAPTCHA\nWhy am I seeing this?\nBrave Search uses private usage metrics to estimate overall activity and performance. You can turn off this option in\nSettings\n.\nLearn more.",
+    "title": "Brave Search",
+    "truncated": false,
+    "url": "https://search.brave.com/search?q=Rust+programming+language+official+documentation",
+    "verification": "native_url_and_bounded_page_snapshot",
+    "websiteActionsPerformed": false
+  }
+}

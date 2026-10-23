@@ -1,0 +1,23 @@
+{
+  "evidence_type": "actual_apple_planning_with_production_controller_and_synthetic_write_receipts",
+  "recorded_at_utc": "2026-10-22T15:09:01.780086+00:00",
+  "macos": "26.6.2",
+  "architecture": "arm64",
+  "model": "Apple Foundation Models system default; exact build unavailable",
+  "source_and_helper_sha256": {
+    "native/fm/main.swift": "1ab78fc41cb246384b3413ec68e05846ba790b42ef81fe4f092828d9f4561221",
+    "native/buntini-fm": "09648b2959ca0fff30f7b7c3d6603f8baaea4519f67d2a5625b7e25eeb81510c",
+    "src-tauri/src/controller.rs": "44d2ea7efd5d424ef52d36af7d44b664b83650c30e5d52d166874a8090c6a9c0",
+    "src-tauri/src/controller_planning_tests.rs": "3f53ab7cd64a872523409201ae2a2d6e66684caeba4d119e56a6557527dbf94e",
+    "src-tauri/src/completion.rs": "3950ab8f10d657271b830e89315a20dfd02c3d5057b0aedb181892a63b3e349d",
+    "src-tauri/src/actions.rs": "84095faf65d097750d94214f16fc36e2c7d2215b3eb289df4430ee522cd361c6",
+    "src-tauri/src/workflows.rs": "a9dbde73ce088cfe9aa194930d616700c2ebb40a23490a5bf4e5f5e1de831e11"
+  },
+  "source_stable_during_test": true,
+  "exit_code": 101,
+  "scenarios": [],
+  "scope": "Each journey starts from the user request. Actual Apple proposals pass through production pending-action filtering, argument validation and exact approval. All writes go only to injected fake receipt callbacks; any app read is rejected. Completion uses saved verified fixture receipts; replayed approvals cannot dispatch twice. No personal apps accessed.",
+  "real_app_writes": 0,
+  "device_task_completion_rate": null,
+  "output": "   Compiling buntini v0.1.0 (/Users/sagar/projects/nexon/src-tauri)\nwarning: function `query_index` is never used\n   --> src/indexer.rs:421:8\n    |\n421 | pub fn query_index(\n    |        ^^^^^^^^^^^\n    |\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `fetch_selected` is never used\n  --> src/research.rs:43:14\n   |\n43 | pub async fn fetch_selected(\n   |              ^^^^^^^^^^^^^^\n\nwarning: `buntini` (lib) generated 2 warnings\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.75s\n     Running unittests src/lib.rs (src-tauri/target/debug/deps/buntini_lib-254d83f489932904)\n\nrunning 1 test\n\nthread 'controller::planning_tests::live_apple_note_reminder_journey_preserves_fields_and_finishes_from_receipts' (60909982) panicked at src/controller_planning_tests.rs:248:5:\nassertion `left == right` failed: Reminder title and due must stay separate and exact\n  left: Object {\"title\": String(\"Check Packing due 2026-10-23 09:00\")}\n right: Object {\"due\": String(\"2026-10-23 09:00\"), \"title\": String(\"Check Packing\")}\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest controller::planning_tests::live_apple_note_reminder_journey_preserves_fields_and_finishes_from_receipts ... FAILED\n\nfailures:\n\nfailures:\n    controller::planning_tests::live_apple_note_reminder_journey_preserves_fields_and_finishes_from_receipts\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 247 filtered out; finished in 4.70s\n\nerror: test failed, to rerun pass `--lib`\n"
+}

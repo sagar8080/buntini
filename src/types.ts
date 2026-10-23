@@ -71,7 +71,7 @@ export interface TaskRecord {
   id: string;
   prompt: string;
   answer: string;
-  state: 'completed' | 'error' | 'cancelled' | 'running';
+  state: 'completed' | 'error' | 'cancelled' | 'running' | 'paused' | 'unknown' | 'waiting_action' | 'waiting_online';
   createdAt: string;
   sources: Source[];
   files: FileHit[];
@@ -109,8 +109,17 @@ export interface PricePoint { price: string; currency: string; observedAt: strin
 export interface PriceWatch { id: string; url: string; label: string; currency: string; threshold: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastCheckedAt?: string; lastPrice?: string; lastError?: string; history: PricePoint[] }
 export interface Voice { id: string; name: string; language: string }
 export interface WebApproval { id: string; prompt: string; provider: string; expiresAt: string; approved: boolean; tool: string; arguments: Record<string, unknown>; service: string; summary: string; sends: CardField[]; host: string; usesKey: boolean; note?: string }
-export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
+export interface ConversationSummary { id: string; title: string; createdAt: string; updatedAt: string; legacy: boolean; turnCount: number }
+export interface ConversationPage { conversation: ConversationSummary; turns: TaskRecord[]; nextCursor: string | null }
+export interface ConversationList { items: ConversationSummary[]; nextCursor: string | null }
+export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
 export interface Memory { id: number; fact: string; createdAt: string }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
+export interface TaskOutcome { id: string; kind: string; description: string; tool?: string | null; acceptedTools: string[]; resources: string[]; dependencies: string[]; status: string; requiredArguments: Record<string, unknown>; requiredFields: string[]; completedBy: string[]; sourceRevision: number }
+export interface FieldProvenance { value: unknown; origin: string; sourceStepId?: string | null; recordId?: string | null; fieldRef?: string | null; calculation?: unknown; source?: unknown; approved: boolean; verified: boolean; previous?: FieldProvenance | null }
+export interface TaskContract { version: number; originalRequest: string; currentRequest: string; revision: number; intentStatus: string; outcomes: TaskOutcome[]; unresolvedFields: { outcomeId: string; field: string; reason: string; status: string }[]; constraints: unknown[]; provenance: Record<string, Record<string, FieldProvenance>>; revisions: unknown[] }
+export interface TaskFieldUpdate { outcomeId: string; fields: Record<string, string> }
+export interface TaskProgress { id: string; goal: string; state: string; updatedAt: string; error?: string; canResume?: boolean; contract?: TaskContract; steps: { id: string; tool: string; arguments: Record<string, unknown>; state: string; approvedAt?: string; finishedAt?: string; evidence?: unknown }[] }
+export interface BackgroundStatus { executionMode: string; limitation: string; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }

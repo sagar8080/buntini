@@ -5,12 +5,62 @@
 //! The model proposes; Rust validates and normalises the arguments, the app shows them
 //! in an editable sheet, and only an approved, re-validated request runs. AppleScript
 //! receives every value as a separate argument, never as script text.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 7] = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "run_shortcut", "open_app", "open_link"];
+pub const TOOLS: [&str; 7] = [
+    "add_reminder",
+    "add_calendar_event",
+    "create_note",
+    "draft_email",
+    "run_shortcut",
+    "open_app",
+    "open_link",
+];
+
+/// A write is successful only when its requested result was read back. An
+/// unknown result may already exist: callers must never replay it automatically.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionOutcome {
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionReceipt {
+    pub outcome: ActionOutcome,
+    pub tool: String,
+    pub object_id: Option<String>,
+    pub destination: Option<String>,
+    pub message: String,
+    pub evidence: Value,
+    pub error: Option<String>,
+}
+
+impl ActionReceipt {
+    fn failure(tool: &str, outcome: ActionOutcome, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let message = if outcome == ActionOutcome::Unknown {
+            format!("I couldn’t confirm the result. {detail} Check the destination before trying again; this action will not be repeated automatically.")
+        } else {
+            detail.clone()
+        };
+        Self {
+            outcome,
+            tool: tool.into(),
+            object_id: None,
+            destination: None,
+            message,
+            evidence: json!({}),
+            error: Some(detail),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -32,13 +82,23 @@ pub struct Proposal {
     pub note: String,
 }
 
-fn text(args: &Map<String, Value>, key: &str, max: usize, required: bool) -> Result<Option<String>, String> {
+fn text(
+    args: &Map<String, Value>,
+    key: &str,
+    max: usize,
+    required: bool,
+) -> Result<Option<String>, String> {
     match args.get(key) {
         None | Some(Value::Null) if !required => Ok(None),
         Some(Value::String(value)) if value.trim().is_empty() && !required => Ok(None),
         Some(Value::String(value)) => {
             let value = value.trim();
-            if value.is_empty() || value.chars().count() > max || value.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+            if value.is_empty()
+                || value.chars().count() > max
+                || value
+                    .chars()
+                    .any(|c| c.is_control() && c != '\n' && c != '\t')
+            {
                 Err(format!("{key} must be 1–{max} characters."))
             } else {
                 Ok(Some(value.to_string()))
@@ -50,27 +110,69 @@ fn text(args: &Map<String, Value>, key: &str, max: usize, required: bool) -> Res
 
 /// A local date and time in the forms models write ("2026-10-22 18:00",
 /// "2026-10-22T18:00:00", or a bare date meaning 9:00), as "YYYY-MM-DD HH:MM".
+/// An explicit UTC offset denotes an instant, so convert it before showing the
+/// local approval field. AppleScript accepts wall-clock components only: reject
+/// missing or repeated daylight-saving times instead of silently choosing one.
 pub fn normalize_when(value: &str) -> Result<String, String> {
-    let value = value.trim().trim_end_matches('Z');
-    let parsed = ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]
-        .iter()
-        .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
-        .or_else(|| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").ok().and_then(|day| day.and_hms_opt(9, 0, 0)))
+    normalize_when_in(value, &chrono::Local)
+}
+
+fn normalize_when_in<Tz: chrono::TimeZone>(value: &str, timezone: &Tz) -> Result<String, String> {
+    let value = value.trim();
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|date| date.with_timezone(timezone).naive_local())
+        .or_else(|| {
+            [
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%dT%H:%M",
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%dT%H:%M:%S",
+            ]
+            .iter()
+            .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
+        })
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .ok()
+                .and_then(|day| day.and_hms_opt(9, 0, 0))
+        })
         .ok_or("Use a date and time like 2026-10-22 18:00.")?;
+    match timezone.from_local_datetime(&parsed) {
+        chrono::LocalResult::Single(_) => {}
+        chrono::LocalResult::Ambiguous(_, _) => return Err("That local time occurs twice when the clocks change. Choose a time outside the repeated hour.".into()),
+        chrono::LocalResult::None => return Err("That local time does not exist when the clocks change. Choose another time.".into()),
+    }
     Ok(parsed.format("%Y-%m-%d %H:%M").to_string())
 }
 
 /// "YYYY-MM-DD HH:MM" in local time, as (year, month, day, hour, minute).
 pub fn when(value: &str) -> Result<(i32, u32, u32, u32, u32), String> {
-    let parsed = chrono::NaiveDateTime::parse_from_str(&normalize_when(value)?, "%Y-%m-%d %H:%M").map_err(|_| "Use a date and time like 2026-10-22 18:00.".to_string())?;
+    let parsed = chrono::NaiveDateTime::parse_from_str(&normalize_when(value)?, "%Y-%m-%d %H:%M")
+        .map_err(|_| "Use a date and time like 2026-10-22 18:00.".to_string())?;
     use chrono::{Datelike, Timelike};
-    Ok((parsed.year(), parsed.month(), parsed.day(), parsed.hour(), parsed.minute()))
+    Ok((
+        parsed.year(),
+        parsed.month(),
+        parsed.day(),
+        parsed.hour(),
+        parsed.minute(),
+    ))
 }
 
 fn https(value: &str) -> Result<String, String> {
-    let candidate = if value.contains("://") { value.to_string() } else { format!("https://{value}") };
-    let url = reqwest::Url::parse(&candidate).map_err(|_| "That isn’t a web address.".to_string())?;
-    if url.scheme() != "https" || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() {
+    let candidate = if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("https://{value}")
+    };
+    let url =
+        reqwest::Url::parse(&candidate).map_err(|_| "That isn’t a web address.".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return Err("Only https web addresses can be opened.".into());
     }
     Ok(url.to_string())
@@ -100,17 +202,23 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     match tool {
         "add_reminder" => {
             put("title", text(args, "title", 200, true)?);
-            let due = text(args, "due", 25, false)?.map(|due| normalize_when(&due)).transpose()?;
+            let due = text(args, "due", 40, false)?
+                .map(|due| normalize_when(&due))
+                .transpose()?;
             put("due", due);
         }
         "add_calendar_event" => {
             put("title", text(args, "title", 200, true)?);
-            let start = normalize_when(&text(args, "start", 25, true)?.unwrap())?;
+            let start = normalize_when(&text(args, "start", 40, true)?.unwrap())?;
             put("start", Some(start));
             put("location", text(args, "location", 200, false)?);
             let minutes = match args.get("minutes") {
                 None | Some(Value::Null) => 60,
-                Some(value) => value.as_u64().or_else(|| value.as_str().and_then(|s| s.trim().parse().ok())).filter(|m| (5..=1440).contains(m)).ok_or("Length must be 5–1440 minutes.")?,
+                Some(value) => value
+                    .as_u64()
+                    .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+                    .filter(|m| (5..=1440).contains(m))
+                    .ok_or("Length must be 5–1440 minutes.")?,
             };
             out.insert("minutes".into(), json!(minutes));
         }
@@ -121,37 +229,107 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "draft_email" => {
             // A made-up or placeholder address is left blank for the user to fill in Mail.
             let to = text(args, "to", 254, false)?.filter(|address| {
-                address.split_once('@').is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.')) && !address.contains(char::is_whitespace) && !address.contains([',', ';', '<', '>', '[', ']'])
+                address
+                    .split_once('@')
+                    .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
+                    && !address.contains(char::is_whitespace)
+                    && !address.contains([',', ';', '<', '>', '[', ']'])
             });
             put("to", to);
             put("subject", text(args, "subject", 200, true)?);
             put("body", text(args, "body", 4000, true)?);
         }
         "run_shortcut" | "open_app" => put("name", text(args, "name", 100, true)?),
-        _ => put("url", Some(https(&text(args, "url", 2000, true)?.unwrap())?)),
+        _ => put(
+            "url",
+            Some(https(&text(args, "url", 2000, true)?.unwrap())?),
+        ),
     }
     Ok(out)
 }
 
 /// What the approval sheet shows: a question and the editable details.
 pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, String) {
-    let get = |key: &str| args.get(key).map(|value| value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string())).unwrap_or_default();
-    let field = |key: &str, label: &str, kind: &'static str| Field { key: key.into(), label: label.into(), value: get(key), kind };
+    let get = |key: &str| {
+        args.get(key)
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string())
+            })
+            .unwrap_or_default()
+    };
+    let field = |key: &str, label: &str, kind: &'static str| Field {
+        key: key.into(),
+        label: label.into(),
+        value: get(key),
+        kind,
+    };
     match tool {
-        "add_reminder" => ("Add this reminder?".into(), vec![field("title", "Reminder", "text"), field("due", "When", "when")], "Added to your default list in Reminders.".into()),
-        "add_calendar_event" => ("Add this to your calendar?".into(), vec![field("title", "Event", "text"), field("start", "Starts", "when"), field("minutes", "Minutes", "text"), field("location", "Where", "text")], "Added to your first writable calendar.".into()),
-        "create_note" => ("Save this note?".into(), vec![field("title", "Title", "text"), field("body", "Note", "long")], "Saved in Notes.".into()),
-        "draft_email" => ("Open this email draft?".into(), vec![field("to", "To", "text"), field("subject", "Subject", "text"), field("body", "Message", "long")], "Opens in Mail for you to review. Buntini never sends email.".into()),
-        "run_shortcut" => ("Run this shortcut?".into(), vec![field("name", "Shortcut", "text")], "Shortcuts can do anything you built them to do.".into()),
-        "open_app" => ("Open this app?".into(), vec![field("name", "App", "text")], String::new()),
-        _ => ("Open this page?".into(), vec![field("url", "Address", "text")], "Opens in your default browser.".into()),
+        "add_reminder" => (
+            "Add this reminder?".into(),
+            vec![
+                field("title", "Reminder", "text"),
+                field("due", "When", "when"),
+            ],
+            "Added to your default list in Reminders.".into(),
+        ),
+        "add_calendar_event" => (
+            "Add this to your calendar?".into(),
+            vec![
+                field("title", "Event", "text"),
+                field("start", "Starts", "when"),
+                field("minutes", "Minutes", "text"),
+                field("location", "Where", "text"),
+            ],
+            "Added to your first writable calendar.".into(),
+        ),
+        "create_note" => (
+            "Save this note?".into(),
+            vec![
+                field("title", "Title", "text"),
+                field("body", "Note", "long"),
+            ],
+            "Saved in Notes.".into(),
+        ),
+        "draft_email" => (
+            "Open this email draft?".into(),
+            vec![
+                field("to", "To", "text"),
+                field("subject", "Subject", "text"),
+                field("body", "Message", "long"),
+            ],
+            "Opens in Mail for you to review. Buntini never sends email.".into(),
+        ),
+        "run_shortcut" => (
+            "Run this shortcut?".into(),
+            vec![field("name", "Shortcut", "text")],
+            "Shortcuts can do anything you built them to do.".into(),
+        ),
+        "open_app" => (
+            "Open this app?".into(),
+            vec![field("name", "App", "text")],
+            String::new(),
+        ),
+        _ => (
+            "Open this page?".into(),
+            vec![field("url", "Address", "text")],
+            "Opens in your default browser.".into(),
+        ),
     }
 }
 
 /// Notes bodies are HTML: show the text as written.
 fn html(text: &str) -> String {
-    let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    escaped.split('\n').map(|line| format!("<div>{}</div>", if line.is_empty() { "<br>" } else { line })).collect()
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    escaped
+        .split('\n')
+        .map(|line| format!("<div>{}</div>", if line.is_empty() { "<br>" } else { line }))
+        .collect()
 }
 
 // Each script reads its values from argv, so user text is never part of the script.
@@ -165,130 +343,636 @@ const DATE_HELPER: &str = r#"on makeDate(y, m, d, h, mi)
   return t
 end makeDate
 "#;
-const REMINDER: &str = r#"on run argv
-  tell application "Reminders"
-    if (count of argv) > 1 then
-      make new reminder with properties {name:item 1 of argv, remind me date:my makeDate(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv, item 6 of argv)}
-    else
-      make new reminder with properties {name:item 1 of argv}
-    end if
-  end tell
+// Foundation serializes arbitrary user text safely; stdout is exactly one
+// structured receipt. Track the mutation boundary so a post-write failure can
+// never look like a safe-to-repeat rejection.
+const RECEIPT_HELPER: &str = r#"use framework "Foundation"
+use scripting additions
+on putField(fields, fieldName, fieldValue)
+  if fieldValue is missing value then set fieldValue to ""
+  fields's setObject:fieldValue forKey:fieldName
+end putField
+on dateText(t)
+  if t is missing value then return ""
+  set m to text -2 thru -1 of ("0" & ((month of t) as integer))
+  set d to text -2 thru -1 of ("0" & (day of t))
+  set h to text -2 thru -1 of ("0" & (hours of t))
+  set mi to text -2 thru -1 of ("0" & (minutes of t))
+  return ((year of t) as text) & "-" & m & "-" & d & " " & h & ":" & mi
+end dateText
+on dateSecond(t)
+  if t is missing value then return ""
+  return seconds of t
+end dateSecond
+on receiptJSON(resultOutcome, resultID, destinationName, fields, failureText)
+  set resultData to current application's NSMutableDictionary's dictionary()
+  my putField(resultData, "outcome", resultOutcome)
+  my putField(resultData, "objectId", resultID)
+  my putField(resultData, "destination", destinationName)
+  my putField(resultData, "evidence", fields)
+  my putField(resultData, "error", failureText)
+  set encoded to current application's NSJSONSerialization's dataWithJSONObject:resultData options:0 |error|:(missing value)
+  if encoded is missing value then error "Could not encode action verification."
+  return (current application's NSString's alloc()'s initWithData:encoded encoding:(current application's NSUTF8StringEncoding)) as text
+end receiptJSON
+"#;
+const RECEIPT_START: &str = r#"on run argv
+  set mutationStarted to false
+  set resultID to ""
+  set destinationName to ""
+  set observed to current application's NSMutableDictionary's dictionary()
+  try
+"#;
+const RECEIPT_END: &str = r#"    return my receiptJSON("succeeded", resultID, destinationName, observed, "")
+  on error failureText number failureNumber
+    set resultOutcome to "failed"
+    if mutationStarted then set resultOutcome to "unknown"
+    return my receiptJSON(resultOutcome, resultID, destinationName, observed, failureText & " (" & failureNumber & ")")
+  end try
 end run
 "#;
-const EVENT: &str = r#"on run argv
-  set startDate to my makeDate(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv, item 6 of argv)
-  set endDate to startDate + ((item 7 of argv) as integer) * 60
-  tell application "Calendar"
-    set target to first calendar whose writable is true
-    tell target to make new event with properties {summary:item 1 of argv, start date:startDate, end date:endDate, location:item 8 of argv}
-  end tell
-end run
+const REMINDER: &str = r#"    tell application "Reminders"
+      set targetList to default list
+      set destinationName to name of targetList
+      my putField(observed, "destinationId", id of targetList)
+      if (count of argv) > 1 then
+        set requestedDate to my makeDate(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv, item 6 of argv)
+        set mutationStarted to true
+        set created to make new reminder at end of reminders of targetList with properties {name:item 1 of argv, due date:requestedDate, remind me date:requestedDate}
+      else
+        set mutationStarted to true
+        set created to make new reminder at end of reminders of targetList with properties {name:item 1 of argv}
+      end if
+      set resultID to id of created
+      set stored to first reminder of targetList whose id is resultID
+      my putField(observed, "title", name of stored)
+      my putField(observed, "due", my dateText(due date of stored))
+      my putField(observed, "remindAt", my dateText(remind me date of stored))
+      my putField(observed, "dueSecond", my dateSecond(due date of stored))
+      my putField(observed, "remindSecond", my dateSecond(remind me date of stored))
+      my putField(observed, "completed", completed of stored)
+      my putField(observed, "identifierScope", "persistent")
+    end tell
 "#;
-const NOTE: &str = r#"on run argv
-  tell application "Notes" to make new note with properties {name:item 1 of argv, body:item 2 of argv}
-end run
+const EVENT: &str = r#"    set startDate to my makeDate(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv, item 6 of argv)
+    set endDate to startDate + ((item 7 of argv) as integer) * 60
+    tell application "Calendar"
+      set targetCalendar to first calendar whose writable is true
+      set destinationName to name of targetCalendar
+      my putField(observed, "destinationId", calendarIdentifier of targetCalendar)
+      set mutationStarted to true
+      tell targetCalendar to set created to make new event with properties {summary:item 1 of argv, start date:startDate, end date:endDate, location:item 8 of argv}
+      set resultID to uid of created
+      set stored to first event of targetCalendar whose uid is resultID
+      my putField(observed, "title", summary of stored)
+      my putField(observed, "start", my dateText(start date of stored))
+      my putField(observed, "end", my dateText(end date of stored))
+      my putField(observed, "startSecond", my dateSecond(start date of stored))
+      my putField(observed, "endSecond", my dateSecond(end date of stored))
+      my putField(observed, "durationSeconds", (end date of stored) - (start date of stored))
+      my putField(observed, "location", location of stored)
+      my putField(observed, "identifierScope", "persistent")
+    end tell
 "#;
-const MAIL: &str = r#"on run argv
-  tell application "Mail"
-    set draft to make new outgoing message with properties {subject:item 2 of argv, content:item 3 of argv, visible:true}
-    if item 1 of argv is not "" then
-      tell draft to make new to recipient at end of to recipients with properties {address:item 1 of argv}
-    end if
-    activate
-  end tell
-end run
+const NOTE: &str = r#"    tell application "Notes"
+      set mutationStarted to true
+      set created to make new note with properties {name:item 1 of argv, body:item 2 of argv}
+      set resultID to id of created
+      set stored to first note whose id is resultID
+      set destinationName to name of container of stored
+      my putField(observed, "destinationId", id of container of stored)
+      my putField(observed, "title", name of stored)
+      my putField(observed, "plaintext", plaintext of stored)
+      my putField(observed, "identifierScope", "persistent")
+    end tell
 "#;
+const MAIL: &str = r#"    tell application "Mail"
+      set destinationName to "Mail draft"
+      set requestedSubject to item 2 of argv
+      set knownDraftIDs to id of every message of drafts mailbox whose subject is requestedSubject
+      set mutationStarted to true
+      set created to make new outgoing message with properties {subject:item 2 of argv, content:item 3 of argv, visible:true}
+      set compositionID to id of created
+      set resultID to "mail-composition:" & compositionID
+      my putField(observed, "compositionId", compositionID)
+      set message signature of created to missing value
+      if item 1 of argv is not "" then
+        tell created to make new to recipient at end of to recipients with properties {address:item 1 of argv}
+      end if
+      save created
+      set stored to first outgoing message whose id is compositionID
+      my putField(observed, "subject", subject of stored)
+      my putField(observed, "body", (content of stored) as text)
+      set recipientAddresses to address of every to recipient of stored
+      my putField(observed, "to", current application's NSArray's arrayWithArray:recipientAddresses)
+      my putField(observed, "ccCount", count of cc recipients of stored)
+      my putField(observed, "bccCount", count of bcc recipients of stored)
+      my putField(observed, "visible", visible of stored)
+      my putField(observed, "saveAccepted", true)
+      my putField(observed, "identifierScope", "open_composition")
+      set newDraftIDs to {}
+      repeat 20 times
+        set matchingDrafts to every message of drafts mailbox whose subject is requestedSubject
+        set newDraftIDs to {}
+        repeat with candidate in matchingDrafts
+          set candidateID to id of candidate
+          if candidateID is not in knownDraftIDs then set end of newDraftIDs to candidateID
+        end repeat
+        if (count of newDraftIDs) > 0 then exit repeat
+        delay 0.25
+      end repeat
+      if (count of newDraftIDs) is not 1 then error "The saved draft could not be identified uniquely. Review the open draft before retrying."
+      set savedID to item 1 of newDraftIDs
+      if savedID < 1 then error "Mail did not return a persistent saved draft identifier."
+      set savedDraft to first message of drafts mailbox whose id is savedID
+      set resultID to "mail-message:" & savedID
+      set destinationName to name of mailbox of savedDraft
+      my putField(observed, "savedSubject", subject of savedDraft)
+      my putField(observed, "savedBody", (content of savedDraft) as text)
+      set savedAddresses to address of every to recipient of savedDraft
+      my putField(observed, "savedTo", current application's NSArray's arrayWithArray:savedAddresses)
+      my putField(observed, "savedCcCount", count of cc recipients of savedDraft)
+      my putField(observed, "savedBccCount", count of bcc recipients of savedDraft)
+      my putField(observed, "identifierScope", "mail_library")
+      activate
+    end tell
+"#;
+
+fn verified_script(body: &str) -> String {
+    format!("{RECEIPT_HELPER}{DATE_HELPER}{RECEIPT_START}{body}{RECEIPT_END}")
+}
 
 /// The script and its arguments for an AppleScript-backed action.
 pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<String>)> {
-    let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").to_string();
-    let parts = |value: &str| when(value).map(|(y, m, d, h, mi)| vec![y.to_string(), m.to_string(), d.to_string(), h.to_string(), mi.to_string()]).unwrap_or_default();
+    let get = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let parts = |value: &str| {
+        when(value)
+            .map(|(y, m, d, h, mi)| {
+                vec![
+                    y.to_string(),
+                    m.to_string(),
+                    d.to_string(),
+                    h.to_string(),
+                    mi.to_string(),
+                ]
+            })
+            .unwrap_or_default()
+    };
     match tool {
         "add_reminder" => {
             let mut argv = vec![get("title")];
             argv.extend(parts(&get("due")));
-            Some((format!("{DATE_HELPER}{REMINDER}"), argv))
+            Some((verified_script(REMINDER), argv))
         }
         "add_calendar_event" => {
             let mut argv = vec![get("title")];
             argv.extend(parts(&get("start")));
-            argv.push(args.get("minutes").and_then(Value::as_u64).unwrap_or(60).to_string());
+            argv.push(
+                args.get("minutes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(60)
+                    .to_string(),
+            );
             argv.push(get("location"));
-            Some((format!("{DATE_HELPER}{EVENT}"), argv))
+            Some((verified_script(EVENT), argv))
         }
-        "create_note" => Some((NOTE.into(), vec![get("title"), format!("<h1>{}</h1>{}", html(&get("title")).trim_start_matches("<div>").trim_end_matches("</div>"), html(&get("body")))])),
-        "draft_email" => Some((MAIL.into(), vec![get("to"), get("subject"), get("body")])),
+        "create_note" => Some((
+            verified_script(NOTE),
+            vec![
+                get("title"),
+                format!(
+                    "<h1>{}</h1>{}",
+                    html(&get("title"))
+                        .trim_start_matches("<div>")
+                        .trim_end_matches("</div>"),
+                    html(&get("body"))
+                ),
+            ],
+        )),
+        "draft_email" => Some((
+            verified_script(MAIL),
+            vec![get("to"), get("subject"), get("body")],
+        )),
         _ => None,
     }
 }
 
-pub async fn output(mut command: Command, seconds: u64) -> Result<String, String> {
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let result = tokio::time::timeout(Duration::from_secs(seconds), command.output()).await.map_err(|_| "That took too long and was stopped.".to_string())?.map_err(|_| "Couldn’t start the helper for that.".to_string())?;
-    if result.status.success() {
-        Ok(String::from_utf8_lossy(&result.stdout).chars().take(4000).collect())
-    } else {
-        let detail = String::from_utf8_lossy(&result.stderr).to_string();
-        Err(if detail.contains("-1743") || detail.contains("Not authorized") {
-            "macOS didn’t allow Buntini to use that app. Allow it in System Settings → Privacy & Security → Automation.".into()
-        } else {
-            format!("That didn’t work: {}", detail.trim().chars().take(200).collect::<String>())
-        })
+const OUTPUT_LIMIT: u64 = 1024 * 1024;
+
+async fn read_output(stream: impl tokio::io::AsyncRead + Unpin) -> Result<Vec<u8>, String> {
+    use tokio::io::AsyncReadExt;
+    let mut bytes = Vec::new();
+    stream
+        .take(OUTPUT_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|_| "Couldn’t read the helper’s response.".to_string())?;
+    if bytes.len() as u64 > OUTPUT_LIMIT {
+        return Err("The helper returned too much data. Narrow the request and try again.".into());
     }
+    Ok(bytes)
+}
+
+/// Return complete helper output or an error. Truncating successful output can
+/// turn a partial JSON row into missing calendar events, reminders or shortcuts.
+#[derive(Debug)]
+struct HelperFailure {
+    started: bool,
+    message: String,
+}
+
+async fn command_output(mut command: Command, seconds: u64) -> Result<String, HelperFailure> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|_| HelperFailure {
+        started: false,
+        message: "Couldn’t start the helper for that.".into(),
+    })?;
+    let result = async {
+        let stdout = child.stdout.take().ok_or("Couldn’t read the helper’s response.")?;
+        let stderr = child.stderr.take().ok_or("Couldn’t read the helper’s response.")?;
+        let (stdout, stderr, status) = tokio::time::timeout(Duration::from_secs(seconds), async {
+            tokio::try_join!(read_output(stdout), read_output(stderr), async {
+                child.wait().await.map_err(|_| "Couldn’t wait for the helper to finish.".to_string())
+            })
+        }).await.map_err(|_| "That took too long to confirm. Check the app before repeating an action.".to_string())??;
+        if status.success() {
+            String::from_utf8(stdout).map_err(|_| "The helper returned invalid text.".into())
+        } else {
+            let detail = String::from_utf8_lossy(&stderr).to_string();
+            Err(if detail.contains("-1743") || detail.contains("Not authorized") {
+                "macOS didn’t allow Buntini to use that app. Allow it in System Settings → Privacy & Security → Automation.".into()
+            } else {
+                format!("That didn’t work: {}", detail.trim().chars().take(200).collect::<String>())
+            })
+        }
+    }.await;
+    result.map_err(|message| HelperFailure {
+        started: true,
+        message,
+    })
+}
+
+pub async fn output(command: Command, seconds: u64) -> Result<String, String> {
+    command_output(command, seconds)
+        .await
+        .map_err(|failure| failure.message)
 }
 
 pub fn find_app(name: &str) -> Option<PathBuf> {
     if name.contains(['/', '\\']) || name.starts_with('.') {
         return None;
     }
-    let bundle = if name.to_lowercase().ends_with(".app") { name.to_string() } else { format!("{name}.app") };
-    let home = std::env::var("HOME").map(|home| PathBuf::from(home).join("Applications")).ok();
-    ["/Applications", "/System/Applications", "/System/Applications/Utilities", "/Applications/Utilities"].iter().map(PathBuf::from).chain(home).map(|dir| dir.join(&bundle)).find(|path| path.is_dir())
+    let bundle = if name.to_lowercase().ends_with(".app") {
+        name.to_string()
+    } else {
+        format!("{name}.app")
+    };
+    let home = std::env::var("HOME")
+        .map(|home| PathBuf::from(home).join("Applications"))
+        .ok();
+    [
+        "/Applications",
+        "/System/Applications",
+        "/System/Applications/Utilities",
+        "/Applications/Utilities",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .chain(home)
+    .map(|dir| dir.join(&bundle))
+    .find(|path| path.is_dir())
 }
 
-/// Runs an approved action and says what happened.
-pub async fn run(tool: &str, args: &Map<String, Value>) -> Result<String, String> {
-    let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").to_string();
-    if let Some((source, argv)) = script(tool, args) {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HelperReceipt {
+    outcome: ActionOutcome,
+    object_id: String,
+    destination: String,
+    evidence: Map<String, Value>,
+    error: String,
+}
+
+fn normalized_plaintext(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_end_matches('\n')
+        .to_string()
+}
+
+fn check_evidence(
+    tool: &str,
+    args: &Map<String, Value>,
+    receipt: &HelperReceipt,
+) -> Result<(), String> {
+    let approved = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
+    let observed = |key: &str| receipt.evidence.get(key).and_then(Value::as_str);
+    let matches = |key: &str, expected: &str| -> Result<(), String> {
+        if observed(key) == Some(expected) {
+            Ok(())
+        } else {
+            Err(format!(
+                "The saved {key} did not match the approved details."
+            ))
+        }
+    };
+    if receipt.object_id.trim().is_empty() || receipt.destination.trim().is_empty() {
+        return Err("The app did not return an identifiable destination object.".into());
+    }
+    if tool != "draft_email" {
+        if observed("identifierScope") != Some("persistent")
+            || observed("destinationId").is_none_or(str::is_empty)
+        {
+            return Err(
+                "The app did not return persistent object and destination identifiers.".into(),
+            );
+        }
+        matches("title", approved("title"))?;
+    }
+    match tool {
+        "add_reminder" => {
+            matches("due", approved("due"))?;
+            matches("remindAt", approved("due"))?;
+            let seconds = if approved("due").is_empty() {
+                json!("")
+            } else {
+                json!(0)
+            };
+            if receipt.evidence.get("dueSecond") != Some(&seconds)
+                || receipt.evidence.get("remindSecond") != Some(&seconds)
+            {
+                return Err(
+                    "The saved reminder time did not exactly match the approved minute.".into(),
+                );
+            }
+            if receipt.evidence.get("completed").and_then(Value::as_bool) != Some(false) {
+                return Err("The reminder could not be verified as incomplete.".into());
+            }
+        }
+        "add_calendar_event" => {
+            matches("start", approved("start"))?;
+            matches("location", approved("location"))?;
+            if receipt.evidence.get("startSecond").and_then(Value::as_u64) != Some(0)
+                || receipt.evidence.get("endSecond").and_then(Value::as_u64) != Some(0)
+            {
+                return Err(
+                    "The saved event time did not exactly match the approved minute.".into(),
+                );
+            }
+            if receipt
+                .evidence
+                .get("durationSeconds")
+                .and_then(Value::as_u64)
+                != args
+                    .get("minutes")
+                    .and_then(Value::as_u64)
+                    .and_then(|minutes| minutes.checked_mul(60))
+            {
+                return Err("The saved event length did not match the approved details.".into());
+            }
+        }
+        "create_note" => {
+            let expected = format!("{}\n{}", approved("title"), approved("body"));
+            if observed("plaintext").map(normalized_plaintext)
+                != Some(normalized_plaintext(&expected))
+            {
+                return Err(
+                    "The saved note text did not match the approved title and body.".into(),
+                );
+            }
+        }
+        "draft_email" => {
+            matches("subject", approved("subject"))?;
+            matches("savedSubject", approved("subject"))?;
+            if observed("body").map(normalized_plaintext)
+                != Some(normalized_plaintext(approved("body")))
+                || observed("savedBody").map(normalized_plaintext)
+                    != Some(normalized_plaintext(approved("body")))
+            {
+                return Err("The draft message did not match the approved body.".into());
+            }
+            let recipients = if approved("to").is_empty() {
+                json!([])
+            } else {
+                json!([approved("to")])
+            };
+            if receipt.evidence.get("to") != Some(&recipients)
+                || receipt.evidence.get("ccCount").and_then(Value::as_u64) != Some(0)
+                || receipt.evidence.get("bccCount").and_then(Value::as_u64) != Some(0)
+                || receipt.evidence.get("savedTo") != Some(&recipients)
+                || receipt.evidence.get("savedCcCount").and_then(Value::as_u64) != Some(0)
+                || receipt
+                    .evidence
+                    .get("savedBccCount")
+                    .and_then(Value::as_u64)
+                    != Some(0)
+            {
+                return Err("The draft recipients did not match the approved details.".into());
+            }
+            if receipt.evidence.get("visible").and_then(Value::as_bool) != Some(true)
+                || receipt
+                    .evidence
+                    .get("saveAccepted")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                || observed("identifierScope") != Some("mail_library")
+            {
+                return Err("The draft could not be verified as saved and open for review.".into());
+            }
+        }
+        _ => return Err("This action does not have an app-record verifier.".into()),
+    }
+    Ok(())
+}
+
+fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> ActionReceipt {
+    let helper: HelperReceipt = match serde_json::from_str(response) {
+        Ok(receipt) => receipt,
+        Err(_) => {
+            return ActionReceipt::failure(
+                tool,
+                ActionOutcome::Unknown,
+                "The helper returned no valid verification receipt.",
+            )
+        }
+    };
+    let detail = if helper.outcome == ActionOutcome::Succeeded {
+        if !helper.error.is_empty() {
+            Some("The helper reported an error alongside its success receipt.".into())
+        } else {
+            check_evidence(tool, args, &helper).err()
+        }
+    } else {
+        Some(if helper.error.is_empty() {
+            "The app did not confirm the action.".into()
+        } else {
+            helper.error.clone()
+        })
+    };
+    let outcome = if (helper.outcome == ActionOutcome::Succeeded && detail.is_some())
+        || (helper.outcome == ActionOutcome::Failed && !helper.object_id.is_empty())
+    {
+        ActionOutcome::Unknown
+    } else {
+        helper.outcome.clone()
+    };
+    let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
+    let mut receipt = if let Some(detail) = detail {
+        ActionReceipt::failure(tool, outcome, detail)
+    } else {
+        let message = match tool {
+            "add_reminder" if !get("due").is_empty() => format!("Verified “{}” in Reminders for {}.", get("title"), get("due")),
+            "add_reminder" => format!("Verified “{}” in Reminders.", get("title")),
+            "add_calendar_event" => format!("Verified “{}” in {} at {}.", get("title"), helper.destination, get("start")),
+            "create_note" => format!("Verified “{}” in Notes.", get("title")),
+            _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
+        };
+        ActionReceipt {
+            outcome,
+            tool: tool.into(),
+            object_id: None,
+            destination: None,
+            message,
+            evidence: json!({}),
+            error: None,
+        }
+    };
+    receipt.object_id = (!helper.object_id.is_empty()).then_some(helper.object_id);
+    receipt.destination = (!helper.destination.is_empty()).then_some(helper.destination);
+    receipt.evidence = Value::Object(helper.evidence);
+    receipt
+}
+
+async fn dispatched_receipt(
+    tool: &str,
+    command: Command,
+    seconds: u64,
+    message: String,
+    evidence: Value,
+) -> ActionReceipt {
+    match command_output(command, seconds).await {
+        Ok(_) => ActionReceipt {
+            outcome: ActionOutcome::Succeeded,
+            tool: tool.into(),
+            object_id: None,
+            destination: None,
+            message,
+            evidence,
+            error: None,
+        },
+        Err(failure) => ActionReceipt::failure(
+            tool,
+            if failure.started {
+                ActionOutcome::Unknown
+            } else {
+                ActionOutcome::Failed
+            },
+            failure.message,
+        ),
+    }
+}
+
+/// Execute exactly one approved intent. The caller journals its idempotency key
+/// before calling this, and must preserve Unknown receipts across restarts.
+pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
+    let args = match validate(tool, &Value::Object(args.clone())) {
+        Ok(args) => args,
+        Err(error) => return ActionReceipt::failure(tool, ActionOutcome::Failed, error),
+    };
+    let get = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    if let Some((source, argv)) = script(tool, &args) {
         let mut command = Command::new("/usr/bin/osascript");
         command.arg("-e").arg(source).args(argv);
-        output(command, 30).await?;
-        return Ok(match tool {
-            "add_reminder" if !get("due").is_empty() => format!("Added “{}” to Reminders for {}.", get("title"), get("due")),
-            "add_reminder" => format!("Added “{}” to Reminders.", get("title")),
-            "add_calendar_event" => format!("Added “{}” to your calendar at {}.", get("title"), get("start")),
-            "create_note" => format!("Saved “{}” in Notes.", get("title")),
-            _ => "Your draft is open in Mail. Review it and send it when you’re ready.".into(),
-        });
+        return match command_output(command, 30).await {
+            Ok(response) => parse_receipt(tool, &args, &response),
+            Err(failure) => ActionReceipt::failure(
+                tool,
+                if failure.started {
+                    ActionOutcome::Unknown
+                } else {
+                    ActionOutcome::Failed
+                },
+                failure.message,
+            ),
+        };
     }
     match tool {
         "run_shortcut" => {
             let name = get("name");
             let mut listing = Command::new("/usr/bin/shortcuts");
             listing.arg("list");
-            let list = output(listing, 15).await?;
-            let exact = list.lines().map(str::trim).find(|line| line.eq_ignore_ascii_case(&name)).map(str::to_string).ok_or_else(|| format!("I couldn’t find a shortcut called “{name}”."))?;
+            let list = match output(listing, 15).await {
+                Ok(list) => list,
+                Err(error) => return ActionReceipt::failure(tool, ActionOutcome::Failed, error),
+            };
+            let Some(exact) = list
+                .lines()
+                .map(str::trim)
+                .find(|line| line.eq_ignore_ascii_case(&name))
+            else {
+                return ActionReceipt::failure(
+                    tool,
+                    ActionOutcome::Failed,
+                    format!("I couldn’t find a shortcut called “{name}”."),
+                );
+            };
             let mut command = Command::new("/usr/bin/shortcuts");
-            command.arg("run").arg(&exact);
-            output(command, 120).await?;
-            Ok(format!("Ran your “{exact}” shortcut."))
+            command.arg("run").arg(exact);
+            dispatched_receipt(tool, command, 120, format!("The “{exact}” shortcut finished. Its individual app changes have not been verified."), json!({"verification":"shortcut_process_completed", "name":exact})).await
         }
         "open_app" => {
             let name = get("name");
-            let path = find_app(&name).ok_or_else(|| format!("I couldn’t find an app called “{name}” in Applications."))?;
+            let Some(path) = find_app(&name) else {
+                return ActionReceipt::failure(
+                    tool,
+                    ActionOutcome::Failed,
+                    format!("I couldn’t find an app called “{name}” in Applications."),
+                );
+            };
             let mut command = Command::new("/usr/bin/open");
             command.arg(&path);
-            output(command, 15).await?;
-            Ok(format!("Opened {}.", path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or(name)))
+            dispatched_receipt(
+                tool,
+                command,
+                15,
+                format!("macOS accepted the request to open {name}."),
+                json!({"verification":"launch_services_accepted", "path":path}),
+            )
+            .await
         }
         "open_link" => {
-            let url = https(&get("url"))?;
+            let url = get("url");
             let mut command = Command::new("/usr/bin/open");
             command.arg(&url);
-            output(command, 15).await?;
-            Ok(format!("Opened {url}."))
+            dispatched_receipt(tool, command, 15, format!("macOS accepted the request to open {url}. The page contents have not been verified."), json!({"verification":"launch_services_accepted", "url":url})).await
         }
-        _ => Err("Unknown action.".into()),
+        _ => ActionReceipt::failure(tool, ActionOutcome::Failed, "Unknown action."),
+    }
+}
+
+/// Compatibility for direct callers that only display text. Durable task runners
+/// should retain the complete receipt from execute instead.
+pub async fn run(tool: &str, args: &Map<String, Value>) -> Result<String, String> {
+    let receipt = execute(tool, args).await;
+    if receipt.outcome == ActionOutcome::Succeeded {
+        Ok(receipt.message)
+    } else {
+        Err(receipt.message)
     }
 }
 
@@ -298,42 +982,352 @@ mod tests {
 
     #[test]
     fn proposals_are_checked_and_normalised() {
-        let reminder = validate("add_reminder", &json!({"title":" Call mum ","due":"2026-10-22 18:00"})).unwrap();
+        let reminder = validate(
+            "add_reminder",
+            &json!({"title":" Call mum ","due":"2026-10-22 18:00"}),
+        )
+        .unwrap();
         assert_eq!(reminder["title"], "Call mum");
         assert!(validate("add_reminder", &json!({"title":"x","due":"tomorrow"})).is_err());
-        assert!(validate("add_reminder", &json!({"title":"x","list":"Work"})).is_err(), "unknown keys are refused");
-        let event = validate("add_calendar_event", &json!({"title":"Lunch","start":"2026-10-24 13:00"})).unwrap();
+        assert!(
+            validate("add_reminder", &json!({"title":"x","list":"Work"})).is_err(),
+            "unknown keys are refused"
+        );
+        let event = validate(
+            "add_calendar_event",
+            &json!({"title":"Lunch","start":"2026-10-24 13:00"}),
+        )
+        .unwrap();
         assert_eq!(event["minutes"], 60);
-        assert!(validate("add_calendar_event", &json!({"title":"Lunch","start":"2026-10-24 13:00","minutes":2})).is_err());
-        assert_eq!(validate("open_link", &json!({"url":"github.com"})).unwrap()["url"], "https://github.com/");
+        assert!(validate(
+            "add_calendar_event",
+            &json!({"title":"Lunch","start":"2026-10-24 13:00","minutes":2})
+        )
+        .is_err());
+        assert_eq!(
+            validate("open_link", &json!({"url":"github.com"})).unwrap()["url"],
+            "https://github.com/"
+        );
         assert!(validate("open_link", &json!({"url":"file:///etc/passwd"})).is_err());
         assert!(validate("open_link", &json!({"url":"http://example.com"})).is_err());
-        assert!(validate("draft_email", &json!({"to":"a@b.com, c@d.com","subject":"s","body":"b"})).unwrap().get("to").is_none(), "one recipient, no lists");
-        assert!(validate("draft_email", &json!({"to":"[Landlord's Email]","subject":"s","body":"b"})).unwrap().get("to").is_none(), "placeholders are left for the user");
-        assert_eq!(validate("add_calendar_event", &json!({"title":"Lunch","start":"2026-10-23T13:00:00"})).unwrap()["start"], "2026-10-23 13:00");
-        assert_eq!(validate("add_reminder", &json!({"title":"Bins","due":"2026-10-23"})).unwrap()["due"], "2026-10-23 09:00");
+        assert!(
+            validate(
+                "draft_email",
+                &json!({"to":"a@b.com, c@d.com","subject":"s","body":"b"})
+            )
+            .unwrap()
+            .get("to")
+            .is_none(),
+            "one recipient, no lists"
+        );
+        assert!(
+            validate(
+                "draft_email",
+                &json!({"to":"[Landlord's Email]","subject":"s","body":"b"})
+            )
+            .unwrap()
+            .get("to")
+            .is_none(),
+            "placeholders are left for the user"
+        );
+        assert_eq!(
+            validate(
+                "add_calendar_event",
+                &json!({"title":"Lunch","start":"2026-10-23T13:00:00"})
+            )
+            .unwrap()["start"],
+            "2026-10-23 13:00"
+        );
+        assert_eq!(
+            validate("add_reminder", &json!({"title":"Bins","due":"2026-10-23"})).unwrap()["due"],
+            "2026-10-23 09:00"
+        );
         assert!(validate("send_email", &json!({})).is_err());
         assert!(find_app("../../bin/sh").is_none());
     }
 
     #[test]
     fn scripts_take_values_as_arguments_not_code() {
-        let args = validate("add_reminder", &json!({"title":"\" & do shell script \"rm -rf ~\" & \"","due":"2026-10-22 18:05"})).unwrap();
+        let args = validate(
+            "add_reminder",
+            &json!({"title":"\" & do shell script \"rm -rf ~\" & \"","due":"2026-10-22 18:05"}),
+        )
+        .unwrap();
         let (source, argv) = script("add_reminder", &args).unwrap();
         assert!(!source.contains("rm -rf"), "user text never becomes script");
-        assert_eq!(argv, ["\" & do shell script \"rm -rf ~\" & \"", "2026", "10", "22", "18", "5"]);
-        let note = validate("create_note", &json!({"title":"Ideas","body":"<b>tea</b>\nbiscuits"})).unwrap();
+        assert_eq!(
+            argv,
+            [
+                "\" & do shell script \"rm -rf ~\" & \"",
+                "2026",
+                "10",
+                "22",
+                "18",
+                "5"
+            ]
+        );
+        let note = validate(
+            "create_note",
+            &json!({"title":"Ideas","body":"<b>tea</b>\nbiscuits"}),
+        )
+        .unwrap();
         let (_, argv) = script("create_note", &note).unwrap();
-        assert!(argv[1].contains("&lt;b&gt;tea&lt;/b&gt;") && argv[1].contains("<div>biscuits</div>"));
-        let (_, mail) = script("draft_email", &validate("draft_email", &json!({"subject":"Leak","body":"Hello"})).unwrap()).unwrap();
+        assert!(
+            argv[1].contains("&lt;b&gt;tea&lt;/b&gt;") && argv[1].contains("<div>biscuits</div>")
+        );
+        let (_, mail) = script(
+            "draft_email",
+            &validate("draft_email", &json!({"subject":"Leak","body":"Hello"})).unwrap(),
+        )
+        .unwrap();
         assert_eq!(mail, ["", "Leak", "Hello"]);
+    }
+
+    fn helper_receipt(evidence: Value) -> Value {
+        json!({"outcome":"succeeded", "objectId":"test-object-123", "destination":"Test destination", "evidence":evidence, "error":""})
+    }
+
+    #[test]
+    fn success_requires_the_destination_identifier_and_exact_fields() {
+        let cases = [
+            (
+                "add_reminder",
+                json!({"title":"Pay rent", "due":"2026-11-01 09:00"}),
+                json!({"destinationId":"list-1", "identifierScope":"persistent", "title":"Pay rent", "due":"2026-11-01 09:00", "remindAt":"2026-11-01 09:00", "dueSecond":0, "remindSecond":0, "completed":false}),
+            ),
+            (
+                "add_calendar_event",
+                json!({"title":"Dentist", "start":"2026-11-02 10:00", "minutes":30, "location":"Clinic"}),
+                json!({"destinationId":"calendar-1", "identifierScope":"persistent", "title":"Dentist", "start":"2026-11-02 10:00", "startSecond":0, "endSecond":0, "durationSeconds":1800, "location":"Clinic"}),
+            ),
+            (
+                "create_note",
+                json!({"title":"Trip", "body":"Pack tea\nRemember tickets"}),
+                json!({"destinationId":"folder-1", "identifierScope":"persistent", "title":"Trip", "plaintext":"Trip\nPack tea\nRemember tickets\n"}),
+            ),
+            (
+                "draft_email",
+                json!({"to":"test@example.com", "subject":"Appointment", "body":"Please confirm.\nThank you."}),
+                json!({"identifierScope":"mail_library", "subject":"Appointment", "body":"Please confirm.\r\nThank you.\r\n", "savedSubject":"Appointment", "savedBody":"Please confirm.\nThank you.\n", "savedTo":["test@example.com"], "savedCcCount":0, "savedBccCount":0, "to":["test@example.com"], "ccCount":0, "bccCount":0, "visible":true, "saveAccepted":true}),
+            ),
+        ];
+        for (tool, approved, evidence) in cases {
+            let args = validate(tool, &approved).unwrap();
+            let valid = helper_receipt(evidence.clone());
+            let receipt = parse_receipt(tool, &args, &valid.to_string());
+            assert_eq!(
+                receipt.outcome,
+                ActionOutcome::Succeeded,
+                "{tool}: {}",
+                receipt.message
+            );
+            assert_eq!(receipt.object_id.as_deref(), Some("test-object-123"));
+            assert_eq!(
+                serde_json::from_str::<ActionReceipt>(&serde_json::to_string(&receipt).unwrap())
+                    .unwrap(),
+                receipt
+            );
+            for field in evidence.as_object().unwrap().keys() {
+                let mut incomplete = valid.clone();
+                incomplete["evidence"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert_eq!(
+                    parse_receipt(tool, &args, &incomplete.to_string()).outcome,
+                    ActionOutcome::Unknown,
+                    "{tool}: missing {field} must not pass"
+                );
+            }
+            let mut no_id = valid.clone();
+            no_id["objectId"] = json!("");
+            assert_eq!(
+                parse_receipt(tool, &args, &no_id.to_string()).outcome,
+                ActionOutcome::Unknown
+            );
+            let mut contradiction = valid;
+            contradiction["error"] = json!("Writing stopped unexpectedly");
+            assert_eq!(
+                parse_receipt(tool, &args, &contradiction.to_string()).outcome,
+                ActionOutcome::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn incomplete_or_mismatched_receipts_preserve_unknown_outcomes() {
+        let args = validate("add_reminder", &json!({"title":"Call mum"})).unwrap();
+        for response in [
+            "",
+            "ok",
+            "{}",
+            "{\"outcome\":\"succeeded\"}",
+            "{\"outcome\":\"succeeded\"} garbage",
+        ] {
+            let receipt = parse_receipt("add_reminder", &args, response);
+            assert_eq!(receipt.outcome, ActionOutcome::Unknown);
+            assert!(receipt
+                .message
+                .contains("will not be repeated automatically"));
+        }
+        let mut mismatched = helper_receipt(
+            json!({"destinationId":"list-1", "identifierScope":"persistent", "title":"Call someone else", "due":"", "remindAt":"", "dueSecond":"", "remindSecond":"", "completed":false}),
+        );
+        let receipt = parse_receipt("add_reminder", &args, &mismatched.to_string());
+        assert_eq!(receipt.outcome, ActionOutcome::Unknown);
+        assert_eq!(
+            receipt.object_id.as_deref(),
+            Some("test-object-123"),
+            "retain the existing object for manual recovery"
+        );
+        mismatched["outcome"] = json!("failed");
+        mismatched["error"] = json!("Verification failed after creation");
+        assert_eq!(
+            parse_receipt("add_reminder", &args, &mismatched.to_string()).outcome,
+            ActionOutcome::Unknown,
+            "a reported failure with an object ID cannot be replayed safely"
+        );
+        mismatched["objectId"] = json!("");
+        assert_eq!(
+            parse_receipt("add_reminder", &args, &mismatched.to_string()).outcome,
+            ActionOutcome::Failed
+        );
+    }
+
+    #[test]
+    fn note_and_draft_verifiers_do_not_drop_body_or_recipient_differences() {
+        let args = validate(
+            "draft_email",
+            &json!({"to":"test@example.com", "subject":"Hi", "body":"One\n\nTwo"}),
+        )
+        .unwrap();
+        let mut fixture = helper_receipt(
+            json!({"identifierScope":"mail_library", "subject":"Hi", "body":"One\n\nTwo", "savedSubject":"Hi", "savedBody":"One\n\nTwo", "savedTo":["test@example.com"], "savedCcCount":0, "savedBccCount":0, "to":["test@example.com"], "ccCount":0, "bccCount":0, "visible":true, "saveAccepted":true}),
+        );
+        for (key, value) in [
+            ("body", json!("One\nTwo")),
+            ("to", json!(["other@example.com"])),
+            ("bccCount", json!(1)),
+            ("visible", json!(false)),
+            ("saveAccepted", json!(false)),
+            ("identifierScope", json!("persistent")),
+        ] {
+            let mut wrong = fixture.clone();
+            wrong["evidence"][key] = value;
+            assert_eq!(
+                parse_receipt("draft_email", &args, &wrong.to_string()).outcome,
+                ActionOutcome::Unknown,
+                "{key}"
+            );
+        }
+        fixture["evidence"]["to"] = json!([]);
+        fixture["evidence"]["savedTo"] = json!([]);
+        let blank = validate("draft_email", &json!({"subject":"Hi", "body":"One\n\nTwo"})).unwrap();
+        assert_eq!(
+            parse_receipt("draft_email", &blank, &fixture.to_string()).outcome,
+            ActionOutcome::Succeeded
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_actions_do_not_start_and_uncertain_helpers_are_not_retried() {
+        let receipt = execute(
+            "add_calendar_event",
+            &json!({"title":"Lunch", "start":"tomorrow"})
+                .as_object()
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(receipt.outcome, ActionOutcome::Failed);
+        let missing = dispatched_receipt(
+            "open_app",
+            Command::new("/definitely/not/a/buntini-helper"),
+            1,
+            "wrong".into(),
+            json!({}),
+        )
+        .await;
+        assert_eq!(missing.outcome, ActionOutcome::Failed);
+        let dir = tempfile::tempdir().unwrap();
+        let attempts = dir.path().join("attempts");
+        let mut command = Command::new("/bin/sh");
+        // A test-only helper records one mutation, then fails before a receipt.
+        command
+            .arg("-c")
+            .arg("printf x >> \"$1\"; exit 1")
+            .arg("fixture")
+            .arg(&attempts);
+        let result = dispatched_receipt("create_note", command, 2, "wrong".into(), json!({})).await;
+        assert_eq!(result.outcome, ActionOutcome::Unknown);
+        assert_eq!(std::fs::read_to_string(attempts).unwrap(), "x");
+        let mut stalled = Command::new("/bin/sleep");
+        stalled.arg("5");
+        let result = dispatched_receipt("create_note", stalled, 0, "wrong".into(), json!({})).await;
+        assert_eq!(result.outcome, ActionOutcome::Unknown);
     }
 
     #[test]
     fn sheets_show_every_value() {
-        let args = validate("add_calendar_event", &json!({"title":"Lunch","start":"2026-10-24 13:00","location":"Café"})).unwrap();
+        let args = validate(
+            "add_calendar_event",
+            &json!({"title":"Lunch","start":"2026-10-24 13:00","location":"Café"}),
+        )
+        .unwrap();
         let (title, fields, _) = describe("add_calendar_event", &args);
         assert_eq!(title, "Add this to your calendar?");
-        assert_eq!(fields.iter().map(|field| field.value.as_str()).collect::<Vec<_>>(), ["Lunch", "2026-10-24 13:00", "60", "Café"]);
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.value.as_str())
+                .collect::<Vec<_>>(),
+            ["Lunch", "2026-10-24 13:00", "60", "Café"]
+        );
+    }
+
+    #[test]
+    fn zoned_action_times_preserve_the_instant_in_the_local_approval() {
+        let eastern = chrono::FixedOffset::west_opt(4 * 60 * 60).unwrap();
+        assert_eq!(
+            normalize_when_in("2026-10-22T18:00:00Z", &eastern).unwrap(),
+            "2026-10-22 14:00"
+        );
+        assert_eq!(
+            normalize_when_in("2026-10-22T00:30:00+02:00", &eastern).unwrap(),
+            "2026-10-21 18:30"
+        );
+        assert_eq!(
+            normalize_when_in("2026-10-22 18:00", &eastern).unwrap(),
+            "2026-10-22 18:00"
+        );
+        assert!(normalize_when_in("2026-10-22ZZ", &eastern).is_err());
+        assert!(normalize_when_in("2026-02-30 18:00", &eastern).is_err());
+    }
+
+    #[tokio::test]
+    async fn helper_output_is_complete_and_bounded() {
+        let content = "a calendar title with unicode ☕\n".repeat(300);
+        let mut command = Command::new("/usr/bin/printf");
+        command.arg("%s").arg(&content);
+        assert_eq!(output(command, 5).await.unwrap(), content);
+        assert_eq!(read_output(&b"complete"[..]).await.unwrap(), b"complete");
+        let too_large = vec![b'x'; OUTPUT_LIMIT as usize + 1];
+        assert!(read_output(too_large.as_slice())
+            .await
+            .unwrap_err()
+            .contains("too much data"));
+        let command = Command::new("/usr/bin/yes");
+        assert!(
+            output(command, 5)
+                .await
+                .unwrap_err()
+                .contains("too much data"),
+            "an unbounded helper must be stopped instead of exhausting memory"
+        );
+        let mut invalid = Command::new("/usr/bin/printf");
+        invalid.arg("\\377");
+        assert!(output(invalid, 5)
+            .await
+            .unwrap_err()
+            .contains("invalid text"));
     }
 }

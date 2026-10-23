@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { Bootstrap, Mode, Settings, TaskEvent, TaskRecord } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, Settings, TaskEvent, TaskRecord } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
@@ -14,8 +14,9 @@ export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');
   let settings = defaults;
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
+  const threads = previewThreads();
   return {
-    settings, tasks: previewTasks(), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
+    settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
     diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
   };
 }
@@ -44,7 +45,36 @@ function previewApps() {
 }
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
 function previewTasks(): TaskRecord[] {
+  if (reliabilityPreview) return previewReliabilityTasks;
   try { return JSON.parse(localStorage.getItem('buntini-preview-tasks') || '[]'); } catch { return []; }
+}
+type PreviewThreads = { activeId: string; items: { summary: ConversationSummary; turns: TaskRecord[] }[] };
+const previewThreadsKey = reliabilityPreview ? 'buntini-preview-reliability-v2' : 'buntini-preview-conversations-v1';
+function emptyPreviewThread() {
+  const at = new Date().toISOString();
+  return { summary: { id: crypto.randomUUID(), title: 'New conversation', createdAt: at, updatedAt: at, legacy: false, turnCount: 0 }, turns: [] as TaskRecord[] };
+}
+function previewThreads(): PreviewThreads {
+  try { const saved = JSON.parse(localStorage.getItem(previewThreadsKey) || 'null'); if (saved?.items?.length && saved.activeId) return saved; } catch { /* Seed a disposable browser preview. */ }
+  const item = emptyPreviewThread(); item.turns = previewTasks();
+  if (item.turns.length) { item.summary.title = item.turns[0].prompt || 'Morning brief'; item.summary.turnCount = item.turns.length; }
+  const state = { activeId: item.summary.id, items: [item] }; savePreviewThreads(state); return state;
+}
+function savePreviewThreads(state: PreviewThreads) { localStorage.setItem(previewThreadsKey, JSON.stringify(state)); }
+function previewPage(state: PreviewThreads, id: string, cursor?: string | null, limit = 100): ConversationPage {
+  const item = state.items.find(item => item.summary.id === id);
+  if (!item) throw new Error('Conversation not found.');
+  const sorted = [...item.turns].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const start = cursor ? sorted.findIndex(turn => turn.id === cursor) + 1 : 0;
+  if (cursor && !start) throw new Error('Invalid conversation cursor.');
+  const turns = sorted.slice(start, start + limit);
+  return { conversation: item.summary, turns, nextCursor: start + limit < sorted.length ? turns.at(-1)!.id : null };
+}
+function previewList(state: PreviewThreads, cursor?: string | null, limit = 30): ConversationList {
+  const sorted = state.items.map(item => item.summary).filter(item => item.turnCount || item.id === state.activeId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
+  const start = cursor ? sorted.findIndex(item => item.id === cursor) + 1 : 0;
+  const items = sorted.slice(start, start + limit);
+  return { items, nextCursor: start + limit < sorted.length ? items.at(-1)!.id : null };
 }
 export async function saveSettings(settings: Settings): Promise<Settings> {
   if (desktop) return invoke('save_settings', { settings });
@@ -54,8 +84,19 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
 export async function command<T = void>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (!desktop) {
     // The browser preview keeps the conversation controls usable without the desktop app.
-    if (name === 'new_topic') return new Date().toISOString() as T;
-    if (name === 'conversation') return [] as T;
+    if (['new_topic', 'conversation', 'conversations', 'open_conversation', 'clear_history'].includes(name)) {
+      const state = previewThreads();
+      if (name === 'new_topic' || name === 'clear_history') {
+        const item = emptyPreviewThread(); state.items = name === 'clear_history' ? [item] : [...state.items, item]; state.activeId = item.summary.id; savePreviewThreads(state);
+        return (name === 'clear_history' ? undefined : previewPage(state, state.activeId)) as T;
+      }
+      if (name === 'conversations') return previewList(state, args?.cursor as string | null, args?.limit as number) as T;
+      const id = args?.taskId ? state.items.find(item => item.turns.some(turn => turn.id === args.taskId))?.summary.id : args?.conversationId as string;
+      if (!id) throw new Error('Conversation not found.');
+      const page = previewPage(state, id, args?.cursor as string | null, args?.limit as number);
+      if (name === 'open_conversation') { state.activeId = id; savePreviewThreads(state); }
+      return page as T;
+    }
     if (name === 'finish_onboarding') { localStorage.setItem('buntini-preview-onboarded', '1'); return undefined as T; }
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
@@ -77,6 +118,13 @@ export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskE
   channel.onmessage = onEvent;
   return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null });
 }
+export async function continueTask(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, onEvent: (event: TaskEvent) => void): Promise<TaskRecord> {
+  if (!desktop) throw new Error('Open the desktop app to continue a saved task.');
+  const channel = new Channel<TaskEvent>();
+  channel.onmessage = onEvent;
+  return invoke(name, { ...args, onEvent: channel });
+}
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === 'string' ? error : 'Something went wrong. Please try again.';
 }
+import { reliabilityPreview, previewReliabilityTasks } from './reliabilityPreview';

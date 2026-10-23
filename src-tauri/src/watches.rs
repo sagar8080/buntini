@@ -159,6 +159,36 @@ fn changed(before: &PriceWatch, after: &PriceWatch) -> bool {
         || before.last_error != after.last_error
         || before.last_availability != after.last_availability
 }
+
+fn record_observation(
+    watch: &mut PriceWatch,
+    result: Result<PriceOffer, String>,
+    cancelled: bool,
+) -> Result<(), String> {
+    if cancelled {
+        return Err("Price check cancelled.".into());
+    }
+    watch.last_checked_at = Some(now());
+    match result {
+        Ok(offer) => {
+            watch.last_price = Some(offer.price.clone());
+            watch.last_availability = offer.availability;
+            watch.last_error = None;
+            watch.history.push(PricePoint {
+                price: offer.price,
+                currency: offer.currency,
+                observed_at: now(),
+                url: watch.url.clone(),
+            });
+            if watch.history.len() > 60 {
+                watch.history.drain(..watch.history.len() - 60);
+            }
+        }
+        Err(error) => watch.last_error = Some(error),
+    }
+    Ok(())
+}
+
 pub(crate) async fn run(
     app: &tauri::AppHandle,
     id: &str,
@@ -167,7 +197,7 @@ pub(crate) async fn run(
     let state = app.state::<AppState>();
     let token = Arc::new(AtomicBool::new(false));
     let active_id = format!("price-watch-{id}");
-    let before = {
+    let (before, run_id) = {
         let mut active = state.active.lock().unwrap();
         if !active.is_empty() {
             return Err("Another task is running. Try the price check after it finishes.".into());
@@ -183,10 +213,21 @@ pub(crate) async fn run(
             return Err("This price watch is paused or no longer due.".into());
         }
         let before = watch.clone();
+        let transaction = store
+            .db
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        let run_id = crate::delivery::monitor_started(
+            &store,
+            &active_id,
+            scheduled.then_some(watch.next_run_at.as_str()),
+            chrono::Utc::now(),
+        )?;
         watch.next_run_at = next(watch.interval_minutes);
         store.save_price_watch(&watch)?;
+        transaction.commit().map_err(|error| error.to_string())?;
         active.insert(active_id.clone(), token.clone());
-        before
+        (before, run_id)
     };
     let _claim = crate::notifications::ActiveMonitor::new(&state, active_id, token.clone());
     state.audit("price_watch.fetch", id);
@@ -205,38 +246,32 @@ pub(crate) async fn run(
     }
     .and_then(|page| crate::pricing::extract_offers(&page.html, &page.url))
     .and_then(|offers| exact_offer(&offers, &before.currency));
-    let result = if token.load(Ordering::Relaxed) {
-        Err("Price check cancelled.".into())
-    } else {
-        result
-    };
     let persisted = (|| -> Result<PriceWatch, String> {
         let store = state.store.lock().unwrap();
-        match store.price_watch(id)? {
-            None => Err("This price watch was deleted while checking.".into()),
-            Some(mut watch) => {
-                watch.last_checked_at = Some(now());
-                match result {
-                    Ok(offer) => {
-                        watch.last_price = Some(offer.price.clone());
-                        watch.last_availability = offer.availability;
-                        watch.last_error = None;
-                        watch.history.push(PricePoint {
-                            price: offer.price,
-                            currency: offer.currency,
-                            observed_at: now(),
-                            url: watch.url.clone(),
-                        });
-                        if watch.history.len() > 60 {
-                            watch.history.drain(..watch.history.len() - 60);
-                        }
-                    }
-                    Err(error) => watch.last_error = Some(error),
-                }
-                store.save_price_watch(&watch).map(|_| watch)
-            }
-        }
+        let transaction = store
+            .db
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        let outcome = match store.price_watch(id)? {
+            None => Err("This price watch was deleted while checking.".to_string()),
+            Some(mut watch) => record_observation(&mut watch, result, token.load(Ordering::SeqCst))
+                .and_then(|_| store.save_price_watch(&watch).map(|_| watch)),
+        };
+        let (status, error) = match &outcome {
+            Ok(watch) if watch.last_error.is_none() => ("completed", None),
+            Ok(watch) => ("error", watch.last_error.as_deref()),
+            Err(error) if token.load(Ordering::SeqCst) => ("cancelled", Some(error.as_str())),
+            Err(error) => ("error", Some(error.as_str())),
+        };
+        crate::delivery::monitor_finished(&store, &run_id, status, error)?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        outcome
     })();
+    let _ = tauri::Emitter::emit(
+        app,
+        "background-updated",
+        serde_json::json!({"monitorKey":format!("price-watch-{id}")}),
+    );
     let watch = persisted?;
     let changed = changed(&before, &watch);
     let below_threshold = below(&watch);
@@ -326,6 +361,13 @@ mod tests {
         });
         assert!(!changed(&watch, &after));
         assert!(below(&watch));
+        let before_cancel = serde_json::to_value(&watch).unwrap();
+        assert!(record_observation(&mut watch, Ok(offer("1")), true).is_err());
+        assert_eq!(serde_json::to_value(&watch).unwrap(), before_cancel, "cancellation must not overwrite a verified price or create a false recovery notification");
+        assert!(
+            record_observation(&mut watch, Err("Price check cancelled.".into()), true).is_err()
+        );
+        assert_eq!(serde_json::to_value(&watch).unwrap(), before_cancel);
         watch.last_availability = Some("https://schema.org/OutOfStock".into());
         assert!(!below(&watch));
     }

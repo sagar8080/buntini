@@ -1,0 +1,200 @@
+{
+  "description": "Held-out routing fixtures. Query content is literal; explicit named sites become visible site: scope before approval. These verify bounded intent labels, not live search relevance or general language understanding.",
+  "research": [
+    {
+      "request": "Search the internet for New York train delays today",
+      "query": "New York train delays today",
+      "purpose": "answer"
+    },
+    {
+      "request": "Please search Google for \"Sony WH-1000XM6\" -sponsored",
+      "query": "\"Sony WH-1000XM6\" -sponsored",
+      "purpose": "answer"
+    },
+    {
+      "request": "Could you search online for Québec weather this week?",
+      "query": "Québec weather this week?",
+      "purpose": "answer"
+    },
+    {
+      "request": "Look up flights from JFK to SFO on Google",
+      "query": "flights from JFK to SFO",
+      "purpose": "answer"
+    },
+    {
+      "request": "Find JavaScript promises on Wikipedia",
+      "query": "JavaScript promises site:wikipedia.org",
+      "purpose": "answer",
+      "domains": [
+        "wikipedia.org"
+      ]
+    },
+    {
+      "request": "Search Amazon for USB-C chargers under $40",
+      "query": "USB-C chargers under $40 site:amazon.com",
+      "purpose": "answer",
+      "domains": [
+        "amazon.com"
+      ]
+    },
+    {
+      "request": "Search YouTube for C++ move semantics",
+      "query": "C++ move semantics site:youtube.com",
+      "purpose": "answer",
+      "domains": [
+        "youtube.com"
+      ]
+    },
+    {
+      "request": "Google résumé templates filetype:pdf -pinterest",
+      "query": "résumé templates filetype:pdf -pinterest",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search the web for headphones that are not wireless",
+      "query": "headphones that are not wireless",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search Google for https://example.org/Guide?lang=EN&v=2",
+      "query": "https://example.org/Guide?lang=EN&v=2",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search online for the latest electric car prices and compare total cost",
+      "query": "the latest electric car prices and compare total cost",
+      "purpose": "compare"
+    },
+    {
+      "request": "Google Alpha vs Beta",
+      "query": "Alpha vs Beta",
+      "purpose": "compare"
+    },
+    {
+      "request": "Hey Buntini, could you please search the web for A&B",
+      "query": "A&B",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search the web for why the word contemporary is used",
+      "query": "why the word contemporary is used",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search on the internet for \"C++\" -ads",
+      "query": "\"C++\" -ads",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search over the internet for \"C++\" -ads",
+      "query": "\"C++\" -ads",
+      "purpose": "answer"
+    },
+    {
+      "request": "Search for \"C++\" -ads online",
+      "query": "\"C++\" -ads",
+      "purpose": "answer"
+    },
+    {
+      "request": "Research \"C++\" -ads online",
+      "query": "\"C++\" -ads",
+      "purpose": "answer"
+    },
+    {
+      "request": "Research \"C++\" -ads on the web",
+      "query": "\"C++\" -ads",
+      "purpose": "answer"
+    }
+  ],
+  "notResearch": [
+    "Find my lease PDF",
+    "Search for my 2025 tax return",
+    "Read the email about Google search",
+    "Don't search the internet for my address",
+    "Please do not google my name",
+    "Never look up my password on Google",
+    "How do I search Google for scholarly articles?",
+    "Explain how to search the web for train times",
+    "I used to search online for train times",
+    "I don't want you to search the web for train times",
+    "Google",
+    "Search online for",
+    "Open Google search results for orchestras"
+  ],
+  "navigation": [
+    {
+      "request": "Please open Google search results for M2 vs M3 in my browser",
+      "engine": "google",
+      "query": "M2 vs M3"
+    },
+    {
+      "request": "Show Wikipedia search for São Paulo",
+      "engine": "wikipedia",
+      "query": "São Paulo"
+    },
+    {
+      "request": "Open YouTube search for \"C#\" -ads please",
+      "engine": "youtube",
+      "query": "\"C#\" -ads"
+    },
+    {
+      "request": "Open the Google search for A&B in the browser",
+      "engine": "google",
+      "query": "A&B"
+    }
+  ],
+  "notNavigation": [
+    "Search the web for train times",
+    "Google train times",
+    "Don't open Google search results for train times",
+    "Tell me how to open Google search results for train times",
+    "Open my saved train notes",
+    "Open Google search results for"
+  ],
+  "requirements": [
+    {
+      "goal": "Compare train and bus fares this week using official sources, then explain the tradeoffs",
+      "query": "train and bus fares",
+      "purpose": "compare",
+      "kinds": [
+        "comparison",
+        "freshness",
+        "source_quality",
+        "answer_format"
+      ]
+    },
+    {
+      "goal": "Find current peer-reviewed evidence and summarize it",
+      "query": "clinical research",
+      "purpose": "answer",
+      "kinds": [
+        "freshness",
+        "source_quality",
+        "answer_format"
+      ]
+    },
+    {
+      "goal": "Alpha vs Beta",
+      "query": "Alpha vs Beta",
+      "purpose": "compare",
+      "kinds": [
+        "comparison"
+      ]
+    },
+    {
+      "goal": "Explain why the word recent appears in contemporary writing",
+      "query": "contemporary writing",
+      "purpose": "answer",
+      "kinds": [
+        "freshness",
+        "answer_format"
+      ]
+    },
+    {
+      "goal": "Search for comparatively inexpensive contemporary art",
+      "query": "art",
+      "purpose": "answer",
+      "kinds": []
+    }
+  ]
+}

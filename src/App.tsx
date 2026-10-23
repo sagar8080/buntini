@@ -11,16 +11,18 @@ import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
+import { BackgroundWork } from './TaskProgress';
+import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
 import Onboarding from './Onboarding';
 import SettingsView from './SettingsView';
 import YourData from './YourData';
 import ActionSheet, { type ActionProposal } from './ActionSheet';
 import { appearance, idleStatus, panelScale } from './themes.ts';
-import { greeting, mergeTurns } from './thread';
+import { greeting, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
-import { bootstrap, command, desktop, errorMessage, runTask, saveSettings } from './bridge';
-import type { Bootstrap, KeyProvider, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
@@ -34,14 +36,23 @@ const skillActivity: Record<string, string> = { music: 'Getting your music going
 
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
+  const [progress, setProgress] = useState<TaskProgress[]>([]);
+  const [background, setBackground] = useState<BackgroundStatus | null>(null);
+  const [onlineTaskId, setOnlineTaskId] = useState('');
   const [page, setPage] = useState<Page>('home');
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<Mode>('auto');
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<TaskRecord[]>([]);
   const [live, setLive] = useState<TaskRecord | null>(null);
-  const [boundary, setBoundary] = useState<string | null>(null);
-  const [canLoadEarlier, setCanLoadEarlier] = useState(false);
+  const [conversationId, setConversationId] = useState('');
+  const conversationIdRef = useRef('');
+  const selectionVersion = useRef(0);
+  const [turnCursor, setTurnCursor] = useState<string | null>(null);
+  const [savedConversations, setSavedConversations] = useState<ConversationSummary[]>([]);
+  const [listCursor, setListCursor] = useState<string | null>(null);
+  const [switchingThread, setSwitchingThread] = useState(false);
+  const switchingThreadRef = useRef(false);
   const [focusId, setFocusId] = useState('');
   const threadLoaded = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +73,11 @@ export default function App() {
   const [approving, setApproving] = useState(false);
   const [proposal, setProposal] = useState<ActionProposal | null>(null);
   const [acting, setActing] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [planning, setPlanning] = useState(false);
+  const planningBusy = useRef(false);
+  const actionBusy = useRef(false);
+  const approvalBusy = useRef(false);
   const activeId = useRef('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -96,8 +111,24 @@ export default function App() {
   const petDragged = useRef(false);
   const mounted = useRef(true);
   const refresh = useCallback(async () => {
+    const version = selectionVersion.current;
     const next = await bootstrap();
-    if (mounted.current) setData(next);
+    if (mounted.current && version === selectionVersion.current) {
+      setData(next); setSavedConversations(next.conversations.items); setListCursor(next.conversations.nextCursor);
+      if (threadLoaded.current) {
+        const previousId = conversationIdRef.current;
+        conversationIdRef.current = next.conversation.conversation.id;
+        setConversationId(next.conversation.conversation.id);
+        setTurns(previous => mergeConversationTurns(previousId, previous, next.conversation));
+        if (previousId !== next.conversation.conversation.id) setTurnCursor(next.conversation.nextCursor);
+      }
+    }
+    if (desktop) {
+      const [flows, scheduled] = await Promise.all([command<TaskProgress[]>('task_progress'), command<BackgroundStatus>('background_status')]);
+      if (mounted.current) { setProgress(flows); setBackground(scheduled); }
+    } else if (reliabilityPreview) {
+      setProgress(previewReliabilityProgress); setBackground(previewBackground);
+    }
     return next;
   }, []);
   useEffect(() => {
@@ -109,7 +140,9 @@ export default function App() {
   useEffect(() => {
     if (!data || threadLoaded.current) return;
     threadLoaded.current = true;
-    setTurns(mergeTurns([], data.tasks)); setBoundary(data.conversationStart ?? null); setCanLoadEarlier(data.tasks.length >= 100);
+    conversationIdRef.current = data.conversation.conversation.id;
+    setConversationId(data.conversation.conversation.id);
+    setTurns(mergeTurns([], data.conversation.turns)); setTurnCursor(data.conversation.nextCursor);
     // First launch: open the bubble so Buntini can introduce itself.
     if (data.onboarded === false) void expand(true);
   }, [data]);
@@ -183,8 +216,7 @@ export default function App() {
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
-      void refresh();
-      setTurns(previous => mergeTurns(previous, [event.payload.task]));
+      void refresh().catch(error => setError(errorMessage(error)));
       setNotice(event.payload.task.state === 'completed' ? `A saved search has an update: ${event.payload.task.prompt}` : 'A saved search couldn’t finish. You’ll find it in History.');
     });
     return () => { void subscription.then(unlisten => unlisten()); };
@@ -193,7 +225,7 @@ export default function App() {
     if (!desktop) return;
     const budget = listen<string>('budget-warning', event => setNotice(event.payload));
     const subscription = listen<{ watch: { label: string }; belowThreshold: boolean; changed: boolean }>('price-watch-result', event => {
-      void refresh();
+      void refresh().catch(error => setError(errorMessage(error)));
       if (event.payload.belowThreshold) setNotice(`${event.payload.watch.label} reached your target price. Details are in History.`);
       else if (event.payload.changed) setNotice(`Price watch updated: ${event.payload.watch.label}`);
     });
@@ -202,8 +234,8 @@ export default function App() {
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (approval) { setApproval(null); setPetState('idle'); }
-        else if (proposal && !acting) { void command('cancel_action', { id: proposal.id }).catch(() => {}); setProposal(null); setPetState('idle'); }
+        if (approval && !approving) { cancelOnlineApproval(); }
+        else if (proposal && !acting) { void command('cancel_action', { id: proposal.id }).then(() => refresh()).catch(e => setError(errorMessage(e))); setProposal(null); setPetState('idle'); }
         else if (recordHeld.current || recording || transcribing) { void cancelVoice(); }
         else if (speaking) { void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
         else if (page !== 'home') setPage('home');
@@ -219,13 +251,13 @@ export default function App() {
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval, proposal, acting]);
+  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval, approving, proposal, acting, onlineTaskId]);
   useEffect(() => {
     const element = conversationRef.current;
     if (!element || page !== 'home') return;
     if (focusId) { document.getElementById(`turn-${focusId}`)?.scrollIntoView({ block: 'start' }); return; }
     element.scrollTo({ top: element.scrollHeight, behavior: live ? 'smooth' : 'instant' });
-  }, [page, expanded, focusId, boundary, live?.answer, activity, turns.at(-1)?.id]);
+  }, [page, expanded, focusId, conversationId, live?.answer, activity, turns.at(-1)?.id]);
   useEffect(() => {
     if (!notice) return;
     const id = window.setTimeout(() => setNotice(''), 3500);
@@ -249,21 +281,24 @@ export default function App() {
   useEffect(() => {
     if (!desktop) return;
     const timers = listen<string>('timer-done', event => { setNotice(event.payload); react('happy'); void speak(event.payload); });
-    return () => { void timers.then(unlisten => unlisten()); };
-  }, [speak]);
+    const updates = ['timer-updated', 'background-updated'].map(name => listen(name, () => { void refresh().catch(e => setError(errorMessage(e))); }));
+    return () => { void timers.then(unlisten => unlisten()); for (const pending of updates) void pending.then(unlisten => unlisten()); };
+  }, [speak, refresh]);
   // The local model proposes one online tool; nothing is sent until the user approves the exact request.
-  const planOnline = useCallback(async (prompt: string, webOnly: boolean) => {
+  const planOnline = useCallback(async (prompt: string, webOnly: boolean, taskId?: string) => {
+    if (planningBusy.current || taskBusy.current || actionBusy.current) return;
+    planningBusy.current = true;
     const planId = crypto.randomUUID();
     activeId.current = planId;
     setError(''); setPlanning(true); setPetState('thinking');
-    try { const next = await command<WebApproval>('plan_online_request', { prompt, planId, webOnly }); setApproval(next); setPetState('approval'); }
+    try { const next = taskId ? await command<WebApproval>('plan_task_online', { taskId, planId, webOnly }) : await command<WebApproval>('plan_online_request', { prompt, planId, webOnly }); setOnlineTaskId(taskId || ''); setApproval(next); setPetState('approval'); }
     catch (error) { const message = errorMessage(error); if (message !== 'Task cancelled.') setError(message); setPetState('idle'); }
-    finally { setPlanning(false); if (activeId.current === planId) activeId.current = ''; }
+    finally { planningBusy.current = false; setPlanning(false); if (activeId.current === planId) activeId.current = ''; }
   }, []);
   // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
     // A spoken question arrives as the recording winds down, so it isn't held back by it.
-    if (!prompt.trim() || busy || planning || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
+    if (!prompt.trim() || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
@@ -271,7 +306,7 @@ export default function App() {
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
-    let streamedText = '', answerSoFar = '', liveId = '', goOnline = false, askAction = false;
+    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
@@ -292,16 +327,18 @@ export default function App() {
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);
       setLive(null);
-      if (result.handoff === 'online') { goOnline = true; await speechQueue.current?.cancel(); return; }
-      if (result.handoff === 'action' && result.action) { setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); return; }
+      setTurns(previous => mergeTurns(previous, [result]));
+      if (result.handoff === 'online') { goOnline = result.id; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
+      if (result.handoff === 'action' && result.action) { setActionError(''); setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       setTurns(previous => mergeTurns(previous, [result]));
       if (result.state === 'completed') setAnnouncement(`${data?.settings.assistantName || 'Buntini'}: ${result.answer.slice(0, 400)}`);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
-        if (!streamedText && result.answer) speechQueue.current?.append(result.answer, speechToken);
-        speechQueue.current?.finish(speechToken);
+        speechQueue.current?.completeAnswer(speechToken, result.answer, streamedText);
       } else await speechQueue.current?.cancel();
-      await refresh();
+      // Refreshing diagnostics cannot turn an authoritative completed task into
+      // an apparent execution failure (which could prompt a duplicate retry).
+      await refresh().catch(error => setError(errorMessage(error)));
     } catch (e) {
       const message = errorMessage(e);
       setError(message); react('sad');
@@ -309,10 +346,57 @@ export default function App() {
     } finally {
       taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle');
       // The model wants to look this up online: show the approval sheet for the same message.
-      if (goOnline) void planOnline(prompt.trim(), false);
+      if (goOnline) void planOnline(prompt.trim(), false, goOnline);
       if (askAction) setPetState('approval');
     }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
+  function cancelOnlineApproval() {
+    if (approvalBusy.current) return;
+    const taskId = onlineTaskId;
+    setApproval(null); setOnlineTaskId(''); setPetState('idle');
+    if (taskId) void command('cancel_task', { taskId }).then(() => refresh()).catch(e => setError(errorMessage(e)));
+  }
+  async function continueSaved(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, original?: TaskRecord) {
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
+    taskBusy.current = true;
+    if (name === 'run_action') { actionBusy.current = true; setActing(true); }
+    setBusy(true); setError(''); setActionError(''); setPage('home'); setPetState('working');
+    await speechQueue.current?.cancel().catch(() => {});
+    let next: TaskRecord | undefined;
+    try {
+      const taskId = original?.id || args.taskId || args.id;
+      if (typeof taskId === 'string') await openThread({ taskId });
+      next = await continueTask(name, args, event => {
+        if (event.taskId) activeId.current = event.taskId;
+        if (event.type === 'state' || event.type === 'tool') setActivity(event.tool ? `Working on ${event.tool.replaceAll('_', ' ')}` : 'Continuing your task');
+        if (event.type === 'notice' && event.text) setNotice(event.text);
+      });
+      setTurns(previous => mergeTurns(previous, [next!]));
+      setProposal(next.handoff === 'action' && next.action ? next.action : null);
+      if (next.state === 'completed') { react('happy'); if (data?.settings.speakResponses) void speak(next.answer); }
+      await refresh().catch(e => setError(errorMessage(e)));
+    } catch (e) {
+      if (name === 'run_action') setActionError(errorMessage(e)); else setError(errorMessage(e));
+      await refresh().catch(() => {});
+    } finally {
+      taskBusy.current = false; actionBusy.current = false; setActing(false); setBusy(false); setActivity(''); activeId.current = '';
+      setPetState(next?.handoff === 'action' || (name === 'run_action' && !next) ? 'approval' : 'idle');
+      if (next?.handoff === 'online') void planOnline(next.prompt, false, next.id);
+    }
+  }
+  async function reviewTask(task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) {
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
+    try {
+      await openThread({ taskId: task.id });
+      if (task.state === 'waiting_action' && task.action) { setActionError(''); setProposal(task.action); setPetState('approval'); }
+      else if (task.state === 'waiting_online') void planOnline(task.prompt, false, task.id);
+      else void continueSaved('resume_task', { taskId: task.id, guidance: guidance || null, fieldUpdates: fields?.length ? fields : null }, task);
+    } catch (e) { setError(errorMessage(e)); }
+  }
+  async function stopSaved(task: TaskRecord) {
+    await command('cancel_task', { taskId: task.id });
+    await refresh();
+  }
   // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
   const submitRef = useRef(submit);
   submitRef.current = submit;
@@ -329,7 +413,7 @@ export default function App() {
     await Promise.all([stopTask, speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))]);
   }
   async function startVoice() {
-    if (busy || transcribing || recordHeld.current || voiceStoppingRef.current) return;
+    if (taskBusy.current || planningBusy.current || actionBusy.current || approvalBusy.current || transcribing || recordHeld.current || voiceStoppingRef.current) return;
     // Recording checks that voice is available: Apple speech, or a local Whisper model.
     setHandsFreeMode(false);
     playbackOverride.current = null;
@@ -381,23 +465,62 @@ export default function App() {
   }
   const briefing = useRef(false);
   async function brief() {
-    if (briefing.current) return;
+    if (briefing.current || switchingThreadRef.current) return;
     briefing.current = true;
-    try { const turn = await command<TaskRecord>('morning_brief'); setTurns(previous => mergeTurns(previous, [turn])); react('happy'); if (data?.settings.speakResponses) void speak(turn.answer); void refresh(); }
+    try { const turn = await command<TaskRecord>('morning_brief'); setTurns(previous => mergeTurns(previous, [turn])); react('happy'); if (data?.settings.speakResponses) void speak(turn.answer); void refresh().catch(error => setError(errorMessage(error))); }
     catch (e) { setError(errorMessage(e)); }
     finally { briefing.current = false; }
   }
   // Once a day, the first time the bubble opens.
   useEffect(() => { if (expanded && data?.briefDue && !busy) void brief(); }, [expanded, data?.briefDue]);
   async function newTopic() {
-    try { setBoundary(await command<string>('new_topic')); setFocusId(''); setNotice('Fresh start. I won’t bring up what we talked about before.'); }
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
+    switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;
+    try { showConversation(await command<ConversationPage>('new_topic')); setInput(''); setProposal(null); setApproval(null); setNotice('New conversation started. Earlier conversations are in History.'); await refresh(); }
+    catch (e) { setError(errorMessage(e)); }
+    finally { switchingThreadRef.current = false; setSwitchingThread(false); }
+  }
+  function showConversation(page: ConversationPage) {
+    selectionVersion.current++;
+    conversationIdRef.current = page.conversation.id; setConversationId(page.conversation.id);
+    setTurns(mergeTurns([], page.turns)); setTurnCursor(page.nextCursor); setLive(null); setFocusId(''); setError(''); setPage('home');
+  }
+  async function openThread(target: { conversationId?: string; taskId?: string }) {
+    if (switchingThreadRef.current) throw new Error('A conversation is still opening.');
+    switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;
+    try {
+      const page = await command<ConversationPage>('open_conversation', target);
+      // A pending task can be older than the newest page. Load through its original
+      // position so review/continue never displays it in another conversation.
+      const taskId = target.taskId && page.turns.some(turn => turn.action?.id === target.taskId) ? page.turns.find(turn => turn.action?.id === target.taskId)!.id : target.taskId;
+      while (taskId && !page.turns.some(turn => turn.id === taskId || turn.action?.id === taskId) && page.nextCursor) {
+        const older = await command<ConversationPage>('conversation', { conversationId: page.conversation.id, cursor: page.nextCursor, limit: 100 });
+        page.turns.push(...older.turns); page.nextCursor = older.nextCursor;
+      }
+      showConversation(page); setFocusId(page.turns.find(turn => turn.id === taskId || turn.action?.id === taskId)?.id || '');
+      await speechQueue.current?.cancel().catch(() => {});
+    } finally { switchingThreadRef.current = false; setSwitchingThread(false); }
+  }
+  async function chooseConversation(id: string) {
+    if (taskBusy.current || planningBusy.current || actionBusy.current) return;
+    try { await openThread({ conversationId: id }); setProposal(null); setApproval(null); }
     catch (e) { setError(errorMessage(e)); }
   }
   async function loadEarlier() {
-    const oldest = turns[0];
-    if (!oldest) return;
-    try { const older = await command<TaskRecord[]>('conversation', { before: oldest.createdAt, limit: 30 }); setTurns(previous => mergeTurns(previous, older)); setCanLoadEarlier(older.length === 30); }
+    if (!turnCursor) return;
+    const id = conversationIdRef.current;
+    try {
+      const older = await command<ConversationPage>('conversation', { conversationId: id, cursor: turnCursor, limit: 100 });
+      if (conversationIdRef.current === id) { setTurns(previous => mergeTurns(previous, older.turns)); setTurnCursor(older.nextCursor); }
+    }
     catch (e) { setError(errorMessage(e)); }
+  }
+  async function loadConversations() {
+    if (!listCursor) return;
+    try {
+      const older = await command<ConversationList>('conversations', { cursor: listCursor, limit: 30 });
+      setSavedConversations(previous => [...new Map([...previous, ...older.items].map(item => [item.id, item])).values()]); setListCursor(older.nextCursor);
+    } catch (e) { setError(errorMessage(e)); }
   }
   async function addFolder() {
     try {
@@ -411,7 +534,7 @@ export default function App() {
   }
   const currentMode = modes.find(item => item.id === mode)!;
   const modelReady = data?.diagnostics.modelReady;
-  const pending = busy || planning || recording || transcribing || voiceStopping;
+  const pending = busy || planning || recording || transcribing || voiceStopping || acting || approving || switchingThread;
   const assistantName = data?.settings.assistantName || 'Buntini';
   const companionScale = data?.settings.companionScale || 1;
 
@@ -432,10 +555,10 @@ export default function App() {
         {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
             {!chatting ? <div className="overlay-welcome"><span>{greeting(new Date(), data?.settings.userName)} What’s on your mind?</span><div><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void brief()}><Sun size={12} /> My day</button></div></div> : <>
-              <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={busy || !!boundary && turns.every(turn => turn.createdAt <= boundary) && !live} title="Start fresh: earlier messages stay here but aren’t sent to the model"><Plus size={11} /> New topic</button></div>
-              <Conversation turns={turns} live={live} boundary={boundary} busy={busy} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={canLoadEarlier} onLoadEarlier={loadEarlier}
+              <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={pending} title="Start a separate conversation; this one stays in History"><Plus size={11} /> New topic</button></div>
+              <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
-                onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
+                progress={progress} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
             </>}
           </div>
           <div className="composer-area">
@@ -454,26 +577,36 @@ export default function App() {
         </>}
 
         {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>History</h2></div>
-          <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { setTurns(previous => mergeTurns(previous, [result])); setFocusId(result.id); setPage('home'); }} onError={setError} />
+          <BackgroundWork status={background} onCancel={id => void safeAction(() => command('cancel_timer', { id }))} />
+          <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">PAST CONVERSATIONS</div>
-          {data?.tasks.length ? <><div className="history-list">{data.tasks.map(item => <button key={item.id} className="history-item" onClick={() => { setTurns(previous => mergeTurns(previous, [item])); setFocusId(item.id); setError(''); setPage('home'); }}><span className="history-icon">{item.sources.length ? <Globe2 size={16} /> : <Clock3 size={16} />}</span><span><strong>{item.prompt || 'Morning brief'}</strong><small>{relativeTime(item.createdAt)} · {item.state}</small></span><ChevronRight size={14} /></button>)}</div><button className="text-button danger clear-history" onClick={() => void safeAction(async () => { await command('clear_history'); setTurns([]); setLive(null); setCanLoadEarlier(false); }, 'Task history cleared.')}><Trash2 size={13} /> Clear task history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
+          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}<button className="text-button danger clear-history" disabled={pending} onClick={() => void safeAction(async () => { await command('clear_history'); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}><Trash2 size={13} /> Clear conversation history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
           <div className="history-privacy"><ShieldCheck size={13} /> Stored in SQLite. Never synced to a cloud.</div>
         </div>}
 
         {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
           const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh();
-        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setBoundary(null); setCanLoadEarlier(false); setPage('home'); await refresh(); }} />} />}
+        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
-        {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={() => { setApproval(null); setPetState('idle'); }} onWebInstead={() => { const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true); }} onAllow={async () => { setApproving(true); try { const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id }); setApproval(null); await submit(allowed.prompt, 'web', allowed.id); } catch (error) { setError(errorMessage(error)); setApproval(null); setPetState('idle'); } finally { setApproving(false); } }} />}
-        {proposal && <ActionSheet proposal={proposal} running={acting} onCancel={() => { void command('cancel_action', { id: proposal.id }).catch(() => {}); setProposal(null); setPetState('idle'); }} onAllow={async args => {
-          setActing(true); setError('');
-          try { const done = await command<TaskRecord>('run_action', { id: proposal.id, args }); setTurns(previous => mergeTurns(previous, [done])); setProposal(null); react('happy'); if (data?.settings.speakResponses) void speak(done.answer); }
-          catch (failure) { setError(errorMessage(failure)); setProposal(null); react('sad'); }
-          finally { setActing(false); setPetState('idle'); }
+        {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onAllow={async () => {
+          if (approvalBusy.current) return;
+          approvalBusy.current = true; setApproving(true);
+          try {
+            const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id });
+            setApproval(null);
+            if (onlineTaskId) { const taskId = onlineTaskId; setOnlineTaskId(''); await continueSaved('continue_task_online', { taskId, approvalId: allowed.id }); }
+            else await submit(allowed.prompt, 'web', allowed.id);
+          } catch (e) { setError(errorMessage(e)); setApproval(null); setPetState('idle'); }
+          finally { approvalBusy.current = false; setApproving(false); }
         }} />}
+        {proposal && <ActionSheet key={proposal.id} proposal={proposal} running={acting} error={actionError} onCancel={() => {
+          if (actionBusy.current) return;
+          void command('cancel_action', { id: proposal.id }).then(() => refresh()).catch(e => setError(errorMessage(e)));
+          setProposal(null); setActionError(''); setPetState('idle');
+        }} onAllow={args => void continueSaved('run_action', { id: proposal.id, args })} />}
         <div className="sr-only" aria-live="polite">{announcement}</div>
         {(error || notice) && <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div>}
         <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · Local-first desktop companion. Shortcut: ⌘ ⇧ Space. No unrestricted shell tools.')}><CircleHelp size={12} /></button></footer>

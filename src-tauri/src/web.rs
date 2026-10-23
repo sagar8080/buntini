@@ -134,7 +134,8 @@ pub fn set_credential(provider: &str, key: &str) -> Result<(), String> {
         return Err("Invalid API key.".into());
     }
     // An unmigrated legacy key must not reappear after the user replaces or clears it.
-    let _ = security_framework::passwords::delete_generic_password(LEGACY_KEYCHAIN_SERVICE, provider);
+    let _ =
+        security_framework::passwords::delete_generic_password(LEGACY_KEYCHAIN_SERVICE, provider);
     if key.trim().is_empty() {
         let _ = security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, provider);
         return Ok(());
@@ -255,7 +256,12 @@ mod tests {
     use crate::store::Store;
     #[tokio::test]
     async fn transient_transport_fixture_bills_each_attempt_and_budget_stops_retry() {
-        let limits = |budget_usd| crate::budget::Limits { daily: 10, monthly: 10, budget_usd, unit_cost: 0.01 };
+        let limits = |budget_usd| crate::budget::Limits {
+            daily: 10,
+            monthly: 10,
+            budget_usd,
+            unit_cost: 0.01,
+        };
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();
         let calls = std::cell::Cell::new(0);
         let result = with_retry(

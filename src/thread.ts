@@ -1,5 +1,5 @@
 // Pure helpers for the conversation thread: ordering, the "New topic" divider and the greeting.
-import type { TaskRecord } from './types';
+import type { ConversationPage, TaskRecord } from './types';
 
 export type ThreadItem = { kind: 'turn'; turn: TaskRecord } | { kind: 'topic'; at: string };
 
@@ -7,7 +7,12 @@ export type ThreadItem = { kind: 'turn'; turn: TaskRecord } | { kind: 'topic'; a
 export function mergeTurns(thread: TaskRecord[], incoming: TaskRecord[]): TaskRecord[] {
   const byId = new Map(thread.map(turn => [turn.id, turn]));
   for (const turn of incoming) if (turn.id) byId.set(turn.id, turn);
-  return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+}
+
+/** Switching threads replaces the visible turns. Refreshing one retains loaded older pages. */
+export function mergeConversationTurns(currentId: string, turns: TaskRecord[], page: ConversationPage): TaskRecord[] {
+  return mergeTurns(currentId === page.conversation.id ? turns : [], page.turns);
 }
 
 /** The thread with a divider where the latest topic began; turns before it are not sent to the model. */

@@ -38,8 +38,9 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
   </div>;
   return <>
     <section className="settings-section">
-      <Service icon={<Globe2 size={18} />} name="Web search" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
-        <div className="chip-row" role="radiogroup" aria-label="Search provider">{(['brave', 'tavily'] as const).map(id => <button type="button" key={id} role="radio" aria-checked={draft.searchProvider === id} className={draft.searchProvider === id ? 'active' : ''} onClick={() => { update('searchProvider', id); setSearchKey(''); }}>{id === 'brave' ? 'Brave Search' : 'Tavily'}</button>)}</div>
+      <Service icon={<Globe2 size={18} />} name="Search API fallback" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
+        <div className="chip-row" role="radiogroup" aria-label="Fallback search provider">{(['brave', 'tavily'] as const).map(id => <button type="button" key={id} role="radio" aria-checked={draft.searchProvider === id} className={draft.searchProvider === id ? 'active' : ''} onClick={() => { update('searchProvider', id); setSearchKey(''); }}>{id === 'brave' ? 'Brave Search' : 'Tavily'}</button>)}</div>
+        <p className="field-help">Chat research searches in the browser first. This optional key is used when browser research is insufficient, and for saved searches.</p>
         <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved · paste to replace' : 'API key'} value={searchKey} onChange={setSearchKey} />
         {actions(draft.searchProvider, !!searchKey.trim(), searchKey.trim(), () => setSearchKey(''), searchSaved)}
       </Service>

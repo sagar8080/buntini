@@ -1,0 +1,130 @@
+{
+  "isolation": "fresh_nonpersistent_store_required",
+  "kind": "public_browser_smoke",
+  "observedAt": "2026-10-22T22:58:14.910208+00:00",
+  "passed": true,
+  "query": "Rust programming language official documentation",
+  "read": {
+    "page": {
+      "retrievedAt": "2026-10-22T22:58:14.910191+00:00",
+      "text": "The Rust Programming Language\nby Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the Rust Community\nThis version of the text assumes you’re using Rust 1.97.0 (released 2026-07-09) or later with\nedition = \"2024\"\nin the\nCargo.toml\nfile of all projects to configure them to use Rust 2024 Edition idioms. See the\n“Installation” section of Chapter 1\nfor instructions on installing or updating Rust, and see\nAppendix E\nfor information on editions.\nThe HTML format is available online at\nhttps://doc.rust-lang.org/stable/book/\nand offline with installations of Rust made with\nrustup\n; run\nrustup doc --book\nto open.\nSeveral community\ntranslations\nare also available.\nThis text is available in\npaperback and ebook format from No Starch Press\n.\n🚨 Want a more interactive learning experience? Try out a different version of the Rust Book, featuring: quizzes, highlighting, visualizations, and more\n:\nhttps://rust-book.cs.brown.edu",
+      "title": "The Rust Programming Language - The Rust Programming Language",
+      "truncated": false,
+      "url": "https://doc.rust-lang.org/book/"
+    },
+    "status": "succeeded"
+  },
+  "search": {
+    "result": {
+      "query": "Rust programming language official documentation",
+      "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+      "searchUrl": "https://www.bing.com/search?q=Rust+programming+language+official+documentation",
+      "sources": [
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …",
+          "title": "Rust - Explore, Build and Survive",
+          "url": "https://rust.facepunch.com/"
+        },
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "Rust is blazingly fast and memory-efficient: with no runtime or garbage collector, it can power performance-critical services, run on …",
+          "title": "Rust Programming Language",
+          "url": "https://rust-lang.org/"
+        },
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife, other inhabitants, the environment, and other …",
+          "title": "Rust on Steam",
+          "url": "https://store.steampowered.com/app/252490/Rust/"
+        },
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "To start using Rust, download the installer, then run the program and follow the onscreen instructions. You may need to install the Visual …",
+          "title": "Install Rust - Rust Programming Language",
+          "url": "https://rust-lang.org/tools/install/"
+        },
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …",
+          "title": "Rust - Play - Rust",
+          "url": "https://rust.facepunch.com/play"
+        },
+        {
+          "retrievedAt": "2026-10-22T22:58:14.383708+00:00",
+          "snippet": "Rust supports multiple programming paradigms. It was influenced by ideas from functional programming, including immutability, higher …",
+          "title": "Rust (programming language ) - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+        }
+      ],
+      "truncated": true
+    },
+    "status": "succeeded"
+  },
+  "searchHost": "www.bing.com",
+  "searchSnapshot": {
+    "authentication": "not_verified",
+    "intentId": "research-search",
+    "links": [
+      {
+        "description": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …",
+        "title": "Rust - Explore, Build and Survive",
+        "url": "https://www.bing.com/ck/a?!&&p=34da417ff025dcc6e68d558fa5057a2252b40f18a974cddd170a7a8bcfc5e1e2JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LmZhY2VwdW5jaC5jb20v&ntb=1"
+      },
+      {
+        "description": "Rust is blazingly fast and memory-efficient: with no runtime or garbage collector, it can power performance-critical services, run on …",
+        "title": "Rust Programming Language",
+        "url": "https://www.bing.com/ck/a?!&&p=0bd7ff94c089bc791fb1bff9ffb9be68a274dffac406a85b9e7b90cb54430fbfJmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LWxhbmcub3JnLw&ntb=1"
+      },
+      {
+        "description": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife, other inhabitants, the environment, and other …",
+        "title": "Rust on Steam",
+        "url": "https://www.bing.com/ck/a?!&&p=c3fc320d4157761153aceb824a4d382405d85cd1a40898a74988d0a71ab9abd2JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9zdG9yZS5zdGVhbXBvd2VyZWQuY29tL2FwcC8yNTI0OTAvUnVzdC8&ntb=1"
+      },
+      {
+        "description": "To start using Rust, download the installer, then run the program and follow the onscreen instructions. You may need to install the Visual …",
+        "title": "Install Rust - Rust Programming Language",
+        "url": "https://www.bing.com/ck/a?!&&p=164f2902612fe3eced8edf81207f2369cd92f9db451c307bfe142a4646480c9cJmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LWxhbmcub3JnL3Rvb2xzL2luc3RhbGwv&ntb=1"
+      },
+      {
+        "description": "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …",
+        "title": "Rust - Play - Rust",
+        "url": "https://www.bing.com/ck/a?!&&p=0d4715da5ff550f223dda94ce07a2741ddc60c114507a3d08995fb350909953aJmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LmZhY2VwdW5jaC5jb20vcGxheQ&ntb=1"
+      },
+      {
+        "description": "Rust supports multiple programming paradigms. It was influenced by ideas from functional programming, including immutability, higher …",
+        "title": "Rust (programming language ) - Wikipedia",
+        "url": "https://www.bing.com/ck/a?!&&p=db8f2456a3db212a2aa21f4e6eadce788fc4750cfa464c4015d4a64eb5b25d62JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvUnVzdF8ocHJvZ3JhbW1pbmdfbGFuZ3VhZ2Up&ntb=1"
+      },
+      {
+        "description": "May 7, 2026 · Rust is about resource management, base-building, and combat. This action game features an extensive crafting system, …",
+        "title": "Rust - Download",
+        "url": "https://www.bing.com/ck/a?!&&p=d102687d0c7f920bea4f30a269ba227755be757951e5ba0c26e2c2ec1443da74JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LmVuLnNvZnRvbmljLmNvbS8&ntb=1"
+      },
+      {
+        "description": "Rust is a 2018 multiplayer survival video game developed by Facepunch Studios. It was first released in early access in December 2013 …",
+        "title": "Rust (video game ) - Wikipedia",
+        "url": "https://www.bing.com/ck/a?!&&p=38827b2e84f79d2de528ba2a2cf4fb86dd16a1268aaa05761551f47842156a93JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvUnVzdF8odmlkZW9fZ2FtZSk&ntb=1"
+      },
+      {
+        "description": "Everything you need to know about Rust in one place. Everyone is welcome to contribute and share their knowledge!",
+        "title": "Rust Wiki | Fandom",
+        "url": "https://www.bing.com/ck/a?!&&p=f02c5c2cd62810c93d85f84cbd876fd91ac3576363f43b51a068acc420388b76JmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly9ydXN0LmZhbmRvbS5jb20vd2lraS9SdXN0X1dpa2k&ntb=1"
+      },
+      {
+        "description": "Rust is a popular programming language used to build everything from web servers to game engines. Rust is known for being very fast, …",
+        "title": "Rust Tutorial - W3Schools",
+        "url": "https://www.bing.com/ck/a?!&&p=51dbd6582e60932c5af9ab40a23cfdb3bff2367e8fd7e0ce68cb36ca606c96ddJmltdHM9MTc5MjYyNzIwMA&ptn=3&ver=2&hsh=4&fclid=3d53f527-988f-6149-0c48-e2dd9965608f&u=a1aHR0cHM6Ly93d3cudzNzY2hvb2xzLmNvbS9ydXN0L2luZGV4LnBocA&ntb=1"
+      }
+    ],
+    "linksTruncated": false,
+    "profileScope": "https://www.bing.com",
+    "sourceKind": "untrusted_web_page",
+    "text": "About 171,000 results\nfacepunch.com\nhttps://\nrust\n.facepunch.com\nRust\n- Explore, Build and Survive\nThe only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …\nrust-lang.org\nhttps://\nrust\n-lang.org\nRust\nProgramming Language\nRust is blazingly fast and memory-efficient: with no runtime or garbage collector, it can power performance-critical services, run on …\nsteampowered.com\nhttps://store.steampowered.com › app\nRust\non Steam\nThe only aim in Rust is to survive. Everything wants you to die - the island’s wildlife, other inhabitants, the environment, and other …\nrust-lang.org\nhttps://\nrust\n-lang.org › tools › install\nInstall\nRust\n-\nRust\nProgramming Language\nTo start using Rust, download the installer, then run the program and follow the onscreen instructions. You may need to install the Visual …\nfacepunch.com\nhttps://\nrust\n.facepunch.com › play\nRust\n- Play -\nRust\nThe only aim in Rust is to survive. Everything wants you to die - the island’s wildlife and other inhabitants, the environment, other …\nwikipedia.org\nhttps://en.wikipedia.org › wiki ›\nRust_(programming_language\n)\nRust (programming language\n) - Wikipedia\nRust supports multiple programming paradigms. It was influenced by ideas from functional programming, including immutability, higher …\nsoftonic.com\nhttps://\nrust\n.en.softonic.com\nRust\n-\nDownload\nMay 7, 2026\n· Rust is about resource management, base-building, and combat. This action game features an extensive crafting system, …\nwikipedia.org\nhttps://en.wikipedia.org › wiki ›\nRust_(video_game\n)\nRust (video game\n) - Wikipedia\nRust is a 2018 multiplayer survival video game developed by Facepunch Studios. It was first released in early access in December 2013 …\nfandom.com\nhttps://\nrust\n.fandom.com\nRust Wiki\n| Fandom\nEverything you need to know about Rust in one place. Everyone is welcome to contribute and share their knowledge!\nw3schools.com\nhttps://www.w3schools.com ›\nrust\n› index.php\nRust\nTutorial - W3Schools\nRust is a popular programming language used to build everything from web servers to game engines. Rust is known for being very fast, …\nSome results have been removed\n1\n2\n3",
+    "title": "Rust programming language official documentation - Search",
+    "truncated": false,
+    "url": "https://www.bing.com/search?q=Rust+programming+language+official+documentation",
+    "verification": "native_url_and_bounded_page_snapshot",
+    "websiteActionsPerformed": false
+  }
+}

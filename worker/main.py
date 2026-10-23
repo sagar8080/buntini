@@ -178,6 +178,10 @@ class MLXBackend:
         try:
             for response in stream:
                 check_cancel(cancel)
+                # MLX reports why its final segment was produced. Exhausting the
+                # caller's allowance is an incomplete answer, not a normal stop.
+                if getattr(response, "finish_reason", None) == "length":
+                    raise WorkerError("response_incomplete", "The local model ran out of room before finishing. Try a shorter request")
                 yield response.text
         finally:
             stream.close()

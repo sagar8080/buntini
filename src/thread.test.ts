@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { greeting, mergeTurns, threadItems } from './thread.ts';
-import type { TaskRecord } from './types';
+import { greeting, mergeTurns, mergeConversationTurns, threadItems } from './thread.ts';
+import type { ConversationPage, TaskRecord } from './types';
 
 const turn = (id: string, createdAt: string, answer = ''): TaskRecord => ({ id, prompt: id, answer, state: 'completed', createdAt, sources: [], files: [] });
 
@@ -30,4 +30,22 @@ test('greetings follow the time of day', () => {
   assert.equal(greeting(at(14)), 'Good afternoon.');
   assert.equal(greeting(at(19), '  '), 'Good evening.');
   assert.equal(greeting(at(2)), 'Up late.');
+});
+
+test('opening a saved conversation replaces the current thread and refresh keeps older pages', () => {
+  const page: ConversationPage = { conversation: { id: 'trip', title: 'Trip', createdAt: '', updatedAt: '', legacy: false, turnCount: 2 }, turns: [turn('trip-latest', '2026-10-21T12:00:00Z')], nextCursor: 'trip-latest' };
+  const switched = mergeConversationTurns('shopping', [turn('shopping-secret', '2026-10-21T13:00:00Z')], page);
+  assert.deepEqual(switched.map(turn => turn.id), ['trip-latest']);
+  const loaded = mergeTurns(switched, [turn('trip-older', '2026-10-21T11:00:00Z')]);
+  const refreshed = mergeConversationTurns('trip', loaded, { ...page, turns: [turn('trip-latest', '2026-10-21T12:00:00Z', 'Verified result')] });
+  assert.deepEqual(refreshed.map(turn => turn.id), ['trip-older', 'trip-latest']);
+  assert.equal(refreshed[1].answer, 'Verified result');
+  assert.deepEqual(mergeConversationTurns('trip', refreshed, { ...page, conversation: { ...page.conversation, id: 'new-topic' }, turns: [] }), []);
+});
+
+test('pagination sorts timestamp ties by stable task ID', () => {
+  const sameTime = '2026-10-21T12:00:00Z';
+  const latest = [turn('turn-003', sameTime), turn('turn-002', sameTime)];
+  const earlier = [turn('turn-001', sameTime), turn('turn-000', sameTime)];
+  assert.deepEqual(mergeTurns(latest, earlier).map(turn => turn.id), ['turn-000', 'turn-001', 'turn-002', 'turn-003']);
 });

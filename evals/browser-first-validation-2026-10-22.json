@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-22",
+  "scope": "Browser-first foreground research and task continuation",
+  "full_suite": {
+    "command": "./scripts/check.sh",
+    "passed": true,
+    "rust": 340,
+    "python": 71,
+    "frontend": 43,
+    "native_contract_assertions": 75
+  },
+  "final_rust_suite": {
+    "passed": true,
+    "rust": 341,
+    "ignored": 8
+  },
+  "live_browser": "browser-research-bing-lifecycle-2026-10-22.json",
+  "local_model": "apple-research-summary-controller-2026-10-22.json",
+  "api_fallback": "Controlled production-pipeline fixtures; no credentialed live API request tested",
+  "installed_executable_sha256": "0196e72ff993838b69ea69fb79bbf3209791126485479d3f25fd8ec6afcfa0e8",
+  "source_sha256": {
+    "src-tauri/src/controller.rs": "4c0c886e047ac623eadbaec7733018cb80c42367b4cc812c9e61daaccaa09d73",
+    "src-tauri/src/search_pipeline.rs": "7c34805387f404ccb83cfeddfc05df9f8c78e61760b02f287d247ef077d25caa",
+    "src-tauri/src/search_intent.rs": "0435d4a4449f2727847ac5663e4b3108d2db15781d95ee901694597f4cf5ddf1",
+    "src-tauri/src/browser_workspace.rs": "efb6329b8f437d99c9594fda75f453dd07fef5644ba7a478a91227d696fece4c",
+    "src-tauri/src/approvals.rs": "802df738d760483b697a7c4d6bcabb3d85ee3f13526c9d86b630b1670be4f4d7",
+    "src-tauri/src/task_contract.rs": "984f54e4a9b11e859a8631e7c749a0c7cda8c9a883226f067f02b4b58364b3c7",
+    "native/fm/main.swift": "77eec2c0c6a61d67f711b9f27cee3442b97ea4b7c6912b45fd25c11890a59103",
+    "worker/tools.json": "b3796f0381b68636ee7f08430f17364748ec079512d6e9c51e371b2521feee5b"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "scope": "Synthetic public-page evidence passed through the production research synthesis and citation/coverage gate; no personal apps or external search requests.",
+  "attempts": [
+    {
+      "answer": "",
+      "backend": "apple",
+      "error": "Research remains incomplete: The answer does not cite enough of the pages read.  The retrieved source pages are saved for review.",
+      "passed": false,
+      "researchReport": {
+        "answerVerified": false,
+        "attempts": [],
+        "evidenceReady": true,
+        "intent": {
+          "goal": "Search the web for the admission price and hours of the Fictional Museum",
+          "preferredDomains": [],
+          "purpose": "answer",
+          "query": "Fictional Museum admission hours",
+          "requirements": []
+        },
+        "limitations": []
+      },
+      "synthetic": true
+    },
+    {
+      "answer": "",
+      "backend": "apple",
+      "error": "Research remains incomplete: The retrieved sources do not yet answer all the research requirements. source number The retrieved source pages are saved for review.",
+      "passed": false,
+      "researchReport": {
+        "answerVerified": false,
+        "attempts": [
+          {
+            "detail": "The sources did not answer all research requirements.",
+            "route": "synthesis",
+            "status": "insufficient"
+          }
+        ],
+        "evidenceReady": true,
+        "intent": {
+          "goal": "Search the web for the admission price and hours of the Fictional Museum",
+          "preferredDomains": [],
+          "purpose": "answer",
+          "query": "Fictional Museum admission hours",
+          "requirements": []
+        },
+        "limitations": [
+          "source number"
+        ]
+      },
+      "synthetic": true
+    },
+    {
+      "answer": "The Fictional Museum charges $12 admission for adults. [1]\n\nThe Fictional Museum is open Tuesday through Sunday from 10 am to 5 pm. [1]",
+      "backend": "apple",
+      "error": null,
+      "passed": true,
+      "researchReport": {
+        "answerVerified": true,
+        "attempts": [],
+        "evidenceReady": true,
+        "intent": {
+          "goal": "Search the web for the admission price and hours of the Fictional Museum",
+          "preferredDomains": [],
+          "purpose": "answer",
+          "query": "Fictional Museum admission hours",
+          "requirements": []
+        },
+        "limitations": []
+      },
+      "synthetic": true
+    }
+  ],
+  "passed": true
+}

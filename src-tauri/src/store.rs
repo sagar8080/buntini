@@ -26,6 +26,9 @@ impl Store {
             .map_err(|e| format!("Cannot initialize local database: {e}"))?;
         // A prior interruption is recoverable and never silently shown as still running.
         let store = Self { db };
+        crate::workflows::initialize(&store.db)?;
+        crate::delivery::initialize(&store.db)?;
+        crate::chat_threads::initialize(&store)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -49,6 +52,7 @@ impl Store {
                 .map_err(|e| e.to_string())?;
         }
         store.migrate_search_usage()?;
+        store.recover_workflows()?;
         for mut task in store.tasks()? {
             if task.state == "running" {
                 task.state = "error".into();
@@ -69,11 +73,18 @@ impl Store {
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let stored = raw.as_ref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-        let old_schema = stored.as_ref().map(|value| value.get("assistantName").is_none()).unwrap_or(false);
+        let stored = raw
+            .as_ref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        let old_schema = stored
+            .as_ref()
+            .map(|value| value.get("assistantName").is_none())
+            .unwrap_or(false);
         // Saved before brains were selectable: keep a working local MLX setup, otherwise
         // start on Apple Intelligence like a fresh install.
-        let needs_backend = stored.as_ref().is_some_and(|value| value.get("modelBackend").is_none());
+        let needs_backend = stored
+            .as_ref()
+            .is_some_and(|value| value.get("modelBackend").is_none());
         let mut settings: Settings = raw
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
@@ -82,12 +93,26 @@ impl Store {
             settings.avatar = "cat".into();
         }
         if needs_backend {
-            settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) { "mlx" } else { "apple" }.into();
+            settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) {
+                "mlx"
+            } else {
+                "apple"
+            }
+            .into();
             if !old_schema {
                 self.db
-                    .execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)", [serde_json::to_string(&settings).map_err(|e| e.to_string())?])
+                    .execute(
+                        "INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)",
+                        [serde_json::to_string(&settings).map_err(|e| e.to_string())?],
+                    )
                     .map_err(|e| e.to_string())?;
-                self.audit("settings.migrated", &format!("Model choice set to {} for existing preferences", settings.model_backend))?;
+                self.audit(
+                    "settings.migrated",
+                    &format!(
+                        "Model choice set to {} for existing preferences",
+                        settings.model_backend
+                    ),
+                )?;
             }
         }
         if old_schema {
@@ -100,7 +125,10 @@ impl Store {
                     [serde_json::to_string(&settings).map_err(|e| e.to_string())?],
                 )
                 .map_err(|e| e.to_string())?;
-            self.audit("settings.migrated","Existing preferences preserved; new profile settings use their defaults")?;
+            self.audit(
+                "settings.migrated",
+                "Existing preferences preserved; new profile settings use their defaults",
+            )?;
         }
         Ok(settings)
     }
@@ -146,31 +174,72 @@ impl Store {
         if fact.chars().count() < 3 || fact.chars().count() > 300 {
             return Err("Memories are 3–300 characters.".into());
         }
-        let count: i64 = self.db.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let count: i64 = self
+            .db
+            .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
         if count >= 200 {
             return Err("Memory is full. Remove a few things in Settings → Privacy.".into());
         }
-        let added = self.db.execute("INSERT OR IGNORE INTO memories(fact,created_at) VALUES(?1,?2)", params![fact, now()]).map_err(|e| e.to_string())?;
+        let added = self
+            .db
+            .execute(
+                "INSERT OR IGNORE INTO memories(fact,created_at) VALUES(?1,?2)",
+                params![fact, now()],
+            )
+            .map_err(|e| e.to_string())?;
         Ok(added > 0)
     }
     pub fn memories(&self) -> Result<Vec<Memory>, String> {
-        let mut stmt = self.db.prepare("SELECT id,fact,created_at FROM memories ORDER BY id").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |r| Ok(Memory { id: r.get(0)?, fact: r.get(1)?, created_at: r.get(2)? })).map_err(|e| e.to_string())?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT id,fact,created_at FROM memories ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Memory {
+                    id: r.get(0)?,
+                    fact: r.get(1)?,
+                    created_at: r.get(2)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     }
     pub fn forget(&self, id: i64) -> Result<(), String> {
-        self.db.execute("DELETE FROM memories WHERE id=?1", [id]).map(|_| ()).map_err(|e| e.to_string())
+        self.db
+            .execute("DELETE FROM memories WHERE id=?1", [id])
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn preference(&self, key: &str) -> Result<Option<String>, String> {
-        self.db.query_row("SELECT value FROM preferences WHERE key=?1", [key], |r| r.get(0)).optional().map_err(|e| e.to_string())
+        self.db
+            .query_row("SELECT value FROM preferences WHERE key=?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())
     }
     pub fn set_preference(&self, key: &str, value: &str) -> Result<(), String> {
-        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,?2)", [key, value]).map(|_| ()).map_err(|e| e.to_string())
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,?2)",
+                [key, value],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn delete_task(&self, id: &str) -> Result<(), String> {
-        self.db.execute("DELETE FROM tasks WHERE id=?1", [id]).map(|_| ()).map_err(|e| e.to_string())
+        self.db
+            .execute("DELETE FROM tasks WHERE id=?1", [id])
+            .map_err(|e| e.to_string())?;
+        self.db
+            .execute("DELETE FROM conversation_turns WHERE task_id=?1", [id])
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn save_task(&self, task: &TaskRecord) -> Result<(), String> {
+        self.active_conversation_id()?;
         self.db
             .execute(
                 "INSERT OR REPLACE INTO tasks VALUES(?1,?2,?3)",
@@ -186,7 +255,7 @@ impl Store {
     pub fn tasks(&self) -> Result<Vec<TaskRecord>, String> {
         let mut stmt = self
             .db
-            .prepare("SELECT data FROM tasks ORDER BY created_at DESC LIMIT 100")
+            .prepare("SELECT data FROM tasks WHERE id IN (SELECT id FROM tasks ORDER BY created_at DESC LIMIT 100) OR id IN (SELECT id FROM workflows WHERE state IN ('paused','waiting_action','waiting_online','unknown')) ORDER BY created_at DESC")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))
@@ -197,33 +266,46 @@ impl Store {
         })
         .collect()
     }
-    /// Turns created before `before`, newest first, for "Load earlier".
-    pub fn tasks_before(&self, before: &str, limit: u32) -> Result<Vec<TaskRecord>, String> {
-        let mut stmt = self.db.prepare("SELECT data FROM tasks WHERE created_at < ?1 ORDER BY created_at DESC LIMIT ?2").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![before, limit.min(100)], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
-        rows.map(|r| r.map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))).collect()
-    }
     pub fn conversation_start(&self) -> Result<Option<String>, String> {
-        self.db.query_row("SELECT value FROM preferences WHERE key='conversation-start'", [], |r| r.get(0)).optional().map_err(|e| e.to_string())
+        self.db
+            .query_row(
+                "SELECT value FROM preferences WHERE key='conversation-start'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())
     }
     /// Setup counts as done once finished, or for anyone who already chatted before
     /// onboarding existed. "Run setup again" stores an explicit "no".
     pub fn onboarded(&self) -> Result<bool, String> {
-        let state: Option<String> = self.db.query_row("SELECT value FROM preferences WHERE key='onboarding'", [], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+        let state: Option<String> = self
+            .db
+            .query_row(
+                "SELECT value FROM preferences WHERE key='onboarding'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
         match state.as_deref() {
             Some("pending") => Ok(false),
             Some(_) => Ok(true),
-            None => self.db.query_row("SELECT EXISTS(SELECT 1 FROM tasks)", [], |r| r.get(0)).map_err(|e| e.to_string()),
+            None => self
+                .db
+                .query_row("SELECT EXISTS(SELECT 1 FROM tasks)", [], |r| r.get(0))
+                .map_err(|e| e.to_string()),
         }
     }
     pub fn set_onboarded(&self, done: bool) -> Result<(), String> {
         let value = if done { now() } else { "pending".into() };
-        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('onboarding',?1)", [&value]).map(|_| ()).map_err(|e| e.to_string())
-    }
-    pub fn start_new_topic(&self) -> Result<String, String> {
-        let at = now();
-        self.db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES('conversation-start',?1)", [&at]).map_err(|e| e.to_string())?;
-        Ok(at)
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO preferences(key,value) VALUES('onboarding',?1)",
+                [&value],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn task(&self, id: &str) -> Result<Option<TaskRecord>, String> {
         let raw: Option<String> = self
@@ -329,41 +411,56 @@ impl Store {
     pub fn export_snapshot(&self) -> Result<serde_json::Value, String> {
         let rows = |sql: &str| -> Result<Vec<serde_json::Value>, String> {
             let mut stmt = self.db.prepare(sql).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
-            rows.map(|row| row.map_err(|e| e.to_string()).map(|raw| serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)))).collect()
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.map(|row| {
+                row.map_err(|e| e.to_string())
+                    .map(|raw| serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)))
+            })
+            .collect()
         };
         Ok(serde_json::json!({
             "exportedAt": now(),
             "settings": self.settings()?,
             "folders": self.roots()?,
             "conversation": rows("SELECT data FROM tasks ORDER BY created_at")?,
+            "conversations": rows("SELECT json_object('id',id,'title',title,'createdAt',created_at,'updatedAt',updated_at,'legacy',json(CASE WHEN legacy THEN 'true' ELSE 'false' END)) FROM chat_threads ORDER BY created_at,id")?,
+            "conversationMembership": rows("SELECT json_object('taskId',task_id,'conversationId',conversation_id) FROM conversation_turns ORDER BY conversation_id,task_id")?,
+            "activeConversationId": self.preference("active-conversation")?,
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
             "memories": self.memories()?,
+            "workflows": self.workflows()?,
+            "timers": rows("SELECT data FROM timers")?,
+            "monitorRuns": rows("SELECT data FROM monitor_runs")?,
+            "controlIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'objectId',object_id) FROM control_intents")?,
+            "monitorIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'monitorId',monitor_id) FROM monitor_intents")?,
             "activityLog": self.audit_entries()?,
         }))
     }
     /// "Delete everything": every table back to empty, as on a fresh install.
     pub fn erase_everything(&self) -> Result<(), String> {
-        self.db
+        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        tx
             .execute_batch(
-                "BEGIN;
-                 DELETE FROM tasks; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
+                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
                  DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
-                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
-                 COMMIT;",
+                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;",
             )
             .map_err(|e| e.to_string())?;
-        self.set_onboarded(false)
+        // The empty database already uses the new thread schema. A task saved before
+        // the next restart must not be mistaken for an unmigrated legacy turn.
+        self.set_preference("conversation-migration-v1", "1")?;
+        self.set_onboarded(false)?;
+        tx.commit().map_err(|e| e.to_string())
     }
     pub fn clear_history(&self) -> Result<(), String> {
-        self.db
-            .execute("DELETE FROM tasks", [])
-            .map_err(|e| e.to_string())?;
-        self.db
-            .execute("DELETE FROM file_index", [])
-            .map_err(|e| e.to_string())?;
-        self.audit("history.cleared", "Task history and file index cleared")
+        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start');").map_err(|e| e.to_string())?;
+        self.active_conversation_id()?;
+        self.audit("history.cleared", "Task history and file index cleared")?;
+        tx.commit().map_err(|e| e.to_string())
     }
     pub fn audit(&self, action: &str, detail: &str) -> Result<(), String> {
         self.db
@@ -405,11 +502,19 @@ impl Store {
     }
     /// Moves the old single monthly counter into the per-provider tables, once.
     fn migrate_search_usage(&self) -> Result<(), String> {
-        let migrated: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM usage_monthly)", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let migrated: bool = self
+            .db
+            .query_row("SELECT EXISTS(SELECT 1 FROM usage_monthly)", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| e.to_string())?;
         if migrated {
             return Ok(());
         }
-        let provider = self.settings().map(|settings| settings.search_provider).unwrap_or_else(|_| "brave".into());
+        let provider = self
+            .settings()
+            .map(|settings| settings.search_provider)
+            .unwrap_or_else(|_| "brave".into());
         self.db
             .execute(
                 "INSERT OR IGNORE INTO usage_monthly(month,provider,used,estimated_spend) SELECT month,?1,used,estimated_spend FROM search_usage",
@@ -422,27 +527,50 @@ impl Store {
         let now = chrono::Local::now();
         let (month, spend) = self
             .db
-            .query_row("SELECT used,estimated_spend FROM usage_monthly WHERE month=?1 AND provider=?2", params![now.format("%Y-%m").to_string(), provider], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, f64>(1)?)))
+            .query_row(
+                "SELECT used,estimated_spend FROM usage_monthly WHERE month=?1 AND provider=?2",
+                params![now.format("%Y-%m").to_string(), provider],
+                |r| Ok((r.get::<_, u32>(0)?, r.get::<_, f64>(1)?)),
+            )
             .optional()
             .map_err(|e| e.to_string())?
             .unwrap_or((0, 0.0));
         let today = self
             .db
-            .query_row("SELECT used FROM usage_daily WHERE day=?1 AND provider=?2", params![now.format("%Y-%m-%d").to_string(), provider], |r| r.get(0))
+            .query_row(
+                "SELECT used FROM usage_daily WHERE day=?1 AND provider=?2",
+                params![now.format("%Y-%m-%d").to_string(), provider],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|e| e.to_string())?
             .unwrap_or(0);
-        Ok(Usage { today, month, spend })
+        Ok(Usage {
+            today,
+            month,
+            spend,
+        })
     }
     /// Reserves one request for `provider` before it is sent: failed or cancelled requests
     /// may still cost the provider. Checks today's count, this month's count and this
     /// month's estimated spend together, on local dates.
-    pub fn reserve(&self, provider: &str, limits: crate::budget::Limits) -> Result<Reservation, String> {
-        if !limits.unit_cost.is_finite() || limits.unit_cost < 0.0 || limits.budget_usd.is_nan() || limits.budget_usd < 0.0 {
+    pub fn reserve(
+        &self,
+        provider: &str,
+        limits: crate::budget::Limits,
+    ) -> Result<Reservation, String> {
+        if !limits.unit_cost.is_finite()
+            || limits.unit_cost < 0.0
+            || limits.budget_usd.is_nan()
+            || limits.budget_usd < 0.0
+        {
             return Err("Invalid search budget.".into());
         }
         let now = chrono::Local::now();
-        let (month, day) = (now.format("%Y-%m").to_string(), now.format("%Y-%m-%d").to_string());
+        let (month, day) = (
+            now.format("%Y-%m").to_string(),
+            now.format("%Y-%m-%d").to_string(),
+        );
         let transaction = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         let usage = self.usage(provider)?;
         if usage.today >= limits.daily {
@@ -464,12 +592,30 @@ impl Store {
             .execute("INSERT INTO usage_daily(day,provider,used) VALUES(?1,?2,1) ON CONFLICT(day,provider) DO UPDATE SET used=used+1", params![day, provider])
             .map_err(|e| e.to_string())?;
         let (month_used, spend) = (usage.month + 1, usage.spend + limits.unit_cost);
-        let ratio = (month_used as f64 / limits.monthly.max(1) as f64).max(if limits.budget_usd.is_finite() && limits.budget_usd > 0.0 { spend / limits.budget_usd } else { 0.0 });
+        let ratio = (month_used as f64 / limits.monthly.max(1) as f64).max(
+            if limits.budget_usd.is_finite() && limits.budget_usd > 0.0 {
+                spend / limits.budget_usd
+            } else {
+                0.0
+            },
+        );
         let key = format!("budget-warned-{month}-{provider}");
-        let warned: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM preferences WHERE key=?1)", [&key], |r| r.get(0)).map_err(|e| e.to_string())?;
-        let warning = (ratio >= 0.8 && !warned).then(|| crate::budget::warning(provider, month_used, limits, spend));
+        let warned: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM preferences WHERE key=?1)",
+                [&key],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let warning = (ratio >= 0.8 && !warned)
+            .then(|| crate::budget::warning(provider, month_used, limits, spend));
         if warning.is_some() {
-            transaction.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,'1')", [&key]).map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,'1')",
+                    [&key],
+                )
+                .map_err(|e| e.to_string())?;
         }
         transaction.commit().map_err(|e| e.to_string())?;
         Ok(Reservation { warning })
@@ -558,33 +704,60 @@ impl Store {
 mod tests {
     use super::*;
     fn limit(daily: u32, monthly: u32, budget_usd: f64, unit_cost: f64) -> crate::budget::Limits {
-        crate::budget::Limits { daily, monthly, budget_usd, unit_cost }
+        crate::budget::Limits {
+            daily,
+            monthly,
+            budget_usd,
+            unit_cost,
+        }
     }
     #[test]
     fn daily_monthly_and_spend_limits_are_enforced_per_provider() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         for _ in 0..3 {
-            s.reserve("tavily", limit(3, 100, f64::INFINITY, 0.0)).unwrap();
+            s.reserve("tavily", limit(3, 100, f64::INFINITY, 0.0))
+                .unwrap();
         }
-        assert!(s.reserve("tavily", limit(3, 100, f64::INFINITY, 0.0)).unwrap_err().contains("Today’s limit of 3"));
+        assert!(s
+            .reserve("tavily", limit(3, 100, f64::INFINITY, 0.0))
+            .unwrap_err()
+            .contains("Today’s limit of 3"));
         // eBay has its own counter, so it never uses up Tavily's allowance.
-        s.reserve("ebay", limit(3, 100, f64::INFINITY, 0.0)).unwrap();
-        assert_eq!(s.usage("tavily").unwrap(), Usage { today: 3, month: 3, spend: 0.0 });
+        s.reserve("ebay", limit(3, 100, f64::INFINITY, 0.0))
+            .unwrap();
+        assert_eq!(
+            s.usage("tavily").unwrap(),
+            Usage {
+                today: 3,
+                month: 3,
+                spend: 0.0
+            }
+        );
         assert_eq!(s.usage("ebay").unwrap().month, 1);
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
         s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap();
-        assert!(s.reserve("brave", limit(10, 10, 0.012, 0.005)).unwrap_err().contains("budget of $0.01"));
+        assert!(s
+            .reserve("brave", limit(10, 10, 0.012, 0.005))
+            .unwrap_err()
+            .contains("budget of $0.01"));
     }
     #[test]
     fn export_has_your_data_and_erase_starts_over() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         s.add_root("/tmp/docs").unwrap();
-        s.save_settings(&Settings { assistant_name: "Miso".into(), ..Settings::default() }).unwrap();
+        s.save_settings(&Settings {
+            assistant_name: "Miso".into(),
+            ..Settings::default()
+        })
+        .unwrap();
         s.set_onboarded(true).unwrap();
         let export = s.export_snapshot().unwrap();
         assert_eq!(export["settings"]["assistantName"], "Miso");
         assert_eq!(export["folders"][0], "/tmp/docs");
-        assert!(!export.to_string().to_lowercase().contains("apikey"), "keys never leave the Keychain");
+        assert!(
+            !export.to_string().to_lowercase().contains("apikey"),
+            "keys never leave the Keychain"
+        );
         s.erase_everything().unwrap();
         assert!(s.roots().unwrap().is_empty());
         assert_eq!(s.settings().unwrap().assistant_name, "Buntini");
@@ -594,7 +767,10 @@ mod tests {
     fn memories_are_kept_once_and_can_be_forgotten() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         assert!(s.remember("Sam is  vegetarian").unwrap());
-        assert!(!s.remember("Sam is vegetarian").unwrap(), "the same fact isn't stored twice");
+        assert!(
+            !s.remember("Sam is vegetarian").unwrap(),
+            "the same fact isn't stored twice"
+        );
         let saved = s.memories().unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].fact, "Sam is vegetarian");
@@ -614,40 +790,78 @@ mod tests {
     #[test]
     fn cloud_reservations_settle_to_reported_usage() {
         let s = Store::open(Path::new(":memory:")).unwrap();
-        let settings = Settings { cloud_budget_usd: 1.0, ..Settings::default() };
-        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap();
-        assert!(s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap_err().contains("OpenAI budget of $1.00"));
+        let settings = Settings {
+            cloud_budget_usd: 1.0,
+            ..Settings::default()
+        };
+        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6))
+            .unwrap();
+        assert!(s
+            .reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6))
+            .unwrap_err()
+            .contains("OpenAI budget of $1.00"));
         // The reply cost far less than the cautious estimate, which frees the rest of the cap.
         s.settle("cloud-openai", 0.6, 0.01).unwrap();
         assert!((s.usage("cloud-openai").unwrap().spend - 0.01).abs() < 1e-9);
-        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6)).unwrap();
-        assert_eq!(s.usage("openai").unwrap().month, 0, "cloud spending is kept apart from search counts");
+        s.reserve("cloud-openai", crate::budget::cloud_limits(&settings, 0.6))
+            .unwrap();
+        assert_eq!(
+            s.usage("openai").unwrap().month,
+            0,
+            "cloud spending is kept apart from search counts"
+        );
     }
     #[test]
     fn the_80_percent_warning_fires_once_a_month() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         let limits = limit(100, 10, f64::INFINITY, 0.0);
-        let warnings = (0..10).map(|_| s.reserve("tavily", limits).unwrap().warning).collect::<Vec<_>>();
+        let warnings = (0..10)
+            .map(|_| s.reserve("tavily", limits).unwrap().warning)
+            .collect::<Vec<_>>();
         assert!(warnings[..7].iter().all(Option::is_none));
-        assert_eq!(warnings[7].as_deref(), Some("Heads up: you’ve used 8 of this month’s 10 Tavily searches."));
+        assert_eq!(
+            warnings[7].as_deref(),
+            Some("Heads up: you’ve used 8 of this month’s 10 Tavily searches.")
+        );
         assert!(warnings[8..].iter().all(Option::is_none));
     }
     #[test]
     fn existing_settings_keep_a_working_local_model_and_others_get_apple() {
         let model = tempfile::tempdir().unwrap();
         std::fs::write(model.path().join("config.json"), "{}").unwrap();
-        for (model_path, expected) in [(model.path().to_string_lossy().into_owned(), "mlx"), ("/no/longer/here".to_string(), "apple")] {
+        for (model_path, expected) in [
+            (model.path().to_string_lossy().into_owned(), "mlx"),
+            ("/no/longer/here".to_string(), "apple"),
+        ] {
             let s = Store::open(Path::new(":memory:")).unwrap();
             let mut raw = serde_json::to_value(Settings::default()).unwrap();
             raw.as_object_mut().unwrap().remove("modelBackend");
             raw["modelPath"] = serde_json::json!(model_path);
-            s.db.execute("INSERT INTO preferences VALUES('settings',?1)", [raw.to_string()]).unwrap();
+            s.db.execute(
+                "INSERT INTO preferences VALUES('settings',?1)",
+                [raw.to_string()],
+            )
+            .unwrap();
             assert_eq!(s.settings().unwrap().model_backend, expected);
             // The choice is saved, so it never flips later.
-            let saved: String = s.db.query_row("SELECT value FROM preferences WHERE key='settings'", [], |r| r.get(0)).unwrap();
+            let saved: String =
+                s.db.query_row(
+                    "SELECT value FROM preferences WHERE key='settings'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
             assert!(saved.contains(&format!("\"modelBackend\":\"{expected}\"")));
         }
-        assert_eq!(Store::open(Path::new(":memory:")).unwrap().settings().unwrap().model_backend, "apple", "fresh installs start on Apple Intelligence");
+        assert_eq!(
+            Store::open(Path::new(":memory:"))
+                .unwrap()
+                .settings()
+                .unwrap()
+                .model_backend,
+            "apple",
+            "fresh installs start on Apple Intelligence"
+        );
     }
     #[test]
     fn the_old_monthly_counter_is_migrated_to_the_search_provider() {
@@ -656,10 +870,21 @@ mod tests {
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch("CREATE TABLE search_usage (month TEXT PRIMARY KEY, used INTEGER NOT NULL, estimated_spend REAL NOT NULL DEFAULT 0);").unwrap();
-            db.execute("INSERT INTO search_usage VALUES(?1, 42, 0.21)", [chrono::Local::now().format("%Y-%m").to_string()]).unwrap();
+            db.execute(
+                "INSERT INTO search_usage VALUES(?1, 42, 0.21)",
+                [chrono::Local::now().format("%Y-%m").to_string()],
+            )
+            .unwrap();
         }
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.usage("brave").unwrap(), Usage { today: 0, month: 42, spend: 0.21 });
+        assert_eq!(
+            s.usage("brave").unwrap(),
+            Usage {
+                today: 0,
+                month: 42,
+                spend: 0.21
+            }
+        );
     }
     #[test]
     fn quota_reservations_survive_reopen_and_cap_atomically() {
@@ -667,12 +892,17 @@ mod tests {
         let path = dir.path().join("db.sqlite");
         {
             let s = Store::open(&path).unwrap();
-            s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).unwrap();
-            assert!(s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).is_err());
+            s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0))
+                .unwrap();
+            assert!(s
+                .reserve("brave", limit(10, 1, f64::INFINITY, 0.0))
+                .is_err());
         }
         let s = Store::open(&path).unwrap();
         assert_eq!(s.usage("brave").unwrap().month, 1);
-        assert!(s.reserve("brave", limit(10, 1, f64::INFINITY, 0.0)).is_err());
+        assert!(s
+            .reserve("brave", limit(10, 1, f64::INFINITY, 0.0))
+            .is_err());
     }
     #[test]
     fn roots_are_data_and_revocation_erases_index() {
@@ -741,7 +971,10 @@ mod tests {
         )
         .unwrap();
         let settings = s.settings().unwrap();
-        assert_eq!(settings.avatar, "cat", "the retired nine-tailed fox becomes the cat");
+        assert_eq!(
+            settings.avatar, "cat",
+            "the retired nine-tailed fox becomes the cat"
+        );
         assert_eq!(settings.cat_coat, "ginger");
         assert_eq!(settings.pet_motion, "playful");
         let mut invalid = settings.clone();

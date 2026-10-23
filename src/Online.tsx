@@ -12,10 +12,10 @@ export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebIns
   const web = approval.tool === 'web_search';
   return <div className="approval-backdrop"><section className="approval-sheet" role="alertdialog" aria-modal="true" aria-labelledby="approval-title">
     <ShieldCheck size={23} /><h3 id="approval-title">{titles[approval.tool] || 'Send this request?'}</h3>
-    <p>{approval.summary}. {web ? 'Public result pages may also be retrieved for a sourced answer.' : 'Only these details are sent.'}</p>
+    <p>{approval.summary}. {web ? 'Your browser may use its existing cookies and signed-in accounts.' : 'Only these details are sent.'}</p>
     <dl className="approval-sends"><div><dt>Sent to</dt><dd>{approval.service} <span>{approval.host}</span></dd></div>{approval.sends.map(field => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>
     {approval.note && <p className="approval-note">{approval.note}</p>}
-    <small>{approval.usesKey ? `Uses your saved ${approval.service} key and counts toward your monthly request cap. ` : 'No account or key needed. '}Private files and conversation history stay on this Mac. This permission expires after one use.</small>
+    <small>{web ? 'Google opens in your existing or default browser. Reading requires browser access in Apps; sending browser content to a cloud model also requires Browser sharing. The selected API fallback uses your saved key and request allowance only if needed. ' : `${approval.usesKey ? `Uses your saved ${approval.service} key and counts toward your monthly request cap. ` : 'No account or key needed. '}Only the displayed request details are sent. `}This permission expires after one use.</small>
     <div>{!web && <button className="text-button" disabled={approving} onClick={onWebInstead}>Web search instead</button>}<button className="secondary-button" disabled={approving} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={approving} autoFocus onClick={onAllow}>{approving ? 'Starting…' : 'Allow once'}</button></div>
   </section></div>;
 }

@@ -12,9 +12,11 @@ mod native {
     /// macOS throws (and takes the app down) when a process that isn't inside an .app
     /// bundle asks for the notification center, as `tauri dev` builds do.
     fn bundled() -> bool {
-        std::env::current_exe().is_ok_and(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
+        std::env::current_exe()
+            .is_ok_and(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
     }
-    const UNBUNDLED: &str = "Desktop notifications work in the installed app, not in a development build.";
+    const UNBUNDLED: &str =
+        "Desktop notifications work in the installed app, not in a development build.";
 
     pub async fn request() -> Result<bool, String> {
         if !bundled() {
@@ -176,7 +178,7 @@ fn with_monitor_gate<T>(
 async fn finish_delivery(
     state: &AppState,
     pending: tokio::sync::oneshot::Receiver<Result<(), String>>,
-) {
+) -> Result<(), String> {
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
         .await
         .map_err(|_| "Notification delivery timed out.".to_string())
@@ -189,10 +191,12 @@ async fn finish_delivery(
             "notification.failed"
         },
         result
+            .as_ref()
             .err()
-            .as_deref()
-            .unwrap_or("Meaningful monitor update delivered"),
+            .map(String::as_str)
+            .unwrap_or("macOS accepted the notification request"),
     );
+    result
 }
 
 pub(crate) async fn dispatch_monitor(
@@ -205,30 +209,66 @@ pub(crate) async fn dispatch_monitor(
 ) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     let state = app.state::<AppState>();
-    let pending = with_monitor_gate(&state, monitor, token, |store| {
-        let _ = app.emit(event, payload);
-        #[cfg(target_os = "macos")]
-        return notification.and_then(|(title, body)| {
-            store
-                .settings()
-                .ok()
-                .filter(|settings| settings.notifications_enabled)
-                .map(|_| {
-                    native::enqueue(
-                        &title.chars().take(100).collect::<String>(),
-                        &body.chars().take(400).collect::<String>(),
-                    )
-                })
-        });
-        #[cfg(not(target_os = "macos"))]
-        let _ = (store, notification);
-    })?;
     #[cfg(target_os = "macos")]
-    if let Some(Some(pending)) = pending {
-        finish_delivery(&state, pending).await;
+    let permission = if notification.is_some() {
+        native::status()
+            .await
+            .and_then(|status| notification_availability(&status))
+    } else {
+        Ok(())
+    };
+    let dispatched = with_monitor_gate(&state, monitor, token, |store| -> Result<_, String> {
+        crate::delivery::monitor_delivery(store, &monitor.key(), Ok("pending"))?;
+        let event_result = app.emit(event, payload).map_err(|error| error.to_string());
+        let wants_desktop = notification.is_some()
+            && store
+                .settings()
+                .is_ok_and(|settings| settings.notifications_enabled);
+        #[cfg(target_os = "macos")]
+        let delivery_error = wants_desktop
+            .then(|| permission.as_ref().err().cloned())
+            .flatten();
+        #[cfg(not(target_os = "macos"))]
+        let delivery_error =
+            wants_desktop.then(|| "Desktop notifications in this build require macOS.".to_string());
+        #[cfg(target_os = "macos")]
+        let pending = notification
+            .filter(|_| wants_desktop && delivery_error.is_none())
+            .map(|(title, body)| {
+                native::enqueue(
+                    &title.chars().take(100).collect::<String>(),
+                    &body.chars().take(400).collect::<String>(),
+                )
+            });
+        #[cfg(not(target_os = "macos"))]
+        let pending: Option<tokio::sync::oneshot::Receiver<Result<(), String>>> = None;
+        Ok((event_result, pending, delivery_error))
+    })?
+    .transpose()?;
+    if let Some((event_result, pending, delivery_error)) = dispatched {
+        #[cfg(target_os = "macos")]
+        let result = match pending {
+            Some(pending) => finish_delivery(&state, pending)
+                .await
+                .map(|_| "desktop_accepted"),
+            None => event_result.map(|_| "in_app_only"),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            let _ = pending;
+            event_result.map(|_| "in_app_only")
+        };
+        let result = delivery_error.map_or(result, Err);
+        crate::delivery::monitor_delivery(
+            &state.store.lock().unwrap(),
+            &monitor.key(),
+            result.as_ref().map(|state| *state).map_err(String::as_str),
+        )?;
+        let _ = app.emit(
+            "background-updated",
+            serde_json::json!({"monitorKey":monitor.key()}),
+        );
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = pending;
     Ok(())
 }
 #[tauri::command]
@@ -245,26 +285,90 @@ pub async fn notification_permission_status() -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     Ok("unknown".into())
 }
-pub async fn deliver(app: &tauri::AppHandle, title: &str, body: &str) {
+fn notification_availability(status: &str) -> Result<(), String> {
+    match status {
+        "authorized" | "provisional" => Ok(()),
+        "denied" => Err("Desktop notifications are denied. Allow Buntini in System Settings → Notifications; the result remains in Buntini's history.".into()),
+        "notDetermined" => Err("Desktop notification permission has not been granted. Enable notifications in Buntini settings; the result remains in history.".into()),
+        _ => Err("Desktop notifications are unavailable in this build. The result remains in Buntini's history.".into()),
+    }
+}
+/// "desktop_accepted" confirms enqueue, not that the person saw the alert.
+/// Disabled notifications still leave the durable result and in-app event.
+pub(crate) async fn deliver_checked(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+) -> Result<String, String> {
+    deliver_with_timer_gate(app, title, body, None).await
+}
+pub(crate) async fn deliver_timer(
+    app: &tauri::AppHandle,
+    id: &str,
+    title: &str,
+    body: &str,
+) -> Result<String, String> {
+    deliver_with_timer_gate(app, title, body, Some(id)).await
+}
+async fn deliver_with_timer_gate(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+    timer_id: Option<&str>,
+) -> Result<String, String> {
     use tauri::Manager;
     let state = app.state::<crate::controller::AppState>();
     let enabled = state
         .store
         .lock()
         .unwrap()
-        .settings()
-        .map(|settings| settings.notifications_enabled)
-        .unwrap_or(false);
+        .settings()?
+        .notifications_enabled;
     if !enabled {
-        return;
+        return Ok("in_app_only".into());
     }
     #[cfg(target_os = "macos")]
     {
-        let pending = native::enqueue(
-            &title.chars().take(100).collect::<String>(),
-            &body.chars().take(400).collect::<String>(),
-        );
-        finish_delivery(&state, pending).await;
+        let status = native::status().await?;
+        notification_availability(&status)?;
+        let pending = {
+            let store = state.store.lock().unwrap();
+            if !store.settings()?.notifications_enabled {
+                return Ok("in_app_only".into());
+            }
+            if let Some(id) = timer_id {
+                let exists: bool = store
+                    .db
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM timers WHERE id=?1 AND state='claimed')",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                if !exists {
+                    return Err(
+                        "This timer was removed before its desktop alert could be sent.".into(),
+                    );
+                }
+            }
+            native::enqueue(
+                &title.chars().take(100).collect::<String>(),
+                &body.chars().take(400).collect::<String>(),
+            )
+        };
+        finish_delivery(&state, pending).await?;
+        return Ok("desktop_accepted".into());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (title, body, timer_id);
+        Err("Desktop notifications in this build require macOS. The result remains in Buntini's history.".into())
+    }
+}
+pub async fn deliver(app: &tauri::AppHandle, title: &str, body: &str) {
+    if let Err(error) = deliver_checked(app, title, body).await {
+        use tauri::Manager;
+        app.state::<AppState>().audit("notification.failed", &error);
     }
 }
 
@@ -286,6 +390,15 @@ mod tests {
             next_run_at: now(),
             last_result_task_id: None,
             last_error: None,
+        }
+    }
+
+    #[test]
+    fn denied_or_unknown_notifications_cannot_be_reported_as_delivered() {
+        assert!(notification_availability("authorized").is_ok());
+        assert!(notification_availability("provisional").is_ok());
+        for status in ["denied", "notDetermined", "unknown", "unavailable"] {
+            assert!(notification_availability(status).is_err());
         }
     }
 

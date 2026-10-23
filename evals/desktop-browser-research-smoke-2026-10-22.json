@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-22",
+  "transport": "desktop browser Apple Events with read-only Accessibility fallback",
+  "invocation": "src-tauri/target/debug/examples/public_desktop_browser_smoke",
+  "query": "Rust programming language official documentation",
+  "browser": {
+    "appId": "chrome",
+    "bundleId": "com.google.Chrome",
+    "name": "Google Chrome",
+    "readable": true
+  },
+  "result": {
+    "stage": "search",
+    "error": {
+      "didRead": false,
+      "message": "That took too long to confirm. Check the app before repeating an action.",
+      "navigated": true
+    }
+  },
+  "diagnostics": {
+    "runningMetadata": true,
+    "windowCountMetadata": "Apple Event query did not answer within more than 20 seconds; only this diagnostic helper was terminated.",
+    "creationDeadlineAtTestSeconds": 12,
+    "creationDeadlineAfterFixSeconds": 45,
+    "otherOperationDeadlineSeconds": 12,
+    "unknownMutationRetried": false,
+    "browserPreferencesChanged": false,
+    "existingTabContentsRead": false,
+    "defaultBrowserSelectionVerified": true,
+    "browserPageExtractionVerified": false,
+    "limitation": "The standalone debug example and shell may have a different macOS Automation/Accessibility identity from installed Buntini. This run does not verify installed-app page reading. No browser permission was changed and no creation with an unknown outcome was automatically retried."
+  },
+  "afterNonmutatingPreflightFix": {
+    "stage": "search",
+    "browser": "com.google.Chrome",
+    "query": "Rust programming language official documentation",
+    "result": "The nonmutating Automation preflight failed; OS-open then successfully dispatched the fixed Google query to Chrome exactly once and returned API fallback.",
+    "didRead": false,
+    "navigated": true,
+    "automationDiagnostic": {"errorNumber": -1743, "message": "An error occurred."},
+    "automationDiagnosis": "macOS Automation denied this standalone helper identity.",
+    "classifierFix": "Accept JXA error.errorNumber as well as error.number for -1743.",
+    "classifierVerified": {"ok": false, "code": "automation_denied", "mutated": false},
+    "preflightDeadlineSeconds": 8,
+    "browserPageExtractionVerified": false,
+    "browserPreferencesChanged": false,
+    "existingTabContentsRead": false
+  }
+}
