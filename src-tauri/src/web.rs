@@ -5,6 +5,17 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+
+/// Requests carrying credentials or private prompts must stay on the selected
+/// HTTPS endpoint. A redirect can forward custom API-key headers or replay a
+/// request body to another origin; automatic retries can also repeat paid work.
+pub(crate) fn private_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .https_only(true)
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+}
 #[derive(Debug)]
 pub struct SearchError {
     pub message: String,
@@ -130,22 +141,41 @@ pub fn credential(_provider: &str) -> Result<String, String> {
 #[cfg(target_os = "macos")]
 pub fn set_credential(provider: &str, key: &str) -> Result<(), String> {
     credential_valid(provider)?;
-    if key.len() > 4096 || key.contains(['\r', '\n']) {
+    // OAuth sessions contain several tokens and can exceed a single API key.
+    let limit = if provider == crate::chatgpt::KEYCHAIN_ID {
+        65_536
+    } else {
+        4096
+    };
+    if key.len() > limit || key.contains(['\r', '\n', '\0']) {
         return Err("Invalid API key.".into());
     }
-    // An unmigrated legacy key must not reappear after the user replaces or clears it.
-    let _ =
-        security_framework::passwords::delete_generic_password(LEGACY_KEYCHAIN_SERVICE, provider);
     if key.trim().is_empty() {
-        let _ = security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, provider);
-        return Ok(());
+        // Try both even when one fails. Only ItemNotFound means a credential is
+        // already absent; a locked/denied Keychain must not look like deletion.
+        let current = delete_credential(KEYCHAIN_SERVICE, provider);
+        let legacy = delete_credential(LEGACY_KEYCHAIN_SERVICE, provider);
+        current.and(legacy)
+    } else {
+        security_framework::passwords::set_generic_password(
+            KEYCHAIN_SERVICE,
+            provider,
+            key.trim().as_bytes(),
+        )
+        .map_err(|_| "macOS Keychain could not save the credential.".to_string())?;
+        // Remove an old credential only after its replacement has been saved.
+        delete_credential(LEGACY_KEYCHAIN_SERVICE, provider)
     }
-    security_framework::passwords::set_generic_password(
-        KEYCHAIN_SERVICE,
-        provider,
-        key.trim().as_bytes(),
-    )
-    .map_err(|_| "macOS Keychain could not save the credential.".into())
+}
+
+#[cfg(target_os = "macos")]
+fn delete_credential(service: &str, provider: &str) -> Result<(), String> {
+    match security_framework::passwords::delete_generic_password(service, provider) {
+        Ok(()) => Ok(()),
+        // errSecItemNotFound, defined by Security.framework.
+        Err(error) if error.code() == -25300 => Ok(()),
+        Err(_) => Err(format!("macOS Keychain could not remove the {provider} credential. Unlock your Keychain and try again.")),
+    }
 }
 #[cfg(not(target_os = "macos"))]
 pub fn set_credential(_provider: &str, _key: &str) -> Result<(), String> {
@@ -157,10 +187,8 @@ pub async fn search(provider: &str, key: &str, query: &str) -> Result<Vec<Source
     if query.trim().is_empty() || query.len() > 2000 {
         return Err("Enter a web query of up to 2,000 characters.".into());
     }
-    let client = reqwest::Client::builder()
+    let client = private_client_builder()
         .timeout(std::time::Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
         .build()
         .map_err(|_| "Cannot initialize secure search.".to_string())?;
     let response=if provider=="brave" {
@@ -254,6 +282,36 @@ pub async fn search(provider: &str, key: &str, query: &str) -> Result<Vec<Source
 mod tests {
     use super::*;
     use crate::store::Store;
+
+    #[tokio::test]
+    async fn private_clients_reject_http_and_do_not_replay_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let secure = private_client_builder().build().unwrap();
+        assert!(secure.get("http://127.0.0.1:1/").send().await.is_err());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:1/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+        });
+        // Only the fixture relaxes HTTPS; the redirect/retry policy is exactly
+        // the one used by authenticated production requests.
+        let response = private_client_builder()
+            .https_only(false)
+            .build()
+            .unwrap()
+            .post(format!("http://{address}/"))
+            .header("x-api-key", "private-key")
+            .body("private-prompt")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        server.await.unwrap();
+    }
     #[tokio::test]
     async fn transient_transport_fixture_bills_each_attempt_and_budget_stops_retry() {
         let limits = |budget_usd| crate::budget::Limits {

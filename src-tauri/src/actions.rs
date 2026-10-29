@@ -160,20 +160,48 @@ pub fn when(value: &str) -> Result<(i32, u32, u32, u32, u32), String> {
     ))
 }
 
+/// Validate destinations opened outside Buntini as strictly as research hosts.
+/// This is a syntax/IP-literal check; the user's browser still owns DNS and any
+/// subsequent redirects. Preserve the original scheme and fragment for display.
+pub(crate) fn public_web_url(value: &str) -> Result<reqwest::Url, String> {
+    if value.is_empty()
+        || value.len() > 4096
+        || value != value.trim()
+        || value.chars().any(char::is_control)
+    {
+        return Err("Enter a valid public web address of up to 4,096 characters.".into());
+    }
+    let url = reqwest::Url::parse(value).map_err(|_| "That isn’t a web address.")?;
+    let expected_port = match url.scheme() {
+        "https" => 443,
+        "http" => 80,
+        _ => return Err("Only public HTTP or HTTPS web addresses can be opened.".into()),
+    };
+    if url.port_or_known_default() != Some(expected_port) {
+        return Err("Public web addresses must use their standard HTTP or HTTPS port.".into());
+    }
+    // Reuse one authoritative host/IP policy for both schemes. Validation does
+    // not send anything; the actual browser destination remains `url` below.
+    let mut secure = url.clone();
+    secure
+        .set_scheme("https")
+        .map_err(|_| "That isn’t a web address.")?;
+    secure
+        .set_port(None)
+        .map_err(|_| "That isn’t a web address.")?;
+    crate::research::validate_public_url(secure.as_str())?;
+    Ok(url)
+}
+
 fn https(value: &str) -> Result<String, String> {
     let candidate = if value.contains("://") {
         value.to_string()
     } else {
         format!("https://{value}")
     };
-    let url =
-        reqwest::Url::parse(&candidate).map_err(|_| "That isn’t a web address.".to_string())?;
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return Err("Only https web addresses can be opened.".into());
+    let url = public_web_url(&candidate)?;
+    if url.scheme() != "https" {
+        return Err("Only public HTTPS web addresses can be opened.".into());
     }
     Ok(url.to_string())
 }
@@ -621,6 +649,15 @@ async fn command_output(mut command: Command, seconds: u64) -> Result<String, He
     })
 }
 
+/// Keep all runtime values after the option terminator. A separate argv value
+/// is insufficient for osascript: a leading `-e` would otherwise become another
+/// source fragment, and `-l` or `-s` would change interpreter/output behavior.
+pub(crate) fn osascript_command(language: &str, source: &str) -> Command {
+    let mut command = Command::new("/usr/bin/osascript");
+    command.args(["-l", language, "-e", source, "--"]);
+    command
+}
+
 pub async fn output(command: Command, seconds: u64) -> Result<String, String> {
     command_output(command, seconds)
         .await
@@ -896,8 +933,8 @@ pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
             .to_string()
     };
     if let Some((source, argv)) = script(tool, &args) {
-        let mut command = Command::new("/usr/bin/osascript");
-        command.arg("-e").arg(source).args(argv);
+        let mut command = osascript_command("AppleScript", &source);
+        command.args(argv);
         return match command_output(command, 30).await {
             Ok(response) => parse_receipt(tool, &args, &response),
             Err(failure) => ActionReceipt::failure(
@@ -932,7 +969,9 @@ pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
                 );
             };
             let mut command = Command::new("/usr/bin/shortcuts");
-            command.arg("run").arg(exact);
+            // A shortcut name may itself begin with a CLI option such as
+            // --help; it must remain the approved positional name.
+            command.arg("run").arg("--").arg(exact);
             dispatched_receipt(tool, command, 120, format!("The “{exact}” shortcut finished. Its individual app changes have not been verified."), json!({"verification":"shortcut_process_completed", "name":exact})).await
         }
         "open_app" => {
@@ -1044,6 +1083,103 @@ mod tests {
         );
         assert!(validate("send_email", &json!({})).is_err());
         assert!(find_app("../../bin/sh").is_none());
+    }
+
+    #[test]
+    fn external_links_reject_private_hosts_and_preserve_public_http_and_fragments() {
+        for value in [
+            "https://127.0.0.1/admin",
+            "http://2130706433/admin",
+            "https://[::1]/",
+            "https://192.168.1.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost/",
+            "https://tauri.localhost/",
+            "https://office.internal/",
+            "https://office.local/",
+            "https://example.com:8443/",
+            "http://example.com:443/",
+            "https://name:password@example.com/",
+            "https://example.com/\nadmin",
+            " https://example.com/",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+        ] {
+            assert!(public_web_url(value).is_err(), "{value}");
+        }
+        for value in [
+            "http://example.com/article#section",
+            "https://example.com/article#section",
+        ] {
+            assert_eq!(public_web_url(value).unwrap().as_str(), value);
+        }
+        for value in [
+            "127.0.0.1",
+            "192.168.1.1",
+            "office.local",
+            "example.com:8443",
+        ] {
+            assert!(
+                validate("open_link", &json!({"url":value})).is_err(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn script_arguments_are_separated_from_interpreter_options() {
+        let mut command = osascript_command("AppleScript", "on run argv\nreturn argv\nend run");
+        command.args(["-e", "error number 123", "-lJavaScript", "--"]);
+        let arguments: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            arguments,
+            [
+                "-l",
+                "AppleScript",
+                "-e",
+                "on run argv\nreturn argv\nend run",
+                "--",
+                "-e",
+                "error number 123",
+                "-lJavaScript",
+                "--"
+            ]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn script_option_prefixes_remain_literal_values_at_runtime() {
+        // These fixed scripts only echo argv; no app automation or shell execution.
+        // Without the terminator, osascript parses the first value as more source
+        // and rejects the invocation instead of delivering the original values.
+        for (language, source) in [
+            (
+                "AppleScript",
+                "on run argv\nset text item delimiters to \"|\"\nreturn argv as text\nend run",
+            ),
+            (
+                "JavaScript",
+                "function run(argv) { return argv.join('|'); }",
+            ),
+        ] {
+            for values in [
+                vec!["-e", "error number 123"],
+                vec!["-eerror number 123", "-lJavaScript", "--"],
+                vec!["-s", "s", "-e"],
+            ] {
+                let mut command = osascript_command(language, source);
+                command.args(&values);
+                assert_eq!(
+                    output(command, 5).await.unwrap().trim_end(),
+                    values.join("|")
+                );
+            }
+        }
     }
 
     #[test]

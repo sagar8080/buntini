@@ -13,7 +13,7 @@ Runs the frontend production build, speech-queue and pet-behavior tests, model-f
 worker tests, locked offline Rust tests, and synthetic native audio checks.
 
 Prerequisites: existing node_modules, cached Cargo dependencies, npm, cargo,
-Python 3, macOS with Xcode Command Line Tools. The checks do not install packages,
+Python 3.11+, macOS with Xcode Command Line Tools. The checks do not install packages,
 download models, open a microphone, contact search providers, or mutate a venv.
 
 Set BUNTINI_CHECK_PYTHON to an existing Python interpreter for worker tests.
@@ -33,6 +33,10 @@ for BUNTINI_CHECK_TOOL in npm cargo "$BUNTINI_CHECK_PYTHON" python3 xcrun; do
     exit 1
   fi
 done
+if ! "$BUNTINI_CHECK_PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo "The check suite requires Python 3.11 or later." >&2
+  exit 1
+fi
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Buntini's desktop/native checks require macOS." >&2
   exit 1
@@ -50,10 +54,12 @@ npm run test:speech
 npm run test:pet
 echo "Checking Python JSONL worker without models..."
 "$BUNTINI_CHECK_PYTHON" -m unittest discover -s worker/tests -v
-echo "Checking Rust controller with locked, cached dependencies..."
-cargo test --locked --offline --target-dir "$BUNTINI_CHECK_ROOT/src-tauri/target" --manifest-path "$BUNTINI_CHECK_ROOT/src-tauri/Cargo.toml"
+echo "Checking release preflight rejection paths..."
+"$BUNTINI_CHECK_PYTHON" -m unittest discover -s scripts/tests -v
 echo "Checking native audio with synthetic input (microphone stays closed)..."
 bash "$BUNTINI_CHECK_ROOT/native/test.sh"
+echo "Checking Rust controller with locked, cached dependencies..."
+cargo test --locked --offline --target-dir "$BUNTINI_CHECK_ROOT/src-tauri/target" --manifest-path "$BUNTINI_CHECK_ROOT/src-tauri/Cargo.toml"
 echo "Validating scenario coverage (device evidence is scored separately per brain)..."
 "$BUNTINI_CHECK_PYTHON" "$BUNTINI_CHECK_ROOT/scripts/evaluate.py"
 echo "All automated checks passed. Device acceptance remains listed in docs/acceptance.md."

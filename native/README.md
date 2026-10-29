@@ -4,6 +4,13 @@
 (Apple Silicon by default on Apple Silicon). Xcode Command Line Tools, Swift, and
 macOS 13+ are required. Set `BUNTINI_AUDIO_ARCH=x86_64` to compile for Intel.
 
+The build scripts also produce target-suffixed copies for Tauri's sidecar bundler.
+Packaged helpers live in `Contents/MacOS` and receive the same Developer ID and
+hardened-runtime signing as the application. They are executable code, not
+resource files. Distribution requires both arm64 helpers; setting
+`BUNTINI_REQUIRE_FM=1` makes an unavailable Apple Intelligence SDK/architecture a
+build error and removes stale helper outputs instead of reusing them.
+
 The helper uses AVAudioEngine and AVAudioConverter to save **16 kHz, mono,
 signed 16-bit PCM WAV** locally. It does not transcribe, upload audio, contact a
 network service, continuously listen, or implement a wake word. Rust sends the

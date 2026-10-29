@@ -10,7 +10,7 @@ impl Store {
         let db = Connection::open(path).map_err(|e| e.to_string())?;
         db.busy_timeout(std::time::Duration::from_secs(3))
             .map_err(|e| e.to_string())?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;
           CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY);
           CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, fact TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
@@ -453,7 +453,23 @@ impl Store {
         // the next restart must not be mistaken for an unmigrated legacy turn.
         self.set_preference("conversation-migration-v1", "1")?;
         self.set_onboarded(false)?;
-        tx.commit().map_err(|e| e.to_string())
+        tx.commit().map_err(|e| e.to_string())?;
+        // DELETE alone leaves private text in free pages and older WAL frames.
+        // Rebuild the emptied database and truncate the WAL before reporting
+        // successful erasure. This is logical removal, not disk sanitization.
+        self.db
+            .execute_batch("VACUUM;")
+            .map_err(|e| e.to_string())?;
+        let (busy, _, _): (i64, i64, i64) = self
+            .db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| e.to_string())?;
+        if busy != 0 {
+            return Err("Data was removed, but a database reader prevented final cleanup. Close and reopen Buntini, then delete everything again.".into());
+        }
+        Ok(())
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -762,6 +778,38 @@ mod tests {
         assert!(s.roots().unwrap().is_empty());
         assert_eq!(s.settings().unwrap().assistant_name, "Buntini");
         assert!(!s.onboarded().unwrap(), "setup runs again after erasing");
+    }
+
+    #[test]
+    fn deleting_everything_removes_text_from_database_and_wal_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("private.sqlite3");
+        let store = Store::open(&path).unwrap();
+        let secret = "private-sentinel-erasure-test";
+        store.remember(secret).unwrap();
+        store
+            .db
+            .execute(
+                "INSERT INTO file_index(path,root,name,content) VALUES(?1,?1,?1,?1)",
+                [secret],
+            )
+            .unwrap();
+        store
+            .db
+            .execute_batch("PRAGMA wal_checkpoint(FULL)")
+            .unwrap();
+        let contains = |bytes: &[u8]| {
+            bytes
+                .windows(secret.len())
+                .any(|part| part == secret.as_bytes())
+        };
+        assert!(contains(&std::fs::read(&path).unwrap()));
+        store.erase_everything().unwrap();
+        assert!(!contains(&std::fs::read(&path).unwrap()));
+        let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
+        if wal.exists() {
+            assert_eq!(std::fs::metadata(wal).unwrap().len(), 0);
+        }
     }
     #[test]
     fn memories_are_kept_once_and_can_be_forgotten() {

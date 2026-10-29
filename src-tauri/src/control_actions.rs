@@ -363,11 +363,9 @@ fn music_verified(action: &str, query: &str, before: &MusicState, after: &MusicS
     }
 }
 async fn script(source: &str, args: &[String], cancel: &Arc<AtomicBool>) -> Result<String, String> {
-    let mut command = tokio::process::Command::new("/usr/bin/osascript");
-    command
-        .arg("-e")
-        .arg(format!("{JSON_HELPER}{source}"))
-        .args(args);
+    let mut command =
+        crate::actions::osascript_command("AppleScript", &format!("{JSON_HELPER}{source}"));
+    command.args(args);
     cancellable(cancel, crate::actions::output(command, 20)).await
 }
 async fn music_state(app: &str, cancel: &Arc<AtomicBool>) -> Result<MusicState, String> {

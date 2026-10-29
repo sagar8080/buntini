@@ -38,6 +38,7 @@ mod search_pipeline_tests;
 #[cfg(test)]
 mod scenario_evals;
 mod scheduler;
+mod security;
 mod skills;
 mod store;
 mod support;
@@ -100,6 +101,20 @@ pub fn run() {
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
+            // Construct the privileged UI with navigation guards in place before
+            // it loads. External pages belong in the isolated browser workspace.
+            let main = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .ok_or_else(|| std::io::Error::other("Missing main window configuration"))?;
+            tauri::WebviewWindowBuilder::from_config(app, main)?
+                .on_navigation(|url| security::ui_navigation_allowed(url, cfg!(dev)))
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .on_download(|_, _| false)
+                .build()?;
             let notices = app.handle().clone();
             app.state::<controller::AppState>()
                 .models

@@ -1,0 +1,34 @@
+{
+  "recorded_at": "2026-10-29T17:15:12.604380+00:00",
+  "candidate_version": "0.1.0",
+  "developer_id_identity": "Developer ID Application: Sagar Das (UU6JNBQ2T8)",
+  "team_id": "UU6JNBQ2T8",
+  "build_command": "BUNTINI_REQUIRE_FM=1 APPLE_SIGNING_IDENTITY=<installed identity> npm run tauri -- build --ci --config <temporary signing config> --bundles app -- --locked --offline",
+  "notarization": "pending user-provided Keychain profile",
+  "secret_material_exported": false,
+  "release_published": false,
+  "rust_suite": {
+    "passed": 379,
+    "failed": 0,
+    "ignored": 8
+  },
+  "sha256": {
+    "Contents/MacOS/buntini": "14e53afd760f29b24ef59ea3a9a4c9ea5125d53b47de727ba9dcd3af1ff85a1f",
+    "Contents/MacOS/buntini-audio": "edbdc440e7a022cc6c3b843cab1984dad141e0bec0dbf490425e975a0c3c3e8c",
+    "Contents/MacOS/buntini-fm": "52244e25b35b7e7e5aac60da7051fbbaac773de3d5a9332fa443c6f7599c143d"
+  },
+  "production_artifact_verification": {
+    "execution": "Outside filesystem sandbox so macOS trust services are available",
+    "bundle_layout_identity_version_resource_hashes": "passed",
+    "strict_deep_signature_verification": "passed",
+    "all_three_binaries": {
+      "developer_id_chain": "passed",
+      "team_id": "UU6JNBQ2T8",
+      "secure_timestamp": "present",
+      "architecture": "arm64",
+      "hardened_runtime": "enabled",
+      "entitlements": "exact reviewed allowlist"
+    },
+    "notarization_and_gatekeeper": "pending notarization profile, not claimed passed"
+  }
+}

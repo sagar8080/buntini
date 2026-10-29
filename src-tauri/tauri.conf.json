@@ -13,6 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [{
       "label": "main",
+      "create": false,
       "title": "Buntini",
       "width": 128,
       "height": 136,
@@ -30,6 +31,7 @@
       "skipTaskbar": true
     }],
     "security": {
+      "capabilities": ["main"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
@@ -37,10 +39,18 @@
     "active": true,
     "targets": ["app", "dmg"],
     "icon": ["icons/icon.icns", "icons/icon.png"],
-    "resources": {"../worker/": "worker/", "../native/": "native/"},
+    "resources": {
+      "../worker/__init__.py": "worker/__init__.py",
+      "../worker/main.py": "worker/main.py",
+      "../worker/protocol.py": "worker/protocol.py",
+      "../worker/voice.py": "worker/voice.py",
+      "../worker/tools.json": "worker/tools.json"
+    },
+    "externalBin": ["../native/buntini-audio", "../native/buntini-fm"],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",
+      "hardenedRuntime": true,
       "entitlements": "Entitlements.plist",
       "infoPlist": "Info.plist"
     }

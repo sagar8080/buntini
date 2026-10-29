@@ -69,6 +69,67 @@ mod tests {
         assert_eq!(error, "Recording cancelled.");
         assert!(voice.recording.lock().await.is_none());
     }
+
+    #[tokio::test]
+    async fn cancellation_reaches_a_recording_already_owned_by_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let voice = Arc::new(Voice::new(
+            dir.path().join("must-not-launch"),
+            dir.path().to_path_buf(),
+        ));
+        let path = dir.path().join("buntini-recording-fixture.wav");
+        std::fs::write(&path, b"private audio fixture").unwrap();
+        // A pipe fixture exercises stop/cancel without a microphone, permission
+        // dialog, speech process or transcription model.
+        let mut child = Command::new("python3")
+            .args([
+                "-u",
+                "-c",
+                "import sys,time;sys.stdin.readline();time.sleep(30)",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        *voice.current_cancel.lock().unwrap() = cancel.clone();
+        *voice.recording.lock().await = Some(Recording {
+            input: child.stdin.take().unwrap(),
+            lines: BufReader::new(child.stdout.take().unwrap()).lines(),
+            child,
+            path: path.clone(),
+            cancel,
+        });
+        let stopping_voice = voice.clone();
+        let stopping = tokio::spawn(async move {
+            stopping_voice
+                .stop(
+                    &ModelHub::new(PathBuf::new(), PathBuf::new()),
+                    &Settings::default(),
+                )
+                .await
+        });
+        timeout(Duration::from_secs(2), async {
+            while voice.recording.lock().await.is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        voice.cancel().await.unwrap();
+        let result = timeout(Duration::from_secs(2), stopping)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.unwrap_err(), "Recording cancelled.");
+        assert!(
+            !path.exists(),
+            "cancelled audio must be removed before returning"
+        );
+        assert!(voice.recording.lock().await.is_none());
+    }
 }
 pub struct Voice {
     recording: Mutex<Option<Recording>>,
@@ -82,22 +143,38 @@ pub struct Voice {
 }
 /// Only removes this app's own recordings (left after an interrupted session, or on
 /// "Delete everything").
-fn remove_recordings(cache: &std::path::Path) {
-    if let Ok(entries) = std::fs::read_dir(cache) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("buntini-recording-") && name.ends_with(".wav") {
-                let _ = std::fs::remove_file(entry.path());
+fn remove_recordings(cache: &std::path::Path) -> Result<(), String> {
+    let entries = match std::fs::read_dir(cache) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Couldn’t inspect the temporary recording cache.".into()),
+    };
+    let mut failed = false;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                failed = true;
+                continue;
             }
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("buntini-recording-") && name.ends_with(".wav") {
+            failed |= std::fs::remove_file(entry.path()).is_err();
         }
+    }
+    if failed {
+        Err("Couldn’t remove all temporary recordings. Check the app cache permissions and try Delete everything again.".into())
+    } else {
+        Ok(())
     }
 }
 impl Voice {
-    pub fn clear_cache(&self) {
-        remove_recordings(&self.cache);
+    pub fn clear_cache(&self) -> Result<(), String> {
+        remove_recordings(&self.cache)
     }
     pub fn new(helper: PathBuf, cache: PathBuf) -> Self {
-        remove_recordings(&cache);
+        let _ = remove_recordings(&cache);
         Self {
             recording: Mutex::new(None),
             speech: Mutex::new(None),
@@ -346,6 +423,13 @@ impl Voice {
             }
         };
         let _ = std::fs::remove_file(&rec.path);
-        result
+        // stop() owns the Recording after taking it out of the shared slot.
+        // Its original cancellation token still belongs to this recording,
+        // including after erasure or a later start replaces current_cancel.
+        if rec.cancel.load(Ordering::SeqCst) {
+            Err("Recording cancelled.".into())
+        } else {
+            result
+        }
     }
 }

@@ -3,6 +3,8 @@ dist/
 src-tauri/target/
 native/buntini-audio
 native/buntini-fm
+native/buntini-audio-*
+native/buntini-fm-*
 native/.build/
 __pycache__/
 *.pyc
@@ -18,3 +20,8 @@ models/
 *.tsbuildinfo
 src-tauri/gen/
 .test-output/
+release-candidates/
+dist-release/
+*.p12
+*.p8
+*.keychain-db

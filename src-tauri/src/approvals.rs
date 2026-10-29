@@ -116,15 +116,15 @@ pub fn approve_web_approval(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<PendingApproval, String> {
-    let provider = state.store.lock().unwrap().settings()?.search_provider;
+    let settings = state.store.lock().unwrap().settings()?;
     let approval = {
         let mut pending = state.approvals.lock().unwrap();
         let approval = pending
             .get_mut(&id)
             .ok_or("This approval no longer exists. Review the request again.")?;
-        if !current(approval) || (approval.tool == "web_search" && approval.provider != provider) {
+        if !current(approval) || !preview_matches(approval, &settings) {
             return Err(
-                "This approval expired or its search provider changed. Review the request again."
+                "This approval expired or its request settings changed. Review the request again."
                     .into(),
             );
         }
@@ -139,7 +139,7 @@ pub fn consume(
     state: &AppState,
     id: Option<&str>,
     prompt: &str,
-    search_provider: &str,
+    settings: &Settings,
 ) -> Result<integrations::Call, String> {
     let id = id.ok_or("Review and approve the online request before anything is sent.")?;
     let approval = state
@@ -148,19 +148,40 @@ pub fn consume(
         .unwrap()
         .remove(id)
         .ok_or("This approval has already been used or no longer exists.")?;
-    let call = validate(&approval, prompt, search_provider)?;
+    let call = validate(&approval, prompt, settings)?;
     state.audit("online.approval.consumed", &format!("{id} {}", call.tool));
     Ok(call)
 }
+/// Execution settings can affect the outgoing request even when the model's
+/// arguments are unchanged (for example, eBay marketplace and price currency).
+/// Require the current request preview to match every detail the user reviewed.
+fn preview_matches(approval: &PendingApproval, settings: &Settings) -> bool {
+    if approval.tool == "web_search" && approval.provider != settings.search_provider {
+        return false;
+    }
+    let preview = integrations::preview(
+        &integrations::Call {
+            tool: approval.tool.clone(),
+            arguments: approval.arguments.clone(),
+        },
+        settings,
+    );
+    approval.service == preview.provider
+        && approval.summary == preview.summary
+        && approval.sends == preview.sends
+        && approval.host == preview.host
+        && approval.uses_key == preview.uses_key
+}
+
 fn validate(
     approval: &PendingApproval,
     prompt: &str,
-    search_provider: &str,
+    settings: &Settings,
 ) -> Result<integrations::Call, String> {
     if !approval.approved
         || !current(approval)
         || approval.prompt != prompt
-        || (approval.tool == "web_search" && approval.provider != search_provider)
+        || !preview_matches(approval, settings)
     {
         return Err("A current approval for this exact request is required.".into());
     }
@@ -234,6 +255,21 @@ mod tests {
     }
 
     fn approval(id: &str, tool: &str, arguments: Value, provider: &str) -> PendingApproval {
+        let settings = Settings {
+            search_provider: if tool == "web_search" {
+                provider.into()
+            } else {
+                "brave".into()
+            },
+            ..Settings::default()
+        };
+        let preview = integrations::preview(
+            &integrations::Call {
+                tool: tool.into(),
+                arguments: arguments.clone(),
+            },
+            &settings,
+        );
         PendingApproval {
             id: id.into(),
             prompt: "news".into(),
@@ -242,27 +278,34 @@ mod tests {
             approved: false,
             tool: tool.into(),
             arguments,
-            service: String::new(),
-            summary: String::new(),
-            sends: vec![],
-            host: String::new(),
-            uses_key: false,
+            service: preview.provider,
+            summary: preview.summary,
+            sends: preview.sends,
+            host: preview.host,
+            uses_key: preview.uses_key,
             note: None,
         }
     }
+    fn settings(provider: &str) -> Settings {
+        Settings {
+            search_provider: provider.into(),
+            ..Settings::default()
+        }
+    }
+
     #[test]
     fn approval_is_exact_scoped_and_expires() {
         let mut a = approval("one", "web_search", json!({"query":"news"}), "brave");
-        assert!(validate(&a, "news", "brave").is_err());
+        assert!(validate(&a, "news", &settings("brave")).is_err());
         a.approved = true;
         assert_eq!(
-            validate(&a, "news", "brave").unwrap().arguments,
+            validate(&a, "news", &settings("brave")).unwrap().arguments,
             json!({"query":"news"})
         );
-        assert!(validate(&a, "private data", "brave").is_err());
-        assert!(validate(&a, "news", "tavily").is_err());
+        assert!(validate(&a, "private data", &settings("brave")).is_err());
+        assert!(validate(&a, "news", &settings("tavily")).is_err());
         a.expires_at = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
-        assert!(validate(&a, "news", "brave").is_err());
+        assert!(validate(&a, "news", &settings("brave")).is_err());
     }
     #[test]
     fn integration_approvals_cannot_be_widened() {
@@ -273,17 +316,41 @@ mod tests {
             "weather",
         );
         a.approved = true;
-        assert_eq!(validate(&a, "news", "brave").unwrap().tool, "weather");
+        assert_eq!(
+            validate(&a, "news", &settings("brave")).unwrap().tool,
+            "weather"
+        );
         a.arguments = json!({"place":"Lisbon","units":"celsius","extra":"x"});
-        assert!(validate(&a, "news", "brave").is_err());
+        assert!(validate(&a, "news", &settings("brave")).is_err());
         a.arguments = json!({"place":"Lisbon"});
         assert!(
-            validate(&a, "news", "brave").is_err(),
+            validate(&a, "news", &settings("brave")).is_err(),
             "defaults must have been approved explicitly"
         );
         a.tool = "run_shell".into();
-        assert!(validate(&a, "news", "brave").is_err());
+        assert!(validate(&a, "news", &settings("brave")).is_err());
     }
+    #[test]
+    fn marketplace_and_reviewed_details_cannot_change_after_approval() {
+        let arguments = integrations::validate(
+            "ebay_search",
+            &json!({"query":"headphones","max_price":100}),
+            "news",
+        )
+        .unwrap()
+        .arguments;
+        let mut grant = approval("marketplace", "ebay_search", arguments, "ebay_search");
+        grant.approved = true;
+        let mut current = settings("brave");
+        assert!(validate(&grant, "news", &current).is_ok());
+        current.ebay_marketplace = "EBAY_GB".into();
+        assert!(validate(&grant, "news", &current).is_err());
+        current.ebay_marketplace = "EBAY_US".into();
+        assert!(validate(&grant, "news", &current).is_ok());
+        grant.host = "unreviewed.example".into();
+        assert!(validate(&grant, "news", &current).is_err());
+    }
+
     #[test]
     fn approved_grants_are_consumed_once() {
         let dir = tempfile::tempdir().unwrap();
@@ -300,7 +367,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert(grant.id.clone(), grant);
-        consume(&state, Some("one-use"), "news", "brave").unwrap();
-        assert!(consume(&state, Some("one-use"), "news", "brave").is_err());
+        consume(&state, Some("one-use"), "news", &settings("brave")).unwrap();
+        assert!(consume(&state, Some("one-use"), "news", &settings("brave")).is_err());
     }
 }

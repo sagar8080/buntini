@@ -1,0 +1,81 @@
+# Production readiness and release runbook
+
+As of October 29, 2026, the local app is Developer ID signed and the repository's release protections are configured. Public rollout remains blocked on Apple notarization and acceptance of the final candidate on supported Macs/providers. Source review, dependency audits and automated fixtures provide bounded evidence. They do not establish that every model, macOS permission flow or integration works in the shipped app.
+
+## Current rollout status
+
+- **Completed:** the full check script passes 43 frontend, 71 worker and 379 Rust tests (8 opt-in checks excluded), plus synthetic native audio, 75 native assertions and scenario validation. The final release-tooling suite passes 24 tests, including extra bundle files, mismatched DMG payloads and mount-cleanup failure paths. Additional lifecycle tests cover erasure failures, exports delayed across erasure and cancellation before credential/model access.
+- **Completed:** the app and both helpers are signed with the installed `Developer ID Application: Sagar Das (UU6JNBQ2T8)` identity. All three pass strict verification, Apple certificate-chain/team checks, secure timestamp, arm64, hardened-runtime and exact entitlement checks outside the execution sandbox. The candidate's layout, versions, permission descriptions and shipped resource hashes match source. See [candidate evidence](../evals/developer-id-candidate-2026-10-29.json).
+- **Completed:** GitHub `main` requires a pull request and the Tests, Dependency audit, and Optional MLX and voice dependency audit checks from GitHub Actions. Rules prohibit force-push/deletion and have no bypass actors. Version tags permit administrator creation and prohibit updates/deletion. The `release` environment accepts only `v*` tags, requires manual approval by `sagar8080`, and forbids administrator bypass. With one collaborator, self-approval is allowed; this is a manual owner gate, not independent second-person review. Secret scanning, push protection and Dependabot security updates are enabled. [Read-back evidence](../evals/github-rollout-setup-2026-10-29.json) records the configured rules.
+- **Completed:** live Open-Meteo, Frankfurter, Wikipedia and OpenStreetMap lookups passed with fixed public queries. The signed packaged Apple helper passed its 75 assertions, literal tool routing and streamed generation. [Free API evidence](../evals/live-free-api-smoke-2026-10-29.json), [signed helper evidence](../evals/signed-packaged-helper-2026-10-29.json).
+- **Completed:** an isolated copy of the app launched with temporary storage and unique credential/migration namespaces. Its real main WebView bootstrapped, mounted onboarding, and exercised allowed window operations; an untrusted bundled WebView was denied controller IPC, and external navigation/popups were blocked. [Startup evidence](../evals/disposable-startup-smoke-2026-10-29.json) retains tool/policy hashes and failed observer attempts. This separate test binary does not replace acceptance of the exact signed/notarized candidate on a fresh Mac.
+- **Waiting for the owner:** a saved `notarytool` Keychain profile for local notarization. The identity is already installed; local signing needs no certificate export. The CI environment already has `APPLE_TEAM_ID` and `APPLE_SIGNING_IDENTITY`; its four private signing/notarization secrets remain to be entered through GitHub/Terminal.
+- **Still external:** acceptance of the exact notarized artifact on a fresh Mac and macOS 13; interactive microphone/TCC/Accessibility checks and real destination readbacks; keyed/cloud/ChatGPT provider acceptance. The owner limited this review to Apple/local inference and free public APIs, so paid checks have not run.
+
+Use [the Apple signing setup guide](apple-signing.md) for the exact credential handoff. No password, certificate export or private key belongs in chat, Git or an evidence report.
+
+## Runtime security repairs
+
+- All AppleScript/JXA executions separate script source from runtime arguments with `--`; option-like queries, titles and names remain literal data. Shortcut names receive the same protection. Regression tests exercise the actual interpreters without automating personal apps.
+- Authenticated/private network clients require HTTPS, refuse redirects and disable implicit retries. This prevents custom API-key headers or private request bodies from following redirects. OAuth callbacks reject ambiguous parameters and foreign state; token refresh/sign-out are serialized, revocation stays on the expected origin, and response/expiry limits reject malformed data. Cloud streams have an aggregate 8 MiB limit.
+- Online execution rechecks every reviewed request detail against current settings, including eBay marketplace. Public link handlers reject private, loopback, link-local and special-use destinations, credentials and nonstandard ports. Marketplace links require an actual supported eBay domain. An external browser still owns DNS and subsequent redirects after opening a validated public link.
+- Exports and logs are created with private permissions and refuse symlink targets. Shareable support summaries omit free-form audit details and panic payloads. Erasure clears pending approvals, coordinates credential/recording/speech startup, cancels in-flight voice work, rebuilds SQLite and truncates its WAL, removes logs and reports cleanup failures.
+
+## Verification on October 29
+
+The integrated `./scripts/check.sh` passed the production frontend build, **43 frontend tests**, **71 worker tests**, **5 release-preflight tests**, **371 Rust tests** (8 opt-in checks excluded), synthetic native audio checks, **75 native contract assertions**, local Apple-helper availability/generation, and scenario-corpus validation. After the final stream-size and voice-cancellation regressions, the complete Rust suite passed **373 tests**, with the same 8 opt-in checks excluded. No real microphone capture, paid model calls or destination-app writes were used.
+
+Separate opt-in checks then passed the blank WebKit isolation/deletion probe and **all four protected Apple controller test functions**, using synthetic research/calendar observations and destination receipts with zero real app writes. The [fresh evidence](../evals/security-controlled-2026-10-29.json) records commands, source/helper/test-binary hashes and limitations. These checks required execution outside the restrictive sandbox; its denied sockets/XPC/filesystem operations are not counted as successful evidence.
+
+A local production-mode arm64 app bundle built successfully. Strict deep code-signature verification passed for the app and both helpers; all three executables had hardened-runtime flags. Resource inspection confirmed only the icon and five required worker/schema files. This local artifact is **ad-hoc signed and unnotarized**; it verifies packaging and does not satisfy the Developer ID/Gatekeeper distribution gates below. Release preflight correctly rejected missing Apple credentials. Workflow validation (`actionlint`), shell/YAML syntax, version preflight and `git diff --check` also passed.
+
+## Security and build controls
+
+- The main companion WebView has an explicit command capability and only the event/window permissions used by its UI. Remote browser content must not receive that capability. Navigation, new-window and download policies are enforced in native code before the main WebView is created.
+- Production resources explicitly include five Python worker/schema files. Native audio and Apple Intelligence helpers are packaged as Tauri sidecars under `Contents/MacOS`, so Developer ID signing includes them as executable code. Development caches, tests, source trees and arbitrary files under `native/` or `worker/` are excluded.
+- Release builds require the Apple Intelligence helper and matching sidecar architectures. The hardened runtime remains enabled without JIT, unsigned-library or debugger exceptions.
+- CI action dependencies use verified full commit hashes. Checkouts do not retain Git credentials. Tests/builds have a read-only GitHub token; only the draft-release job gets repository write access. Each job has a bounded timeout. Dependabot proposes weekly action/npm/Cargo/Python updates.
+- The release gate runs the complete offline checks, full npm audit (including development/build dependencies), RustSec audit and optional MLX/voice dependency resolution audit on Apple silicon. An unavailable audit service fails the job. It does not silently count as a clean result.
+- Tags must match the versions in npm manifests, the npm lockfile, Cargo and Tauri. Missing signing/notarization credentials or an ad-hoc/development identity block the release build before signing.
+- The app and final disk image must pass Developer ID/team verification, strict code-signature validation, arm64 checks, stapled notarization-ticket validation and Gatekeeper assessment. Checksums and a commit/tag record accompany the artifacts. The workflow creates a draft; it does not publish it automatically.
+
+## Dependency audit evidence
+
+The October 29 review found no advisories in the full npm dependency tree. RustSec identified [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html) in Tokio 1.54.0; the manifest floor and lockfile now require the patched 1.54.1. The subsequent Cargo audit reports zero vulnerabilities.
+
+Two Cargo warnings remain: the older `glib` branch has an unsoundness advisory in a Linux-only Tauri transitive dependency, and `proc-macro-error` is unmaintained. The shipping target is Apple silicon macOS; the warning-bearing crates are not linked into that target. Keep these warnings visible and track upstream removal. They must be reassessed before adding Linux support. Passing an audit describes its advisory database at that time, not a guarantee against undisclosed issues.
+
+The Python worker uses optional, user-managed MLX/Whisper/VAD environments with constrained version ranges. An isolated `pip-audit` 2.10.1 run on this Apple silicon Mac/Python 3.13.5 resolved **49 dependencies with zero known vulnerabilities**, including MLX-LM 0.32.2, MLX Whisper 0.4.3 and ONNX Runtime 1.31.1. The [machine-readable evidence](../evals/python-dependency-audit-2026-10-29.json) retains exact versions and requirement-file hashes. No existing user environment or model weights were modified. CI audits the currently resolved supported dependencies; it cannot establish the state of an arbitrary pre-existing user environment. No model weights or Python environment are silently installed by the app. Audit the actual configured environment when diagnosing an existing installation.
+
+## External setup before any release tag
+
+1. The GitHub `release` environment, main/tag rules and scanner protections described above are configured. Keep them enabled; review changes to workflows and signing policy. Add a second collaborator if independent review is required. Non-provider secret patterns and credential-validity checks remain disabled; they are not claimed as completed gates.
+2. Add these environment secrets: `APPLE_CERTIFICATE` (base64-encoded Developer ID Application `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (the full `Developer ID Application: … (TEAMID)` name), `APPLE_ID`, `APPLE_PASSWORD` (an app-specific notarization password), and `APPLE_TEAM_ID`. Restrict and rotate these credentials. Tauri imports the certificate into its temporary signing keychain.
+3. Confirm an active Apple Developer membership, a valid unexpired certificate and access to Apple's notarization service. Do not commit certificates, passwords, access tokens or private keys. The workflow intentionally has no unsigned public-release fallback.
+4. Resolve every outstanding device/brain gate below for the intended feature set. Do not infer an exception from fixture counts or historical successful probes.
+
+The credential names and signing behavior follow [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/macos/). Environment protections and secret access follow [GitHub's deployment environment documentation](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments). Immutable action references follow [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use).
+
+## Device and model release blockers
+
+- Install the exact draft DMG/zip on a fresh Apple silicon Mac with normal browser-download quarantine. Verify the checksum and recorded commit. Confirm Gatekeeper accepts it without disabling safeguards, removing quarantine or using Open Anyway. Check launch/quit/relaunch, data migration, app permissions and helper availability from the installed app, outside the source checkout.
+- Test the supported macOS floor (13) and current macOS 26, including unavailable Apple Intelligence and switching to another brain. Complete the [interactive acceptance sequence](acceptance.md#remaining-interactive-sequence): denied/revoked TCC access, voice capture and interruption, Accessibility/browser isolation, cloud-sharing controls, budgets, cancellation, sleep/restart and unknown-write recovery. Use disposable destination records and test accounts.
+- Run all ten controlled device journeys in [the per-brain evaluation gate](evaluations.md#per-brain-controlled-device-gate) for every released brain/model and integration. Retain the exact app/model/OS versions and destination readbacks. Require all scenarios to pass with zero false-success claims, unapproved writes, duplicate writes or unintended side effects. The retained raw Apple multi-step probes still fail; protected controller probes use synthetic app observations/receipts and do not replace these device journeys.
+- Verify each keyed provider's live success, timeout, denied access and quota behavior using an owner's configured account. Confirm cloud request bodies respect sharing controls and that changing/revoking a category prevents further transmission of that category. Exercise ChatGPT sign-in cancellation, denial, refresh and sign-out.
+- Verify export/deletion on a disposable profile, including browser-profile cleanup, current database/WAL/cache/log removal and Keychain deletion. Preserve an explicit explanation of deletion limits: exported copies, old Nexon migration backups, destination records and Time Machine/APFS snapshots remain outside current app-data deletion. See [the privacy policy](../PRIVACY.md).
+
+## Preparing and publishing a release
+
+1. Update all version manifests and lockfile roots consistently. Run `./scripts/check.sh`, the dependency audits and `python3 scripts/release_preflight.py --tag vX.Y.Z`. A prerelease such as `vX.Y.Z-beta.1` must match that full version in the manifests. Commit the reviewed source and create the protected version tag.
+2. The tagged CI run requires tests and all audits, then the protected `release` environment. It builds with a locked Cargo graph, signs the app and both helpers, notarizes/staples the app, separately notarizes/staples the final DMG, and verifies signatures/tickets/Gatekeeper before uploading. Failures stop the pipeline; a missing secret is an actionable blocker.
+3. Inspect the draft's `BUILD-INFO.json` and `SHA256SUMS.txt`, and run the device/model gates against those exact artifacts. Record results and remaining limitations. Rebuilding changes the candidate and requires renewed artifact acceptance.
+4. Publish the existing draft only after acceptance. The workflow refuses to silently overwrite an existing release. Retain checksums, commit identity, test/audit output and reviewed device evidence with the candidate. Have the previous accepted artifact available if rollout must be stopped.
+
+To verify an already built candidate without signing or publishing anything:
+
+```sh
+APPLE_TEAM_ID=YOURTEAMID sh scripts/verify-release.sh \
+  /absolute/path/Buntini.app /absolute/path/Buntini.dmg
+```
+
+The existing installed Developer ID identity was used for local signing; no certificate or private key was exported. Two known configuration values were stored as protected environment secrets. No release tag was created and no release was published.

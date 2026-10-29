@@ -1,0 +1,31 @@
+{
+  "error": "JavaScript readback closed",
+  "kind": "disposable_companion_startup_smoke",
+  "passed": false,
+  "process_exit_code": 0,
+  "disposable_identifier": "app.buntini.smoke.93d988e77ba34818b40957e34a2e65ce",
+  "binary_sha256": "28d9babbe94660c87dfe7f4d226a1532f372e92f117afe976ef6414f1c0f48f5",
+  "production_security_source_sha256": "e665239d4d9d5f03de9797aab6171ea409d534dbd4cc51be59b1d11664168af9",
+  "production_capability_sha256": "15ccf9f4d3a0bc2a148e5aed8e2c871948e9740a41353f78fbb67322ce3b6df5",
+  "production_permission_manifest_sha256": "26edac30969e4953d94067ab9d4be9834e1ce96e9a93a81af085f266238b3525",
+  "isolation": [
+    "Separate source tree, Cargo target and app bundle",
+    "Unique compile-time Keychain/migration namespaces",
+    "Temporary data/cache",
+    "Desktop awareness/roaming disabled",
+    "Nonpersistent WebViews",
+    "No microphone, TCC prompts, personal apps or provider calls requested"
+  ],
+  "unchanged_boundaries": [
+    "Production IPC command handlers",
+    "Production explicit app-command permission allowlist",
+    "Production main capability",
+    "Production main navigation/popup/download guards",
+    "Bundled frontend production assets"
+  ],
+  "limitations": [
+    "Separate debug binary with custom-protocol; not the signed release candidate",
+    "Observer and storage isolation are injected only into the disposable copy",
+    "Does not establish fresh-Mac permissions, notarization or Gatekeeper acceptance"
+  ]
+}

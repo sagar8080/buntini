@@ -236,7 +236,7 @@ fn open_address(address: &str) -> Option<Command> {
     } else {
         format!("https://{address}")
     };
-    let parsed = reqwest::Url::parse(&url).ok()?;
+    let parsed = crate::actions::public_web_url(&url).ok()?;
     if parsed.scheme() != "https"
         || !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -479,6 +479,10 @@ mod tests {
             "open http://example.com/path",
             "open https://user:password@example.com/path",
             "open file:///tmp/private",
+            "open https://127.0.0.1/admin",
+            "open https://192.168.1.1/",
+            "open https://tauri.localhost/",
+            "open https://example.com:8443/",
         ] {
             assert_eq!(ask(prompt), None, "{prompt}");
         }

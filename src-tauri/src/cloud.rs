@@ -386,11 +386,13 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
 
 const LINE_LIMIT: usize = 262_144;
 const EVENT_LIMIT: usize = 1_048_576;
+const STREAM_LIMIT: usize = 8 * 1_048_576;
 
 /// Splits a server-sent event stream into (event, data) pairs, with the same bounded
 /// buffering as the local worker's line reader.
 #[derive(Default)]
 pub struct Sse {
+    received_bytes: usize,
     line: Vec<u8>,
     event: String,
     data: String,
@@ -398,6 +400,12 @@ pub struct Sse {
 
 impl Sse {
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<(String, String)>, String> {
+        // Many individually small events can otherwise accumulate unbounded
+        // thinking blocks, provider metadata or tool names in the decoder.
+        self.received_bytes = self.received_bytes.saturating_add(bytes.len());
+        if self.received_bytes > STREAM_LIMIT {
+            return Err("The cloud response exceeded its safe stream size limit.".into());
+        }
         let mut events = Vec::new();
         for &byte in bytes {
             if byte != b'\n' {
@@ -1031,8 +1039,7 @@ where
         return Err(Failure::Rejected("Task cancelled.".into()));
     }
     let request = build(provider.id, model, key, payload).map_err(Failure::Rejected)?;
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+    let client = crate::web::private_client_builder()
         .read_timeout(Duration::from_secs(60))
         .build()
         .map_err(|_| Failure::Rejected("Cannot prepare a secure connection.".into()))?;
@@ -1166,6 +1173,19 @@ mod tests {
             ]
         );
         assert!(Sse::default().push(&vec![b'x'; LINE_LIMIT + 1]).is_err());
+    }
+
+    #[test]
+    fn many_small_events_cannot_bypass_the_total_cloud_response_limit() {
+        let event = format!("data: {}\n\n", "x".repeat(8192));
+        let mut sse = Sse::default();
+        for _ in 0..STREAM_LIMIT / event.len() {
+            assert_eq!(sse.push(event.as_bytes()).unwrap().len(), 1);
+        }
+        assert!(sse
+            .push(event.as_bytes())
+            .unwrap_err()
+            .contains("stream size limit"));
     }
 
     #[test]

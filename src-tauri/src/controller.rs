@@ -142,6 +142,18 @@ impl AppState {
             }
             bundled
         };
+        // Native helpers are bundled as sidecars in Contents/MacOS so Tauri
+        // signs each executable before signing and notarizing the outer app.
+        // Release builds must never fall back to a writable source checkout.
+        let native_dir = if cfg!(debug_assertions) {
+            resource("native")
+        } else {
+            std::env::current_exe()
+                .map_err(|_| "Cannot locate the installed app executable.".to_string())?
+                .parent()
+                .ok_or("Cannot locate the installed app directory.")?
+                .to_path_buf()
+        };
         let imported = migration::import_legacy(&data, &cache);
         let store = Store::open(&data.join(migration::DATABASE))?;
         match imported {
@@ -155,12 +167,12 @@ impl AppState {
             None => {}
         }
         let store = Arc::new(Mutex::new(store));
-        let models = ModelHub::new(resource("worker/main.py"), resource("native/buntini-fm"));
+        let models = ModelHub::new(resource("worker/main.py"), native_dir.join("buntini-fm"));
         models.set_ledger(store.clone());
         Ok(Self {
             store,
             models,
-            voice: Voice::new(resource("native/buntini-audio"), cache),
+            voice: Voice::new(native_dir.join("buntini-audio"), cache),
             active: Mutex::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             config_gate: tokio::sync::Mutex::new(()),
@@ -336,11 +348,12 @@ pub fn warm_up_soon(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move { warm_up(&app.state::<AppState>()).await });
 }
 #[tauri::command]
-pub fn set_api_key(
+pub async fn set_api_key(
     provider: String,
     key: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _gate = state.config_gate.lock().await;
     // The ChatGPT sign-in is written only by the sign-in flow, never pasted in.
     if provider == crate::chatgpt::KEYCHAIN_ID {
         return Err("Use Sign in with ChatGPT in Settings → Brain.".into());
@@ -446,8 +459,15 @@ pub fn cancel_task(task_id: String, state: State<'_, AppState>) -> Result<(), St
 }
 #[tauri::command]
 pub async fn speak(text: String, state: State<'_, AppState>) -> Result<(), String> {
-    let epoch = state.voice.reserve_speech();
-    let settings = state.store.lock().unwrap().settings()?;
+    let (epoch, settings) = {
+        let _gate = state.config_gate.lock().await;
+        (
+            state.voice.reserve_speech(),
+            state.store.lock().unwrap().settings()?,
+        )
+    };
+    // Release the lifecycle gate before preflight/playback. Erasure can then
+    // invalidate this epoch even while voice validation or speech is pending.
     crate::support::valid_voice(&settings.voice_id).await?;
     state
         .voice
@@ -460,6 +480,9 @@ pub async fn stop_speaking(state: State<'_, AppState>) -> Result<(), String> {
 }
 #[tauri::command]
 pub async fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
+    // Keep startup inside the erasure/settings gate so it cannot reopen the
+    // microphone while Delete everything is cancelling and clearing audio.
+    let _gate = state.config_gate.lock().await;
     let settings = state.store.lock().unwrap().settings()?;
     state.models.voice_ready(&settings)?;
     state.audit("microphone.start", "User started push to talk");
@@ -481,24 +504,10 @@ pub async fn cancel_recording(state: State<'_, AppState>) -> Result<(), String> 
 }
 #[tauri::command]
 pub async fn open_source(url: String, state: State<'_, AppState>) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(&url).map_err(|_| "Invalid source URL.".to_string())?;
-    if url.len() > 4096
-        || !["http", "https"].contains(&parsed.scheme())
-        || parsed.host_str().is_none()
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
-        return Err("Only public HTTP or HTTPS source links can be opened.".into());
-    }
-    let status = tokio::process::Command::new("/usr/bin/open")
-        .arg("--")
-        .arg(parsed.as_str())
-        .status()
-        .await
-        .map_err(|_| "Cannot open the default browser.".to_string())?;
-    if !status.success() {
-        return Err("The browser could not open this source.".into());
-    }
+    let parsed = crate::actions::public_web_url(&url)?;
+    let mut command = tokio::process::Command::new("/usr/bin/open");
+    command.arg("--").arg(parsed.as_str());
+    crate::actions::output(command, 15).await?;
     state.audit("source.opened", parsed.host_str().unwrap_or("source"));
     Ok(())
 }
@@ -1128,12 +1137,7 @@ pub async fn continue_task_online(
             .ok_or("The saved lookup has no query.")?
             .to_string();
         let intent = step.id.clone();
-        let call = crate::approvals::consume(
-            &state,
-            Some(&approval_id),
-            &query,
-            &settings.search_provider,
-        )?;
+        let call = crate::approvals::consume(&state, Some(&approval_id), &query, &settings)?;
         flow.approve(
             &intent,
             json!({"query":query,"approvedTool":call.tool,"approvedArguments":call.arguments}),
@@ -2985,7 +2989,7 @@ pub async fn run_task(
             &state,
             approval_id.as_deref(),
             &task.prompt,
-            &task_settings.search_provider,
+            &task_settings,
         ) {
             Ok(call) => approved = Some(call),
             Err(error) => {

@@ -638,11 +638,9 @@ end run
 "#;
 
 async fn osascript(source: &str, argv: &[String], seconds: u64) -> Result<String, String> {
-    let mut command = Command::new("/usr/bin/osascript");
-    command
-        .arg("-e")
-        .arg(format!("{HELPERS}{source}"))
-        .args(argv);
+    let mut command =
+        crate::actions::osascript_command("AppleScript", &format!("{HELPERS}{source}"));
+    command.args(argv);
     crate::actions::output(command, seconds).await
 }
 

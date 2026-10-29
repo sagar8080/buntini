@@ -52,10 +52,13 @@ pub async fn preview_voice(
     text: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let epoch = state.voice.reserve_speech();
     if !(100..=300).contains(&rate) || text.chars().count() > 500 {
         return Err("Voice previews allow up to 500 characters and a rate of 100–300.".into());
     }
+    let epoch = {
+        let _gate = state.config_gate.lock().await;
+        state.voice.reserve_speech()
+    };
     valid_voice(&voice_id).await?;
     state
         .voice

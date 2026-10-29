@@ -14,7 +14,10 @@ use crate::{
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,6 +289,9 @@ impl ModelHub {
         audio_path: &Path,
         cancel: Arc<AtomicBool>,
     ) -> Result<String, String> {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Task cancelled.".into());
+        }
         let request = if self.apple_speech(settings) {
             self.apple
                 .request(
@@ -313,6 +319,9 @@ impl ModelHub {
     where
         F: FnMut(String) + Send,
     {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Task cancelled.".into());
+        }
         self.ready(settings)?;
         payload["type"] = "generate".into();
         match backend(settings) {
@@ -459,6 +468,47 @@ mod tests {
             whisper_model: String::new(),
             ..Settings::default()
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_generation_stops_before_credentials_or_model_preflight() {
+        let hub = ModelHub::new(PathBuf::new(), PathBuf::new());
+        for backend in ["apple", "mlx", "cloud"] {
+            for provider in ["anthropic", "openai", "gemini", "chatgpt"] {
+                let mut settings = settings(backend);
+                settings.cloud_provider = provider.into();
+                let error = hub
+                    .generate(
+                        &settings,
+                        serde_json::json!({"messages":[]}),
+                        Arc::new(AtomicBool::new(true)),
+                        |_| panic!("cancelled work cannot emit tokens"),
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(error, "Task cancelled.", "{backend}/{provider}");
+            }
+        }
+        assert!(hub.apple.status.lock().unwrap().starts_with("Not started"));
+        assert!(hub.mlx.status.lock().unwrap().starts_with("Not started"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_transcription_never_opens_a_model_or_audio_file() {
+        let hub = ModelHub::new(PathBuf::new(), PathBuf::new());
+        for backend in ["apple", "mlx"] {
+            let error = hub
+                .transcribe(
+                    &settings(backend),
+                    Path::new("/nonexistent/private-audio.wav"),
+                    Arc::new(AtomicBool::new(true)),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error, "Task cancelled.");
+        }
+        assert!(hub.apple.status.lock().unwrap().starts_with("Not started"));
+        assert!(hub.mlx.status.lock().unwrap().starts_with("Not started"));
     }
 
     #[test]

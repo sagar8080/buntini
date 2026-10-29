@@ -101,7 +101,7 @@ async fn saved_lookup_approval_covers_browser_first_and_only_selected_api_fallba
         &state,
         Some(&approval.id),
         "weather forecast",
-        &settings.search_provider
+        &settings
     )
     .is_err());
 }

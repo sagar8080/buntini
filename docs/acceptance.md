@@ -2,7 +2,13 @@
 
 This records the implementation against the supplied version 0.1 TDD, verified on October 21, 2026. Implemented behavior and completed checks are distinguished from device/provider acceptance. The delivered artifact is the native Tauri macOS app, not the Vite browser preview.
 
+Public distribution additionally requires the [production readiness gates](production-readiness.md). Historical automated results below do not establish signed-artifact, fresh-device or real-model acceptance.
+
 ## Automated evidence
+
+### Security and release review — October 29, 2026
+
+The [production readiness report](production-readiness.md#current-rollout-status) records the current build/test/audit evidence, runtime security repairs and remaining distribution blockers. The final Rust suite passed **379 tests** (8 opt-in checks excluded); the integrated frontend/worker/native checks and 24 release-tooling tests passed. Four protected Apple controller tests plus the blank WebKit isolation/deletion probe passed separately. All app observations and write receipts in those controlled journeys were synthetic. A production-mode app and both helpers now pass Developer ID, timestamp, hardened-runtime and entitlement checks. Four free public API checks and the signed packaged Apple helper also pass. Notarization and fresh-device/keyed-provider acceptance remain outstanding.
 
 ### Task contracts, scoped tools and typed evidence — October 22, 2026
 
@@ -109,5 +115,5 @@ The separate browser workspace additionally uses a persistent, isolated WebKit p
 14. Durable tasks: use disposable records for a note → reminder journey. Quit while awaiting approval, reopen and verify exact restored fields, approve once, and inspect both destination IDs/readbacks. Test cancellation, permission denial and interrupted-write handling. Review unknown outcomes in the destination instead of retrying them.
 15. Threads: create a conversation with several turns, start New topic, reopen the first conversation and continue it. Confirm there is one History entry per thread and no cross-thread context.
 16. Browser workspace: use a disposable account on an approved HTTPS origin, verify isolation from your main browser, blocked cross-origin/popups/downloads, restart persistence, cancellation and Delete everything cleanup. Do not interpret a page snapshot as a verified booking or transaction.
-17. Release: push a `v*` tag, download the DMG from the GitHub release on another Mac, install it, use Open Anyway, and run steps 1, 7 and 8 there.
+17. Release: follow the [release runbook](production-readiness.md), download the signed and notarized artifacts from the draft release on another Mac, verify the checksums, install with normal Gatekeeper validation, and run steps 1, 7 and 8 there. Complete the device/brain gates before manually publishing the draft. A requirement to remove quarantine or use Open Anyway fails public-release acceptance.
 

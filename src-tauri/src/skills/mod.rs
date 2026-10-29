@@ -293,8 +293,8 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
 
 /// Runs an AppleScript with values passed as arguments (never as script text).
 pub(crate) async fn osascript(source: &str, argv: &[&str], seconds: u64) -> Result<String, String> {
-    let mut command = tokio::process::Command::new("/usr/bin/osascript");
-    command.arg("-e").arg(source).args(argv);
+    let mut command = crate::actions::osascript_command("AppleScript", source);
+    command.args(argv);
     crate::actions::output(command, seconds)
         .await
         .map(|output| output.trim().to_string())

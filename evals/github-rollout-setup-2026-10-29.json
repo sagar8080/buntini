@@ -1,0 +1,168 @@
+{
+  "recorded_at": "2026-10-29",
+  "repository": "sagar8080/buntini",
+  "release_environment": {
+    "name": "release",
+    "can_admins_bypass": false,
+    "deployment_branch_policy": {
+      "protected_branches": false,
+      "custom_branch_policies": true
+    }
+  },
+  "reviewers": [
+    {
+      "login": "sagar8080",
+      "id": 24851729
+    }
+  ],
+  "self_review_note": "Only one maintainer exists; owner manually approves release jobs. Independent second-person review requires adding another collaborator.",
+  "tag_deployment_policies": [
+    {
+      "id": 64819417,
+      "node_id": "MDE2OkdhdGVCcmFuY2hQb2xpY3k2NDgxOTQxNw==",
+      "name": "v*",
+      "type": "tag"
+    }
+  ],
+  "rulesets": [
+    {
+      "id": 26143449,
+      "name": "Buntini immutable release tags",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/tags/v*"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "update"
+        },
+        {
+          "type": "deletion"
+        }
+      ]
+    },
+    {
+      "id": 26143415,
+      "name": "Buntini main release checks",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/main"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": true,
+            "required_reviewers": [],
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": true,
+            "require_extra_approval_for_unattributed_changes": true,
+            "allowed_merge_methods": [
+              "merge",
+              "squash",
+              "rebase"
+            ]
+          }
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": true,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "Tests",
+                "integration_id": 15368
+              },
+              {
+                "context": "Dependency audit",
+                "integration_id": 15368
+              },
+              {
+                "context": "Optional MLX and voice dependency audit",
+                "integration_id": 15368
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 26143433,
+      "name": "Buntini release tag creation",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [
+        {
+          "actor_id": 5,
+          "actor_type": "RepositoryRole",
+          "bypass_mode": "always"
+        }
+      ],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/tags/v*"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    }
+  ],
+  "security_and_analysis": {
+    "secret_scanning": {
+      "status": "enabled"
+    },
+    "secret_scanning_push_protection": {
+      "status": "enabled"
+    },
+    "dependabot_security_updates": {
+      "status": "enabled"
+    },
+    "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+    },
+    "secret_scanning_validity_checks": {
+      "status": "disabled"
+    }
+  },
+  "release_secret_names": [
+    "APPLE_SIGNING_IDENTITY",
+    "APPLE_TEAM_ID"
+  ],
+  "secret_values_read": false,
+  "published_release": false,
+  "remaining_ci_secret_names": [
+    "APPLE_CERTIFICATE",
+    "APPLE_CERTIFICATE_PASSWORD",
+    "APPLE_ID",
+    "APPLE_PASSWORD"
+  ]
+}

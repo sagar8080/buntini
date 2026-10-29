@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T17:13:18.555640+00:00",
+  "scope": "Read-only compatibility inspection of already built local artifacts; no claim of execution on macOS 13. Apple Intelligence and Apple speech require macOS 26; isolated WebKit browser is gated at macOS 14.",
+  "declared_app_floor": "13.0",
+  "artifacts": [
+    {
+      "path": "/Users/sagar/projects/nexon/native/buntini-audio",
+      "sha256": "2633bdc2f92529a75916c61ea80bdf96759b802ba4bbf2fa957945c2e581c32f",
+      "build_metadata": "/Users/sagar/projects/nexon/native/buntini-audio:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 13.0\n      sdk 26.5\n   ntools 1\n     tool LD\n  version 1267.0\n",
+      "linked_libraries": "/Users/sagar/projects/nexon/native/buntini-audio:\n\t/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation (compatibility version 1.0.0, current version 2.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n\t/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5026.5.4)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)\n\t/usr/lib/swift/libswiftAVFoundation.dylib (compatibility version 1.0.0, current version 2420.7.1, weak)\n\t/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 411.255.0)\n\t/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0, weak)\n\t/usr/lib/swift/libswiftCoreImage.dylib (compatibility version 1.0.0, current version 2.2.0, weak)\n\t/usr/lib/swift/libswiftCoreMIDI.dylib (compatibility version 1.0.0, current version 6.0.0, weak)\n\t/usr/lib/swift/libswiftCoreMedia.dylib (compatibility version 1.0.0, current version 3320.8.5, weak)\n\t/usr/lib/swift/libswiftDarwin.dylib (compatibility version 1.0.0, current version 377.120.8)\n\t/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1542.100.32)\n\t/usr/lib/swift/libswiftIOKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftMetal.dylib (compatibility version 1.0.0, current version 373.2.0, weak)\n\t/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 951.7.0, weak)\n\t/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0, weak)\n\t/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 877.5.1, weak)\n\t/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 128.120.2, weak)\n\t/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 23.0.0, weak)\n"
+    },
+    {
+      "path": "/Users/sagar/projects/nexon/native/buntini-fm",
+      "sha256": "ab7b94b92d050b0b1223ba375e116113b3fedfaa9648fcae594f8e7386aa0b1e",
+      "build_metadata": "/Users/sagar/projects/nexon/native/buntini-fm:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 13.0\n      sdk 26.5\n   ntools 1\n     tool LD\n  version 1267.0\n",
+      "linked_libraries": "/Users/sagar/projects/nexon/native/buntini-fm:\n\t/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation (compatibility version 1.0.0, current version 2.0.0)\n\t/System/Library/Frameworks/EventKit.framework/Versions/A/EventKit (compatibility version 1.0.0, current version 1934.4.9)\n\t/System/Library/Frameworks/FoundationModels.framework/Versions/A/FoundationModels (compatibility version 1.0.0, current version 1.5.2, weak)\n\t/System/Library/Frameworks/Speech.framework/Versions/A/Speech (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n\t/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5026.5.4)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5026.5.4)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)\n\t/usr/lib/swift/libswiftAVFoundation.dylib (compatibility version 1.0.0, current version 2420.7.1, weak)\n\t/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 411.255.0, weak)\n\t/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0, weak)\n\t/usr/lib/swift/libswiftCoreImage.dylib (compatibility version 1.0.0, current version 2.2.0, weak)\n\t/usr/lib/swift/libswiftCoreLocation.dylib (compatibility version 1.0.0, current version 53.0.0, weak)\n\t/usr/lib/swift/libswiftCoreMIDI.dylib (compatibility version 1.0.0, current version 6.0.0, weak)\n\t/usr/lib/swift/libswiftCoreMedia.dylib (compatibility version 1.0.0, current version 3320.8.5, weak)\n\t/usr/lib/swift/libswiftDarwin.dylib (compatibility version 1.0.0, current version 377.120.8, weak)\n\t/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1542.100.32, weak)\n\t/usr/lib/swift/libswiftIOKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftMetal.dylib (compatibility version 1.0.0, current version 373.2.0, weak)\n\t/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 951.7.0, weak)\n\t/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0, weak)\n\t/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 877.5.1, weak)\n\t/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 128.120.2, weak)\n\t/usr/lib/swift/libswift_Concurrency.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftos.dylib (compatibility version 1.0.0, current version 1082.0.0, weak)\n\t/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 23.0.0, weak)\n"
+    },
+    {
+      "path": "/Users/sagar/.cargo-target/release/bundle/macos/Buntini.app/Contents/MacOS/buntini",
+      "sha256": "c21eaeeeca3adf286bb647e4dd7c3397e7b604b389bf5e26b21d05ba3ec45c51",
+      "build_metadata": "/Users/sagar/.cargo-target/release/bundle/macos/Buntini.app/Contents/MacOS/buntini:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 13.0\n      sdk 26.5\n   ntools 1\n     tool LD\n  version 1267.0\n",
+      "linked_libraries": "/Users/sagar/.cargo-target/release/bundle/macos/Buntini.app/Contents/MacOS/buntini:\n\t/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices (compatibility version 1.0.0, current version 1226.0.0)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 1965.5.1)\n\t/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit (compatibility version 45.0.0, current version 2685.60.104)\n\t/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon (compatibility version 2.0.0, current version 170.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5026.5.4)\n\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61901.120.67)\n\t/System/Library/Frameworks/UserNotifications.framework/Versions/A/UserNotifications (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreLocation.framework/Versions/A/CoreLocation (compatibility version 1.0.0, current version 3075.0.8)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)\n\t/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit (compatibility version 1.0.0, current version 275.0.0)\n\t/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices (compatibility version 1.0.0, current version 66.0.0)\n\t/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit (compatibility version 1.0.0, current version 624.2.5)\n\t/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 734.4.0)\n\t/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1195.14.4)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5026.5.4)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/System/Library/Frameworks/ColorSync.framework/Versions/A/ColorSync (compatibility version 1.0.0, current version 3813.5.1)\n"
+    }
+  ],
+  "fixture_checks": {
+    "data_lifecycle": {
+      "passed": 8,
+      "failed": 0,
+      "command": "cargo test --locked --offline --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --lib data::tests"
+    },
+    "cancellation_related": {
+      "passed": 8,
+      "failed": 0,
+      "command": "cargo test --locked --offline --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --lib cancelled_"
+    },
+    "conversation_privacy": {
+      "passed": 4,
+      "failed": 0,
+      "command": "cargo test --locked --offline --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --lib conversation::tests"
+    },
+    "cloud_budget_settlement": {
+      "passed": 1,
+      "failed": 0,
+      "command": "cargo test --locked --offline --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --lib store::tests::cloud_reservations_settle_to_reported_usage"
+    }
+  },
+  "limits": [
+    "Lifecycle account/profile/keychain services are injected synthetic fixtures; no actual Keychain entries, browser profiles, personal app data, microphone or paid provider APIs were used.",
+    "This records an existing local build; a later signed artifact must be inspected again.",
+    "Actual macOS 13 launch/permission testing requires that OS and remains outstanding."
+  ],
+  "source_sha256": {
+    "src-tauri/src/data.rs": "09b11546b77a931b54c724f2cbb3cc4acce992e91c376c81f643ae87abc73a79",
+    "src-tauri/src/voice.rs": "d8b4099e0fbfb4c3ab21d49feb1dbd59a91c27919e088c60a01e331269bde236",
+    "src-tauri/src/model.rs": "067505b84fe3d3e1794a2c6efc2bfe3f6f32d73b9723e003b0d7644f62dec3b1"
+  }
+}

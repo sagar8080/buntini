@@ -388,20 +388,16 @@ async fn control(
     destination: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<ControlReply, String> {
-    let mut cmd = tokio::process::Command::new("/usr/bin/osascript");
-    cmd.arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(CONTROL)
-        .args([
-            mode,
-            &target.bundle_id,
-            window,
-            tab,
-            expected,
-            destination,
-            if mode == "snapshot" { READ_DOM } else { "" },
-        ]);
+    let mut cmd = crate::actions::osascript_command("JavaScript", CONTROL);
+    cmd.args([
+        mode,
+        &target.bundle_id,
+        window,
+        tab,
+        expected,
+        destination,
+        if mode == "snapshot" { READ_DOM } else { "" },
+    ]);
     // A cold browser launch or the initial macOS Automation prompt needs more
     // time than an already-owned tab operation. Cancellation still kills the
     // helper, and an unknown creation outcome is never retried automatically.
