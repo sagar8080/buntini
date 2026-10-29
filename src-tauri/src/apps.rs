@@ -637,6 +637,36 @@ const SAFARI_PAGE: &str = r#"on run argv
 end run
 "#;
 
+// The message selected in Mail's front viewer: time, message ID, sender, subject, Mail-local
+// numeric ID, body length and how many are selected, then the opening of its body.
+const MAIL_SELECTED: &str = r#"on run argv
+  if application "Mail" is not running then return "closed"
+  tell application "Mail"
+    set picked to selection
+    if (count of picked) is 0 then return "none"
+    set m to item 1 of picked
+    set c to content of m
+    if c is missing value then set c to ""
+    set originalLength to length of c
+    if originalLength > 4000 then set c to text 1 thru 4000 of c
+    return my stamp(date received of m) & tab & my clean(message id of m) & tab & my clean(sender of m) & tab & my clean(subject of m) & tab & my clean(id of m) & tab & (originalLength as text) & tab & ((count of picked) as text) & linefeed & c
+  end tell
+end run
+"#;
+// The items selected in Finder's front window, as POSIX paths, one per line (at most 20).
+const FINDER_SELECTED: &str = r#"on run argv
+  if application "Finder" is not running then return ""
+  tell application "Finder" to set picked to selection
+  set out to {}
+  repeat with f in picked
+    set end of out to POSIX path of (f as alias)
+    if (count of out) ≥ 20 then exit repeat
+  end repeat
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+
 async fn osascript(source: &str, argv: &[String], seconds: u64) -> Result<String, String> {
     let mut command =
         crate::actions::osascript_command("AppleScript", &format!("{HELPERS}{source}"));
@@ -1989,6 +2019,59 @@ pub(crate) async fn safari_page() -> Result<Option<(String, String, String)>, St
         .map(|page| (page.title, page.url, page.text)))
 }
 
+/// The email selected in Mail, for "this". Mail must be allowed in Settings → Apps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedMail {
+    pub id: String,
+    pub message_id: String,
+    pub received: String,
+    pub sender: String,
+    pub subject: String,
+    pub text: String,
+    pub truncated: bool,
+    pub selected: usize,
+}
+
+pub(crate) async fn selected_mail() -> Result<Option<SelectedMail>, String> {
+    parse_selected_mail(&osascript(MAIL_SELECTED, &[], 10).await?)
+}
+
+fn parse_selected_mail(output: &str) -> Result<Option<SelectedMail>, String> {
+    if ["closed", "none", ""].contains(&output.trim()) {
+        return Ok(None);
+    }
+    let (head, body) = output.split_once('\n').unwrap_or((output, ""));
+    let parts: Vec<&str> = head.split('\t').map(str::trim).collect();
+    let [received, message_id, sender, subject, id, length, selected] = parts[..] else {
+        return Err("Mail returned incomplete message data.".into());
+    };
+    let length: usize = length
+        .parse()
+        .map_err(|_| "Mail returned an invalid message length.")?;
+    let text: String = body.trim().chars().take(4000).collect();
+    Ok(Some(SelectedMail {
+        id: id.into(),
+        message_id: message_id.into(),
+        received: received.into(),
+        sender: sender.into(),
+        subject: subject.into(),
+        truncated: length > text.chars().count(),
+        text,
+        selected: selected.parse().unwrap_or(1),
+    }))
+}
+
+/// The paths selected in Finder, for "this". macOS asks once before Buntini may see them.
+pub(crate) async fn selected_finder_items() -> Result<Vec<String>, String> {
+    Ok(osascript(FINDER_SELECTED, &[], 10)
+        .await?
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('/'))
+        .map(str::to_string)
+        .collect())
+}
+
 fn page_evidence(output: &str) -> Result<Value, String> {
     let mut records = Vec::new();
     let display = match parse_page(output)? {
@@ -2199,6 +2282,24 @@ pub async fn check_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_selected_email_is_parsed_or_refused_never_guessed() {
+        assert_eq!(parse_selected_mail("none").unwrap(), None);
+        assert_eq!(parse_selected_mail("closed\n").unwrap(), None);
+        let found = parse_selected_mail(
+            "2026-10-29 09:15\t<a@b>\tAna Silva <ana@example.com>\tLease renewal\t42\t5000\t2\nCan you sign\nby Friday?",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(found.subject, "Lease renewal");
+        assert_eq!(found.id, "42");
+        assert_eq!(found.selected, 2);
+        assert_eq!(found.text, "Can you sign\nby Friday?");
+        assert!(found.truncated);
+        assert!(parse_selected_mail("2026-10-29 09:15\t<a@b>\tAna").is_err());
+        assert!(parse_selected_mail("a\tb\tc\td\te\tlots\t1\nbody").is_err());
+    }
 
     #[test]
     fn notes_suffix_fallback_preserves_identifiers_and_reports_its_actual_query() {

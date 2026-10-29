@@ -9,6 +9,7 @@
 pub mod browser;
 pub mod mac;
 pub mod music;
+pub mod this;
 
 use crate::{privacy::Share, types::Settings};
 
@@ -17,6 +18,7 @@ pub enum Skill {
     Music(music::Command),
     Browser(browser::Command),
     Mac(mac::Command),
+    This(this::Command),
 }
 
 pub enum Outcome {
@@ -25,8 +27,14 @@ pub enum Outcome {
         answer: String,
         share: Option<Share>,
     },
-    /// A web page to summarise or answer from; the model writes the reply.
-    Page { title: String, text: String },
+    /// Text to summarise or answer from (a web page, a selection, an email); the model
+    /// writes the reply. `kind` names it for the model; `share` is the data it shows.
+    Page {
+        kind: &'static str,
+        title: String,
+        text: String,
+        share: Share,
+    },
 }
 
 pub struct Context<'a> {
@@ -34,6 +42,8 @@ pub struct Context<'a> {
     pub prompt: &'a str,
     /// The app that was in front before Buntini opened, if known.
     pub front_app: Option<String>,
+    /// What was in front when Buntini opened, for requests about "this".
+    pub focus: Option<crate::focus::Snapshot>,
 }
 
 /// A request in lowercase words. Apostrophes, dots, percent signs and numeric signs
@@ -271,6 +281,7 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
     music::recognise(&text, &recent)
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
+        .or_else(|| this::recognise(&text).map(Skill::This))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }
 
@@ -280,6 +291,7 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::Music(_) => "music",
         Skill::Browser(_) => "browser",
         Skill::Mac(_) => "mac",
+        Skill::This(_) => "this",
     }
 }
 
@@ -288,6 +300,7 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::Music(command) => music::run(command, context).await,
         Skill::Browser(command) => browser::run(command, context).await,
         Skill::Mac(command) => mac::run(command).await,
+        Skill::This(command) => this::run(command, context).await,
     }
 }
 

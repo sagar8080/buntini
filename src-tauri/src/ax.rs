@@ -188,6 +188,42 @@ pub fn pid(bundle: &str) -> Option<i32> {
     apps.iter().next().map(|app| app.processIdentifier())
 }
 
+/// What an app shows in front: its focused window's title and the text selected in its
+/// focused element, up to `cap` characters. Password fields are never read (`secure`).
+/// Unlike `Element::app`, this only asks Chromium-style apps to build their tree and
+/// leaves every other app's drawing alone, because it runs whenever Buntini opens.
+pub struct Selection {
+    pub window: String,
+    pub text: String,
+    pub secure: bool,
+}
+
+pub fn selection(pid: i32, cap: usize) -> Selection {
+    let app = Element(unsafe { AXUIElement::new_application(pid) });
+    unsafe {
+        app.0.set_messaging_timeout(1.0);
+        app.0.set_attribute_value(
+            &CFString::from_str("AXManualAccessibility"),
+            CFBoolean::new(true),
+        );
+    }
+    let window = app
+        .element("AXFocusedWindow")
+        .map(|window| window.text("AXTitle"))
+        .unwrap_or_default();
+    let Some(focused) = app.element("AXFocusedUIElement") else {
+        return Selection { window, text: String::new(), secure: false };
+    };
+    if [focused.text("AXRole"), focused.text("AXSubrole")]
+        .iter()
+        .any(|role| role == "AXSecureTextField")
+    {
+        return Selection { window, text: String::new(), secure: true };
+    }
+    let text = focused.text("AXSelectedText").trim().chars().take(cap).collect();
+    Selection { window, text, secure: false }
+}
+
 /// Buttons in an app's windows whose label starts with `prefix` ("Play "), in page order,
 /// as (button, label without the prefix).
 pub fn buttons(pid: i32, prefix: &str) -> Vec<(Element, String)> {

@@ -307,10 +307,18 @@ fn current_browser(context: &Context) -> Result<&'static crate::apps::App, Strin
         .iter()
         .filter(|app| crate::apps::BROWSERS.contains(&app.id) && crate::apps::installed(app))
         .collect();
+    // The snapshot taken as Buntini opened knows the browser even after a quick visit.
     let front = context
-        .front_app
-        .as_deref()
-        .and_then(|name| browsers.iter().find(|app| app.name == name))
+        .focus
+        .as_ref()
+        .and_then(crate::focus::Snapshot::browser)
+        .and_then(|id| browsers.iter().find(|app| app.id == id))
+        .or_else(|| {
+            context
+                .front_app
+                .as_deref()
+                .and_then(|name| browsers.iter().find(|app| app.name == name))
+        })
         .copied();
     let chosen = front
         .or_else(|| {
@@ -420,8 +428,10 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
                     .await?
                     .ok_or("No page is open in Safari.")?;
                 return Ok(Outcome::Page {
+                    kind: "web page",
                     title: format!("{title} ({address})"),
                     text,
+                    share: Share::Browser,
                 });
             }
             crate::apps::ensure_public_window(browser).await?;
@@ -438,8 +448,10 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             .map_err(|_| "The browser couldn’t be read.".to_string())??;
             let (title, text) = page.split_once('\n').unwrap_or(("", &page));
             Ok(Outcome::Page {
+                kind: "web page",
                 title: title.to_string(),
                 text: text.to_string(),
+                share: Share::Browser,
             })
         }
     }

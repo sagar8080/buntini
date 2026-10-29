@@ -24,6 +24,7 @@ mod conversation;
 mod data;
 mod delivery;
 mod explicit_fields;
+mod focus;
 mod indexer;
 mod integrations;
 mod local;
@@ -75,6 +76,8 @@ pub fn run_public_desktop_browser_smoke() {
 }
 
 fn show_companion(app: &tauri::AppHandle) {
+    // Before Buntini takes focus: what "this" means is whatever the user was just in.
+    focus::capture();
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -168,6 +171,7 @@ pub fn run() {
             }
             overlay::start_hit_testing(app.handle().clone());
             world::start(app.handle().clone());
+            focus::start();
             scheduler::start(app.handle().clone());
             if let Err(error) = app
                 .global_shortcut()
@@ -226,6 +230,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             controller::bootstrap,
+            focus::capture_focus,
             controller::save_settings,
             controller::set_api_key,
             controller::pick_folder,

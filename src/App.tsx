@@ -169,6 +169,8 @@ export default function App() {
     root.classList.toggle('is-desktop', desktop);
   }, [data?.settings, systemDark]);
   const expand = useCallback(async (open: boolean) => {
+    // What "this" means in a request: whatever was in front as the chat opened.
+    if (open && desktop) void command('capture_focus').catch(() => {});
     setExpanded(open); setMenu(false);
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, []);

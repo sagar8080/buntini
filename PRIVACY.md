@@ -1,6 +1,6 @@
 # Buntini privacy policy
 
-*Last updated: October 22, 2026. This describes what the app does; it is not legal advice. Have it reviewed before a commercial launch.*
+*Last updated: October 29, 2026. This describes what the app does; it is not legal advice. Have it reviewed before a commercial launch.*
 
 Buntini is a desktop companion that runs on your Mac. There are no Buntini servers and no Buntini account. We (the people who make Buntini) never receive your messages, files, settings or usage.
 
@@ -11,6 +11,7 @@ Buntini keeps its records in its folder under `~/Library/Application Support/app
 - **Your conversation threads and task journals**, including full saved model messages, step inputs, approvals, tool evidence, destination IDs, receipts and which local-data categories were used. These let Buntini resume a task without repeating its completed actions. Also your settings, saved timers, searches, price watches, and the things you ask it to remember. Timers and monitors keep due times, execution/delivery status and errors. Approved intent records retain monitor queries/pages/settings and approved memory facts/timer durations to prevent a repeated approval from duplicating or recreating something you deleted, forgot or cancelled; these remain until Delete everything.
 - **The file index** for folders you choose to allow. Buntini reads only those folders, and you can remove access at any time.
 - **What you're doing:** if "Notice what I'm doing" is on, the name of the app in front, how long you've been active, window positions (never titles or contents) and battery, CPU and disk levels. This is kept in memory for at most three hours and never saved.
+- **What “this” means:** when you open Buntini (⌘⇧Space, the menu bar or the pet), it notes the app you were in and, if Accessibility is allowed, that app's front window title and any text you had selected. Password fields are never read. This is kept in memory for at most ten minutes and never saved, unless a request about “this” uses it; that task then records it like any other read. The email open in Mail, the page in your browser or the files selected in Finder are read only when a request refers to them, and Mail and browsers must be allowed in Settings → Apps. A cloud brain sees selected text only with **What you select** enabled in Privacy, and an email, page or file names only with the matching category enabled.
 - **API keys** you add, and your **ChatGPT sign-in** if you use one, in the macOS Keychain.
 - **An activity log** of tools used and permissions given, and a **crash log** (time, error and code location only).
 - **Voice recordings**, after you tap or hold the mic, for up to 30 seconds. They are deleted after transcription, failure or cancellation.

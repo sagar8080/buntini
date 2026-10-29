@@ -171,6 +171,59 @@
       }
     },
     {
+      "id": "this-summary",
+      "kind": "routing",
+      "category": "screen_context",
+      "prompt": "Summarise this",
+      "recent": [],
+      "expected": {
+        "skill": "this",
+        "action": "read_this"
+      }
+    },
+    {
+      "id": "this-translate",
+      "kind": "routing",
+      "category": "screen_context",
+      "prompt": "Translate this into Portuguese please",
+      "recent": [],
+      "expected": {
+        "skill": "this",
+        "action": "read_this"
+      }
+    },
+    {
+      "id": "this-selection",
+      "kind": "routing",
+      "category": "screen_context",
+      "prompt": "Explain the selected text",
+      "recent": [],
+      "expected": {
+        "skill": "this",
+        "action": "read_selection"
+      }
+    },
+    {
+      "id": "negated-this",
+      "kind": "routing",
+      "category": "negation",
+      "prompt": "Don't summarise this",
+      "recent": [],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
+      "id": "this-reminder-is-approved-write",
+      "kind": "routing",
+      "category": "screen_context",
+      "prompt": "Remind me about this tomorrow at 9",
+      "recent": [],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
       "id": "negated-music",
       "kind": "routing",
       "category": "negation",

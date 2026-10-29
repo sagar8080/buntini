@@ -35,10 +35,12 @@ pub enum Share {
     Music,
     /// Open browser tabs and the page showing in Safari.
     Browser,
+    /// Text selected and the window in front when Buntini opens ("this").
+    Selection,
 }
 
 impl Share {
-    pub const ALL: [Share; 10] = [
+    pub const ALL: [Share; 11] = [
         Share::Activity,
         Share::System,
         Share::Files,
@@ -49,6 +51,7 @@ impl Share {
         Share::Notes,
         Share::Music,
         Share::Browser,
+        Share::Selection,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -62,6 +65,7 @@ impl Share {
             Share::Notes => "notes",
             Share::Music => "music",
             Share::Browser => "browser",
+            Share::Selection => "selection",
         }
     }
 }
@@ -76,7 +80,7 @@ pub fn allows(locality: Locality, settings: &Settings, share: Share) -> bool {
 pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     for (index, id) in shares.iter().enumerate() {
         if !Share::ALL.iter().any(|share| share.id() == id) || shares[..index].contains(id) {
-            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music or browser at most once each.".into());
+            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, browser or selection at most once each.".into());
         }
     }
     Ok(())

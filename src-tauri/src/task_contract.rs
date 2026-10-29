@@ -921,6 +921,38 @@ impl TaskContract {
             }
         }
     }
+    /// Binds a field of the one requested write that uses `tool` to a value the controller
+    /// resolved itself (`source` says how), unless the user's own words already fixed it.
+    /// The binding is a constraint, so later proposals and approvals must keep it.
+    pub fn bind_write_field(&mut self, tool: &str, field: &str, value: Value, source: &str) -> bool {
+        let matching: Vec<usize> = self
+            .outcomes
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.kind == "write" && o.tool.as_deref() == Some(tool))
+            .map(|(index, _)| index)
+            .collect();
+        let [index] = matching[..] else {
+            return false;
+        };
+        let outcome = &mut self.outcomes[index];
+        if self
+            .constraints
+            .iter()
+            .any(|c| c.outcome_id.as_deref() == Some(&outcome.id) && c.field == field)
+        {
+            return false;
+        }
+        outcome.required_arguments[field] = value.clone();
+        self.constraints.push(Constraint {
+            outcome_id: Some(outcome.id.clone()),
+            field: field.into(),
+            value,
+            source: source.into(),
+            revision: self.revision,
+        });
+        true
+    }
     pub fn next_outcome(&self) -> Option<&Outcome> {
         self.outcomes.iter().find(|o| o.status != "complete")
     }
@@ -1358,6 +1390,36 @@ mod tests {
                 json!({"complete":true})
             }),
         }
+    }
+    #[test]
+    fn a_title_resolved_from_the_screen_constrains_the_reminder_but_not_its_time() {
+        let goal = "Remind me about this tomorrow at 9";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let title = json!("Lease renewal (email from Ana Silva)");
+        assert!(contract.bind_write_field("add_reminder", "title", title.clone(), "focus_referent"));
+        // A second binding cannot replace the first, and other tools are untouched.
+        assert!(!contract.bind_write_field("add_reminder", "title", json!("Other"), "focus_referent"));
+        assert!(!contract.bind_write_field("create_note", "title", json!("Other"), "focus_referent"));
+        contract.refresh(goal, &[]);
+        let write = contract.next_outcome().unwrap();
+        assert_eq!(write.tool.as_deref(), Some("add_reminder"));
+        assert_eq!(write.required_arguments["title"], title);
+        assert!(contract
+            .constraints
+            .iter()
+            .any(|c| c.field == "title" && c.source == "focus_referent"));
+        let offered = contract.relevant_tools(&[], &crate::tools::offer(&["add_reminder"]));
+        assert_eq!(
+            offered[0]["parameters"]["properties"]["title"]["enum"],
+            json!([title])
+        );
+        assert!(contract
+            .validate_proposal("add_reminder", &json!({"title":"Something else","due":"2026-10-30 09:00"}), &[])
+            .is_err());
+        assert!(contract
+            .validate_proposal("add_reminder", &json!({"title":title,"due":"2026-10-30 09:00"}), &[])
+            .is_ok());
     }
     fn names(definitions: &Value) -> Vec<&str> {
         definitions
