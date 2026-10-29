@@ -71,6 +71,8 @@ impl RetryPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuccessVerifier {
+    CalculationResult,
+    StructuredMathResult,
     ScopedFileResults,
     SystemSnapshot,
     OnlineTaskResult,
@@ -85,6 +87,8 @@ pub enum SuccessVerifier {
 impl SuccessVerifier {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::CalculationResult => "calculation_result",
+            Self::StructuredMathResult => "structured_math_result",
             Self::ScopedFileResults => "scoped_file_results",
             Self::SystemSnapshot => "system_snapshot",
             Self::OnlineTaskResult => "online_task_result",
@@ -218,8 +222,17 @@ fn parse_catalog(raw: &str) -> Result<Catalog, String> {
         if properties.values().any(|spec| {
             !matches!(
                 spec["type"].as_str(),
-                Some("string" | "integer" | "number" | "boolean")
-            )
+                Some("string" | "integer" | "number" | "boolean" | "array")
+            ) || (spec["type"] == "array"
+                && (spec["items"]["type"] != "string"
+                    || spec["maxItems"]
+                        .as_u64()
+                        .is_none_or(|max| max > 32 || max == 0)
+                    || spec["minItems"].as_u64().unwrap_or(0)
+                        > spec["maxItems"].as_u64().unwrap_or(0)
+                    || spec["items"]["maxLength"]
+                        .as_u64()
+                        .is_none_or(|max| max > 4096 || max == 0)))
         }) {
             return Err(fail("unsupported argument schema type"));
         }
@@ -266,6 +279,17 @@ fn validate_example(schema: &Value, arguments: &Value) -> Result<(), String> {
                     && length <= spec["maxLength"].as_u64().unwrap_or(u64::MAX)
             }),
             Some("boolean") => value.is_boolean(),
+            Some("array") => value.as_array().is_some_and(|items| {
+                items.len() as u64 >= spec["minItems"].as_u64().unwrap_or(0)
+                    && items.len() as u64 <= spec["maxItems"].as_u64().unwrap_or(0)
+                    && items.iter().all(|item| {
+                        item.as_str().is_some_and(|text| {
+                            let length = text.chars().count() as u64;
+                            length >= spec["items"]["minLength"].as_u64().unwrap_or(0)
+                                && length <= spec["items"]["maxLength"].as_u64().unwrap_or(0)
+                        })
+                    })
+            }),
             Some(kind @ ("integer" | "number")) => value.as_f64().is_some_and(|number| {
                 number.is_finite()
                     && (kind != "integer" || value.is_i64() || value.is_u64())
@@ -312,14 +336,24 @@ mod tests {
 
     #[test]
     fn every_tool_the_app_offers_has_a_shared_schema_and_contract() {
-        for name in ["search_files", "system_info", "look_up_online", "remember"]
-            .into_iter()
-            .chain(crate::actions::TOOLS)
-            .chain(crate::monitor_actions::TOOLS)
-            .chain(crate::control_actions::TOOLS)
-            .chain(crate::browser_workspace::TOOLS)
-            .chain(crate::apps::READ_TOOLS)
-            .chain(crate::integrations::TOOLS.iter().map(|tool| tool.name))
+        for name in [
+            "calculate",
+            "split_costs",
+            "scale_quantities",
+            "compare_options",
+            "sum_by_status",
+            "search_files",
+            "system_info",
+            "look_up_online",
+            "remember",
+        ]
+        .into_iter()
+        .chain(crate::actions::TOOLS)
+        .chain(crate::monitor_actions::TOOLS)
+        .chain(crate::control_actions::TOOLS)
+        .chain(crate::browser_workspace::TOOLS)
+        .chain(crate::apps::READ_TOOLS)
+        .chain(crate::integrations::TOOLS.iter().map(|tool| tool.name))
         {
             let tool =
                 definition(name).unwrap_or_else(|| panic!("{name} missing from worker/tools.json"));
@@ -337,6 +371,78 @@ mod tests {
         }
         assert_eq!(offer(&["system_info", "nope"]).as_array().unwrap().len(), 1);
         assert!(contract("nope").is_none());
+    }
+
+    #[test]
+    fn calculation_schema_is_a_bounded_string_array_with_a_real_verifier() {
+        let definition = definition("calculate").unwrap();
+        let schema = &definition["parameters"];
+        assert_eq!(
+            contract("calculate").unwrap().operation,
+            ToolOperation::Read
+        );
+        assert_eq!(
+            contract("calculate").unwrap().success_verifier,
+            SuccessVerifier::CalculationResult
+        );
+        assert_eq!(contract("calculate").unwrap().resources, vec!["knowledge"]);
+        assert!(validate_example(schema, &json!({"expressions":["18+15","(240+84)/4"]})).is_ok());
+        for invalid in [
+            json!({"expressions":[]}),
+            json!({"expressions":vec!["1";9]}),
+            json!({"expressions":[false]}),
+            json!({"expressions":["x".repeat(257)]}),
+        ] {
+            assert!(validate_example(schema, &invalid).is_err(), "{invalid}");
+        }
+        let mut catalog: Value =
+            serde_json::from_str(include_str!("../../worker/tools.json")).unwrap();
+        catalog["calculate"]["parameters"]["properties"]["expressions"]["items"]["type"] =
+            "object".into();
+        assert!(
+            parse_catalog(&catalog.to_string()).is_err(),
+            "nested/arbitrary arrays cannot silently enter fixed schemas"
+        );
+    }
+
+    #[test]
+    fn structured_math_catalog_uses_bounded_flat_rows_and_recomputed_receipts() {
+        for name in [
+            "split_costs",
+            "scale_quantities",
+            "compare_options",
+            "sum_by_status",
+        ] {
+            let tool = definition(name).unwrap();
+            let contract = contract(name).unwrap();
+            assert_eq!(contract.operation, ToolOperation::Read);
+            assert_eq!(
+                contract.success_verifier,
+                SuccessVerifier::StructuredMathResult
+            );
+            assert_eq!(contract.resources, vec!["knowledge"]);
+            for spec in tool["parameters"]["properties"]
+                .as_object()
+                .unwrap()
+                .values()
+            {
+                if spec["type"] == "array" {
+                    assert_eq!(spec["items"]["type"], "string");
+                    assert!(spec["maxItems"].as_u64().unwrap() <= 24);
+                    assert!(spec["items"]["maxLength"].as_u64().unwrap() <= 512);
+                }
+            }
+            for example in &contract.examples {
+                assert!(crate::structured_math::validate(name, &example.arguments).is_ok());
+                let evidence = crate::structured_math::run(name, &example.arguments).unwrap();
+                assert!(crate::structured_math::verify(
+                    name,
+                    &example.arguments,
+                    &evidence
+                ));
+                assert!(!crate::structured_math::render(&evidence).is_empty());
+            }
+        }
     }
 
     #[test]

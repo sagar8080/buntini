@@ -170,6 +170,22 @@ def validate_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 value = value.strip().lower() == "true"
             if not isinstance(value, bool):
                 raise WorkerError("invalid_tool_call", f"{name}.{key} must be true or false")
+        elif spec["type"] == "array":
+            # Native tag formats may carry the JSON array as text. Decode only
+            # JSON, then enforce the same fixed bounded string-array schema.
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (ValueError, RecursionError) as exc:
+                    raise WorkerError("invalid_tool_call", f"{name}.{key} must be a JSON string array") from exc
+            if not isinstance(value, list) or not spec.get("minItems", 0) <= len(value) <= spec["maxItems"]:
+                raise WorkerError("invalid_tool_call", f"{name}.{key} has an invalid item count")
+            item_schema = spec["items"]
+            if item_schema["type"] != "string" or any(not isinstance(item, str) for item in value):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} must contain only text")
+            value = [item.strip() for item in value]
+            if any(not item_schema.get("minLength", 0) <= len(item) <= item_schema["maxLength"] for item in value):
+                raise WorkerError("invalid_tool_call", f"{name}.{key} contains an item of invalid length")
         else:
             if isinstance(value, str):
                 try:
@@ -225,8 +241,8 @@ GEMMA_QUOTE = '<|"|>'
 def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, Any]]:
     """Gemma 4's native call syntax: call:name{key:<|"|>text<|"|>,count:3}.
 
-    Flat arguments only (strings, numbers, true/false), which is all Buntini's tools
-    take. Everything still passes the fixed tool schema afterwards.
+    Flat arguments plus bounded JSON string arrays. Everything still passes the
+    fixed tool schema afterwards.
     """
     match = re.fullmatch(r"\s*call:([a-z][a-z0-9_]*)\{(.*)\}\s*", payload, flags=re.DOTALL)
     if match is None:
@@ -245,6 +261,12 @@ def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, An
                 raise WorkerError("invalid_tool_call", "The model left a Gemma tool argument unfinished")
             value: Any = body[position + len(GEMMA_QUOTE) : end]
             position = end + len(GEMMA_QUOTE)
+        elif body.startswith("[", position):
+            try:
+                value, end = json.JSONDecoder().raw_decode(body, position)
+            except (ValueError, RecursionError) as exc:
+                raise WorkerError("invalid_tool_call", "The model produced an invalid Gemma array") from exc
+            position = end
         else:
             raw = re.match(r"[^,]*", body[position:]).group(0)
             position += len(raw)

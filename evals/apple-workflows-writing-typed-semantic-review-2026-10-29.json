@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "kind": "independent_manual_semantic_review",
+  "scope": "Read-only review of actual production-controller writing workflows. No additional inference, source changes, fixture changes or rescoring changes were performed. Text and numeric inputs are synthetic user tasks; Apple SDK inference is real. Backend acceptance only; signed bundle and UI were not exercised.",
+  "raw_report": {
+    "path": "/Users/sagar/projects/nexon/evals/apple-workflows-writing-typed-2026-10-29.jsonl",
+    "sha256": "2ac1f10b9c7c1a693f988dcbfc503016b4650848cbde770e447e3b95fc9082a6"
+  },
+  "helper_sha256": "cc52557eef1b112fc5c295e7d8dec66e53dcc8616675fd476fed950ae030f884",
+  "helper_source_sha256": "954daabbe8cfe9d1c427357e0b2bd18d58ad07e2cdc97d5271d3414b546b815b",
+  "test_binary_sha256": "a6654ea2164c5c8fcc9cda54712c873cf419876ebd96f259753499e322add53a",
+  "rows": [
+    {
+      "id": "email-rewrite",
+      "raw_line_sha256": "2d42d45cf4161b4e570afdf2ab66d950dfb2c7957e3e4ffe652b7559c3d5cbcb",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Polite email preserves Maya, damaged monitor, order QZ742 and November 6 replacement deadline. Unknown signer remains an explicit [Your Name] placeholder; no assistant identity is inserted."
+    },
+    {
+      "id": "meeting-actions",
+      "raw_line_sha256": "ca57729deb0ac756b2ced3ebcb44e2934eb98560711e58ae028dd70379763a2f",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "All three source owner/action/deadline relationships are preserved: Maya/budget/Friday; Leo/venue/Tuesday; user/agenda/Thursday."
+    },
+    {
+      "id": "travel-itinerary",
+      "raw_line_sha256": "bb4a4b730f20ae74664861f075272f28723aadfe5ec732fbc39e035bc4f35f34",
+      "actual_apple_calls": 2,
+      "automated_passed": false,
+      "manual_passed": false,
+      "assessment": "Schedule starts Library09:30 before10:00 opening, Museum11:50 before12:00 opening and Library13:20 after13:00 closing. Visit/walk durations are inconsistent. Presence of all destination names does not establish a valid itinerary."
+    },
+    {
+      "id": "expense-split",
+      "raw_line_sha256": "0186dec15b8cc63254021511c0c284b4126c2f8e6cf9267371c499afcc394de1",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Apple extracted exactly four participants, shared240 cabin and84 groceries, and16 parking only for Maya/Leo. Rust computes81 common share plus8 each for the named parking beneficiaries, yielding89/89/81/81; arithmetic and person associations are correct."
+    },
+    {
+      "id": "subscription-audit",
+      "raw_line_sha256": "b2682c3d8517fec925c09b8165fedaa726a332600d42fc1448a76ac4368a3635",
+      "actual_apple_calls": 1,
+      "automated_passed": false,
+      "manual_passed": false,
+      "assessment": "Apple chose include_status=used despite requested unused cancellation and copied Video's amount as0 instead of18. Rust faithfully computed the wrong supplied inputs (15 monthly/180 yearly), so a valid arithmetic receipt does not establish a correct source-grounded answer."
+    },
+    {
+      "id": "compare-laptops",
+      "raw_line_sha256": "9b6ccd4a5e34b0b78a5a6d71f2e710ef9f27279ec9e1423b28c9d8bc27561c62",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Apple copied all three prices699/849/999 and RAM8/16/16, plus inclusive minimum16GB. Rust excludes Alder before selecting Birch849,150 less than Cedar. Names, qualifying attributes and prices match the source."
+    },
+    {
+      "id": "reply-draft",
+      "raw_line_sha256": "1f40126a5ecd47ac8ac9ec408286e425ededbcb762c7754fd0fb7d249090a549",
+      "actual_apple_calls": 2,
+      "automated_passed": false,
+      "manual_passed": false,
+      "assessment": "Draft accepts the specified lunch/date/time, vegetarian dish and parking question, and signs Casey; however it greets Casey instead of the incoming sender Maya. Correct signature alone does not establish correct reply roles."
+    },
+    {
+      "id": "packing-checklist",
+      "raw_line_sha256": "5b407efd319cd5c63f2f10baaf80f873b2b534eefa997f2a9ea4e59d6d2d8e04",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Includes rain protection, warm clothing, train ticket and laptop charging, while omitting supplied towels/hairdryer. Additional ordinary packing suggestions are allowed. Full checklist is delivered; closing advice is not offloading."
+    },
+    {
+      "id": "recipe-shopping",
+      "raw_line_sha256": "1918e59446ab0f9c78d7adf1d8d53edb398433e047c24027466a42fa4779547e",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Apple copied original150g pasta,200g tomatoes,1 onion,2 tablespoons oil and serving counts2→6 unchanged. Rust applies factor3 once:450g/600g/3/6 tablespoons. Exactly four requested ingredients, original units and associations are preserved."
+    },
+    {
+      "id": "document-summary",
+      "raw_line_sha256": "76fe5c05ecdb5943be25a525c95d86a2b45667083cbaedf3aa9acee90f90269e",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Exactly three bullets preserve Tuesday/Thursday permission,4pm previous working day deadline, and first30days ineligibility. The output neither invents policy rules nor advises an eligibility decision."
+    },
+    {
+      "id": "announcement-tone",
+      "raw_line_sha256": "2deeb26de1d9842f3a6c805eef92b2ff682c127f7c83abf995aa3eb8900ceb39",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Preserves office3pm November12, expensesnoon November11 and emergency extension204. Adds only ordinary greeting/closing and [Your Name] placeholder, without invented identity or changed facts."
+    },
+    {
+      "id": "translation",
+      "raw_line_sha256": "ae94821ea4635d106516825b5121c5418138424121202778ccf27a4600fd672d",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "manual_passed": true,
+      "assessment": "Understandable Spanish preserves Maya, train18:40, requested check-in after19:00 and booking RX318. 'Hacer la entrada' is less idiomatic than hotel check-in but preserves the intended question and timing."
+    }
+  ],
+  "summary": {
+    "reviewed": 12,
+    "passed": 9,
+    "failed": 3,
+    "actual_apple_sdk_calls": 20,
+    "remaining_failures": [
+      "travel-itinerary",
+      "subscription-audit",
+      "reply-draft"
+    ],
+    "automated_agreement": true
+  },
+  "limitations": [
+    "A deterministic math receipt verifies submitted typed inputs and arithmetic; only this manual source comparison establishes their correctness for these four cases.",
+    "This is evidence for one local Apple system-model/device run. It does not establish universal correctness, release-bundle behavior or readiness of untested workflows."
+  ]
+}

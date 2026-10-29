@@ -265,7 +265,7 @@ pub fn replace_index(
         .len())
 }
 
-fn terms(query: &str) -> Result<Vec<String>, String> {
+fn terms(query: &str) -> Result<Vec<(String, Option<String>)>, String> {
     if query.trim().is_empty() || query.len() > 512 {
         return Err("Enter a file query of up to 512 characters.".into());
     }
@@ -274,9 +274,10 @@ fn terms(query: &str) -> Result<Vec<String>, String> {
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty())
     {
+        let alternative = local::singular_search_term(word);
         let word = word.to_lowercase();
-        if !result.contains(&word) {
-            result.push(word);
+        if !result.iter().any(|(existing, _)| existing == &word) {
+            result.push((word, alternative));
         }
         if result.len() > 32 {
             return Err("Use up to 32 search words for the file index.".into());
@@ -288,15 +289,24 @@ fn terms(query: &str) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
-fn matches_terms(name: &str, content: &str, words: &[String]) -> bool {
+fn matches_terms(
+    name: &str,
+    content: &str,
+    words: &[(String, Option<String>)],
+    allow_alternatives: bool,
+) -> bool {
     let name = name.to_lowercase();
     let content = content.to_lowercase();
-    words.iter().all(|term| {
-        name.split(|c: char| !c.is_alphanumeric())
-            .any(|word| word.starts_with(term))
-            || content
-                .split(|c: char| !c.is_alphanumeric())
-                .any(|word| word.starts_with(term))
+    words.iter().all(|(term, alternative)| {
+        let matches = |word: &str| {
+            word.starts_with(term)
+                || (allow_alternatives
+                    && alternative
+                        .as_ref()
+                        .is_some_and(|term| word.starts_with(term)))
+        };
+        name.split(|c: char| !c.is_alphanumeric()).any(matches)
+            || content.split(|c: char| !c.is_alphanumeric()).any(matches)
     })
 }
 
@@ -310,7 +320,13 @@ pub fn indexed_candidates(
     let words = terms(query)?;
     let expression = words
         .iter()
-        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+        .map(|(term, alternative)| {
+            let literal = format!("\"{}\"*", term.replace('"', "\"\""));
+            match alternative {
+                Some(alternative) => format!("({literal} OR \"{alternative}\"*)"),
+                None => literal,
+            }
+        })
         .collect::<Vec<_>>()
         .join(" AND ");
     let approved = roots.iter().map(String::as_str).collect::<HashSet<_>>();
@@ -342,10 +358,20 @@ pub fn verify_candidates(
     query: &str,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
+    verify_candidate_group(roots, candidates, query, cancel).map(|group| group.hits)
+}
+
+pub(crate) fn verify_candidate_group(
+    roots: &[String],
+    candidates: &[IndexCandidate],
+    query: &str,
+    cancel: &Arc<AtomicBool>,
+) -> Result<local::MatchGroup<FileHit>, String> {
     let words = terms(query)?;
     let approved = roots.iter().map(String::as_str).collect::<HashSet<_>>();
     let mut paths = HashSet::new();
     let mut hits = Vec::new();
+    let mut fallback = Vec::new();
     for candidate in candidates.iter().take(MAX_DOCUMENTS) {
         check_cancel(cancel)?;
         if !approved.contains(candidate.root.as_str()) || !paths.insert(candidate.path.as_str()) {
@@ -368,17 +394,28 @@ pub fn verify_candidates(
             continue;
         };
         let content = read_content(&mut file, path, metadata.len());
-        if !matches_terms(name, &content, &words) {
+        let exact = matches_terms(name, &content, &words, false);
+        if !exact
+            && (!hits.is_empty()
+                || fallback.len() >= MAX_HITS
+                || !matches_terms(name, &content, &words, true))
+        {
             continue;
         }
         let mut excerpt = content
             .lines()
             .filter(|line| {
-                matches_terms("", line, &words)
-                    || words.iter().any(|term| {
+                matches_terms("", line, &words, !exact)
+                    || words.iter().any(|(term, alternative)| {
                         line.to_lowercase()
                             .split(|c: char| !c.is_alphanumeric())
-                            .any(|word| word.starts_with(term))
+                            .any(|word| {
+                                word.starts_with(term)
+                                    || (!exact
+                                        && alternative
+                                            .as_ref()
+                                            .is_some_and(|term| word.starts_with(term)))
+                            })
                     })
             })
             .take(3)
@@ -398,7 +435,7 @@ pub fn verify_candidates(
                 .take(600)
                 .collect();
         }
-        hits.push(FileHit {
+        let hit = FileHit {
             name: name.into(),
             path: candidate.path.clone(),
             size: metadata.len(),
@@ -409,13 +446,19 @@ pub fn verify_candidates(
                 .map(|time| time.to_rfc3339())
                 .unwrap_or_default(),
             excerpt: (!excerpt.is_empty()).then_some(excerpt),
-        });
+        };
+        if exact {
+            fallback.clear();
+            hits.push(hit);
+        } else {
+            fallback.push(hit);
+        }
         if hits.len() == MAX_HITS {
             break;
         }
     }
     check_cancel(cancel)?;
-    Ok(hits)
+    Ok(local::prefer_literal(hits, fallback))
 }
 
 pub fn query_index(
@@ -486,6 +529,90 @@ mod tests {
     }
 
     #[test]
+    fn plural_candidates_are_fresh_and_exact_results_take_precedence() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("offer.txt"),
+            "ACME-6279 quote total 680 including assembly",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.path().join("name.txt"),
+            "Atlas Polaris BUS AcmeOps ACME-6279s",
+        )
+        .unwrap();
+        let roots = vec![root(folder.path())];
+        let build = rebuild(&roots, &token()).unwrap();
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let hits = query_index(&db, &roots, "ACME-6279 Quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0]
+            .excerpt
+            .as_deref()
+            .unwrap()
+            .contains("680 including assembly"));
+        assert!(query_index(&db, &roots, "ACME-6280 Quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &[], "quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &roots, "quotes", &Arc::new(AtomicBool::new(true))).is_err());
+        for name in ["Atlas", "Polaris", "BUS", "AcmeOps", "ACME-6279s"] {
+            let hits = query_index(&db, &roots, name, &token()).unwrap();
+            assert_eq!(hits.len(), 1, "{name}");
+            assert_eq!(hits[0].name, "name.txt");
+        }
+        // Reopening rejects a stale singular match, even though it is still
+        // eligible in the stored FTS candidate set.
+        std::fs::write(folder.path().join("offer.txt"), "unrelated replacement").unwrap();
+        assert!(query_index(&db, &roots, "quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &[], "quotes", &token())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn exact_candidates_after_forty_plural_alternatives_are_not_discarded() {
+        let folder = tempfile::tempdir().unwrap();
+        let roots = vec![root(folder.path())];
+        let mut candidates = Vec::new();
+        for index in 0..MAX_HITS + 5 {
+            let path = Path::new(&roots[0]).join(format!("offer-{index}.txt"));
+            std::fs::write(&path, "vendor quote total 680").unwrap();
+            candidates.push(IndexCandidate {
+                root: roots[0].clone(),
+                path: path.to_string_lossy().into_owned(),
+            });
+        }
+        assert_eq!(
+            verify_candidates(&roots, &candidates, "quotes", &token())
+                .unwrap()
+                .len(),
+            MAX_HITS
+        );
+        let path = Path::new(&roots[0]).join("literal.txt");
+        std::fs::write(&path, "vendor quotes total 745").unwrap();
+        candidates.push(IndexCandidate {
+            root: roots[0].clone(),
+            path: path.to_string_lossy().into_owned(),
+        });
+        let hits = verify_candidates(&roots, &candidates, "quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "literal.txt");
+
+        let build = rebuild(&roots, &token()).unwrap();
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let hits = query_index(&db, &roots, "quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "literal.txt");
+    }
+
+    #[test]
     fn revoked_deleted_and_changed_files_never_return_stored_private_text() {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("notes.txt");
@@ -533,13 +660,17 @@ mod tests {
             folder.path().join("visible.txt"),
         )
         .unwrap();
-        assert!(query_index(&db, &roots, "needle", &token())
-            .unwrap()
-            .is_empty());
+        for query in ["needle", "needles"] {
+            assert!(query_index(&db, &roots, query, &token())
+                .unwrap()
+                .is_empty());
+        }
         db.execute("INSERT INTO file_index(root,path,name,content) VALUES(?1,?2,'private.txt','needle outside')", params![roots[0], outside.path().join("private.txt").to_str().unwrap()]).unwrap();
-        assert!(query_index(&db, &roots, "needle", &token())
-            .unwrap()
-            .is_empty());
+        for query in ["needle", "needles"] {
+            assert!(query_index(&db, &roots, query, &token())
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]

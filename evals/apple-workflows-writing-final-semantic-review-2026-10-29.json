@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "kind": "independent_manual_semantic_review",
+  "scope": "Read-only review of actual production-controller writing workflows. No extra SDK inference, source changes, fixture changes, rescoring changes or raw-evidence edits were performed. User text/numeric tasks are synthetic; the Apple SDK calls and production runtime path are real. Backend acceptance only; UI and signed release bundle were not exercised.",
+  "raw_report": {
+    "path": "/Users/sagar/projects/nexon/evals/apple-workflows-writing-final-2026-10-29.jsonl",
+    "sha256": "5f735887b439b4ca183898655f728c6af2c17cf7babd68a51201677c0fb0e70e"
+  },
+  "helper_sha256": "831afca5ec749151f098aa871db241204c9259a3a6e7f5694a2a5cf2cc622e98",
+  "helper_source_sha256": "fefa86d4cd5dcd1a497a309b888ffbf353c74387a0e678e53bd30fdef9c0d5b3",
+  "test_binary_sha256": "9092ead4a947391f0e91102a539a173dbca89ac304e892fe66242155008a3c32",
+  "rows": [
+    {
+      "id": "email-rewrite",
+      "raw_line_sha256": "4cc4ea05fb0aa586ffb5e51bf3d088fdfb0a12038e9bf02461abf08159194d8d",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Polite email preserves Maya, damaged monitor, order QZ742 and November 6 replacement deadline. Unknown signer remains an explicit [Your Name] placeholder; no assistant identity is inserted."
+    },
+    {
+      "id": "meeting-actions",
+      "raw_line_sha256": "fae374981d362b0902ff209777e05af6faa3cfee614dd8b3cbb7c62ddb147ec9",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "All three source owner/action/deadline relationships are preserved: Maya/budget/Friday; Leo/venue/Tuesday; user/agenda/Thursday."
+    },
+    {
+      "id": "travel-itinerary",
+      "raw_line_sha256": "e76998ac6c524e9da0d953136052b5e854827f85144629f19054460c1196a17e",
+      "actual_apple_calls": 2,
+      "automated_passed": false,
+      "completed": true,
+      "manual_passed": false,
+      "assessment": "Schedule starts Library09:30 before10:00 opening, Museum11:50 before12:00 opening and Library13:20 after13:00 closing. Visit/walk durations are inconsistent. Presence of all destination names does not establish a valid itinerary."
+    },
+    {
+      "id": "expense-split",
+      "raw_line_sha256": "620ae37709da5a0569f9425b083c01dc439f170ad39429a750c25952f22e9db2",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Apple extracted exactly four participants, shared240 cabin and84 groceries, and16 parking only for Maya/Leo. Rust computes81 common share plus8 each for the named parking beneficiaries, yielding89/89/81/81; arithmetic and person associations are correct."
+    },
+    {
+      "id": "subscription-audit",
+      "raw_line_sha256": "5c12001e65c30fe79214f2d62b059aaf1c801b21c75d74e1d8bb0d0c27ffd5cc",
+      "actual_apple_calls": 1,
+      "automated_passed": false,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Final canonical inputs exactly preserve all four user-provided labels, prices12/18/3/15 and used/unused statuses, select only unused Video/Fitness, and annualize33monthly to396yearly. The raw Apple proposal copied these row values correctly but selected include_status=used. Production controller bound the complete literal source table and target status before computation, retaining modelProposedArguments in provenance. Delivered selection and kept groups answer the user's cancellation-savings question correctly. Automated service-action checks are false negatives: they do not recognize 'Selected items (unused)' or 'Other items kept'; both numeric period checks pass.",
+      "adjudication": "automated_false_negative",
+      "source_grounding": "complete user-literal table binding; raw model proposal preserved in field provenance"
+    },
+    {
+      "id": "compare-laptops",
+      "raw_line_sha256": "c1d98867ac9c01934c79e4c3cb00fbb8e1efe8ad58b4950e40d64790dd72a3a9",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Apple copied all three prices699/849/999 and RAM8/16/16, plus inclusive minimum16GB. Rust excludes Alder before selecting Birch849,150 less than Cedar. Names, qualifying attributes and prices match the source."
+    },
+    {
+      "id": "reply-draft",
+      "raw_line_sha256": "dddc69f07a67274ae12882b9855aeaa0fd1bdb4d63be30efeeeaf88d582ce82c",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Delivered reply correctly greets original sender Maya and signs original recipient Casey, accepts Saturday November7 at2pm, offers a vegetarian dish, asks about parking, and does not claim sending. Production role normalization is part of the observed path; this review establishes delivered role correctness, not unaided raw-model role accuracy."
+    },
+    {
+      "id": "packing-checklist",
+      "raw_line_sha256": "d89b9042cd90544884d656c0243c0a8afbe0bd100c02c988e2428d88cd4e0690",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Includes rain protection, warm clothing, train ticket and laptop charging, while omitting supplied towels/hairdryer. Additional ordinary packing suggestions are allowed. Full checklist is delivered; closing advice is not offloading."
+    },
+    {
+      "id": "recipe-shopping",
+      "raw_line_sha256": "7828b591008e5779d6ca8d98987b27cecc67bf61b9014e2152e6d9e8df131824",
+      "actual_apple_calls": 1,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Apple copied original150g pasta,200g tomatoes,1 onion,2 tablespoons oil and serving counts2→6 unchanged. Rust applies factor3 once:450g/600g/3/6 tablespoons. Exactly four requested ingredients, original units and associations are preserved."
+    },
+    {
+      "id": "document-summary",
+      "raw_line_sha256": "a0aeceac5bfecced4272f15aa66cbdde04bfc5d6a964fbc96a8079a858fa6976",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Exactly three bullets preserve Tuesday/Thursday permission,4pm previous working day deadline, and first30days ineligibility. The output neither invents policy rules nor advises an eligibility decision."
+    },
+    {
+      "id": "announcement-tone",
+      "raw_line_sha256": "1441b6ff129666412ddc4a0edabea4a704051ae0068196533614c7bcaad25e01",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Preserves office3pm November12, expensesnoon November11 and emergency extension204. Adds only ordinary greeting/closing and [Your Name] placeholder, without invented identity or changed facts."
+    },
+    {
+      "id": "translation",
+      "raw_line_sha256": "49d5590193963ba0ade838aa6d33b72b1b85a6e56f757a2f3ec83e2b736a87ea",
+      "actual_apple_calls": 2,
+      "automated_passed": true,
+      "completed": true,
+      "manual_passed": true,
+      "assessment": "Understandable Spanish preserves Maya, train18:40, requested check-in after19:00 and booking RX318. 'Hacer la entrada' is less idiomatic than hotel check-in but preserves the intended question and timing."
+    }
+  ],
+  "summary": {
+    "reviewed": 12,
+    "automated_passed": 10,
+    "manual_passed": 11,
+    "manual_failed": 1,
+    "actual_apple_sdk_calls": 20,
+    "remaining_failures": [
+      "travel-itinerary"
+    ],
+    "automated_agreement": false,
+    "adjudicated_false_negatives": [
+      "subscription-audit"
+    ]
+  },
+  "limitations": [
+    "Canonical source binding and deterministic arithmetic are production corrections, not proof that the model itself selected every raw argument correctly.",
+    "A deterministic math receipt verifies submitted typed inputs and arithmetic; this manual comparison verifies the observed task's source associations.",
+    "One Apple system-model/device run does not establish universal correctness, UI behavior, signed-bundle behavior or readiness of untested workflows."
+  ]
+}

@@ -444,10 +444,29 @@ const REMINDER: &str = r#"    tell application "Reminders"
 "#;
 const EVENT: &str = r#"    set startDate to my makeDate(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv, item 6 of argv)
     set endDate to startDate + ((item 7 of argv) as integer) * 60
+    -- Calendar's calendarIdentifier getter fails on some macOS releases even
+    -- though its returned object specifier carries the real persistent ID.
+    -- Read that formal descriptor; never substitute a name or invented ID.
+    set lookup to current application's NSAppleScript's alloc()'s initWithSource:"tell application \"Calendar\" to get first calendar whose writable is true"
+    set calendarDescriptor to lookup's executeAndReturnError:(missing value)
+    if calendarDescriptor is missing value then error "Calendar did not return a writable calendar reference."
+    -- Require an object specifier for the Calendar class, selected by unique ID
+    -- (obj / wres / ID), rather than accepting a display-name selection.
+    if (calendarDescriptor's descriptorType()) as integer is not 1868720672 then error "Calendar returned an invalid object reference."
+    set wantedClass to calendarDescriptor's descriptorForKeyword:2002873972
+    set selectionForm to calendarDescriptor's descriptorForKeyword:1718579821
+    if wantedClass is missing value or selectionForm is missing value then error "Calendar returned an incomplete object reference."
+    if (wantedClass's typeCodeValue()) as integer is not 2003985779 then error "The selected object is not a calendar."
+    if (selectionForm's enumCodeValue()) as integer is not 1229201440 then error "The selected calendar reference is not identified by a persistent ID."
+    set idDescriptor to calendarDescriptor's descriptorForKeyword:1936026724
+    if idDescriptor is missing value then error "The selected calendar has no persistent identifier descriptor."
+    set selectedCalendarID to idDescriptor's stringValue() as text
+    if selectedCalendarID is "" then error "The selected calendar has no persistent identifier."
     tell application "Calendar"
-      set targetCalendar to first calendar whose writable is true
+      set targetCalendar to calendar id selectedCalendarID
+      if writable of targetCalendar is not true then error "The selected calendar is no longer writable."
       set destinationName to name of targetCalendar
-      my putField(observed, "destinationId", calendarIdentifier of targetCalendar)
+      my putField(observed, "destinationId", selectedCalendarID)
       set mutationStarted to true
       tell targetCalendar to set created to make new event with properties {summary:item 1 of argv, start date:startDate, end date:endDate, location:item 8 of argv}
       set resultID to uid of created
@@ -464,11 +483,12 @@ const EVENT: &str = r#"    set startDate to my makeDate(item 2 of argv, item 3 o
 "#;
 const NOTE: &str = r#"    tell application "Notes"
       set mutationStarted to true
-      set created to make new note with properties {name:item 1 of argv, body:item 2 of argv}
+      set created to make new note with properties {body:item 2 of argv}
       set resultID to id of created
       set stored to first note whose id is resultID
-      set destinationName to name of container of stored
-      my putField(observed, "destinationId", id of container of stored)
+      set targetFolder to container of stored
+      set destinationName to name of targetFolder
+      my putField(observed, "destinationId", id of targetFolder)
       my putField(observed, "title", name of stored)
       my putField(observed, "plaintext", plaintext of stored)
       my putField(observed, "identifierScope", "persistent")

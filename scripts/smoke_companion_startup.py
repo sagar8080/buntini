@@ -28,7 +28,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(root, cached_target):
+def run(root, cached_target, apple_workflow=False):
     with tempfile.TemporaryDirectory(prefix="buntini-startup-smoke-") as temporary:
         work = Path(temporary)
         source = work / "source"
@@ -56,6 +56,29 @@ def run(root, cached_target):
         replace_once(code / "controller.rs", "let native_dir = if cfg!(debug_assertions) {", "let native_dir = if false {")
         shutil.copy2(root / "scripts/smoke_startup_observer.rs", code / "startup_smoke.rs")
         shutil.copy2(root / "scripts/smoke_startup_checks.js", code / "startup_smoke_checks.js")
+        if apple_workflow:
+            replace_once(code / "startup_smoke_checks.js", "    window.__buntiniStartupSmoke = {\n      state: 'done'", """    await invoke('save_settings', { settings: { ...boot.settings, modelBackend: 'apple' } });
+    const events = [];
+    const callback = window.__TAURI_INTERNALS__.transformCallback(raw => {
+      if (raw.message) events.push(raw.message);
+    });
+    let appleTask;
+    try {
+      appleTask = await invoke('run_task', {
+        prompt: 'Rewrite this announcement in a warm concise tone without changing facts: The office closes at 3pm on November 12. Submit expenses by noon November 11. Emergency support is extension 204.',
+        mode: 'auto', onEvent: `__CHANNEL__:${callback}`, approvalId: null,
+      });
+    } finally { window.__TAURI_INTERNALS__.unregisterCallback(callback); }
+    check(appleTask.state === 'completed' && appleTask.backend === 'apple', 'Apple IPC workflow must finish on the Apple backend');
+    check(['November 12', 'November 11', 'noon', '204'].every(fact => appleTask.answer.includes(fact)), 'Apple IPC answer must preserve announcement facts');
+    check(!appleTask.action && !appleTask.handoff, 'Writing in chat must not request an app or online action');
+    const saved = await invoke('bootstrap');
+    check(saved.tasks.some(task => task.id === appleTask.id && task.answer === appleTask.answer), 'The completed Apple IPC task must be persisted');
+    window.__buntiniAppleIpcWorkflow = { task: appleTask, events, passed: true, entry: 'real bundled WebView IPC to production run_task; not a visual chat-button test' };
+    window.__buntiniStartupSmoke = {
+      state: 'done'""")
+            replace_once(code / "startup_smoke_checks.js", "      frontendMounted:", "      appleWorkflow: window.__buntiniAppleIpcWorkflow,\n      frontendMounted:")
+            replace_once(code / "startup_smoke.rs", "for _ in 0..150 {\n        let value", "for _ in 0..1200 {\n        let value")
         target = work / "target"
         if cached_target.exists():
             # APFS clones are independent files; root can build its candidate safely.
@@ -81,7 +104,7 @@ def run(root, cached_target):
             plistlib.dump({"CFBundleIdentifier": identifier, "CFBundleExecutable": "buntini", "CFBundleName": "BuntiniSmoke", "CFBundlePackageType": "APPL", "LSUIElement": True, "LSMinimumSystemVersion": "13.0"}, output)
         subprocess.run(["/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(app)], check=True, capture_output=True, text=True)
         binary_hash = digest(macos / "buntini")
-        started = subprocess.run([str(macos / "buntini")], cwd=source, capture_output=True, text=True, timeout=90)
+        started = subprocess.run([str(macos / "buntini")], cwd=source, capture_output=True, text=True, timeout=180 if apple_workflow else 90)
         reports = [line.removeprefix("BUNTINI_STARTUP_SMOKE ") for line in started.stdout.splitlines() if line.startswith("BUNTINI_STARTUP_SMOKE ")]
         if len(reports) != 1:
             raise RuntimeError(f"Startup report missing; exit {started.returncode}; stderr: {started.stderr[-6000:]}")
@@ -93,10 +116,14 @@ def run(root, cached_target):
             "production_security_source_sha256": digest(root / "src-tauri/src/security.rs"),
             "production_capability_sha256": digest(root / "src-tauri/capabilities/default.json"),
             "production_permission_manifest_sha256": digest(root / "src-tauri/permissions/companion.json"),
+            "bundled_apple_helper_sha256": digest(macos / "buntini-fm"),
+            "bundled_apple_helper_source_sha256": digest(source / "native/fm/main.swift"),
             "isolation": ["Separate source tree, Cargo target and app bundle", "Unique compile-time Keychain/migration namespaces", "Temporary data/cache", "Desktop awareness/roaming disabled", "Nonpersistent WebViews", "No microphone, TCC prompts, personal apps or provider calls requested"],
             "unchanged_boundaries": ["Production IPC command handlers", "Production explicit app-command permission allowlist", "Production main capability", "Production main navigation/popup/download guards", "Bundled frontend production assets"],
             "limitations": ["Separate debug binary with custom-protocol; not the signed release candidate", "Observer and storage isolation are injected only into the disposable copy", "Does not establish fresh-Mac permissions, notarization or Gatekeeper acceptance"],
         })
+        if apple_workflow:
+            report["isolation"][-1] = "No microphone, personal apps, paid providers or outbound API calls; Apple Foundation Models used locally"
         if started.returncode:
             report["passed"] = False
         return report
@@ -105,10 +132,11 @@ def run(root, cached_target):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--apple-workflow", action="store_true", help="Also exercise an actual Apple writing task through bundled WebView IPC")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     try:
-        result = run(root, root / "src-tauri/target")
+        result = run(root, root / "src-tauri/target", args.apple_workflow)
     except Exception as error:
         result = {"kind": "disposable_companion_startup_smoke", "passed": False, "error": str(error)}
     args.output.write_text(json.dumps(result, indent=2) + "\n")

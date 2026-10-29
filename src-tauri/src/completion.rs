@@ -171,7 +171,7 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("create_note")
                 }
-                "draft" | "prepare" | "write" if has(&["email", "mail", "message", "draft"]) => {
+                "draft" | "prepare" | "write" if has(&["email", "mail", "message"]) => {
                     Some("draft_email")
                 }
                 "open"
@@ -373,24 +373,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
         }) {
             continue;
         }
-        let has = |targets: &[&str]| tokens.iter().any(|word| targets.contains(word));
-        let required: &[&str] = if has(&["calendar", "events", "appointments"]) {
-            &["read_calendar"]
-        } else if has(&["mail", "email", "emails", "inbox"]) {
-            &["read_mail"]
-        } else if has(&["reminders"]) {
-            &["read_reminders"]
-        } else if has(&["note", "notes"]) {
-            &["find_notes"]
-        } else if has(&["page", "website", "webpage"]) {
-            &["read_page", "browse_page", "look_up_online"]
-        } else if has(&["tabs"]) {
-            &["browser_tabs"]
-        } else if has(&["files", "folder", "folders"]) {
-            &["search_files"]
-        } else {
-            &[]
-        };
+        let required = crate::task_contract::read_tools(clause);
         if !required.is_empty()
             && !steps.iter().any(|step| {
                 !step.effect
@@ -759,6 +742,18 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         });
     }
     if claims_own_write(text) {
+        let plain = unquoted(prompt);
+        let request = request_clause(&plain);
+        let verb = words(request).first().copied().unwrap_or("");
+        let (actions, unsupported) = requested_actions(prompt);
+        if actions.is_empty() && !unsupported
+            && ["rewrite", "rephrase", "polish", "proofread", "translate", "draft"].contains(&verb)
+        {
+            // A generated message may speak in the user's first person ("I
+            // ordered a monitor"). Render it explicitly as quoted text so it
+            // cannot be mistaken for an assistant execution announcement.
+            return Ok(format!("Text for review:\n\n{}",text.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")));
+        }
         return Err("The response claimed an action without a verified receipt. Buntini has not confirmed that it was done.".into());
     }
     Ok(text.to_string())
@@ -768,6 +763,15 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_rewritten_first_person_message_is_quoted_instead_of_claiming_execution() {
+        let answer = validate_answer("Rewrite this as a polite email: 'I ordered a monitor and it arrived damaged.'", "Hi Maya, I ordered a monitor and it arrived damaged. Could you replace it?", &[]).unwrap();
+        assert!(answer.starts_with("Text for review:\n\n> "));
+        assert!(!claims_own_write(&answer));
+        assert!(validate_answer("Thanks", "I ordered a monitor.", &[]).is_err());
+        assert!(validate_answer("Rewrite this and add a reminder", "I created the reminder.", &[]).is_err());
+    }
 
     fn saved(tool: &str, message: &str) -> Step {
         Step {
@@ -1194,6 +1198,15 @@ mod tests {
             &[saved("create_note", "Verified note.")]
         )
         .is_err());
+    }
+
+    #[test]
+    fn generic_note_read_uses_the_same_source_alternatives_as_the_task_contract() {
+        let mut file = saved("search_files", "Read repair note.");
+        file.effect = false;
+        file.evidence = Some(json!({"files":[{"name":"repair.txt"}]}));
+        assert!(require_reads("Find my bicycle repair note and tell me the appointment", &[file.clone()]).is_ok());
+        assert!(require_reads("Read my notes in Notes app", &[file]).is_err());
     }
 
     #[test]

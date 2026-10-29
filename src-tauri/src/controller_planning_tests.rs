@@ -274,7 +274,9 @@ for line in sys.stdin:
         );
         let (state, settings, mut task, mut flow) = fixture_task_state(
             dir.path(),
-            "Add a reminder titled Lease due tomorrow",
+            // Keep title unresolved: explicit titles are now bound before
+            // inference, making title+clarified due a fully known proposal.
+            "Add a reminder about my lease due tomorrow",
             &script,
         );
         flow.refresh_contract();

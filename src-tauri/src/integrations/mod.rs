@@ -8,6 +8,12 @@ pub mod duffel;
 pub mod ebay;
 pub mod everyday;
 pub mod places;
+mod summary;
+mod weather_advice;
+pub use summary::render_card_summary;
+#[cfg(all(test, debug_assertions))]
+pub(crate) use weather_advice::has_walk_advice;
+pub use weather_advice::with_walk_advice;
 
 use crate::{controller::AppState, types::*, web};
 use futures_util::StreamExt;

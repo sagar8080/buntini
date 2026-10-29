@@ -174,6 +174,17 @@ impl Store {
         if fact.chars().count() < 3 || fact.chars().count() > 300 {
             return Err("Memories are 3–300 characters.".into());
         }
+        let exists: bool = self
+            .db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM memories WHERE fact=?1)",
+                [&fact],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if exists {
+            return Ok(false);
+        }
         let count: i64 = self
             .db
             .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
@@ -825,6 +836,22 @@ mod tests {
         s.forget(saved[0].id).unwrap();
         assert!(s.memories().unwrap().is_empty());
         assert!(s.remember("no").is_err());
+    }
+
+    #[test]
+    fn repeating_a_saved_memory_is_idempotent_even_when_capacity_is_full() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        for number in 0..200 {
+            assert!(store
+                .remember(&format!("Preference number {number}"))
+                .unwrap());
+        }
+        assert!(!store.remember("Preference   number 0").unwrap());
+        assert_eq!(store.memories().unwrap().len(), 200);
+        assert!(store
+            .remember("A new preference")
+            .unwrap_err()
+            .contains("Memory is full"));
     }
     #[test]
     fn onboarding_is_needed_once_unless_asked_again() {

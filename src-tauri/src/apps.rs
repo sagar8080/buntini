@@ -1509,7 +1509,39 @@ fn mail_rows(output: &str, unread: bool, limit: usize) -> Vec<Vec<String>> {
 }
 
 async fn find_notes_evidence(query: &str) -> Result<Value, String> {
-    notes_evidence(query, &osascript(NOTES_FIND, &[query.into()], 40).await?)
+    let exact = notes_evidence(query, &osascript(NOTES_FIND, &[query.into()], 40).await?)?;
+    if exact["count"] != 0 {
+        return Ok(exact);
+    }
+    let Some(fallback) = notes_query_fallback(query) else {
+        return Ok(exact);
+    };
+    let output = osascript(NOTES_FIND, &[fallback.clone()], 40).await?;
+    notes_fallback_evidence(query, &fallback, &output)
+}
+
+/// Models sometimes include the generic noun in "my Groceries note". Preserve
+/// every identifying word and try removing only that trailing noun, and only
+/// after the exact phrase produced zero matches. Never shorten arbitrary text.
+fn notes_query_fallback(query: &str) -> Option<String> {
+    let query = query.trim();
+    let lower = query.to_ascii_lowercase();
+    for suffix in [" notes", " note"] {
+        if lower.ends_with(suffix) {
+            let candidate = query[..query.len() - suffix.len()].trim();
+            return (candidate.chars().count() >= 3).then(|| candidate.to_string());
+        }
+    }
+    None
+}
+
+fn notes_fallback_evidence(query: &str, effective: &str, output: &str) -> Result<Value, String> {
+    let mut result = notes_evidence(effective, output)?;
+    result["scope"]["query"] = json!(query);
+    result["scope"]["effectiveQuery"] = json!(effective);
+    result["scope"]["queryStrategy"] = json!("exact_phrase_then_generic_note_suffix");
+    result["scope"]["exactPhraseMatches"] = json!(0);
+    Ok(result)
 }
 
 fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
@@ -2167,6 +2199,33 @@ pub async fn check_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notes_suffix_fallback_preserves_identifiers_and_reports_its_actual_query() {
+        let literal = "BuntiniQA-01234567-0123-4567-8901-012345678901 Handoff";
+        let original = format!("{literal} note");
+        assert_eq!(notes_query_fallback(&original).as_deref(), Some(literal));
+        assert_eq!(
+            notes_query_fallback("Project Notes").as_deref(),
+            Some("Project")
+        );
+        for query in [
+            "note",
+            "notes",
+            "Footnotes",
+            "Notebook",
+            "Do not shorten other words",
+            "x note",
+        ] {
+            assert_eq!(notes_query_fallback(query), None, "{query}");
+        }
+        let output = format!("2026-10-29 15:00\towned-note-id\t{literal}\tAlex owns the draft.\t20\n__buntini_summary__\t1\t1\ttrue");
+        let found = notes_fallback_evidence(&original, literal, &output).unwrap();
+        assert_eq!(found["scope"]["query"], original);
+        assert_eq!(found["scope"]["effectiveQuery"], literal);
+        assert_eq!(found["records"][0]["id"], "owned-note-id");
+        assert!(validate_evidence("find_notes", &json!({"query":original}), &found, true).is_ok());
+    }
 
     #[test]
     fn typed_calendar_preserves_source_ids_and_exact_dst_instants() {

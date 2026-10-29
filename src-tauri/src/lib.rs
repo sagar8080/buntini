@@ -1,4 +1,6 @@
 mod actions;
+#[cfg(debug_assertions)]
+pub mod acceptance_apps;
 mod advisor;
 mod approvals;
 mod apps;
@@ -7,6 +9,11 @@ mod brief;
 mod browser_workspace;
 mod browser_session;
 mod budget;
+mod calculation;
+mod structured_math;
+mod writing_context;
+mod source_fields;
+mod location_fields;
 mod chat_threads;
 mod chatgpt;
 mod cloud;

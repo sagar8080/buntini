@@ -1,10 +1,22 @@
 """The shared tool catalog is policy data, not an extra model-controlled API."""
 import unittest
 
-from worker.protocol import TOOL_DEFINITIONS, WorkerError, selected_tools, validate_arguments
+from worker.protocol import TOOL_DEFINITIONS, WorkerError, selected_tools, validate_arguments, parse_gemma_call, parse_tool_payload
 
 
 class ToolContractTests(unittest.TestCase):
+    def test_calculation_arrays_remain_bounded_and_strict_in_every_tool_format(self):
+        arguments = {"expressions": ["18+15", "(240+84)/4"]}
+        self.assertEqual(validate_arguments("calculate", arguments), arguments)
+        self.assertEqual(parse_gemma_call('call:calculate{expressions:["18+15","(240+84)/4"]}', {"calculate"}), ("calculate", arguments))
+        self.assertEqual(parse_tool_payload('<function=calculate><parameter=expressions>["18+15","(240+84)/4"]</parameter></function>', {"calculate"}), ("calculate", arguments))
+        for value in ([], ["1"] * 9, [False], [["1"]], [""], ["1" * 257], "not JSON", {"expression": "1"}):
+            with self.subTest(value=value), self.assertRaises(WorkerError):
+                validate_arguments("calculate", {"expressions": value})
+        for payload in ('call:calculate{expressions:["1",]}', 'call:calculate{expressions:[false]}'):
+            with self.subTest(payload=payload), self.assertRaises(WorkerError):
+                parse_gemma_call(payload, {"calculate"})
+
     def test_all_model_definitions_strip_private_contracts(self):
         for selection in (None, [{"name": "control_music"}], [{"function": {"name": "read_calendar"}}]):
             for tool in selected_tools(selection):

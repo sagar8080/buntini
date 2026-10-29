@@ -155,17 +155,87 @@ fn text_extension(path: &Path) -> bool {
             | "css"
     )
 }
+
+/// A conservative regular-plural alternative, never a replacement for the
+/// user's query. Identifiers, acronyms and common non-plural endings stay
+/// literal; callers use alternatives only when no literal result survives.
+pub(crate) fn singular_search_term(term: &str) -> Option<String> {
+    if term.len() < 4
+        || !term.chars().all(|ch| ch.is_ascii_alphabetic())
+        || term.chars().all(|ch| ch.is_ascii_uppercase())
+        || term.chars().skip(1).any(|ch| ch.is_ascii_uppercase())
+    {
+        return None;
+    }
+    let lower = term.to_ascii_lowercase();
+    if !lower.ends_with('s')
+        || ["ss", "us", "is", "as", "ous", "ness"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+    {
+        return None;
+    }
+    if lower.ends_with("ies") && lower.len() > 4 {
+        return Some(format!("{}y", &lower[..lower.len() - 3]));
+    }
+    let drop = if ["ches", "shes", "xes", "zes"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+    {
+        2
+    } else {
+        1
+    };
+    Some(lower[..lower.len() - drop].to_string())
+}
+
 pub fn search(
     roots: &[String],
     query: &str,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<(String, FileHit, String)>, String> {
-    let query = query.trim().to_lowercase();
+    search_group(roots, query, cancel).map(|group| group.hits)
+}
+
+/// A search backend returns one homogeneous group: literal matches when any
+/// survive, otherwise plural alternatives. Preserve that distinction when
+/// combining multiple bounded searches so fallback rows cannot crowd out exact
+/// hits discovered by another backend.
+pub(crate) struct MatchGroup<T> {
+    pub hits: Vec<T>,
+    pub literal: bool,
+}
+
+pub(crate) fn prefer_literal<T>(literal: Vec<T>, fallback: Vec<T>) -> MatchGroup<T> {
+    if literal.is_empty() {
+        MatchGroup {
+            hits: fallback,
+            literal: false,
+        }
+    } else {
+        MatchGroup {
+            hits: literal,
+            literal: true,
+        }
+    }
+}
+
+pub(crate) fn search_group(
+    roots: &[String],
+    query: &str,
+    cancel: &Arc<AtomicBool>,
+) -> Result<MatchGroup<(String, FileHit, String)>, String> {
+    let query = query.trim();
     if query.is_empty() || query.len() > 512 {
         return Err("Enter a file name or a few search words (up to 512 characters).".into());
     }
-    let words: Vec<&str> = query.split_whitespace().collect();
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let alternatives = query
+        .split_whitespace()
+        .map(singular_search_term)
+        .collect::<Vec<_>>();
     let mut result = Vec::new();
+    let mut fallback = Vec::new();
     let mut scanned = 0;
     for root_str in roots {
         let root = PathBuf::from(root_str);
@@ -183,7 +253,7 @@ pub fn search(
             }
             scanned += 1;
             if scanned > MAX_ENTRIES || result.len() >= MAX_HITS {
-                return Ok(result);
+                return Ok(prefer_literal(result, fallback));
             }
             let entry = match item {
                 Ok(e) => e,
@@ -212,18 +282,42 @@ pub fn search(
                 }
             }
             let lower = content.to_lowercase();
-            if !words
+            let exact = words
                 .iter()
-                .all(|w| name_lower.contains(w) || lower.contains(w))
-            {
+                .all(|w| name_lower.contains(w) || lower.contains(w));
+            let relaxed = result.is_empty()
+                && fallback.len() < MAX_HITS
+                && words.iter().zip(&alternatives).all(|(word, alternative)| {
+                    name_lower.contains(word)
+                        || lower.contains(word)
+                        || alternative.as_ref().is_some_and(|singular| {
+                            name_lower.contains(singular) || lower.contains(singular)
+                        })
+                });
+            if !exact && !relaxed {
                 continue;
             }
+            let excerpt_words = words
+                .iter()
+                .zip(&alternatives)
+                .map(|(word, alternative)| {
+                    if exact {
+                        word
+                    } else {
+                        alternative.as_ref().unwrap_or(word)
+                    }
+                })
+                .collect::<Vec<_>>();
             let excerpt = if content.is_empty() {
                 None
             } else {
                 let lines = content
                     .lines()
-                    .filter(|line| words.iter().any(|w| line.to_lowercase().contains(w)))
+                    .filter(|line| {
+                        excerpt_words
+                            .iter()
+                            .any(|w| line.to_lowercase().contains(w.as_str()))
+                    })
                     .take(3)
                     .collect::<Vec<_>>()
                     .join(" ");
@@ -245,7 +339,7 @@ pub fn search(
                 .map(chrono::DateTime::<chrono::Utc>::from)
                 .map(|d| d.to_rfc3339())
                 .unwrap_or_default();
-            result.push((
+            let hit = (
                 root_str.clone(),
                 FileHit {
                     name,
@@ -255,10 +349,16 @@ pub fn search(
                     excerpt,
                 },
                 content,
-            ));
+            );
+            if exact {
+                fallback.clear();
+                result.push(hit);
+            } else {
+                fallback.push(hit);
+            }
         }
     }
-    Ok(result)
+    Ok(prefer_literal(result, fallback))
 }
 
 pub fn snapshot() -> SystemSnapshot {
@@ -424,6 +524,116 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert!(hits[0].2.is_empty());
         assert!(search(&[root], "large", &Arc::new(AtomicBool::new(true))).is_err());
+    }
+
+    #[test]
+    fn plural_fallback_reads_real_content_and_retains_identifier_spelling() {
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join("vendor-offer.txt"),
+            "ACME-6279 quote: Cedar costs 680 including assembly.",
+        )
+        .unwrap();
+        let roots = vec![folder
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()];
+        let hits = search(
+            &roots,
+            "ACME-6279 Quotes",
+            &Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0]
+            .1
+            .excerpt
+            .as_deref()
+            .unwrap()
+            .contains("680 including assembly"));
+        assert!(search(
+            &roots,
+            "ACME-6280 Quotes",
+            &Arc::new(AtomicBool::new(false))
+        )
+        .unwrap()
+        .is_empty());
+
+        for name in ["Atlas", "Polaris", "BUS", "AcmeOps", "ACME-6279s"] {
+            assert!(singular_search_term(name).is_none(), "{name}");
+            fs::write(folder.path().join("proper-name.txt"), name).unwrap();
+            let hits = search(&roots, name, &Arc::new(AtomicBool::new(false))).unwrap();
+            assert_eq!(hits.len(), 1, "{name}");
+            assert_eq!(hits[0].1.name, "proper-name.txt");
+        }
+    }
+
+    #[test]
+    fn exact_hits_override_a_full_fallback_buffer_and_both_are_bounded() {
+        let fallback_folder = tempfile::tempdir().unwrap();
+        let exact_folder = tempfile::tempdir().unwrap();
+        for index in 0..MAX_HITS + 5 {
+            fs::write(
+                fallback_folder.path().join(format!("offer-{index}.txt")),
+                "vendor quote total 680",
+            )
+            .unwrap();
+        }
+        fs::write(
+            exact_folder.path().join("literal.txt"),
+            "vendor quotes total 745",
+        )
+        .unwrap();
+        let root = |path: &Path| path.canonicalize().unwrap().to_string_lossy().into_owned();
+        let first_root = root(fallback_folder.path());
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            search(&[first_root.clone()], "quotes", &cancel)
+                .unwrap()
+                .len(),
+            MAX_HITS
+        );
+        let hits = search(&[first_root, root(exact_folder.path())], "quotes", &cancel).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1.name, "literal.txt");
+        // A proper name with the same regular suffix also keeps its literal
+        // match; the relaxed candidate cannot replace the requested spelling.
+        fs::write(fallback_folder.path().join("name.txt"), "Charle").unwrap();
+        fs::write(exact_folder.path().join("name.txt"), "Charles").unwrap();
+        let hits = search(
+            &[root(fallback_folder.path()), root(exact_folder.path())],
+            "Charles",
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].2, "Charles");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plural_fallback_cannot_read_hidden_symlink_or_revoked_scopes() {
+        use std::os::unix::fs::symlink;
+        let folder = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(folder.path().join(".private.txt"), "vendor quote hidden").unwrap();
+        fs::write(outside.path().join("private.txt"), "vendor quote outside").unwrap();
+        symlink(
+            outside.path().join("private.txt"),
+            folder.path().join("link.txt"),
+        )
+        .unwrap();
+        let roots = vec![folder
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()];
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert!(search(&roots, "quotes", &cancel).unwrap().is_empty());
+        assert!(search(&[], "quotes", &cancel).unwrap().is_empty());
     }
     #[test]
     #[ignore = "Run explicitly on the target Mac to record current tool latency"]

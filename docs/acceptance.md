@@ -1,5 +1,9 @@
 # MVP delivery and acceptance
 
+### Actual Apple everyday workflows — October 29, 2026
+
+The current local revision completes **31 of 38 positive user workflows** and **2 of 3 boundary checks**, using 103 actual Apple Foundation Models SDK calls, real disposable files/profiles and scoped Notes/Reminders/Calendar records, plus free public APIs. **The app remains blocked for public rollout:** seven user scenarios and an unknown-fact boundary still fail. See the [current acceptance report](apple-workflow-acceptance.md) for all completed tasks, exact limits, hashes and remaining blockers. The new source is not the previously notarized v0.1.0 artifact.
+
 This records the implementation against the supplied version 0.1 TDD, verified on October 21, 2026. Implemented behavior and completed checks are distinguished from device/provider acceptance. The delivered artifact is the native Tauri macOS app, not the Vite browser preview.
 
 Public distribution additionally requires the [production readiness gates](production-readiness.md). Historical automated results below do not establish signed-artifact, fresh-device or real-model acceptance.
@@ -91,7 +95,7 @@ Web mode sends the explicitly approved query, never private file results. Retrie
 
 Price watches use published Schema.org offers with decimal-string amounts and explicit currencies. Ambiguous products, conflicting quotes/stock/sellers, aggregate ranges, and unsupported metadata cannot produce a threshold alert. There is no currency conversion or checkout-total guarantee. Pausing/deleting cancels the active monitor and prevents later retries/notices through its cancellation state.
 
-File scans are limited to approved roots, 10,000 entries, 40 hits, and 64 KB per text file. Index rebuilds are bounded to 5,000 files/20 MiB and atomic; indexed hits reopen current files within current grants. New files require an explicit refresh. Neither cached index text nor remote page text becomes tool authority.
+File scans are limited to approved roots, 10,000 entries, 40 hits, and 64 KB per text file. Index rebuilds are bounded to 5,000 files/20 MiB and atomic; indexed hits reopen current files within current grants. Search also performs the same bounded scoped live walk to discover new files; an explicit rebuild still refreshes the saved index snapshot. Neither cached index text nor remote page text becomes tool authority.
 
 The separate browser workspace additionally uses a persistent, isolated WebKit profile per approved origin with a required public-IP proxy. It reads rendered text after approval; its bounded observation does not prove authentication or any website transaction. See [capabilities](capabilities.md).
 

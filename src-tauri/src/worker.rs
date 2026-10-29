@@ -37,6 +37,8 @@ pub struct WorkerManager {
     pub status: std::sync::Mutex<String>,
     label: &'static str,
     closed: AtomicBool,
+    #[cfg(test)]
+    model_calls: std::sync::atomic::AtomicUsize,
 }
 #[derive(Debug)]
 pub struct Turn {
@@ -82,7 +84,15 @@ impl WorkerManager {
             status: std::sync::Mutex::new("Not started · local tools are ready".into()),
             label,
             closed: AtomicBool::new(false),
+            #[cfg(test)]
+            model_calls: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+    /// Counts actual SDK invocations reported by the native helper, not
+    /// deterministic controller bindings or a request merely reaching a worker.
+    #[cfg(test)]
+    pub(crate) fn model_calls(&self) -> usize {
+        self.model_calls.load(Ordering::SeqCst)
     }
     pub async fn reset(&self) {
         let mut w = self.worker.lock().await;
@@ -241,6 +251,10 @@ impl WorkerManager {
                     let msg:Value=match serde_json::from_str(&line){Ok(v)=>v,Err(_)=>break Err("The local worker returned invalid JSON.".into())};
                     if msg.get("id").and_then(Value::as_str)!=Some(&id){continue;}
                     match msg.get("type").and_then(Value::as_str).unwrap_or("") {
+                        "model_call"=>{
+                            #[cfg(test)]
+                            self.model_calls.fetch_add(1, Ordering::SeqCst);
+                        },
                         "pong"=>break Ok(Turn{text:msg.to_string(),tool:None,raw:None}),
                         "token"=>{if let Some(t)=msg.get("text").and_then(Value::as_str){if text.len()+t.len()>64_000{break Err("The local response exceeded its safe size limit.".into());} text.push_str(t);on_token(t.into());}},
                         "tool_call"=>{if tool.is_some(){break Err("The model requested multiple tools in a single turn.".into());} tool=Some(msg);},

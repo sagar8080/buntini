@@ -1,0 +1,177 @@
+{
+  "kind": "independent_semantic_review_of_frozen_captured_outputs",
+  "recordedAt": "2026-10-29T20:47:29.713873+00:00",
+  "reviewer": "Codex direct inspection of captured requests, source records, generated proposals/answers, production receipts and cleanup",
+  "scope": "Backend opt-in debug acceptance evidence; not a packaged-app/TCC identity or release certification. Original automated reports remain byte-for-byte unchanged. No model call or action performed by this review.",
+  "reports": [
+    {
+      "path": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "testBinarySha256": "acd208fa9fedbccec6e1beb123721f8e293fa31e42617194598f7b4a662e2f2f",
+      "helperSha256": "cc99916d9280c6ba55fa0a768c604569e05f67b0df15305939899c052c8513ed"
+    },
+    {
+      "path": "evals/apple-workflows-public-pinned-2026-10-29.jsonl",
+      "sha256": "bb8f91f76e36d414b27e3d18851409e8515744280106403e5096adbb5d50e713",
+      "testBinarySha256": "acd208fa9fedbccec6e1beb123721f8e293fa31e42617194598f7b4a662e2f2f",
+      "helperSha256": "cc99916d9280c6ba55fa0a768c604569e05f67b0df15305939899c052c8513ed"
+    }
+  ],
+  "results": [
+    {
+      "id": "notes-grocery-summary",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "b771cecf38bf934ff7e0d7511594f07aa1eb035868444af71ce02c62ce588d55",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 3,
+      "reason": "Correctly identifies chickpeas, spinach and tomatoes as missing ingredients, preserves $25 budget, excludes already-owned rice; real namespaced source read and cleanup verified.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-compare-quotes",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "342a9375829157b5e4d587dc082ffa75aba4621b0f3604f104abb4ebc5a88a1e",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 1,
+      "reason": "Model dropped the explicit unique note identifier and proposed query Quotes; harness refused before reading unrelated notes. No completed source read or recommendation.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-handoff-summary",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "05d799bb98a1f60efdd0562f83ef914fea4b17bca20c6af67bb864da902017e7",
+      "automatedPassed": false,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 3,
+      "reason": "Automated false negative: nested owner sections correctly associate Alex with draft/Monday and Mina with accessibility/Tuesday, and user with screenshots before Monday. Same-line checker rejects valid nested formatting.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-literal-text",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "affc75b29cc6e2e0abf442050c75c62061cc3218467fde0438479d66e6061f4e",
+      "automatedPassed": false,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 3,
+      "reason": "Automated false negative: answer correctly states 42 dollars and the exact coffee symbol ☕. Requiring the English word coffee rejected a correct direct symbol answer.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-project-next-step",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "95087375480422e9775898ed638b22aa017a35fc7022b90b11d59f2038682b8f",
+      "automatedPassed": true,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 5,
+      "reason": "Automated false positive for full request: real derived note write/readback/cleanup succeeded and contains DNS/backup/owner facts, but generated body copies the source as one paragraph rather than the requested short checklist. Do not count as fully completed.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-travel-checklist",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "9fb82a21003bab26feb6c864675f1385d8569b87826cdffe75f855b65cb7336e",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 3,
+      "reason": "Model derives correct due 2031-05-20 07:25, but drops explicit unique identifier from requested reminder title; exact gate refuses write. No actual reminder created.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "notes-to-calendar-workshop",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "38c895e285c9ef2ce86bfd3de8b51f4d6e20656fc9dcbed96c005ba662ecb0f1",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 3,
+      "reason": "Correct45-minute duration but proposed year2026 rather than source2031 and omitted Study Room. Exact gate refuses write.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "create-meeting-followup-note",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "c99e88779c576314e06c18f109930548a47e57d4ef26526b40d9e989b342ae57",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 2,
+      "reason": "Generated note body omits Mina/accessibility review and is not requested two-item checklist. Exact content gate refuses write.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "create-library-return-reminder",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "846db9d192dad8d1365fc2f5ceee5e5e0148c5aaae9c58debf01827c4bccddd1",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 2,
+      "reason": "Proposed18:15 instead of15minutes before18:00, which is17:45. Exact gate refuses write.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "create-training-calendar-event",
+      "sourceReport": "evals/apple-workflows-apps-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "a8958699f3ee99b5fd630f50eb4f45c3eacf8e0b592fa6eeff3768b33a4c63f1",
+      "sourceRecordSha256ExcludingLineTerminator": "f9c855b8f2a4a34e7edc91aa8aa2756345443e9f4e26c8e3c35c2e7875701e9c",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 4,
+      "reason": "Actual Apple-derived35-minute duration from14:15–14:50, exact2031-05-21/date/title/location proposal, real Calendar creation/readback and exact-ID deletion verified.",
+      "cleanupVerified": true
+    },
+    {
+      "id": "public-seattle-walk-weather",
+      "sourceReport": "evals/apple-workflows-public-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "bb8f91f76e36d414b27e3d18851409e8515744280106403e5096adbb5d50e713",
+      "sourceRecordSha256ExcludingLineTerminator": "5430ac3738f1b9d1eedefa772417d019d96ecc38462bc66dde8b770e68e5a46c",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 1,
+      "reason": "Real provider cards returned and persisted, but Apple structured summary declared partial coverage; controller honestly displayed original cards with unavailable-summary notice. No completed AI-assisted requested advice.",
+      "cleanupVerified": null
+    },
+    {
+      "id": "public-space-needle-background",
+      "sourceReport": "evals/apple-workflows-public-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "bb8f91f76e36d414b27e3d18851409e8515744280106403e5096adbb5d50e713",
+      "sourceRecordSha256ExcludingLineTerminator": "1aa8d5f29a00d5a11e95e141291cc144976e8f79fa6ffa83a4c2b8e668b13484",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 1,
+      "reason": "Real article cards returned and persisted, but Apple structured summary declared partial coverage and was rejected. Original cards are not a completed requested AI summary.",
+      "cleanupVerified": null
+    },
+    {
+      "id": "public-pike-place-cafes",
+      "sourceReport": "evals/apple-workflows-public-pinned-2026-10-29.jsonl",
+      "sourceReportSha256": "bb8f91f76e36d414b27e3d18851409e8515744280106403e5096adbb5d50e713",
+      "sourceRecordSha256ExcludingLineTerminator": "1ce44989bb04fd0c558d5f02d336bfecf13c9e5ea27c5c9bb2adb7cdf6616a49",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 1,
+      "reason": "Real cafe cards returned and persisted, but Apple structured summary declared partial coverage and was rejected. Raw cards fallback is not counted as a completed AI comparison.",
+      "cleanupVerified": null
+    }
+  ],
+  "summary": {
+    "manuallyCompleted": 4,
+    "attempted": 13,
+    "originalAutomatedPassed": 3,
+    "falseNegativeCheckers": [
+      "notes-handoff-summary",
+      "notes-literal-text"
+    ],
+    "fullRequestOverstatement": [
+      "notes-project-next-step"
+    ]
+  }
+}

@@ -236,12 +236,13 @@ fn clauses(goal: &str) -> Vec<String> {
     }
     result
 }
-fn read_tools(clause: &str) -> Vec<&'static str> {
+pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     // Online topic words such as "calendar apps" do not authorize local reads.
     if crate::search_intent::explicit_request(clause).is_some() {
         return vec!["look_up_online"];
     }
     let words = tokens(clause);
+    let document = words.iter().flat_map(|word| word.split('-')).any(|word|["lease","leases","quote","quotes","warranty","warranties","memo","agenda","itinerary","itineraries","document","documents","plan","plans","travel","policy","policies"].contains(&word));
     let has = |set: &[&str]| words.iter().any(|w| set.contains(w));
     let explicit = words.first().is_some_and(|word| {
         [
@@ -264,20 +265,33 @@ fn read_tools(clause: &str) -> Vec<&'static str> {
     if !explicit && !question {
         return vec![];
     }
-    if has(&["calendar", "event", "events", "appointments", "meetings"]) {
+    // Pasted text is already present; a transformation does not authorize an
+    // unrelated file/app lookup merely because its text mentions a policy.
+    if !has(&["my"]) && words.first().is_some_and(|word|["summarize","summarise"].contains(word))
+        && clause.split_once(':').is_some_and(|(_,text)|text.trim().len()>=20)
+    {
+        return vec![];
+    }
+    if has(&["files", "file", "folder", "folders"]) {
+        vec!["search_files"]
+    } else if has(&["calendar", "event", "events", "appointments", "meetings"]) {
         vec!["read_calendar"]
     } else if has(&["mail", "email", "emails", "inbox"]) {
         vec!["read_mail"]
     } else if has(&["reminders"]) {
         vec!["read_reminders"]
     } else if has(&["note", "notes"]) {
-        vec!["find_notes"]
+        if has(&["notes"]) || clause.contains("in notes") || clause.contains("notes app") || clause.contains("apple notes") {
+            vec!["find_notes"]
+        } else {
+            vec!["find_notes", "search_files"]
+        }
+    } else if document && (explicit || has(&["my"])) {
+        vec!["search_files"]
     } else if has(&["page", "website", "webpage"]) {
         vec!["read_page", "browse_page", "look_up_online"]
     } else if has(&["tabs"]) {
         vec!["browser_tabs"]
-    } else if has(&["files", "file", "folder", "folders"]) {
-        vec!["search_files"]
     } else if has(&["weather", "forecast"]) {
         vec!["weather", "look_up_online"]
     } else if has(&["flight", "flights"]) {
@@ -358,6 +372,8 @@ fn verified_read(step: &Step) -> bool {
         return false;
     };
     match contract.success_verifier {
+        SuccessVerifier::StructuredMathResult => crate::structured_math::verify(&step.tool, &step.arguments, evidence),
+        SuccessVerifier::CalculationResult => crate::calculation::verify(&step.arguments, evidence),
         SuccessVerifier::ControlReceipt
             if step.tool == "control_music" && step.arguments["action"] == "now_playing" =>
         {
@@ -615,6 +631,12 @@ impl TaskContract {
                 {
                     required.push("due".into());
                 }
+                if tool == "add_calendar_event"
+                    && completion::unquoted(goal).split(|c:char|!c.is_alphanumeric()).any(|word|["duration","lasting","minutes","minute"].contains(&word))
+                    && !required.contains(&"minutes".into())
+                {
+                    required.push("minutes".into());
+                }
                 self.push_outcome(
                     "write",
                     &clause,
@@ -655,6 +677,43 @@ impl TaskContract {
         }
         // An answer is distinct from successful writes. The conservative bootstrap
         // leaves unfamiliar continuations visible for the answer phase.
+        if !self.outcomes.iter().any(|outcome|outcome.kind=="read") {
+            let plain = completion::unquoted(goal);
+            let pronoun_read = plain.split(['.',';','\n']).any(|clause| {
+                let clause=completion::request_clause(clause.trim());
+                ["find it","read it","check it"].iter().any(|prefix|clause==*prefix || clause.starts_with(&format!("{prefix} ")))
+            });
+            if pronoun_read {
+                let declaration = goal.split(['.',';','\n']).find_map(|sentence| {
+                    let sentence=sentence.trim();
+                    let lower=sentence.to_ascii_lowercase();
+                    ["i just added my ","i added my ","i just saved my ","i saved my "]
+                        .iter().find_map(|prefix|lower.starts_with(prefix).then(||sentence[prefix.len()..].trim()))
+                });
+                if let Some(title)=declaration {
+                    let lower=title.to_ascii_lowercase();
+                    if [" note"," document"," file"].iter().any(|suffix|lower.ends_with(suffix)) && title.len()<=200 {
+                        let query=title.rsplit_once(' ').map(|(head,_)|head).unwrap_or(title).trim();
+                        if !query.is_empty() {
+                            self.push_outcome("read","Read the document the user just identified",vec!["find_notes".into(),"search_files".into()],json!({"query":query}),vec!["query".into()]);
+                        }
+                    }
+                }
+            }
+        }
+        let (writes, unsupported) = completion::requested_actions(goal);
+        let plain = completion::unquoted(goal);
+        let words = tokens(&plain);
+        let arithmetic = words.iter().any(|word| ["calculate", "compute", "split", "scale", "arithmetic"].contains(word))
+            || plain.contains("how much less") || plain.contains("how much i save") || plain.contains("how much do i save");
+        if writes.is_empty() && !unsupported && arithmetic {
+            let tool = if words.contains(&"split") { "split_costs" }
+                else if words.contains(&"scale") { "scale_quantities" }
+                else if words.contains(&"subscriptions") && words.contains(&"unused") { "sum_by_status" }
+                else if words.contains(&"offers") && plain.contains("at least") { "compare_options" }
+                else { "calculate" };
+            self.push_outcome("read", "Compute the requested result from supplied quantities, labels and constraints using the fixed operation", vec![tool.into()], json!({}), vec![]);
+        }
         if !completion::receipt_only_goal(goal) {
             let mut accepted = Vec::new();
             for outcome in &self.outcomes {
@@ -670,6 +729,29 @@ impl TaskContract {
         }
         // Existing deterministic parsers supply only exact user literals.
         // Failed/ambiguous extraction leaves fields unresolved for clarification.
+        let mut literals = Vec::new();
+        if let Some(query) = crate::explicit_fields::read_query(goal).filter(|query|query.len()<=100) {
+            literals.push(("read","find_notes","query",Value::String(query)));
+        }
+        for tool in ["create_note","add_reminder","add_calendar_event"] {
+            if let Some(title) = crate::explicit_fields::action_title(goal,tool) {
+                literals.push(("write",tool,"title",Value::String(title)));
+            }
+        }
+        if let Some(location)=crate::location_fields::supplied_location(goal) {
+            literals.push(("write","add_calendar_event","location",Value::String(location)));
+            for outcome in self.outcomes.iter_mut().filter(|outcome|outcome.tool.as_deref()==Some("add_calendar_event")) {
+                if !outcome.required_fields.contains(&"location".into()) { outcome.required_fields.push("location".into()); }
+            }
+        }
+        for (kind,tool,field,value) in literals {
+            let matching = self.outcomes.iter().enumerate().filter(|(_,outcome)| outcome.kind==kind && outcome.accepted_tools.iter().any(|accepted| accepted==tool || (kind=="read" && accepted=="search_files"))).map(|(index,_)|index).collect::<Vec<_>>();
+            if matching.len()==1 {
+                let outcome = &mut self.outcomes[matching[0]];
+                outcome.required_arguments[field] = value.clone();
+                self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:field.into(),value,source:"user_literal".into(),revision:self.revision});
+            }
+        }
         for bound in [
             crate::explicit_fields::explicit_note(goal, &[]),
             crate::explicit_fields::explicit_reminder(goal, &[]),
@@ -1050,6 +1132,7 @@ impl TaskContract {
                 }
                 let relevant_read = next.is_some_and(|o| {
                     o.accepted_tools.iter().any(|t| t == name)
+                        || (o.kind == "answer" && (name == "calculate" || crate::structured_math::TOOLS.contains(&name)))
                         || (o.kind == "answer"
                             && (o.resources.is_empty()
                                 || crate::tools::contract(name).is_some_and(|c| {
@@ -1069,6 +1152,11 @@ impl TaskContract {
                 if write_allowed {
                     if let Some(outcome) = next_write {
                         result["parameters"]["required"] = json!(outcome.required_fields);
+                        for (field,value) in outcome.required_arguments.as_object().into_iter().flatten() {
+                            if value.is_string() && result["parameters"]["properties"][field]["type"]=="string" {
+                                result["parameters"]["properties"][field]["enum"] = json!([value]);
+                            }
+                        }
                     }
                 }
                 if let Some(outcome) =
@@ -1124,7 +1212,7 @@ impl TaskContract {
                 return Ok(());
             }
             if outcome.kind == "answer"
-                && (outcome.resources.is_empty()
+                && (tool == "calculate" || crate::structured_math::TOOLS.contains(&tool) || outcome.resources.is_empty()
                     || crate::tools::contract(tool)
                         .is_some_and(|c| c.resources.iter().any(|r| outcome.resources.contains(r))))
             {
@@ -1185,6 +1273,47 @@ impl TaskContract {
             return None;
         }
         completion::completed_action_answer(&self.current_request, steps)
+    }
+    pub fn terminal_receipt_answer(&self, steps: &[Step]) -> Option<String> {
+        if !self.outcomes.iter().any(|outcome|outcome.kind=="write")
+            || self.outcomes.iter().any(|outcome|outcome.kind!="answer" && outcome.status!="complete") {
+            return None;
+        }
+        let plain=completion::unquoted(&self.current_request);
+        let mut remaining=Vec::new();
+        for sentence in plain.split(['.',';','\n']) {
+            let sentence=sentence.trim();
+            if sentence.is_empty() { continue; }
+            let temporal_fact=["my ","the ","our "].iter().any(|prefix|sentence.starts_with(prefix))
+                && ["must be returned by ","is due ","runs from ","starts at ","ends at "].iter().any(|phrase|sentence.contains(phrase))
+                && !sentence.contains(" and ") && !sentence.contains(" then ")
+                && sentence.split_whitespace().any(|word|chrono::NaiveTime::parse_from_str(word.trim_matches([',',';']),"%H:%M").is_ok());
+            let duration_field=(sentence.starts_with("derive its duration ") || sentence.starts_with("derive the duration "))
+                && !sentence.contains(" then ")
+                && sentence.split(" and ").skip(1).all(completion::non_action);
+            if temporal_fact || duration_field { continue; }
+            // Only discard this known field modifier. Any further requested
+            // operation remains for the conservative completion parser below.
+            remaining.push(sentence.replace(", using exactly the title","").replace(" with exactly the title"," titled"));
+        }
+        let reduced=remaining.join(". ");
+        if !completion::receipt_only_goal(&reduced) { return None; }
+        let mut messages=Vec::new();
+        for outcome in self.outcomes.iter().filter(|outcome|outcome.kind=="write") {
+            for id in &outcome.completed_by {
+                let step=steps.iter().find(|step|step.id==*id && verified_write(step))?;
+                let receipt:ActionReceipt=serde_json::from_value(step.evidence.as_ref()?.get("receipt")?.clone()).ok()?;
+                let field=|key:&str| receipt.evidence.get(key).and_then(Value::as_str).filter(|value|!value.is_empty());
+                let title=field("title").unwrap_or("the requested item");
+                let message=match step.tool.as_str() {
+                    "add_reminder" if field("due").is_some()=>format!("Created and verified reminder \"{title}\", due {}.",field("due")?),
+                    "add_calendar_event" if field("start").is_some() && field("end").is_some()=>format!("Created and verified calendar event \"{title}\", {}–{}{}.",field("start")?,field("end")?,field("location").map(|location|format!(", {location}")).unwrap_or_default()),
+                    _=>receipt.message,
+                };
+                messages.push(message);
+            }
+        }
+        (!messages.is_empty()).then(||messages.join("\n\n"))
     }
     pub fn mark_answer_complete(&mut self) {
         if self
@@ -1496,6 +1625,68 @@ mod tests {
                 .is_err());
         }
     }
+    #[test]
+    fn drafting_a_reply_in_chat_does_not_require_a_mail_write() {
+        let goal = "Draft a friendly reply to this invitation. Accept Saturday November 7 at 2pm, mention a vegetarian dish, and ask whether there is parking. Do not send anything.";
+        let contract = TaskContract::from_request(goal);
+        assert!(contract.outcomes.iter().all(|outcome| outcome.kind == "answer"));
+        assert!(contract.validate_answer("Hi Maya, I would love to join on November 7 at 2pm. I will bring a vegetarian dish. Is parking available?", &[]).is_ok());
+        assert!(contract.validate_proposal("draft_email", &json!({"subject":"Lunch","body":"Reply"}), &[]).is_err());
+        assert!(TaskContract::from_request("Draft an email to my landlord").outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("draft_email")));
+    }
+
+    #[test]
+    fn a_note_in_a_shared_folder_can_use_file_search() {
+        let contract = TaskContract::from_request("Find the cobalt bicycle repair note by its contents and tell me the appointment time");
+        let read = contract.outcomes.iter().find(|outcome| outcome.kind == "read").unwrap();
+        assert!(read.accepted_tools.contains(&"search_files".into()));
+        assert!(read.accepted_tools.contains(&"find_notes".into()));
+        assert_eq!(read_tools("find the repair note in notes app"),vec!["find_notes"]);
+        assert_eq!(read_tools("search files for calendar notes"),vec!["search_files"]);
+    }
+
+    #[test]
+    fn requested_source_precedes_arithmetic_and_cannot_be_replaced_by_a_guess() {
+        let goal = "Compare my Alder vendor quotes and calculate the difference.";
+        let contract = TaskContract::from_request(goal);
+        assert_eq!(contract.next_outcome().unwrap().accepted_tools,vec!["search_files"]);
+        assert!(contract.validate_proposal("calculate",&json!({"expressions":["100+200"]}),&[]).is_err());
+        assert!(contract.outcomes.iter().any(|outcome|outcome.accepted_tools==vec!["calculate"]));
+        let calculation = TaskContract::from_request("Split 210 plus 90 equally among three people.");
+        assert_eq!(calculation.next_outcome().unwrap().accepted_tools,vec!["split_costs"]);
+        assert!(calculation.validate_proposal("split_costs",&json!({"participants":["A","B","C"],"charges":["Room|210|*","Food|90|*"]}),&[]).is_ok());
+    }
+
+    #[test]
+    fn named_plans_filenames_and_a_just_added_document_require_actual_reads() {
+        for goal in ["Read my Seabright travel plan and tell me the departure.","Read quarterly-planning-memo.txt and tell me the decision."] {
+            let contract=TaskContract::from_request(goal);
+            assert_eq!(contract.next_outcome().unwrap().accepted_tools,vec!["search_files"],"{goal}");
+            assert!(contract.validate_answer("I guess the departure is 17:00",&[]).is_err());
+        }
+        let contract=TaskContract::from_request("I just added my Cedar warranty note. Please find it and tell me its deadline.");
+        assert_eq!(contract.next_outcome().unwrap().required_arguments,json!({"query":"Cedar warranty"}));
+        assert_eq!(contract.next_outcome().unwrap().kind,"read");
+        let pasted=TaskContract::from_request("Summarize this policy: Remote work is Tuesday and Thursday with requests due the previous day.");
+        assert!(pasted.outcomes.iter().all(|outcome|outcome.kind=="answer"));
+    }
+
+    #[test]
+    fn terminal_temporal_actions_use_receipts_without_skipping_unknown_followups() {
+        let goal="My library books must be returned by 18:00 on April 8, 2032. Set a reminder fifteen minutes beforehand, using exactly the title \"Return library books\".";
+        let mut contract=TaskContract::from_request(goal);
+        let mut reminder=step("reminder","add_reminder",json!({"title":"Return library books","due":"2032-04-08 17:45"}),true);
+        reminder.evidence.as_mut().unwrap()["receipt"]["evidence"]=json!({"title":"Return library books","due":"2032-04-08 17:45","remindAt":"2032-04-08 17:45"});
+        contract.refresh(goal,&[reminder.clone()]);
+        let answer=contract.terminal_receipt_answer(&[reminder]).unwrap();
+        assert!(answer.contains("17:45") && !answer.contains("15 minutes"));
+        let goal="Create a note titled Trip, then craft a haiku";
+        let mut contract=TaskContract::from_request(goal);
+        let note=step("note","create_note",json!({"title":"Trip","body":"Known body"}),true);
+        contract.refresh(goal,&[note.clone()]);
+        assert!(contract.terminal_receipt_answer(&[note]).is_none());
+    }
+
     #[test]
     fn requested_due_is_required_and_user_clarification_survives_refresh() {
         let goal = "Add a reminder to call Ana tomorrow";

@@ -1,0 +1,160 @@
+{
+  "scope": "Actual local Apple helper diagnostic; no tool dispatch or app writes; not completed production workflows.",
+  "helper_sha256": "391cd503a2aa0322c2a07597eb6fdfbb2f52f05d9524a645bd8838d6a86c7ac5",
+  "results": [
+    {
+      "id": "calculate-format",
+      "request": {
+        "id": "argument-sanity:calculate-format",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Compute53plus28, and split360plus72 equally between six people."
+          }
+        ],
+        "tools": [
+          {
+            "name": "calculate"
+          }
+        ],
+        "workflow_goal": "Compute53plus28, and split360plus72 equally between six people.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "stage": "route",
+          "id": "argument-sanity:calculate-format",
+          "type": "model_call"
+        },
+        {
+          "type": "model_call",
+          "stage": "arguments",
+          "id": "argument-sanity:calculate-format"
+        },
+        {
+          "type": "tool_call",
+          "arguments": {
+            "expressions": [
+              "53+28",
+              "(360+72)/6"
+            ]
+          },
+          "id": "argument-sanity:calculate-format",
+          "name": "calculate"
+        },
+        {
+          "type": "done",
+          "finish_reason": "tool_call",
+          "id": "argument-sanity:calculate-format",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "id": "notes-query",
+      "request": {
+        "id": "argument-sanity:notes-query",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Find my note titled Birch Project Brief and summarize it."
+          }
+        ],
+        "tools": [
+          {
+            "name": "find_notes"
+          }
+        ],
+        "workflow_goal": "Find my note titled Birch Project Brief and summarize it.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "id": "argument-sanity:notes-query",
+          "type": "model_call",
+          "stage": "route"
+        },
+        {
+          "stage": "arguments",
+          "id": "argument-sanity:notes-query",
+          "type": "model_call"
+        },
+        {
+          "message": "Apple Intelligence couldn\u2019t finish this answer.",
+          "type": "error",
+          "recoverable": true,
+          "id": "argument-sanity:notes-query",
+          "code": "inference_failed"
+        },
+        {
+          "type": "done",
+          "finish_reason": "error",
+          "id": "argument-sanity:notes-query",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "id": "file-query",
+      "request": {
+        "id": "argument-sanity:file-query",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Find my Seabright itinerary file and tell me train departure and hotel location."
+          }
+        ],
+        "tools": [
+          {
+            "name": "search_files"
+          }
+        ],
+        "workflow_goal": "Find my Seabright itinerary file and tell me train departure and hotel location.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "stage": "route",
+          "id": "argument-sanity:file-query",
+          "type": "model_call"
+        },
+        {
+          "id": "argument-sanity:file-query",
+          "stage": "arguments",
+          "type": "model_call"
+        },
+        {
+          "message": "Apple Intelligence couldn\u2019t finish this answer.",
+          "type": "error",
+          "recoverable": true,
+          "id": "argument-sanity:file-query",
+          "code": "inference_failed"
+        },
+        {
+          "type": "done",
+          "finish_reason": "error",
+          "id": "argument-sanity:file-query",
+          "text": ""
+        }
+      ]
+    }
+  ]
+}
