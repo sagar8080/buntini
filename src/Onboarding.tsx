@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Apple, ArrowLeft, ArrowRight, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import IntelligenceMark from './IntelligenceMark';
 import Pet from './Pet';
 import { palettes } from './Cat';
 import { appleStatus, cloudProviders } from './brain.ts';
@@ -106,7 +107,7 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
   const option = (id: Answers['backend'], icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={answers.backend === id} className={answers.backend === id ? 'active' : ''} onClick={() => set('backend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
   return <>
     <div className="brain-options" role="radiogroup" aria-label="Brain">
-      {option('apple', <Apple size={16} />, 'Apple Intelligence', 'Built in · private · fast', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
+      {option('apple', <IntelligenceMark size={16} />, 'Apple Intelligence', 'Built in · private · fast', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
       {option('mlx', <Cpu size={16} />, 'Local model', 'Your own MLX model folder · bigger, slower, private')}
       {option('cloud', <Cloud size={16} />, 'Cloud model', 'Anthropic, OpenAI or Gemini · your key, your cap')}
     </div>

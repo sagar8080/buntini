@@ -217,7 +217,25 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
         <path d="M99 151V154M105 151V154" stroke={coat.outline} strokeWidth="1.2" strokeLinecap="round" strokeOpacity=".55" />
       </g>
     </g>
+    {/* A ball of wool in the accent colour, beside the front paw. The cat bats it while
+        playing (the `bat` habit); a loose strand runs back to the paw. */}
+    <g className="cat-yarn">
+      <ellipse className="cat-yarn-shadow" cx="38" cy="166" rx="10" ry="2.2" fill="#1D1720" fillOpacity=".18" />
+      <path className="cat-yarn-strand" d="M47 162C54 168 61 167 66 162C68 160 70 159 72 160" stroke={accent} strokeWidth="1.6" strokeLinecap="round" />
+      <g className="cat-yarn-ball">
+        <circle cx="38" cy="155" r="11" fill={accent} />
+        <g stroke="#000" strokeOpacity=".2" strokeWidth="1.2" strokeLinecap="round">
+          <path d="M28.6 150C33 146 42 145.6 47.6 150.6" />
+          <path d="M27.4 156C33.6 151.4 42.6 151.6 48.8 157.6" />
+          <path d="M30.6 163C35 158.8 42 158.6 46.4 162.4" />
+          <path d="M33.6 145C30.4 151 31 159 35.8 165.4" />
+          <path d="M42.6 144.8C45.8 151 45.4 159.4 40.6 165.6" />
+        </g>
+        <path d="M31.4 149.4C33 147.4 35.4 146.2 37.8 146" stroke="#fff" strokeOpacity=".55" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="38" cy="155" r="11" stroke="#000" strokeOpacity=".22" strokeWidth="1.2" />
+      </g>
+    </g>
     <g className="cat-hearts" fill="#FF7A93">{[[124, 68], [137, 54], [113, 50]].map(([x, y], index) => <g key={index} transform={`translate(${x} ${y})`}><path className="cat-heart" style={{ animationDelay: `${index * .28}s` }} d="M0 3C-1.5 0-6-.5-6 3C-6 6.5-1.5 8.5 0 10C1.5 8.5 6 6.5 6 3C6-.5 1.5 0 0 3Z" /></g>)}</g>
-    <g className="cat-zzz" fill="#8C7FA6" fontFamily="Manrope, sans-serif" fontWeight="800"><text x="128" y="60" fontSize="12">z</text><text x="137" y="48" fontSize="9">z</text><text x="144" y="38" fontSize="7">z</text></g>
+    <g className="cat-zzz" fill="#8C7FA6" fontFamily="-apple-system, system-ui, sans-serif" fontWeight="800"><text x="128" y="60" fontSize="12">z</text><text x="137" y="48" fontSize="9">z</text><text x="144" y="38" fontSize="7">z</text></g>
   </svg>;
 }

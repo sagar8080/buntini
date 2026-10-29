@@ -5,7 +5,7 @@ import type { Settings } from './types';
 
 export interface Palette { panel: string; accent: string }
 export const presets: { id: Settings['themePreset']; label: string; light: Palette; dark: Palette }[] = [
-  { id: 'classic', label: 'Classic', light: { panel: '#fcf8f3', accent: '#c66b31' }, dark: { panel: '#252428', accent: '#f0a164' } },
+  { id: 'classic', label: 'Classic', light: { panel: '#f6f7f9', accent: '#c2561c' }, dark: { panel: '#121419', accent: '#ff9a55' } },
   { id: 'midnight', label: 'Midnight', light: { panel: '#f4f5fb', accent: '#4f5fd1' }, dark: { panel: '#171a2b', accent: '#8c9bff' } },
   { id: 'paper', label: 'Paper', light: { panel: '#f7f4ec', accent: '#3d5a80' }, dark: { panel: '#22201c', accent: '#9db4d6' } },
   { id: 'sakura', label: 'Sakura', light: { panel: '#fdf5f7', accent: '#d4577a' }, dark: { panel: '#2a2226', accent: '#f08aa7' } },

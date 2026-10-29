@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { desktop } from './bridge';
-import { actionDuration, gazeToward, nextBlinkDelay, nextIdleDelay, pickIdleAction, randomGlance, type PetAction } from './petLife';
+import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, type PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
 export interface PetReaction { kind: PetAction; id: number }
@@ -42,8 +42,14 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     current.current = next;
     setAction(next);
     if (next === 'look') { glance.current = randomGlance(); applyGaze(); }
+    // Each play with the ball has its own strength, read by the toy animations.
+    if (isToyAction(next) && ref.current) {
+      const { roll, lift } = toyPlay();
+      ref.current.style.setProperty('--toy-roll', roll.toFixed(2));
+      ref.current.style.setProperty('--toy-lift', lift.toFixed(2));
+    }
     endTimer.current = window.setTimeout(stop, actionDuration[next]);
-  }, [applyGaze, stop]);
+  }, [applyGaze, ref, stop]);
 
   useEffect(() => () => window.clearTimeout(endTimer.current), []);
 
@@ -75,12 +81,17 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     }
     let cancelled = false;
     let timer = 0;
+    let played: PetAction | null = null;
     const schedule = () => {
       timer = window.setTimeout(() => {
         if (cancelled) return;
-        if (!document.hidden && !stillPreferred() && !current.current) play(pickIdleAction(motion, cat));
+        played = null;
+        if (!document.hidden && !stillPreferred() && !current.current) {
+          played = pickIdleAction(motion, cat);
+          play(played);
+        }
         schedule();
-      }, nextIdleDelay(motion));
+      }, nextIdleDelay(motion, Math.random, isToyAction(played)));
     };
     schedule();
     return () => { cancelled = true; window.clearTimeout(timer); };

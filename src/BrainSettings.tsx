@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { Apple, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import { Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
 import { errorMessage } from './bridge';
@@ -18,7 +19,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
   return <>
     <section className="settings-section">
       <div className="brain-options" role="radiogroup" aria-label="Brain">
-        {option('apple', <Apple size={18} />, 'Apple Intelligence', 'Private and built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
+        {option('apple', <IntelligenceMark size={18} />, 'Apple Intelligence', 'Private and built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
         {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma, run by MLX')}
         {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'Your own ChatGPT plan' : `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
