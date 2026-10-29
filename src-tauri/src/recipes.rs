@@ -1,0 +1,258 @@
+//! Recipes: everyday workflows whose structure Rust knows, so the model only fills what
+//! it must. A recipe can fix fields of a requested write before planning starts
+//! (`prepare`), bind a whole next step from the user's words or typed evidence (`bind`),
+//! and finish from verified evidence without the model (`answer`). Everything a recipe
+//! produces still goes through the task contract, approval and receipt path.
+//!
+//! Recipes run in registry order and the first to act wins, so a narrower recipe goes
+//! before a broader one. Each hook returns `Ok(None)` (or `false`) when it doesn't apply;
+//! an error means the request matched but cannot be completed safely.
+use crate::{
+    focus::Referent,
+    planning::BoundAction,
+    task_contract::{Outcome, TaskContract},
+    workflows::Step,
+};
+use serde_json::Value;
+
+/// What a recipe may look at: the saved goal and journal, and the tools on offer now.
+pub struct Plan<'a> {
+    pub goal: &'a str,
+    pub steps: &'a [Step],
+    pub offered: &'a Value,
+}
+
+impl Plan<'_> {
+    fn offers(&self, tool: &str) -> bool {
+        self.offered
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|definition| definition["name"] == tool))
+    }
+}
+
+pub trait Recipe: Sync {
+    fn id(&self) -> &'static str;
+    /// Fix fields of a requested write from what "this" was, before planning starts.
+    fn prepare(&self, _goal: &str, _referent: &Referent, _contract: &mut TaskContract) -> bool {
+        false
+    }
+    /// Arguments for the next unfinished outcome, bound without the model.
+    fn bind(&self, _plan: &Plan, _next: &Outcome) -> Result<Option<BoundAction>, String> {
+        Ok(None)
+    }
+    /// A complete answer from verified evidence, without the model.
+    fn answer(&self, _plan: &Plan) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+}
+
+/// "What is my first calendar event on 2026-11-02?"
+struct FirstCalendarEvent;
+impl Recipe for FirstCalendarEvent {
+    fn id(&self) -> &'static str {
+        "first_calendar_event"
+    }
+    fn answer(&self, plan: &Plan) -> Result<Option<String>, String> {
+        crate::planning::calendar_answer(plan.goal, plan.steps)
+    }
+}
+
+/// "Create a note titled X with body Y"
+struct LiteralNote;
+impl Recipe for LiteralNote {
+    fn id(&self) -> &'static str {
+        "literal_note"
+    }
+    fn bind(&self, plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
+        if next.tool.as_deref() != Some("create_note") || !plan.offers("create_note") {
+            return Ok(None);
+        }
+        crate::explicit_fields::explicit_note(plan.goal, plan.steps)
+    }
+}
+
+/// "Add a reminder titled X due 2026-11-02 18:00"
+struct LiteralReminder;
+impl Recipe for LiteralReminder {
+    fn id(&self) -> &'static str {
+        "literal_reminder"
+    }
+    fn bind(&self, plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
+        if next.tool.as_deref() != Some("add_reminder") || !plan.offers("add_reminder") {
+            return Ok(None);
+        }
+        crate::explicit_fields::explicit_reminder(plan.goal, plan.steps)
+    }
+}
+
+/// "Remind me 30 minutes before my first event on 2026-11-02"
+struct EventPreparation;
+impl Recipe for EventPreparation {
+    fn id(&self) -> &'static str {
+        "event_preparation"
+    }
+    fn bind(&self, plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
+        if next.tool.as_deref() != Some("add_reminder") || !plan.offers("add_reminder") {
+            return Ok(None);
+        }
+        crate::planning::calendar_reminder(plan.goal, plan.steps)
+    }
+}
+
+/// "Remind me about this tomorrow at 9": named after the thing on screen.
+struct ReminderAboutThis;
+impl Recipe for ReminderAboutThis {
+    fn id(&self) -> &'static str {
+        "reminder_about_this"
+    }
+    fn prepare(&self, goal: &str, referent: &Referent, contract: &mut TaskContract) -> bool {
+        if !crate::focus::reminds_about_this(goal) {
+            return false;
+        }
+        referent.reminder_title().is_some_and(|title| {
+            contract.bind_write_field("add_reminder", "title", Value::String(title), "focus_referent")
+        })
+    }
+}
+
+/// "Reply to this saying I'll be there": a Mail draft to the sender of the open email,
+/// with its subject. The model writes only the body, which the approval sheet shows.
+struct ReplyToThis;
+impl Recipe for ReplyToThis {
+    fn id(&self) -> &'static str {
+        "reply_to_this"
+    }
+    fn prepare(&self, goal: &str, referent: &Referent, contract: &mut TaskContract) -> bool {
+        let Referent::Mail(mail) = referent else {
+            return false;
+        };
+        if !crate::focus::replies_to_this(goal) {
+            return false;
+        }
+        let Some(address) = crate::focus::sender_address(&mail.sender) else {
+            return false;
+        };
+        let subject = reply_subject(&mail.subject);
+        let to = contract.bind_write_field("draft_email", "to", Value::String(address), "focus_referent");
+        let re = contract.bind_write_field("draft_email", "subject", Value::String(subject), "focus_referent");
+        to || re
+    }
+}
+
+/// "Lease renewal" as "Re: Lease renewal", leaving an existing "Re:" alone.
+fn reply_subject(subject: &str) -> String {
+    let subject = subject.trim();
+    if subject.to_lowercase().starts_with("re:") {
+        subject.to_string()
+    } else if subject.is_empty() {
+        "Re:".into()
+    } else {
+        format!("Re: {subject}")
+    }
+}
+
+static RECIPES: &[&dyn Recipe] = &[
+    &FirstCalendarEvent,
+    &LiteralNote,
+    &LiteralReminder,
+    &EventPreparation,
+    &ReminderAboutThis,
+    &ReplyToThis,
+];
+
+/// Lets every applicable recipe fix fields from what "this" was. Returns the ids that did.
+pub fn prepare(goal: &str, referent: &Referent, contract: &mut TaskContract) -> Vec<&'static str> {
+    RECIPES
+        .iter()
+        .filter(|recipe| recipe.prepare(goal, referent, contract))
+        .map(|recipe| recipe.id())
+        .collect()
+}
+
+/// The first recipe's binding for the next outcome.
+pub fn bind(plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
+    for recipe in RECIPES {
+        if let Some(bound) = recipe.bind(plan, next)? {
+            return Ok(Some(bound));
+        }
+    }
+    Ok(None)
+}
+
+/// The first recipe's finished answer.
+pub fn answer(plan: &Plan) -> Result<Option<String>, String> {
+    for recipe in RECIPES {
+        if let Some(answer) = recipe.answer(plan)? {
+            return Ok(Some(answer));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn mail(sender: &str, subject: &str) -> Referent {
+        Referent::Mail(crate::apps::SelectedMail {
+            id: "7".into(),
+            message_id: "<m@x>".into(),
+            received: "2026-10-29 09:15".into(),
+            sender: sender.into(),
+            subject: subject.into(),
+            text: "Are you free on Friday?".into(),
+            truncated: false,
+            selected: 1,
+        })
+    }
+
+    #[test]
+    fn registry_ids_are_unique() {
+        let mut ids: Vec<&str> = RECIPES.iter().map(|r| r.id()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), RECIPES.len());
+    }
+
+    #[test]
+    fn a_reply_to_the_open_email_fixes_its_recipient_and_subject() {
+        let goal = "Reply to this saying I'll be there";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let applied = prepare(goal, &mail("Ana Silva <ana@example.com>", "Friday"), &mut contract);
+        assert_eq!(applied, ["reply_to_this"]);
+        contract.refresh(goal, &[]);
+        let next = contract.next_outcome().unwrap();
+        assert_eq!(next.tool.as_deref(), Some("draft_email"));
+        assert_eq!(next.required_arguments["to"], "ana@example.com");
+        assert_eq!(next.required_arguments["subject"], "Re: Friday");
+        assert!(contract
+            .validate_proposal("draft_email", &json!({"to":"eve@example.com","subject":"Re: Friday","body":"Yes"}), &[])
+            .is_err());
+        assert!(contract
+            .validate_proposal("draft_email", &json!({"to":"ana@example.com","subject":"Re: Friday","body":"I'll be there."}), &[])
+            .is_ok());
+    }
+
+    #[test]
+    fn replies_need_an_email_on_screen_and_a_reply_request() {
+        let goal = "Reply to this saying yes";
+        let mut contract = TaskContract::from_request(goal);
+        let page = Referent::Page { browser: "safari", title: "Docs".into() };
+        assert!(prepare(goal, &page, &mut contract).is_empty());
+        let other = "Draft an email to Ana about Friday";
+        let mut contract = TaskContract::from_request(other);
+        assert!(prepare(other, &mail("ana@example.com", "Friday"), &mut contract).is_empty());
+        // A sender without an address can't be replied to.
+        let mut contract = TaskContract::from_request(goal);
+        assert!(prepare(goal, &mail("Ana Silva", "Friday"), &mut contract).is_empty());
+    }
+
+    #[test]
+    fn reply_subjects_are_not_doubled() {
+        assert_eq!(reply_subject("Lunch"), "Re: Lunch");
+        assert_eq!(reply_subject("RE: Lunch"), "RE: Lunch");
+        assert_eq!(reply_subject("  "), "Re:");
+    }
+}

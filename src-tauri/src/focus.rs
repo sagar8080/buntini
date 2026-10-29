@@ -150,6 +150,34 @@ pub fn reminds_about_this(prompt: &str) -> bool {
     })
 }
 
+/// Whether a request asks to reply to the thing on screen ("reply to this saying yes",
+/// "write back to her"), rather than to someone it names.
+pub fn replies_to_this(prompt: &str) -> bool {
+    let text = crate::skills::words(prompt);
+    let Some((_, rest)) = crate::skills::from_verb(&text, &["reply", "respond", "write"]) else {
+        return false;
+    };
+    let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
+    let rest = rest.strip_prefix("to ").unwrap_or(rest);
+    [
+        "this", "this email", "this message", "this mail", "him", "her", "them", "it",
+        "the email", "that email",
+    ]
+    .iter()
+    .any(|target| rest == *target || rest.starts_with(&format!("{target} ")))
+}
+
+/// "Ana Silva <ana@example.com>" as "ana@example.com"; a bare address as itself.
+pub fn sender_address(sender: &str) -> Option<String> {
+    let address = match sender.rsplit_once('<') {
+        Some((_, rest)) => rest.trim_end().trim_end_matches('>').trim(),
+        None => sender.trim(),
+    };
+    let (user, domain) = address.split_once('@')?;
+    (!user.is_empty() && domain.contains('.') && !address.contains(char::is_whitespace))
+        .then(|| address.to_lowercase())
+}
+
 fn browser_id(bundle: &str) -> Option<&'static str> {
     match bundle {
         "com.apple.Safari" => Some("safari"),
@@ -391,6 +419,15 @@ mod tests {
         ] {
             assert!(reminds_about_this(prompt), "{prompt}");
         }
+        for prompt in ["reply to this saying yes", "Please write back to her", "respond to him: no"] {
+            assert!(replies_to_this(prompt), "{prompt}");
+        }
+        for prompt in ["reply to Ana", "don't reply to this", "how do I reply to this"] {
+            assert!(!replies_to_this(prompt), "{prompt}");
+        }
+        assert_eq!(sender_address("Ana Silva <Ana@Example.com>").as_deref(), Some("ana@example.com"));
+        assert_eq!(sender_address("ana@example.com").as_deref(), Some("ana@example.com"));
+        assert_eq!(sender_address("Ana Silva"), None);
         for prompt in [
             "don't remind me about this",
             "remind me to reply to him",

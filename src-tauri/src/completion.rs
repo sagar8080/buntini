@@ -174,6 +174,14 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 "draft" | "prepare" | "write" if has(&["email", "mail", "message"]) => {
                     Some("draft_email")
                 }
+                // A reply is drafted for the user to send; Buntini never sends it.
+                // "Reply in French" or "respond with one word" is about the answer itself.
+                "reply" | "respond"
+                    if tokens.get(1) == Some(&"to") || has(&["email", "mail", "message"]) =>
+                {
+                    Some("draft_email")
+                }
+                "write" if tokens.get(1) == Some(&"back") => Some("draft_email"),
                 "open"
                     if has(&["page", "site", "website", "url", "link", "https"])
                         || clause.contains("https://") =>

@@ -224,6 +224,48 @@
       }
     },
     {
+      "id": "needs-reply",
+      "kind": "routing",
+      "category": "daily_basics",
+      "prompt": "What needs a reply?",
+      "recent": [],
+      "expected": {
+        "skill": "day",
+        "action": "needs_reply"
+      }
+    },
+    {
+      "id": "my-day",
+      "kind": "routing",
+      "category": "daily_basics",
+      "prompt": "What does my day look like?",
+      "recent": [],
+      "expected": {
+        "skill": "day",
+        "action": "my_day"
+      }
+    },
+    {
+      "id": "reply-to-this-is-approved-write",
+      "kind": "routing",
+      "category": "screen_context",
+      "prompt": "Reply to this saying I'll be there",
+      "recent": [],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
+      "id": "negated-triage",
+      "kind": "routing",
+      "category": "negation",
+      "prompt": "Don't triage my inbox",
+      "recent": [],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
       "id": "negated-music",
       "kind": "routing",
       "category": "negation",

@@ -36,6 +36,7 @@ mod overlay;
 mod planning;
 mod pricing;
 mod privacy;
+mod recipes;
 mod research;
 mod search_intent;
 #[cfg(test)]
@@ -52,6 +53,7 @@ mod store;
 mod support;
 mod task_contract;
 mod tools;
+mod triage;
 mod types;
 mod voice;
 mod watches;

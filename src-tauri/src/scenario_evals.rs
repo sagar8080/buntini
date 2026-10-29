@@ -1,6 +1,6 @@
 //! Executable corpus against the production deterministic router. Never runs a skill.
 //! A fixture pass establishes the routing contract, not model or device accuracy.
-use crate::skills::{self, browser, mac, this, Skill};
+use crate::skills::{self, browser, day, mac, this, Skill};
 use serde_json::{json, Value};
 
 fn observed(prompt: &str, recent: &[String]) -> Value {
@@ -31,6 +31,10 @@ fn observed(prompt: &str, recent: &[String]) -> Value {
         Some(Skill::This(command)) => match command {
             this::Command::About => json!({"skill":"this", "action":"read_this"}),
             this::Command::Selection => json!({"skill":"this", "action":"read_selection"}),
+        },
+        Some(Skill::Day(command)) => match command {
+            day::Command::NeedsReply => json!({"skill":"day", "action":"needs_reply"}),
+            day::Command::MyDay => json!({"skill":"day", "action":"my_day"}),
         },
     }
 }

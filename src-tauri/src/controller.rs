@@ -2454,6 +2454,7 @@ async fn execute_with_settings(
                 prompt: &task.prompt,
                 front_app,
                 focus,
+                helper: state.models.apple_helper(),
             };
             match crate::skills::run(skill, &context).await? {
                 crate::skills::Outcome::Done { answer, share } => {
@@ -2645,12 +2646,11 @@ async fn execute_with_settings(
         offered.clear();
     }
     let mut flow = Workflow::new(task, mode, &settings, messages, separate_context, &offered);
-    // "Remind me about this": the reminder is named after the thing on screen, so the
-    // model only works out when.
-    if crate::focus::reminds_about_this(&task.prompt) {
-        if let Some(title) = referent.as_ref().and_then(crate::focus::Referent::reminder_title) {
-            flow.contract
-                .bind_write_field("add_reminder", "title", Value::String(title), "focus_referent");
+    // "Remind me about this", "reply to this": recipes fix what the thing on screen
+    // decides (a reminder's title, a reply's recipient), so the model fills only the rest.
+    if let Some(found) = &referent {
+        for id in crate::recipes::prepare(&task.prompt, found, &mut flow.contract) {
+            state.audit(&format!("recipe.{id}"), &task.id);
         }
     }
     state.store.lock().unwrap().checkpoint(&mut flow, task)?;
@@ -2780,7 +2780,11 @@ where
             Some(answer) => Some(answer),
             None => match flow.contract.terminal_receipt_answer(&flow.steps).or_else(||structured_math_answer(flow)) {
                 Some(answer) => Some(answer),
-                None => crate::planning::calendar_answer(&flow.goal, &flow.steps)?,
+                None => crate::recipes::answer(&crate::recipes::Plan {
+                    goal: &flow.goal,
+                    steps: &flow.steps,
+                    offered: &available_definitions,
+                })?,
             },
         };
         if let Some(answer) = finished_answer {
@@ -2895,27 +2899,15 @@ where
             })
         } else if clarified {
             None
-        } else if flow
-            .contract
-            .next_outcome()
-            .is_some_and(|o| o.tool.as_deref() == Some("create_note"))
-            && definitions
-                .as_array()
-                .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "create_note"))
-        {
-            crate::explicit_fields::explicit_note(&flow.goal, &flow.steps)?
-        } else if flow
-            .contract
-            .next_outcome()
-            .is_some_and(|o| o.tool.as_deref() == Some("add_reminder"))
-            && definitions
-                .as_array()
-                .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "add_reminder"))
-        {
-            match crate::explicit_fields::explicit_reminder(&flow.goal, &flow.steps)? {
-                Some(bound) => Some(bound),
-                None => crate::planning::calendar_reminder(&flow.goal, &flow.steps)?,
-            }
+        } else if let Some(next) = flow.contract.next_outcome() {
+            crate::recipes::bind(
+                &crate::recipes::Plan {
+                    goal: &flow.goal,
+                    steps: &flow.steps,
+                    offered: &definitions,
+                },
+                next,
+            )?
         } else {
             None
         };

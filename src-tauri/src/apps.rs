@@ -637,6 +637,43 @@ const SAFARI_PAGE: &str = r#"on run argv
 end run
 "#;
 
+// Unreplied inbox messages from the last N days, newest 60 first by Mail's order: time,
+// Mail-local numeric ID, read, flagged, whether a To recipient is one of the user's own
+// account addresses, how many To recipients, sender, subject. Then a count summary.
+const MAIL_TRIAGE: &str = r#"on run argv
+  set cutoff to (current date) - ((item 1 of argv) as integer) * days
+  set out to {}
+  tell application "Mail"
+    set mine to {}
+    repeat with a in accounts
+      try
+        set mine to mine & (email addresses of a)
+      end try
+    end repeat
+    set found to (messages of inbox whose date received > cutoff and was replied to is false)
+    set total to count of found
+    repeat with m in found
+      set toMe to "unknown"
+      set toCount to 0
+      try
+        set recipientsTo to to recipients of m
+        set toCount to count of recipientsTo
+        if (count of mine) > 0 then
+          set toMe to "false"
+          repeat with r in recipientsTo
+            if (address of r) is in mine then set toMe to "true"
+          end repeat
+        end if
+      end try
+      set end of out to my stamp(date received of m) & tab & my clean(id of m) & tab & (read status of m as text) & tab & (flagged status of m as text) & tab & toMe & tab & (toCount as text) & tab & my clean(sender of m) & tab & my clean(subject of m)
+      if (count of out) ≥ 60 then exit repeat
+    end repeat
+  end tell
+  set end of out to "__buntini_summary__" & tab & (total as text) & tab & (count of out as text) & tab & "true"
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
 // The message selected in Mail's front viewer: time, message ID, sender, subject, Mail-local
 // numeric ID, body length and how many are selected, then the opening of its body.
 const MAIL_SELECTED: &str = r#"on run argv
@@ -2061,6 +2098,63 @@ fn parse_selected_mail(output: &str) -> Result<Option<SelectedMail>, String> {
     }))
 }
 
+/// An unreplied inbox message, for "what needs a reply?".
+#[derive(Debug, Clone, PartialEq)]
+pub struct MailHeader {
+    pub received: String,
+    pub id: String,
+    pub read: bool,
+    pub flagged: bool,
+    /// Whether a To recipient is one of the user's account addresses; None if unknown.
+    pub to_me: Option<bool>,
+    pub to_count: usize,
+    pub sender: String,
+    pub subject: String,
+}
+
+/// Unreplied inbox messages from the last `days` days (at most 60), and how many there were.
+pub(crate) async fn unreplied_mail(days: u32) -> Result<(Vec<MailHeader>, usize), String> {
+    parse_unreplied(&osascript(MAIL_TRIAGE, &[days.to_string()], 60).await?)
+}
+
+fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
+    let found = counted_rows(output, 8, "Mail")?;
+    let flag = |value: &str| match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err("Mail returned an invalid message status. Please try again.".to_string()),
+    };
+    let mut headers = Vec::new();
+    for row in &found.rows {
+        headers.push(MailHeader {
+            received: row[0].clone(),
+            id: nonempty(&row[1]).ok_or("Mail returned a message without an ID.")?.into(),
+            read: flag(&row[2])?,
+            flagged: flag(&row[3])?,
+            to_me: if row[4] == "unknown" { None } else { Some(flag(&row[4])?) },
+            to_count: row[5].parse().unwrap_or(0),
+            sender: row[6].clone(),
+            subject: row[7].clone(),
+        });
+    }
+    headers.sort_by(|a, b| b.received.cmp(&a.received));
+    Ok((headers, found.total))
+}
+
+/// The opening (up to 500 characters) of each message by Mail-local ID.
+pub(crate) async fn mail_openings(
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    if ids.is_empty() {
+        return Ok(Default::default());
+    }
+    Ok(rows(&osascript(MAIL_TEXT, ids, 40).await?)
+        .into_iter()
+        .filter(|row| row.len() >= 2)
+        .map(|row| (row[0].clone(), row[1].clone()))
+        .collect())
+}
+
 /// The paths selected in Finder, for "this". macOS asks once before Buntini may see them.
 pub(crate) async fn selected_finder_items() -> Result<Vec<String>, String> {
     Ok(osascript(FINDER_SELECTED, &[], 10)
@@ -2282,6 +2376,19 @@ pub async fn check_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreplied_mail_rows_are_typed_and_sorted_newest_first() {
+        let output = "2026-10-27 08:00\t11\ttrue\tfalse\ttrue\t1\tAna <ana@x.com>\tLease\n2026-10-28 10:00\t12\tfalse\ttrue\tunknown\t3\tnoreply@shop.com\tYour order\n__buntini_summary__\t5\t2\ttrue";
+        let (headers, total) = parse_unreplied(output).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(headers[0].id, "12");
+        assert_eq!(headers[0].to_me, None);
+        assert!(headers[0].flagged && !headers[0].read);
+        assert_eq!(headers[1].to_me, Some(true));
+        assert!(parse_unreplied("2026-10-27 08:00\t11\tmaybe\tfalse\ttrue\t1\tA\tB\n__buntini_summary__\t1\t1\ttrue").is_err());
+        assert!(parse_unreplied("__buntini_summary__\t1\t0\ttrue").unwrap().0.is_empty());
+    }
 
     #[test]
     fn the_selected_email_is_parsed_or_refused_never_guessed() {

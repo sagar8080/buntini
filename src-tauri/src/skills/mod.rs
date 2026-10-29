@@ -7,6 +7,7 @@
 //! pdf", "stop reminding me…") falls through to the model. The phrase tests in each skill
 //! are the contract.
 pub mod browser;
+pub mod day;
 pub mod mac;
 pub mod music;
 pub mod this;
@@ -19,6 +20,7 @@ pub enum Skill {
     Browser(browser::Command),
     Mac(mac::Command),
     This(this::Command),
+    Day(day::Command),
 }
 
 pub enum Outcome {
@@ -44,6 +46,8 @@ pub struct Context<'a> {
     pub front_app: Option<String>,
     /// What was in front when Buntini opened, for requests about "this".
     pub focus: Option<crate::focus::Snapshot>,
+    /// The Apple helper, which reads Calendar and Reminders.
+    pub helper: &'a std::path::Path,
 }
 
 /// A request in lowercase words. Apostrophes, dots, percent signs and numeric signs
@@ -282,6 +286,7 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
         .or_else(|| this::recognise(&text).map(Skill::This))
+        .or_else(|| day::recognise(&text).map(Skill::Day))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }
 
@@ -292,6 +297,7 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::Browser(_) => "browser",
         Skill::Mac(_) => "mac",
         Skill::This(_) => "this",
+        Skill::Day(_) => "day",
     }
 }
 
@@ -301,6 +307,7 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::Browser(command) => browser::run(command, context).await,
         Skill::Mac(command) => mac::run(command).await,
         Skill::This(command) => this::run(command, context).await,
+        Skill::Day(command) => day::run(command, context).await,
     }
 }
 
