@@ -29,6 +29,7 @@ impl Store {
         crate::workflows::initialize(&store.db)?;
         crate::delivery::initialize(&store.db)?;
         crate::chat_threads::initialize(&store)?;
+        crate::memory_index::initialize(&store.db)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -133,6 +134,8 @@ impl Store {
         Ok(settings)
     }
     pub fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        // An app switched off in Settings → Apps takes its records out of the memory index.
+        crate::memory_index::purge_disallowed(&self.db, settings)?;
         settings.validate()?;
         let raw = serde_json::to_string(settings).map_err(|e| e.to_string())?;
         self.db
@@ -166,6 +169,7 @@ impl Store {
         self.db
             .execute("DELETE FROM file_index WHERE root=?1", [root])
             .map_err(|e| e.to_string())?;
+        crate::memory_index::purge(&self.db, "files", Some(root))?;
         self.audit("folder.revoked", root)
     }
     /// Remembers a fact; repeating one already known changes nothing. Keeps at most 200.
@@ -220,8 +224,8 @@ impl Store {
     pub fn forget(&self, id: i64) -> Result<(), String> {
         self.db
             .execute("DELETE FROM memories WHERE id=?1", [id])
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        crate::memory_index::purge_record(&self.db, "memory", &id.to_string())
     }
     pub fn preference(&self, key: &str) -> Result<Option<String>, String> {
         self.db
@@ -457,7 +461,8 @@ impl Store {
             .execute_batch(
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
                  DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
-                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;",
+                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
+                 DELETE FROM memory_records; DELETE FROM memory_fts;",
             )
             .map_err(|e| e.to_string())?;
         // The empty database already uses the new thread schema. A task saved before
@@ -485,6 +490,9 @@ impl Store {
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start');").map_err(|e| e.to_string())?;
+        // Earlier conversations and folder text leave the memory index with them.
+        crate::memory_index::purge(&tx, "history", None)?;
+        crate::memory_index::purge(&tx, "files", None)?;
         self.active_conversation_id()?;
         self.audit("history.cleared", "Task history and file index cleared")?;
         tx.commit().map_err(|e| e.to_string())
@@ -805,6 +813,22 @@ mod tests {
                 [secret],
             )
             .unwrap();
+        let mut db = Connection::open(&path).unwrap();
+        crate::memory_index::replace_source(
+            &mut db,
+            "notes",
+            &[crate::memory_index::Record {
+                source: "notes",
+                source_id: "n1".into(),
+                scope: String::new(),
+                shares: vec![crate::privacy::Share::Notes],
+                title: format!("{secret}-title"),
+                text: format!("{secret}-note"),
+                observed_at: "2026-10-29 09:00".into(),
+            }],
+        )
+        .unwrap();
+        drop(db);
         store
             .db
             .execute_batch("PRAGMA wal_checkpoint(FULL)")

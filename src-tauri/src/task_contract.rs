@@ -236,10 +236,24 @@ fn clauses(goal: &str) -> Vec<String> {
     }
     result
 }
+/// "What did Ana say about the lease?", "Did Sam mention the trip?": recalling what
+/// someone said, wherever it was, rather than reading one app now.
+fn recalls(clause: &str) -> bool {
+    let text = clause.to_lowercase();
+    let said = [" say", " said", " tell me", " told me", " mention", " write", " wrote", " send me", " sent me", " ask", " asked"];
+    ((text.starts_with("what did ") || text.starts_with("when did ") || text.starts_with("did ") || text.starts_with("where did "))
+        && said.iter().any(|word| text.contains(word)))
+        || ["what do you know about ", "what do i know about ", "do you remember ", "do you know anything about "]
+            .iter()
+            .any(|lead| text.starts_with(lead))
+}
 pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     // Online topic words such as "calendar apps" do not authorize local reads.
     if crate::search_intent::explicit_request(clause).is_some() {
         return vec!["look_up_online"];
+    }
+    if recalls(clause) {
+        return vec!["search_memory"];
     }
     let words = tokens(clause);
     let document = words.iter().flat_map(|word| word.split('-')).any(|word|["lease","leases","quote","quotes","warranty","warranties","memo","agenda","itinerary","itineraries","document","documents","plan","plans","travel","policy","policies"].contains(&word));
@@ -387,6 +401,10 @@ fn verified_read(step: &Step) -> bool {
         )
         .is_ok(),
         SuccessVerifier::BrowserSnapshotReceipt => verified_write(step),
+        SuccessVerifier::ScopedMemoryResults => evidence
+            .get("records")
+            .is_some_and(Value::is_array)
+            && evidence["kind"] == "memory",
         SuccessVerifier::ScopedFileResults => {
             evidence.get("files").is_some_and(Value::is_array)
                 || evidence.as_str().is_some_and(|s| !s.trim().is_empty())
@@ -1705,6 +1723,10 @@ mod tests {
         assert!(read.accepted_tools.contains(&"find_notes".into()));
         assert_eq!(read_tools("find the repair note in notes app"),vec!["find_notes"]);
         assert_eq!(read_tools("search files for calendar notes"),vec!["search_files"]);
+        for recall in ["What did Ana say about the lease", "did Sam mention the trip", "What do you know about my landlord"] {
+            assert_eq!(read_tools(recall), vec!["search_memory"], "{recall}");
+        }
+        assert_ne!(read_tools("what did I do today"), vec!["search_memory"]);
     }
 
     #[test]

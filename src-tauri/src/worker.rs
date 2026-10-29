@@ -255,7 +255,7 @@ impl WorkerManager {
                             #[cfg(test)]
                             self.model_calls.fetch_add(1, Ordering::SeqCst);
                         },
-                        "pong"=>break Ok(Turn{text:msg.to_string(),tool:None,raw:None}),
+                        "pong"|"vectors"=>break Ok(Turn{text:msg.to_string(),tool:None,raw:None}),
                         "token"=>{if let Some(t)=msg.get("text").and_then(Value::as_str){if text.len()+t.len()>64_000{break Err("The local response exceeded its safe size limit.".into());} text.push_str(t);on_token(t.into());}},
                         "tool_call"=>{if tool.is_some(){break Err("The model requested multiple tools in a single turn.".into());} tool=Some(msg);},
                         "error"=>{failure=Some(msg.get("message").and_then(Value::as_str).unwrap_or("Local model inference failed.").chars().take(2000).collect::<String>());},

@@ -28,6 +28,7 @@ mod focus;
 mod indexer;
 mod integrations;
 mod local;
+mod memory_index;
 mod migration;
 mod model;
 mod monitor_actions;
@@ -174,6 +175,7 @@ pub fn run() {
             overlay::start_hit_testing(app.handle().clone());
             world::start(app.handle().clone());
             focus::start();
+            memory_index::start(app.handle().clone());
             scheduler::start(app.handle().clone());
             if let Err(error) = app
                 .global_shortcut()

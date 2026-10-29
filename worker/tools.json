@@ -45,6 +45,52 @@
       ]
     }
   },
+  "search_memory": {
+    "name": "search_memory",
+    "description": "Search what Buntini already knows on this Mac: remembered facts, earlier conversations, and indexed Notes, Mail, Calendar, Reminders and shared-folder text. Use to recall what someone said or where something was mentioned. Results are bounded excerpts from an index, each with its source and date.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The person, topic or words to recall, for example 'Ana lease renewal'."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "memory"
+      ],
+      "operation": "read",
+      "use_when": [
+        "The user asks what someone said, mentioned or sent, or what Buntini knows about a person or topic."
+      ],
+      "avoid_when": [
+        "The user asks for new email, today's calendar, or a live web page; use that app's read instead."
+      ],
+      "prerequisites": [
+        "The memory index has been built on this Mac."
+      ],
+      "output_kind": "memory_search_results",
+      "success_verifier": "scoped_memory_results",
+      "verification_scope": "An index match proves only the returned excerpt as it was when indexed, not that the source still says it.",
+      "retry_policy": "retry_read_after_failure",
+      "examples": [
+        {
+          "request": "What did Ana say about the lease?",
+          "arguments": {
+            "query": "Ana lease"
+          }
+        }
+      ]
+    }
+  },
   "system_info": {
     "name": "system_info",
     "description": "Read a current snapshot of this Mac: RAM use, CPU load, free storage, uptime and busy processes. Use for device status; it cannot change settings or close processes.",

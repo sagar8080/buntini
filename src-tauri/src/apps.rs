@@ -366,6 +366,26 @@ const NOTES_FIND: &str = r#"on run argv
   return out as text
 end run
 "#;
+// Notes changed in the last N days, for the memory index: modified time, ID, title and
+// the first 1,500 characters of plain text (at most 300 notes).
+const NOTES_RECENT: &str = r#"on run argv
+  set cutoff to (current date) - ((item 1 of argv) as integer) * days
+  set out to {}
+  tell application "Notes"
+    set found to (notes whose modification date > cutoff)
+    repeat with n in found
+      set t to plaintext of n
+      if t is missing value then set t to ""
+      if length of t > 1500 then set t to text 1 thru 1500 of t
+      set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t)
+      if (count of out) ≥ 300 then exit repeat
+    end repeat
+  end tell
+  set end of out to "__buntini_summary__" & tab & (count of found as text) & tab & (count of out as text) & tab & "true"
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
 // argv: action, query. Asking what's playing never launches the app.
 const MUSIC: &str = r#"on run argv
   set act to item 1 of argv
@@ -2152,6 +2172,41 @@ pub(crate) async fn mail_openings(
         .into_iter()
         .filter(|row| row.len() >= 2)
         .map(|row| (row[0].clone(), row[1].clone()))
+        .collect())
+}
+
+/// A record for the memory index: (time, ID, title, text).
+pub type Recent = (String, String, String, String);
+
+/// Notes changed in the last `days` days (at most 300). Notes must be allowed.
+pub(crate) async fn recent_notes(days: u32) -> Result<Vec<Recent>, String> {
+    let found = counted_rows(&osascript(NOTES_RECENT, &[days.to_string()], 120).await?, 4, "Notes")?;
+    Ok(found
+        .rows
+        .into_iter()
+        .map(|row| (row[0].clone(), row[1].clone(), row[2].clone(), row[3].clone()))
+        .collect())
+}
+
+/// Inbox messages from the last `days` days, newest `limit` with their openings, as
+/// (received, Mail ID, "subject — from sender", opening). Mail must be allowed.
+pub(crate) async fn recent_mail(days: u32, limit: usize) -> Result<Vec<Recent>, String> {
+    let output = osascript(MAIL_LIST, &["".into(), "0".into(), days.to_string()], 120).await?;
+    let mut rows = counted_rows(&output, 6, "Mail")?.rows;
+    rows.sort_by(|a, b| b[0].cmp(&a[0]));
+    rows.truncate(limit);
+    let ids: Vec<String> = rows.iter().filter_map(|row| nonempty(&row[5]).map(str::to_string)).collect();
+    let mut openings = std::collections::HashMap::new();
+    for batch in ids.chunks(40) {
+        openings.extend(mail_openings(batch).await?);
+    }
+    Ok(rows
+        .into_iter()
+        .filter(|row| !row[5].is_empty())
+        .map(|row| {
+            let opening = openings.get(&row[5]).cloned().unwrap_or_default();
+            (row[0].clone(), row[5].clone(), format!("{} — from {}", row[4], row[3]), opening)
+        })
         .collect())
 }
 

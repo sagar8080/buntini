@@ -118,6 +118,17 @@ pub fn support_summary(
         ),
         format!("Folders allowed: {}", store.roots()?.len()),
         format!(
+            "Memory index: {}",
+            match crate::memory_index::counts(&store.db)? {
+                counts if counts.is_empty() => "empty".to_string(),
+                counts => counts
+                    .iter()
+                    .map(|(source, count)| format!("{source} {count}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            }
+        ),
+        format!(
             "Online search: {} · free tier {}",
             settings.search_provider,
             if settings.free_tier_only { "on" } else { "off" }
