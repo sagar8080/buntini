@@ -891,9 +891,17 @@ pub fn start(app: tauri::AppHandle) {
             while busy() {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
-            // Shared folders' text first, so this pass indexes what they hold now.
+            // Shared folders' text first, so this pass indexes what they hold now. It
+            // steps aside before each file while a chat runs or the Mac is on battery.
             state.index_cancel.store(false, Ordering::SeqCst);
-            if let Err(error) = crate::controller::refresh_file_index(&state, state.index_cancel.clone()).await {
+            let handle = app.clone();
+            let seen = std::sync::Mutex::new(None);
+            let pause = move || {
+                let state = handle.state::<crate::controller::AppState>();
+                let busy = !state.active.lock().unwrap().is_empty();
+                busy || on_battery_lately(&seen)
+            };
+            if let Err(error) = crate::controller::refresh_file_index(&state, state.index_cancel.clone(), pause).await {
                 state.audit("files.index_failed", &error);
             }
             match refresh(&state.store, &state.models, &state.index_cancel, &busy).await {

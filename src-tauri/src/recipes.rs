@@ -728,7 +728,12 @@ mod tests {
         let choices = reply_choices(goal, &partial).unwrap();
         assert_eq!(choices.len(), 1);
         assert!(choices[0].label.ends_with("older emails not searched"));
-        // A subject or text that mentions her is not an email from her.
+        // A subject or text that mentions her is not an email from her, and neither is
+        // an address whose domain has her name in it.
+        let domain = ["2026-10-26 09:00", "<deal@x>", "Deals <offers@ana.shop>", "This week", "4701"];
+        let mut contract = TaskContract::from_request(goal);
+        assert!(reply_from_search(goal, &[search("ana", &[domain], 1)], &mut contract).is_err());
+        assert!(contract.constraints.is_empty(), "no recipient is chosen from a domain");
         let nobody = [search("ana", &[BANANA], 1)];
         let mut contract = TaskContract::from_request(goal);
         let error = reply_from_search(goal, &nobody, &mut contract).unwrap_err();

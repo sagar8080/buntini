@@ -2095,7 +2095,13 @@ async fn file_tool(
 /// start`), so nobody has to press a button or watch a count. Waits for no one: the
 /// caller checks the user isn't busy, and `cancel` (Delete everything, Clear history)
 /// stops it.
-pub(crate) async fn refresh_file_index(state: &AppState, cancel: Arc<AtomicBool>) -> Result<(), String> {
+/// Rebuilds the index of shared folders' text in the background, stepping aside before
+/// each file while `pause` says the user needs the Mac.
+pub(crate) async fn refresh_file_index(
+    state: &AppState,
+    cancel: Arc<AtomicBool>,
+    pause: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
     let roots = state.store.lock().unwrap().roots()?;
     if roots.is_empty() {
         return Ok(());
@@ -2103,7 +2109,7 @@ pub(crate) async fn refresh_file_index(state: &AppState, cancel: Arc<AtomicBool>
     let store = state.store.clone();
     let documents = local::Documents::for_index(state.models.apple_helper(), &cancel);
     tauri::async_runtime::spawn_blocking(move || {
-        let build = crate::indexer::rebuild(&roots, &documents, &cancel)?;
+        let build = crate::indexer::rebuild_yielding(&roots, &documents, &cancel, &pause)?;
         // Clearing history sets `cancel` before it takes the store, so a check under the
         // lock never writes back what it just erased.
         let mut store = store.lock().unwrap();

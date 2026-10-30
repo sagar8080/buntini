@@ -309,6 +309,8 @@ struct Target {
     ordinal: Option<Ordinal>,
     clock: Option<Clock>,
     day: Option<NaiveDate>,
+    /// Named only by "it" or "that": what it points back to isn't known here.
+    pointed: bool,
 }
 
 fn target(text: &str, today: NaiveDate) -> Target {
@@ -447,8 +449,18 @@ const WHICH_WAY: &str = "Say whether to move it earlier or later, like “an hou
 fn without_pointers(mut target: Target) -> Target {
     if !target.words.is_empty() && target.words.iter().all(|w| POINTERS.contains(&w.as_str())) {
         target.words.clear();
+        target.pointed = true;
     }
     target
+}
+
+/// "It" may mean something from earlier in the conversation (tomorrow's dentist, not
+/// today's only meeting), so even a single match is offered to pick, never bound.
+fn pick_when_pointed(plan: EditPlan, target: &Target) -> EditPlan {
+    match plan {
+        EditPlan::One(candidate) if target.pointed => EditPlan::Several(vec![candidate]),
+        plan => plan,
+    }
 }
 
 fn request(goal: &str, tool: &str, today: NaiveDate) -> Result<Request, String> {
@@ -968,7 +980,7 @@ fn reminder_plan(
     }
     // "The first one" is the first of what was read, however many there are.
     let ordered = target.ordinal.is_some() && target.words.is_empty();
-    Ok(decide(narrowed(candidates, &all, &target.words), complete || ordered))
+    Ok(pick_when_pointed(decide(narrowed(candidates, &all, &target.words), complete || ordered), target))
 }
 
 fn event_plan(
@@ -1036,7 +1048,7 @@ fn event_plan(
         for record in chosen {
             candidates.push(event_candidate(step, record, change)?);
         }
-        let plan = decide(narrowed(candidates, &timed, &target.words), complete || target.ordinal.is_some());
+        let plan = pick_when_pointed(decide(narrowed(candidates, &timed, &target.words), complete || target.ordinal.is_some()), target);
         if let EditPlan::One(candidate) = &plan {
             let args = &candidate.arguments;
             if args["start"] == args["occurrence"]
@@ -2023,8 +2035,15 @@ mod tests {
         let later = one("Push my 3pm back by an hour", "update_calendar_event", &[today.clone()]);
         assert_eq!((later["start"].as_str(), later["minutes"].as_u64()), (Some("2026-10-29 16:00"), Some(45)));
         assert_eq!(one("move the design review 30 minutes earlier", "update_calendar_event", &[today.clone()])["start"], "2026-10-29 14:30");
-        // "It" names no title: today's only event is the one, and the sheet shows it.
-        assert_eq!(one("push it by an hour", "update_calendar_event", &[today.clone()])["start"], "2026-10-29 16:00");
+        // "It" names no title and may mean an event from earlier in the conversation:
+        // today's only event is offered to pick, never bound for the user.
+        match plan("push it by an hour", "update_calendar_event", &[today.clone()]) {
+            Ok(EditPlan::Several(choices)) => {
+                assert_eq!(choices.len(), 1);
+                assert_eq!(choices[0].arguments["start"], "2026-10-29 16:00");
+            }
+            other => panic!("{other:?}"),
+        }
         let tomorrow = calendar_day("2026-10-30", vec![]);
         assert_eq!(
             one("move the design review to tomorrow same time", "update_calendar_event", &[today.clone(), tomorrow])["start"],

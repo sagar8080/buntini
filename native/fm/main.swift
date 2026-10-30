@@ -1456,6 +1456,24 @@ func dueComponents(_ text: String, timeZone: TimeZone?) -> DateComponents? {
     return components
 }
 
+/// A reminder's new due date from the text Buntini read and the user approved. That text
+/// is in `stamp`'s zone (the Mac's), so a timed due is converted to the same moment in
+/// the reminder's own zone rather than taking its clock reading there. A floating or
+/// date-only reminder keeps the date and time as written.
+func rescheduledDue(_ text: String, readIn stamp: DateFormatter, timeZone: TimeZone?) -> DateComponents? {
+    guard let written = dueComponents(text, timeZone: timeZone) else { return nil }
+    guard written.hour != nil, let zone = timeZone, zone.identifier != stamp.timeZone.identifier || zone.secondsFromGMT() != stamp.timeZone.secondsFromGMT() else {
+        return written
+    }
+    guard let moment = stamp.date(from: text) else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = zone
+    var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: moment)
+    components.calendar = calendar
+    components.timeZone = zone
+    return components.isValidDate ? components : nil
+}
+
 /// What an event occurrence is like, for comparing just before and after a change.
 func eventSnapshot(_ event: EKEvent, stamp: DateFormatter) -> [String: Any] {
     ["title": event.title ?? "", "start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate),
@@ -1550,7 +1568,7 @@ enum Edits {
               reminderDueText(reminder.dueDateComponents, stamp: stamp) == wasDue else {
             return receipt("failed", error: "That reminder changed since Buntini read it. Ask again so it reads your reminders afresh.")
         }
-        guard let components = dueComponents(due, timeZone: reminder.dueDateComponents?.timeZone),
+        guard let components = rescheduledDue(due, readIn: stamp, timeZone: reminder.dueDateComponents?.timeZone),
               let newDue = reminderDueDate(components) else {
             return receipt("failed", error: "Buntini’s Apple helper didn’t understand that due date.")
         }
@@ -1687,6 +1705,12 @@ func contractSelfTest() async -> Int32 {
         try require(dueComponents("2026-11-06 09:30", timeZone: utc).map { reminderDueText($0, stamp: stamp) } == "2026-11-06 09:30", "A new due time must read back as written")
         try require(dueComponents("2026-11-06", timeZone: utc).map { reminderDueText($0, stamp: stamp) } == "2026-11-06", "A new date without a time must stay without one")
         try require(dueComponents("2026-11-06", timeZone: nil)?.timeZone == nil, "A floating reminder must stay floating")
+        let newYork = TimeZone(identifier: "America/New_York")!
+        let moved = rescheduledDue("2026-11-06 14:00", readIn: stamp, timeZone: newYork)
+        try require(moved?.timeZone == newYork && moved?.hour == 9, "A reminder kept in another zone must move to the moment that was read and approved")
+        try require(moved.map { reminderDueText($0, stamp: stamp) } == "2026-11-06 14:00", "A reminder kept in another zone must read back as approved")
+        try require(rescheduledDue("2026-11-06", readIn: stamp, timeZone: newYork).map { reminderDueText($0, stamp: stamp) } == "2026-11-06", "A date-only reminder keeps its date in any zone")
+        try require(rescheduledDue("2026-11-06 14:00", readIn: stamp, timeZone: utc)?.hour == 14, "A reminder in the Mac's zone keeps the time as written")
         for invalid in ["", "Friday", "2026-11-31", "2026-11-06 24:00", "2026-11-06 9:30", "2026-11-06T09:30", "2026-11-06 09:30 "] {
             try require(dueComponents(invalid, timeZone: utc) == nil, "Invalid due dates must be refused: \(invalid)")
         }

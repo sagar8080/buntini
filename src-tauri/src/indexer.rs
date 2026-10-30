@@ -44,6 +44,12 @@ pub struct IndexCandidate {
     pub path: String,
 }
 
+/// How often a paused rebuild looks again whether it may carry on.
+#[cfg(not(test))]
+const PAUSE_STEP: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(test)]
+const PAUSE_STEP: std::time::Duration = std::time::Duration::from_millis(20);
+
 fn check_cancel(cancel: &Arc<AtomicBool>) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("Task cancelled.".into())
@@ -60,14 +66,26 @@ fn current_root(root: &Path) -> bool {
     root.is_absolute() && root.canonicalize().ok().as_deref() == Some(root)
 }
 
-/// Run only after the user explicitly requests a rebuild. Collection is pure
-/// filesystem work and belongs in spawn_blocking, without holding the DB lock.
-/// Documents are read through the Apple helper (`local::read_content`); text past
-/// `local::MAX_READ` is cut there, so every document fits the same per-file limit.
+/// Collection is pure filesystem work and belongs in spawn_blocking, without holding
+/// the DB lock. Documents are read through the Apple helper (`local::read_content`);
+/// text past `local::MAX_READ` is cut there, so every document fits the same per-file
+/// limit.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn rebuild(
     roots: &[String],
     documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
+) -> Result<IndexBuild, String> {
+    rebuild_yielding(roots, documents, cancel, &|| false)
+}
+
+/// Like `rebuild`, waiting before each file while `pause` says the user needs the Mac
+/// (a chat running, or on battery): background work steps aside, then carries on.
+pub fn rebuild_yielding(
+    roots: &[String],
+    documents: &local::Documents,
+    cancel: &Arc<AtomicBool>,
+    pause: &dyn Fn() -> bool,
 ) -> Result<IndexBuild, String> {
     let mut build = IndexBuild {
         docs: Vec::new(),
@@ -94,6 +112,9 @@ pub fn rebuild(
             .into_iter()
             .filter_entry(visible)
         {
+            while pause() && !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(PAUSE_STEP);
+            }
             check_cancel(cancel)?;
             if build.scanned_entries >= MAX_ENTRIES || build.docs.len() >= MAX_DOCUMENTS {
                 build.truncated = true;
@@ -461,6 +482,26 @@ mod tests {
     }
     fn token() -> Arc<AtomicBool> {
         Arc::new(AtomicBool::new(false))
+    }
+    #[test]
+    fn a_background_rebuild_waits_while_the_user_needs_the_mac() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("a.txt"), "alpha").unwrap();
+        let roots = vec![root(folder.path())];
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        // Busy for the first few looks, then free.
+        let pause = || asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 3;
+        let build = super::rebuild_yielding(&roots, &local::Documents::none(), &token(), &pause).unwrap();
+        assert_eq!(build.docs.len(), 1);
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst) > 3, "it waited, then carried on");
+        // Stopping it while it waits ends it.
+        let cancel = token();
+        let stopping = cancel.clone();
+        let busy = move || {
+            stopping.store(true, std::sync::atomic::Ordering::SeqCst);
+            true
+        };
+        assert!(super::rebuild_yielding(&roots, &local::Documents::none(), &cancel, &busy).is_err());
     }
     fn database() -> Connection {
         let db = Connection::open_in_memory().unwrap();
