@@ -856,7 +856,7 @@ where
         channel,
         dispatch,
         |tool, args, settings| async move {
-            crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), &settings).await
+            crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), &settings, crate::apps::Launch::for_request()).await
         },
     )
     .await
@@ -2855,7 +2855,7 @@ async fn execute_with_settings(
                 return Err("This brain isn’t allowed to see your email. You can allow Your email in Settings → Privacy.".into());
             }
             touch(task, privacy::Share::Mail);
-            let opening = crate::apps::mail_openings(&[email.id.clone()], crate::apps::Launch::Allow)
+            let opening = crate::apps::mail_openings(&[email.id.clone()], crate::apps::Launch::for_request())
                 .await
                 .ok()
                 .and_then(|mut openings| openings.remove(&email.id))
@@ -3037,7 +3037,7 @@ async fn continue_workflow(
         settings,
         flow,
         |tool, args| async move {
-            crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), settings).await
+            crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), settings, crate::apps::Launch::for_request()).await
         },
     )
     .await
@@ -3903,6 +3903,15 @@ mod tests {
         let saved: crate::triage::Listing = serde_json::from_str(&store.preference(crate::triage::LISTING).unwrap().unwrap()).unwrap();
         assert_eq!(saved.task_id, "chat-task");
         assert_eq!(saved.emails.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_routines_reads_leave_closed_apps_closed() {
+        use crate::apps::Launch;
+        assert_eq!(Launch::for_request(), Launch::Allow, "a request from the window may open Mail");
+        // The read closure the workflow loop awaits runs inside the run's scope.
+        let read = || async { Launch::for_request() };
+        assert_eq!(HEADLESS.scope((), read()).await, Launch::IfRunning);
     }
 
     async fn calendar_preparation_journey(apple: bool, start: &str, due: &str, title: &str) {

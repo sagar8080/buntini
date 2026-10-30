@@ -768,6 +768,19 @@ pub enum Launch {
     Allow,
 }
 
+impl Launch {
+    /// What a read for the request under way may do. A routine's run (nobody at the
+    /// window, `controller::headless`) leaves a closed Mail or Notes closed; a request the
+    /// user just made may open the app it asked about.
+    pub fn for_request() -> Self {
+        if crate::controller::headless() {
+            Launch::IfRunning
+        } else {
+            Launch::Allow
+        }
+    }
+}
+
 /// What a guarded script returns when its app is closed.
 const NOT_RUNNING_SENTINEL: &str = "__buntini_not_running__";
 /// The end of the error a guarded read gives when its app is closed.
@@ -1416,11 +1429,16 @@ pub fn reminder_evidence(reminders: &Agenda<Reminder>) -> Value {
     )
 }
 
+/// A model's or recipe's read, as typed evidence. `launch` says whether Mail and Notes
+/// may be opened for it. Calendar, Reminders and Contacts are read through EventKit and
+/// the Contacts framework, which never open their apps, and browser and music reads
+/// already leave a closed app closed.
 pub async fn run_evidence(
     tool: &str,
     args: &Map<String, Value>,
     helper_path: &Path,
     settings: &Settings,
+    launch: Launch,
 ) -> Result<Value, String> {
     let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
     match tool {
@@ -1437,10 +1455,11 @@ pub async fn run_evidence(
                 get("query"),
                 args.get("unread").and_then(Value::as_bool).unwrap_or(false),
                 args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize,
+                launch,
             )
             .await
         }
-        "find_notes" => find_notes_evidence(get("query")).await,
+        "find_notes" => find_notes_evidence(get("query"), launch).await,
         "find_contact" => find_contact(helper_path, get("name")).await,
         "list_shortcuts" => Ok(shortcut_evidence(get("query"), &shortcut_names().await?)),
         "control_music" if get("action") == "now_playing" => {
@@ -1913,10 +1932,12 @@ pub fn describe_reminders(reminders: &Agenda<Reminder>) -> String {
 }
 
 /// Recent inbox metadata, with explicitly bounded excerpts and search coverage.
-async fn read_mail_evidence(query: &str, unread: bool, limit: usize) -> Result<Value, String> {
+async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Launch) -> Result<Value, String> {
     let days = if query.is_empty() { "14" } else { "120" };
-    let output = osascript(
+    let output = osascript_if(
         MAIL_LIST,
+        "Mail",
+        launch,
         &[
             query.into(),
             if unread { "1" } else { "0" }.into(),
@@ -1934,7 +1955,7 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize) -> Result<V
     let openings = if ids.is_empty() {
         Ok(String::new())
     } else {
-        osascript(MAIL_TEXT, &ids, 40).await
+        osascript_if(MAIL_TEXT, "Mail", launch, &ids, 40).await
     };
     mail_evidence(query, unread, limit, found, openings.as_deref().ok())
 }
@@ -2037,7 +2058,7 @@ fn mail_evidence(
 }
 
 async fn read_mail(query: &str, unread: bool, limit: usize) -> Result<String, String> {
-    Ok(read_mail_evidence(query, unread, limit).await?["text"]
+    Ok(read_mail_evidence(query, unread, limit, Launch::Allow).await?["text"]
         .as_str()
         .unwrap_or("")
         .to_string())
@@ -2052,15 +2073,15 @@ fn mail_rows(output: &str, unread: bool, limit: usize) -> Vec<Vec<String>> {
     found
 }
 
-async fn find_notes_evidence(query: &str) -> Result<Value, String> {
-    let exact = notes_evidence(query, &osascript(NOTES_FIND, &[query.into()], 40).await?)?;
+async fn find_notes_evidence(query: &str, launch: Launch) -> Result<Value, String> {
+    let exact = notes_evidence(query, &osascript_if(NOTES_FIND, "Notes", launch, &[query.into()], 40).await?)?;
     if exact["count"] != 0 {
         return Ok(exact);
     }
     let Some(fallback) = notes_query_fallback(query) else {
         return Ok(exact);
     };
-    let output = osascript(NOTES_FIND, &[fallback.clone()], 40).await?;
+    let output = osascript_if(NOTES_FIND, "Notes", launch, &[fallback.clone()], 40).await?;
     notes_fallback_evidence(query, &fallback, &output)
 }
 
@@ -2130,7 +2151,7 @@ pub(crate) fn notes_evidence(query: &str, output: &str) -> Result<Value, String>
 }
 
 async fn find_notes(query: &str) -> Result<String, String> {
-    Ok(find_notes_evidence(query).await?["text"]
+    Ok(find_notes_evidence(query, Launch::Allow).await?["text"]
         .as_str()
         .unwrap_or("")
         .to_string())
@@ -3719,7 +3740,7 @@ mod tests {
 
     #[test]
     fn background_scripts_check_the_app_is_running() {
-        for (source, app) in [(NOTES_RECENT, "Notes"), (MAIL_LIST, "Mail"), (MAIL_TEXT, "Mail"), (MAIL_TRIAGE, "Mail")] {
+        for (source, app) in [(NOTES_RECENT, "Notes"), (NOTES_FIND, "Notes"), (MAIL_LIST, "Mail"), (MAIL_TEXT, "Mail"), (MAIL_TRIAGE, "Mail")] {
             let background = guarded(source, app, Launch::IfRunning);
             let check = format!("on run argv\n  if application \"{app}\" is not running then return \"{NOT_RUNNING_SENTINEL}\"\n");
             assert!(background.starts_with(&check), "{app}: the check comes before any tell");

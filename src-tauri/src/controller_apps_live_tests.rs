@@ -89,7 +89,7 @@ async fn read_owned_notes(
             "Real-app acceptance refused a read outside its exact test-note namespace.".into(),
         );
     }
-    crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), settings).await
+    crate::apps::run_evidence(&tool, &args, state.models.apple_helper(), settings, crate::apps::Launch::for_request()).await
 }
 
 async fn initial_turn(state: &AppState, prompt: &str, namespace: &str) -> LiveTurn {
