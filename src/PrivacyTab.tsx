@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { ChevronRight, Folder, FolderPlus, ShieldCheck, X } from 'lucide-react';
 import Toggle from './Toggle';
-import FileIndexSettings from './FileIndexSettings';
 import MacUpdates from './MacUpdates';
 import type { Memory, Settings } from './types';
 
@@ -36,7 +35,7 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Folders</h3><span className="count-badge">{roots.length}</span></div>
       {roots.map(path => <div className="root-item" key={path}><Folder size={14} /><span title={path}>{path}</span><button type="button" aria-label={`Remove access to ${path}`} title="Remove access" onClick={() => void onRemoveFolder(path)}><X size={14} /></button></div>)}
-      <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Add folder</button><FileIndexSettings roots={roots} onError={onError} /></div>
+      <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Add folder</button></div>
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Memory</h3><span className="count-badge">{memories.length}</span></div>

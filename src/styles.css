@@ -412,10 +412,6 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .research-evidence strong { display: block; font-size: 11px; color: var(--text); font-weight: 500; }
 .research-evidence small { font-size: 11px; display: block; margin-top: 5px; }
 .research-evidence p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
-.file-index-controls { margin-top: 9px; }
-.file-index-controls > .secondary-button { width: 100%; }
-.file-index-controls > p { font-size: 11px; color: var(--muted); line-height: 1.7; margin: 8px 0 0; }
-.file-index-controls > small { display: block; font-size: 11px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
 /* Cat parts and motion personalities. Motion rules come first so state reactions win. */
 .cat-tail { transform-origin: 110px 154px; animation: cat-tail 3.6s ease-in-out infinite; }
 .cat-ear-left { transform-origin: 72px 70px; transition: transform .3s ease; }
@@ -831,7 +827,6 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .service-body .chip-row { margin-top: 0; }
 .service-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.row-actions .file-index-controls { margin: 0; }
 .settings-page .root-item > span { font-size: 12px; }
 .settings-page .audit-button { font-size: 12px; padding-top: 14px; }
 

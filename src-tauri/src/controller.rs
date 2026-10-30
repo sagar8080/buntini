@@ -2036,58 +2036,26 @@ async fn file_tool(
     Ok(files)
 }
 
-#[tauri::command]
-pub fn file_index_status(state: State<'_, AppState>) -> Result<IndexStatus, String> {
-    let store = state.store.lock().unwrap();
-    let roots = store.roots()?;
-    let mut status = store
-        .index_metadata()?
-        .map(|metadata| {
-            let mut status = metadata.status;
-            status.truncated |= roots.iter().any(|root| !metadata.roots.contains(root));
-            status
-        })
-        .unwrap_or(IndexStatus {
-            files: 0,
-            truncated: false,
-            indexed_at: String::new(),
-        });
-    if !status.indexed_at.is_empty() {
-        status.files=store.db.query_row("SELECT count(DISTINCT path) FROM file_index WHERE root IN (SELECT path FROM roots)",[],|row|row.get::<_,i64>(0)).map_err(|e|e.to_string())?.max(0) as usize;
-    }
-    Ok(status)
-}
-#[tauri::command]
-pub fn cancel_file_index(state: State<'_, AppState>) {
-    for (id, cancel) in state.active.lock().unwrap().iter() {
-        if id.starts_with("index-") {
-            cancel.store(true, Ordering::Relaxed);
-        }
-    }
-}
-#[tauri::command]
-pub async fn refresh_file_index(state: State<'_, AppState>) -> Result<IndexStatus, String> {
+/// Brings the index of shared folders' text up to date. Buntini decides when: the
+/// background pass that keeps the memory index current runs it first (`memory_index::
+/// start`), so nobody has to press a button or watch a count. Waits for no one: the
+/// caller checks the user isn't busy, and `cancel` (Delete everything, Clear history)
+/// stops it.
+pub(crate) async fn refresh_file_index(state: &AppState, cancel: Arc<AtomicBool>) -> Result<(), String> {
     let roots = state.store.lock().unwrap().roots()?;
     if roots.is_empty() {
-        return Err("Authorize a folder before building its local file index.".into());
-    }
-    let id = format!("index-{}", uuid::Uuid::new_v4());
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut active = state.active.lock().unwrap();
-        if !active.is_empty() {
-            return Err("Finish or cancel the current task before indexing.".into());
-        }
-        active.insert(id.clone(), cancel.clone());
+        return Ok(());
     }
     let store = state.store.clone();
     let documents = local::Documents::for_index(state.models.apple_helper(), &cancel);
-    let work = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let build = crate::indexer::rebuild(&roots, &documents, &cancel)?;
-        if cancel.load(Ordering::Relaxed) {
-            return Err("File indexing cancelled.".into());
-        }
+        // Clearing history sets `cancel` before it takes the store, so a check under the
+        // lock never writes back what it just erased.
         let mut store = store.lock().unwrap();
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         let current = store.roots()?;
         let count = crate::indexer::replace_index(&mut store.db, &current, &build.docs)?;
         let status = IndexStatus {
@@ -2108,14 +2076,11 @@ pub async fn refresh_file_index(state: State<'_, AppState>) -> Result<IndexStatu
                 "{count} bounded local documents indexed; truncated={}",
                 status.truncated
             ),
-        )?;
-        Ok(status)
+        )
     })
     .await
     .map_err(|_| "The file index stopped unexpectedly.".to_string())
-    .and_then(|result| result);
-    state.active.lock().unwrap().remove(&id);
-    work
+    .and_then(|result| result)
 }
 pub(crate) async fn web_tool(
     state: &AppState,

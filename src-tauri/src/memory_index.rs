@@ -878,7 +878,8 @@ fn on_battery_lately(last: &std::sync::Mutex<Option<(std::time::Instant, bool)>>
 
 /// Keeps the index current: a first pass shortly after launch, then every six hours.
 /// Each pass waits while a chat is running or the Mac is on battery, before it starts
-/// and before each app read and embedding batch.
+/// and before each app read and embedding batch. It starts by rebuilding the index of
+/// shared folders' text, which Buntini keeps up to date itself.
 pub fn start(app: tauri::AppHandle) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
@@ -889,6 +890,11 @@ pub fn start(app: tauri::AppHandle) {
             let busy = || !state.active.lock().unwrap().is_empty() || on_battery_lately(&battery);
             while busy() {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+            // Shared folders' text first, so this pass indexes what they hold now.
+            state.index_cancel.store(false, Ordering::SeqCst);
+            if let Err(error) = crate::controller::refresh_file_index(&state, state.index_cancel.clone()).await {
+                state.audit("files.index_failed", &error);
             }
             match refresh(&state.store, &state.models, &state.index_cancel, &busy).await {
                 Ok(done) => state.audit(
