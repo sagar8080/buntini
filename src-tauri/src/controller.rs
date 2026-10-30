@@ -545,11 +545,11 @@ pub fn validate_tool(
         tool if mode != "web" && crate::structured_math::TOOLS.contains(&tool) => { crate::structured_math::validate(tool,&Value::Object(args.clone()))?; },
         "calculate" if mode != "web" => { crate::calculation::validate(&Value::Object(args.clone()))?; },
         "system_info" if mode!="web"=>{if !args.is_empty(){return Err("system_info does not accept arguments.".into());}},
-        "search_memory" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_memory only accepts a query.".into());}let q=args["query"].as_str().ok_or("Memory query must be text.")?;if q.trim().is_empty()||q.len()>300{return Err("Invalid memory query.".into());}},
-        "search_files" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_files only accepts a query.".into());}let q=args["query"].as_str().ok_or("File query must be text.")?;if q.trim().is_empty()||q.len()>512{return Err("Invalid file query.".into());}},
+        "search_memory" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_memory only accepts a query.".into());}let q=args["query"].as_str().ok_or("Memory query must be text.")?;if q.trim().is_empty()||q.chars().count()>300{return Err("Invalid memory query.".into());}},
+        "search_files" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_files only accepts a query.".into());}let q=args["query"].as_str().ok_or("File query must be text.")?;if q.trim().is_empty()||q.chars().count()>512{return Err("Invalid file query.".into());}},
         tool if mode=="auto" && (action_tool(tool) || crate::apps::READ_TOOLS.contains(&tool))=>{},
-        "remember" if mode=="auto"=>{if args.len()!=1{return Err("remember only accepts a fact.".into());}let fact=args.get("fact").and_then(Value::as_str).ok_or("The fact must be text.")?;if fact.trim().len()<3||fact.len()>600{return Err("Invalid memory.".into());}},
-        "look_up_online" if mode=="auto"=>{if args.len()!=1{return Err("look_up_online only accepts a query.".into());}let q=args.get("query").and_then(Value::as_str).ok_or("Lookup query must be text.")?;if q.trim().is_empty()||q.len()>2000{return Err("Invalid lookup query.".into());}},
+        "remember" if mode=="auto"=>{if args.len()!=1{return Err("remember only accepts a fact.".into());}let fact=args.get("fact").and_then(Value::as_str).ok_or("The fact must be text.")?;if fact.trim().chars().count()<3||fact.chars().count()>600{return Err("Invalid memory.".into());}},
+        "look_up_online" if mode=="auto"=>{if args.len()!=1{return Err("look_up_online only accepts a query.".into());}let q=args.get("query").and_then(Value::as_str).ok_or("Lookup query must be text.")?;if q.trim().is_empty()||q.chars().count()>2000{return Err("Invalid lookup query.".into());}},
         "web_search" if mode=="web"=>{if args.len()!=1 || args.get("query").and_then(Value::as_str)!=Some(user_query){return Err("Web searches must use the user's exact explicit query. Local file contents cannot be sent to search providers.".into());}},
         _=>return Err(format!("The tool '{name}' is not authorized. Buntini only exposes scoped file search, system information, and explicit web search.")),
     }
@@ -4411,6 +4411,39 @@ for line in sys.stdin:
             "x"
         )
         .is_err());
+    }
+
+    #[test]
+    fn query_limits_count_characters_not_bytes() {
+        // 120 characters, 360 bytes: within the 300-character schema in tools.json.
+        let japanese = "賃貸契約の更新について".repeat(12);
+        assert_eq!(japanese.chars().count(), 132);
+        let japanese: String = japanese.chars().take(120).collect();
+        let call = |name: &str, field: &str, value: &str| {
+            validate_tool(&json!({"name":name,"arguments":{field:value}}), "auto", "x")
+        };
+        assert!(call("search_memory", "query", &japanese).is_ok());
+        assert!(call("search_files", "query", &japanese).is_ok());
+        assert!(call("look_up_online", "query", &japanese).is_ok());
+        assert!(call("search_memory", "query", &"語".repeat(301)).is_err());
+    }
+
+    #[test]
+    fn search_memory_contract_cases_match_the_corpus() {
+        // The worker checks the same cases against tools.json; this is the Rust side.
+        let corpus: Value = serde_json::from_str(include_str!("../../evals/scenarios.json")).unwrap();
+        let cases: Vec<&Value> = corpus["scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["kind"] == "tool_contract" && case["call"]["name"] == "search_memory")
+            .collect();
+        assert!(cases.len() >= 4);
+        for case in cases {
+            let offered = case["allowed"].as_array().unwrap().iter().any(|tool| tool == "search_memory");
+            let accepted = offered && validate_tool(&case["call"], "auto", "x").is_ok();
+            assert_eq!(accepted, case["valid"] == true, "{}", case["id"]);
+        }
     }
 }
 
