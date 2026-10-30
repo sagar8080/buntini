@@ -27,7 +27,7 @@ fn file(state: &AppState, name: &str, text: &str) -> PathBuf {
 
 fn rebuild(state: &AppState) {
     let roots = state.store.lock().unwrap().roots().unwrap();
-    let build = crate::indexer::rebuild(&roots, &Arc::new(AtomicBool::new(false))).unwrap();
+    let build = crate::indexer::rebuild(&roots, &crate::local::Documents::none(), &Arc::new(AtomicBool::new(false))).unwrap();
     let mut store = state.store.lock().unwrap();
     let count = crate::indexer::replace_index(&mut store.db, &roots, &build.docs).unwrap();
     store

@@ -6,8 +6,6 @@ use crate::{local, types::FileHit};
 use rusqlite::{params, Connection};
 use std::{
     collections::HashSet,
-    fs::File,
-    io::Read,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -58,60 +56,19 @@ fn visible(entry: &DirEntry) -> bool {
     entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
 }
 
-fn text_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-        "txt"
-            | "md"
-            | "markdown"
-            | "csv"
-            | "tsv"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "log"
-            | "rs"
-            | "py"
-            | "js"
-            | "ts"
-            | "tsx"
-            | "jsx"
-            | "html"
-            | "css"
-    )
-}
-
 fn current_root(root: &Path) -> bool {
     root.is_absolute() && root.canonicalize().ok().as_deref() == Some(root)
 }
 
-/// Unsupported, binary, invalid UTF-8, or oversized files remain searchable by
-/// filename, but their contents are never read beyond the fixed size limit.
-fn read_content(file: &mut File, path: &Path, length: u64) -> String {
-    if !text_file(path) || length > local::MAX_READ {
-        return String::new();
-    }
-    let mut bytes = Vec::with_capacity(length as usize);
-    if file
-        .take(local::MAX_READ + 1)
-        .read_to_end(&mut bytes)
-        .is_err()
-        || bytes.len() > local::MAX_READ as usize
-        || bytes.contains(&0)
-    {
-        return String::new();
-    }
-    String::from_utf8(bytes).unwrap_or_default()
-}
-
 /// Run only after the user explicitly requests a rebuild. Collection is pure
 /// filesystem work and belongs in spawn_blocking, without holding the DB lock.
-pub fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild, String> {
+/// Documents are read through the Apple helper (`local::read_content`); text past
+/// `local::MAX_READ` is cut there, so every document fits the same per-file limit.
+pub fn rebuild(
+    roots: &[String],
+    documents: &local::Documents,
+    cancel: &Arc<AtomicBool>,
+) -> Result<IndexBuild, String> {
     let mut build = IndexBuild {
         docs: Vec::new(),
         scanned_entries: 0,
@@ -171,14 +128,7 @@ pub fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild,
                     continue;
                 }
             };
-            let metadata = match file.metadata() {
-                Ok(metadata) => metadata,
-                Err(_) => {
-                    build.skipped += 1;
-                    continue;
-                }
-            };
-            let content = read_content(&mut file, entry.path(), metadata.len());
+            let content = local::read_content(&mut file, entry.path(), documents);
             if build.content_bytes.saturating_add(content.len()) > MAX_CONTENT_BYTES {
                 build.truncated = true;
                 break 'roots;
@@ -356,15 +306,19 @@ pub fn verify_candidates(
     roots: &[String],
     candidates: &[IndexCandidate],
     query: &str,
+    documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
-    verify_candidate_group(roots, candidates, query, cancel).map(|group| group.hits)
+    verify_candidate_group(roots, candidates, query, documents, cancel).map(|group| group.hits)
 }
 
+/// Candidates are reread now, so a document's excerpt is its current text, not what
+/// the index stored. Unchanged documents come from `local::read_content`'s memory.
 pub(crate) fn verify_candidate_group(
     roots: &[String],
     candidates: &[IndexCandidate],
     query: &str,
+    documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<local::MatchGroup<FileHit>, String> {
     let words = terms(query)?;
@@ -393,7 +347,7 @@ pub(crate) fn verify_candidate_group(
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let content = read_content(&mut file, path, metadata.len());
+        let content = local::read_content(&mut file, path, documents);
         let exact = matches_terms(name, &content, &words, false);
         if !exact
             && (!hits.is_empty()
@@ -465,16 +419,37 @@ pub fn query_index(
     db: &Connection,
     roots: &[String],
     query: &str,
+    documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
     check_cancel(cancel)?;
     let candidates = indexed_candidates(db, roots, query)?;
-    verify_candidates(roots, &candidates, query, cancel)
+    verify_candidates(roots, &candidates, query, documents, cancel)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Plain-text index tests; document tests pass their own reader.
+    fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild, String> {
+        super::rebuild(roots, &local::Documents::none(), cancel)
+    }
+    fn verify_candidates(
+        roots: &[String],
+        candidates: &[IndexCandidate],
+        query: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Vec<FileHit>, String> {
+        super::verify_candidates(roots, candidates, query, &local::Documents::none(), cancel)
+    }
+    fn query_index(
+        db: &Connection,
+        roots: &[String],
+        query: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Vec<FileHit>, String> {
+        super::query_index(db, roots, query, &local::Documents::none(), cancel)
+    }
     fn token() -> Arc<AtomicBool> {
         Arc::new(AtomicBool::new(false))
     }
@@ -737,6 +712,38 @@ mod tests {
         let build = rebuild(&[root(nested.path())], &token()).unwrap();
         assert!(build.truncated);
         assert!(build.docs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn documents_are_indexed_by_their_text_and_reread_when_found() {
+        use std::os::unix::fs::PermissionsExt;
+        let tools = tempfile::tempdir().unwrap();
+        let helper = tools.path().join("buntini-fm");
+        // Answers with the piped bytes as the document's text.
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nbody=$(cat)\nprintf '{\"text\":\"%s\",\"truncated\":false}\\n' \"$body\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let pdf = folder.path().join("statement.pdf");
+        std::fs::write(&pdf, "Deposit returned 1200").unwrap();
+        let roots = vec![root(folder.path())];
+        let documents = local::Documents::for_index(&helper, &token());
+        let build = super::rebuild(&roots, &documents, &token()).unwrap();
+        assert_eq!(build.docs[0].content, "Deposit returned 1200");
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let search = local::Documents::for_search(&helper, &token());
+        let hits = super::query_index(&db, &roots, "deposit", &search, &token()).unwrap();
+        assert_eq!(hits[0].excerpt.as_deref(), Some("Deposit returned 1200"));
+        // The stored text only picks candidates: without a fresh read there is no match.
+        assert!(query_index(&db, &roots, "deposit", &token()).unwrap().is_empty());
+        std::fs::write(&pdf, "Deposit withheld 300").unwrap();
+        let hits = super::query_index(&db, &roots, "deposit", &search, &token()).unwrap();
+        assert_eq!(hits[0].excerpt.as_deref(), Some("Deposit withheld 300"));
     }
 
     #[test]

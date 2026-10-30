@@ -95,7 +95,7 @@ async fn a_finished_index_does_not_hide_newly_created_files() {
     let root = root.canonicalize().unwrap().to_string_lossy().to_string();
     state.store.lock().unwrap().add_root(&root).unwrap();
     let roots = vec![root.clone()];
-    let build = crate::indexer::rebuild(&roots, &Arc::new(AtomicBool::new(false))).unwrap();
+    let build = crate::indexer::rebuild(&roots, &crate::local::Documents::none(), &Arc::new(AtomicBool::new(false))).unwrap();
     {
         let mut store = state.store.lock().unwrap();
         let count = crate::indexer::replace_index(&mut store.db, &roots, &build.docs).unwrap();
@@ -141,7 +141,7 @@ async fn a_new_literal_file_displaces_a_full_indexed_plural_fallback_group() {
     }
     let roots = vec![root.clone()];
     let token = Arc::new(AtomicBool::new(false));
-    let build = crate::indexer::rebuild(&roots, &token).unwrap();
+    let build = crate::indexer::rebuild(&roots, &crate::local::Documents::none(), &token).unwrap();
     {
         let mut store = state.store.lock().unwrap();
         let count = crate::indexer::replace_index(&mut store.db, &roots, &build.docs).unwrap();
@@ -157,7 +157,7 @@ async fn a_new_literal_file_displaces_a_full_indexed_plural_fallback_group() {
             .unwrap();
         let candidates = crate::indexer::indexed_candidates(&store.db, &roots, "quotes").unwrap();
         let group =
-            crate::indexer::verify_candidate_group(&roots, &candidates, "quotes", &token).unwrap();
+            crate::indexer::verify_candidate_group(&roots, &candidates, "quotes", &crate::local::Documents::none(), &token).unwrap();
         assert!(!group.literal);
         assert_eq!(group.hits.len(), 40);
     }

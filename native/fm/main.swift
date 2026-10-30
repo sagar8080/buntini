@@ -4,8 +4,11 @@
 // `ping`→`pong`, `generate`→`token`…`done` or one `tool_call`, `transcribe`→`done`,
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
-// Speech weak-linked, so older systems answer `pong{available:false}`.
+// Speech weak-linked, so older systems answer `pong{available:false}`. It also reads
+// Calendar, Reminders and Contacts, and the text of documents in shared folders.
+import AppKit
 import AVFoundation
+import Compression
 import Contacts
 import CoreFoundation
 import EventKit
@@ -13,6 +16,7 @@ import Foundation
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
+import PDFKit
 import Speech
 
 let output = FileHandle.standardOutput
@@ -1096,6 +1100,259 @@ enum People {
     }
 }
 
+@_silgen_name("sandbox_init")
+private func sandboxInit(_ profile: UnsafePointer<CChar>, _ flags: UInt64, _ error: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
+
+/// `--extract-document <pdf|docx|doc|rtf|rtfd|pages>`: the plain text of one document from
+/// a shared folder, given on standard input. Buntini opens the file itself inside the
+/// folder the user shared and pipes the bytes here, so this process never opens a path
+/// it was handed. Parsing runs in its own process because PDF and Word readers are large
+/// and a hostile file could crash or stall them; every read is capped and timed. Before
+/// parsing, the process gives up network access, file writes, new processes and reads of
+/// the user's folders, so a link or embedded object in a document can never be followed.
+/// Prints one JSON object: `{"text":…, "truncated":…}` or `{"error":code}`.
+enum Documents {
+    static let kinds: Set<String> = ["pdf", "docx", "doc", "rtf", "rtfd", "pages"]
+    static let maxBytes = 32 * 1024 * 1024
+    static let maxPages = 200
+    static let maxCharacters = 60_000
+    static let seconds = 8.0
+
+    struct Extracted {
+        let text: String
+        let truncated: Bool
+    }
+
+    static func run(_ arguments: [String]) -> Int32 {
+        guard arguments.count == 3, arguments[1] == "--extract-document", kinds.contains(arguments[2]) else {
+            FileHandle.standardError.write(Data("invalid-kind: Say which kind of document this is.\n".utf8))
+            return 2
+        }
+        // A reader that never returns is stopped here as well as by Buntini.
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+            emit(["error": "timed_out"])
+            exit(3)
+        }
+        var data = Data()
+        while data.count <= maxBytes, let chunk = try? FileHandle.standardInput.read(upToCount: 1 << 20), !chunk.isEmpty {
+            data.append(chunk)
+        }
+        guard data.count <= maxBytes else {
+            emit(["error": "too_large"])
+            return 0
+        }
+        guard confine() else {
+            emit(["error": "unavailable"])
+            return 0
+        }
+        do {
+            let result = try extract(data, kind: arguments[2])
+            emit(["text": result.text, "truncated": result.truncated])
+        } catch {
+            emit(["error": (error as? Failure)?.code ?? "unreadable"])
+        }
+        return 0
+    }
+
+    /// The document's text, never its links, attachments or embedded objects. Kinds come
+    /// from the file's extension, so nothing here guesses a format (HTML, which can load
+    /// from the network, is never one of them).
+    static func extract(_ data: Data, kind: String, pages: Int = maxPages, characters: Int = maxCharacters) throws -> Extracted {
+        switch kind {
+        case "pdf": return try pdfText(data, pages: pages, characters: characters)
+        case "pages": return try pdfText(try pagesPreview(data), pages: pages, characters: characters)
+        case "docx": return try styledText(data, type: .officeOpenXML, characters: characters)
+        case "doc": return try styledText(data, type: .docFormat, characters: characters)
+        case "rtf": return try styledText(data, type: .rtf, characters: characters)
+        case "rtfd": return try styledText(data, type: .rtfd, characters: characters)
+        default: throw Failure(code: "unsupported", message: "Unsupported document kind.")
+        }
+    }
+
+    static func pdfText(_ data: Data, pages: Int, characters: Int) throws -> Extracted {
+        guard let document = PDFDocument(data: data) else { throw Failure(code: "unreadable", message: "Not a readable PDF.") }
+        // Passwords are never guessed or asked for here.
+        guard !document.isLocked else { throw Failure(code: "locked", message: "The PDF needs a password.") }
+        var parts: [String] = []
+        var count = 0
+        var truncated = document.pageCount > pages
+        for index in 0..<min(document.pageCount, pages) {
+            guard let text = document.page(at: index)?.string else { continue }
+            parts.append(text)
+            count += text.count
+            if count > characters {
+                truncated = true
+                break
+            }
+        }
+        return clean(parts.joined(separator: "\n"), characters: characters, truncated: truncated)
+    }
+
+    static func styledText(_ data: Data, type: NSAttributedString.DocumentType, characters: Int) throws -> Extracted {
+        guard let text = try? NSAttributedString(data: data, options: [.documentType: type], documentAttributes: nil).string else {
+            throw Failure(code: "unreadable", message: "Not a readable document.")
+        }
+        return clean(text, characters: characters, truncated: false)
+    }
+
+    /// Attachment placeholders and control characters other than line breaks and tabs are
+    /// dropped, then the text is cut to the character cap.
+    static func clean(_ raw: String, characters: Int, truncated: Bool) -> Extracted {
+        var scalars = String.UnicodeScalarView()
+        for scalar in raw.unicodeScalars where scalar != "\u{FFFC}" {
+            if scalar == "\n" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar) {
+                scalars.append(scalar)
+            } else if scalar == "\r" || scalar == "\u{2028}" || scalar == "\u{2029}" {
+                scalars.append("\n")
+            }
+        }
+        let text = String(scalars)
+        guard text.count > characters else { return Extracted(text: text, truncated: truncated) }
+        return Extracted(text: String(text.prefix(characters)), truncated: true)
+    }
+
+    /// Pages keeps its text in a private format; older Pages files also carry a PDF
+    /// preview, which is read when present. A file without one is refused rather than
+    /// guessed at. Only stored or deflated entries in a plain (not ZIP64) archive count.
+    static func pagesPreview(_ data: Data) throws -> Data {
+        let missing = Failure(code: "no_preview", message: "This Pages file has no readable preview.")
+        let bytes = [UInt8](data)
+        func number(_ offset: Int, _ width: Int) -> Int? {
+            guard offset >= 0, offset + width <= bytes.count else { return nil }
+            return (0..<width).reduce(0) { $0 | Int(bytes[offset + $1]) << (8 * $1) }
+        }
+        let floor = max(0, bytes.count - 65_557)
+        guard bytes.count >= 22,
+              let end = stride(from: bytes.count - 22, through: floor, by: -1).first(where: { number($0, 4) == 0x0605_4b50 }),
+              let entries = number(end + 10, 2), let directory = number(end + 16, 4), entries <= 10_000 else { throw missing }
+        var offset = directory
+        for _ in 0..<entries {
+            guard number(offset, 4) == 0x0201_4b50, let method = number(offset + 10, 2), let compressed = number(offset + 20, 4),
+                  let size = number(offset + 24, 4), let nameLength = number(offset + 28, 2), let extra = number(offset + 30, 2),
+                  let comment = number(offset + 32, 2), let local = number(offset + 42, 4),
+                  offset + 46 + nameLength <= bytes.count else { throw missing }
+            let name = String(decoding: bytes[(offset + 46)..<(offset + 46 + nameLength)], as: UTF8.self)
+            offset += 46 + nameLength + extra + comment
+            guard name == "QuickLook/Preview.pdf" else { continue }
+            guard size <= maxBytes, number(local, 4) == 0x0403_4b50, let localName = number(local + 26, 2),
+                  let localExtra = number(local + 28, 2) else { throw missing }
+            let start = local + 30 + localName + localExtra
+            guard start + compressed <= bytes.count else { throw missing }
+            let stored = Data(bytes[start..<(start + compressed)])
+            switch method {
+            case 0 where compressed == size: return stored
+            case 8:
+                guard size > 0 else { throw missing }
+                var inflated = [UInt8](repeating: 0, count: size)
+                let written = stored.withUnsafeBytes { source in
+                    compression_decode_buffer(&inflated, size, source.bindMemory(to: UInt8.self).baseAddress!, compressed, nil, COMPRESSION_ZLIB)
+                }
+                guard written == size else { throw missing }
+                return Data(inflated)
+            default: throw missing
+            }
+        }
+        throw missing
+    }
+
+    /// Denies the network, file writes, new processes and reads of the user's folders for
+    /// the rest of this process. Document bytes already arrived on standard input. The
+    /// helper's own folder stays readable: the system pages its code in from there.
+    static func confine() -> Bool {
+        func quoted(_ path: String) -> String {
+            "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        guard let helper = Bundle.main.executableURL?.resolvingSymlinksInPath().deletingLastPathComponent().path, helper != "/" else { return false }
+        let userFolders = ["/Users", "/Volumes", NSHomeDirectory()].map { "(subpath \(quoted($0)))" }.joined(separator: " ")
+        let profile = "(version 1)(allow default)(deny network*)(deny file-write*)(deny process-exec*)(deny process-fork)(deny file-read* \(userFolders))(allow file-read* (subpath \(quoted(helper))))"
+        var error: UnsafeMutablePointer<CChar>?
+        let result = sandboxInit(profile, 0, &error)
+        if let error { free(error) }
+        return result == 0
+    }
+}
+
+/// Document readers on documents made here: formats, caps, refusals and confinement.
+func documentChecks(_ require: (Bool, String) throws -> Void) throws {
+    func pdf(_ pages: [String], password: String? = nil) -> Data {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let info = password.map { [kCGPDFContextUserPassword: $0, kCGPDFContextOwnerPassword: $0] as CFDictionary }
+        let context = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, info)!
+        for page in pages {
+            context.beginPDFPage(nil)
+            context.textPosition = CGPoint(x: 72, y: 700)
+            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: page, attributes: [.font: NSFont.systemFont(ofSize: 14)])), context)
+            context.endPDFPage()
+        }
+        context.closePDF()
+        return data as Data
+    }
+    func zip(_ name: String, _ payload: Data, deflate: Bool) -> Data {
+        func le(_ value: Int, _ width: Int) -> [UInt8] { (0..<width).map { UInt8((value >> (8 * $0)) & 0xff) } }
+        var stored = [UInt8](payload)
+        if deflate {
+            var buffer = [UInt8](repeating: 0, count: payload.count + 1024)
+            let size = payload.withUnsafeBytes { compression_encode_buffer(&buffer, buffer.count, $0.bindMemory(to: UInt8.self).baseAddress!, payload.count, nil, COMPRESSION_ZLIB) }
+            stored = Array(buffer.prefix(size))
+        }
+        let method = deflate ? 8 : 0
+        let nameBytes = [UInt8](name.utf8)
+        let local = le(0x0403_4b50, 4) + le(20, 2) + le(0, 2) + le(method, 2) + le(0, 8) + le(stored.count, 4) + le(payload.count, 4) + le(nameBytes.count, 2) + le(0, 2) + nameBytes + stored
+        let central = le(0x0201_4b50, 4) + le(20, 2) + le(20, 2) + le(0, 2) + le(method, 2) + le(0, 8) + le(stored.count, 4) + le(payload.count, 4) + le(nameBytes.count, 2) + le(0, 6) + le(0, 6) + le(0, 4) + nameBytes
+        let end = le(0x0605_4b50, 4) + le(0, 4) + le(1, 2) + le(1, 2) + le(central.count, 4) + le(local.count, 4) + le(0, 2)
+        return Data(local + central + end)
+    }
+    func code(_ body: () throws -> Documents.Extracted) -> String? {
+        do { _ = try body(); return nil } catch { return (error as? Failure)?.code }
+    }
+    let phrase = "Quarterly lease renewal for Finch"
+    let styled = NSMutableAttributedString(string: phrase + " ")
+    styled.append(NSAttributedString(string: "details", attributes: [.link: URL(string: "https://tracker.invalid/open")!]))
+    let range = NSRange(location: 0, length: styled.length)
+    for (kind, type) in [("docx", NSAttributedString.DocumentType.officeOpenXML), ("doc", .docFormat), ("rtf", .rtf), ("rtfd", .rtfd)] {
+        let data = try styled.data(from: range, documentAttributes: [.documentType: type])
+        let text = try Documents.extract(data, kind: kind).text
+        try require(text.contains(phrase) && text.contains("details"), "A \(kind) document must yield its text")
+        try require(!text.contains("tracker.invalid"), "A \(kind) document's links must never become its text")
+    }
+    let twoPages = pdf(["Invoice total 680", "Second page 745"])
+    let both = try Documents.extract(twoPages, kind: "pdf")
+    try require(both.text.contains("Invoice total 680") && both.text.contains("Second page 745") && !both.truncated, "A PDF must yield every page's text")
+    let first = try Documents.extract(twoPages, kind: "pdf", pages: 1)
+    try require(first.truncated && !first.text.contains("Second page"), "Pages past the cap must not be read")
+    let short = try Documents.extract(twoPages, kind: "pdf", characters: 7)
+    try require(short.truncated && short.text.count == 7, "Text past the character cap must be cut and marked")
+    try require(code { try Documents.extract(pdf(["Private"], password: "secret"), kind: "pdf") } == "locked", "A password-protected PDF must be refused, never guessed")
+    try require(code { try Documents.extract(Data("not a pdf".utf8), kind: "pdf") } == "unreadable", "A damaged PDF must be refused")
+    try require(code { try Documents.extract(Data("{\\rtf1 x}".utf8), kind: "html") } == "unsupported", "Unknown kinds must be refused")
+    try require(!Documents.kinds.contains("html") && !Documents.kinds.contains("webarchive"), "Formats that load from the network must never be read")
+    try require(Documents.clean("a\u{FFFC}b\u{0}c\r", characters: 10, truncated: false).text == "abc\n", "Attachments and control characters must be dropped")
+    for deflate in [false, true] {
+        let pages = zip("QuickLook/Preview.pdf", pdf(["Pages preview 312"]), deflate: deflate)
+        try require(try Documents.extract(pages, kind: "pages").text.contains("Pages preview 312"), "A Pages preview must be read (deflate: \(deflate))")
+    }
+    try require(code { try Documents.extract(zip("Index/Document.iwa", Data("x".utf8), deflate: false), kind: "pages") } == "no_preview", "A Pages file without a preview must be refused honestly")
+    let damaged = zip("QuickLook/Preview.pdf", pdf(["Pages preview"]), deflate: true)
+    try require(code { try Documents.extract(damaged.prefix(damaged.count / 2) + damaged.suffix(22), kind: "pages") } == "no_preview", "A damaged Pages archive must be refused")
+    try require(Documents.confine(), "Document reading must be able to confine itself")
+    let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+    var address = sockaddr_in()
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = in_port_t(9).bigEndian
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let connected = socketFD < 0 ? -1 : withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+    }
+    let denied = socketFD < 0 || (connected < 0 && (errno == EPERM || errno == EACCES))
+    if socketFD >= 0 { close(socketFD) }
+    try require(denied, "A confined document reader must not reach the network")
+    try require(FileManager.default.contents(atPath: NSHomeDirectory() + "/Library/Preferences/.GlobalPreferences.plist") == nil
+                && (try? FileManager.default.contentsOfDirectory(atPath: NSHomeDirectory())) == nil,
+                "A confined document reader must not read the user's folders")
+    try require(!FileManager.default.createFile(atPath: NSTemporaryDirectory() + "buntini-confined-\(getpid())", contents: Data()), "A confined document reader must not write files")
+}
+
 /// Pure contract checks: no model, microphone, account, Calendar or Reminders access.
 func contractSelfTest() async -> Int32 {
     var checks = 0
@@ -1402,6 +1659,8 @@ func contractSelfTest() async -> Int32 {
         try require(await registry.count == 1, "An older task must not remove its replacement")
         await registry.cancelAll()
         try require(await registry.count == 0, "Shutdown must clear running tasks")
+        // Last, because it confines this process the way a document read does.
+        try documentChecks(require)
         emit(["check": "contracts", "ok": true, "assertions": checks])
         return 0
     } catch {
@@ -1416,6 +1675,9 @@ struct Helper {
         // Checked first and by position, so a looked-up name can never select another mode.
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
             exit(await People.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--extract-document" {
+            exit(Documents.run(CommandLine.arguments))
         }
         if CommandLine.arguments.contains("--self-test-contracts") {
             exit(await contractSelfTest())

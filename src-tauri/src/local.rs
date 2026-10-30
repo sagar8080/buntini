@@ -1,12 +1,14 @@
 use crate::types::*;
 use std::{
+    collections::{HashMap, VecDeque},
     fs::{self, File},
     io::Read,
     path::{Component, Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, LazyLock, Mutex,
     },
+    time::{Duration, Instant},
 };
 use walkdir::{DirEntry, WalkDir};
 
@@ -128,32 +130,259 @@ pub fn scoped_open(root: &Path, path: &Path) -> Result<File, String> {
         .map_err(|e| e.to_string())
 }
 
-fn text_extension(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase()
-            .as_str(),
-        "txt"
-            | "md"
-            | "markdown"
-            | "csv"
-            | "tsv"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "log"
-            | "rs"
-            | "py"
-            | "js"
-            | "ts"
-            | "tsx"
-            | "jsx"
-            | "html"
-            | "css"
-    )
+/// Plain text read as it is, up to `MAX_READ`.
+const TEXT_EXTENSIONS: &[&str] = &[
+    "txt", "md", "markdown", "csv", "tsv", "json", "yaml", "yml", "toml", "log", "rs", "py",
+    "js", "ts", "tsx", "jsx", "html", "css",
+];
+/// Documents whose text the Apple helper extracts; the extension is the helper's kind.
+/// An `.rtfd` package is a folder, so its `TXT.rtf` is read as RTF on the way through.
+const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "doc", "rtf", "rtfd", "pages"];
+/// The largest document handed to the helper, which refuses anything bigger itself.
+pub const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
+/// The helper stops itself after 8 seconds; this is the backstop if it cannot.
+const DOCUMENT_SECONDS: u64 = 10;
+/// Escaped JSON for 64 KB of text fits well inside this.
+const MAX_HELPER_OUTPUT: u64 = 1024 * 1024;
+const CACHE_ENTRIES: usize = 1_024;
+const CACHE_BYTES: usize = 16 * 1024 * 1024;
+
+/// How a shared-folder file's content is read. Search, the file index and the memory
+/// index's file source all go through this one list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Content {
+    Text,
+    Document(&'static str),
+}
+
+pub fn content_kind(path: &Path) -> Option<Content> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if TEXT_EXTENSIONS.contains(&extension.as_str()) {
+        return Some(Content::Text);
+    }
+    DOCUMENT_EXTENSIONS
+        .iter()
+        .find(|kind| **kind == extension)
+        .map(|kind| Content::Document(kind))
+}
+
+/// Reads documents through the Apple helper for one walk. A file search may read only a
+/// few new documents in a short time, so a folder of PDFs can't stall it; documents read
+/// before come back from memory while they are unchanged. Without the helper, documents
+/// are found by name only, as other files are.
+pub struct Documents {
+    helper: Option<PathBuf>,
+    cancel: Arc<AtomicBool>,
+    fresh: AtomicUsize,
+    until: Option<Instant>,
+    seconds: u64,
+}
+
+impl Documents {
+    #[cfg(test)]
+    pub fn none() -> Self {
+        Self {
+            helper: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+            fresh: 0.into(),
+            until: None,
+            seconds: DOCUMENT_SECONDS,
+        }
+    }
+
+    pub fn for_search(helper: &Path, cancel: &Arc<AtomicBool>) -> Self {
+        Self {
+            helper: Some(helper.to_path_buf()),
+            cancel: cancel.clone(),
+            fresh: 24.into(),
+            until: Some(Instant::now() + Duration::from_secs(4)),
+            seconds: DOCUMENT_SECONDS,
+        }
+    }
+
+    /// The user asked for the rebuild, so every document is read within the index's limits.
+    pub fn for_index(helper: &Path, cancel: &Arc<AtomicBool>) -> Self {
+        Self {
+            fresh: usize::MAX.into(),
+            until: None,
+            ..Self::for_search(helper, cancel)
+        }
+    }
+
+    fn take_fresh(&self) -> bool {
+        self.until.is_none_or(|until| Instant::now() < until)
+            && self
+                .fresh
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
+                .is_ok()
+    }
+}
+
+type CacheKey = (PathBuf, u64, Option<std::time::SystemTime>, u64);
+
+#[derive(Default)]
+struct DocumentCache {
+    texts: HashMap<CacheKey, String>,
+    order: VecDeque<CacheKey>,
+    bytes: usize,
+}
+
+/// Extracted text kept in memory only, keyed so any change to the file reads it again.
+/// It is reached only after the file reopens inside a folder that is still shared.
+static DOCUMENT_CACHE: LazyLock<Mutex<DocumentCache>> = LazyLock::new(Default::default);
+
+fn cache_key(path: &Path, metadata: &fs::Metadata) -> CacheKey {
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(metadata);
+    #[cfg(not(unix))]
+    let inode = 0;
+    (path.to_path_buf(), metadata.len(), metadata.modified().ok(), inode)
+}
+
+fn cached(key: &CacheKey) -> Option<String> {
+    DOCUMENT_CACHE.lock().ok()?.texts.get(key).cloned()
+}
+
+fn remember(key: CacheKey, text: &str) {
+    let Ok(mut cache) = DOCUMENT_CACHE.lock() else {
+        return;
+    };
+    if let Some(old) = cache.texts.insert(key.clone(), text.to_string()) {
+        cache.bytes -= old.len();
+        cache.order.retain(|existing| existing != &key);
+    }
+    cache.bytes += text.len();
+    cache.order.push_back(key);
+    while cache.order.len() > CACHE_ENTRIES || cache.bytes > CACHE_BYTES {
+        let Some(oldest) = cache.order.pop_front() else {
+            break;
+        };
+        if let Some(old) = cache.texts.remove(&oldest) {
+            cache.bytes -= old.len();
+        }
+    }
+}
+
+/// A file's searchable text: plain text up to `MAX_READ`, or a document's extracted text
+/// cut to the same size. Unsupported, binary, invalid UTF-8, oversized or unreadable
+/// files give no text and stay searchable by name. Either way the text is untrusted file
+/// content, never instructions.
+pub fn read_content(file: &mut File, path: &Path, documents: &Documents) -> String {
+    let Ok(metadata) = file.metadata() else {
+        return String::new();
+    };
+    match content_kind(path) {
+        Some(Content::Text) if metadata.len() <= MAX_READ => {
+            let mut bytes = Vec::with_capacity(metadata.len() as usize);
+            if file.take(MAX_READ + 1).read_to_end(&mut bytes).is_err()
+                || bytes.len() > MAX_READ as usize
+                || bytes.contains(&0)
+            {
+                return String::new();
+            }
+            String::from_utf8(bytes).unwrap_or_default()
+        }
+        Some(Content::Document(kind)) if metadata.len() <= MAX_DOCUMENT_BYTES => {
+            let Some(helper) = documents.helper.as_deref().filter(|helper| helper.is_file()) else {
+                return String::new();
+            };
+            let key = cache_key(path, &metadata);
+            if let Some(text) = cached(&key) {
+                return text;
+            }
+            if !documents.take_fresh() {
+                return String::new();
+            }
+            let mut bytes = Vec::with_capacity(metadata.len() as usize);
+            if file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes).is_err()
+                || bytes.len() as u64 > MAX_DOCUMENT_BYTES
+            {
+                return String::new();
+            }
+            let Some(text) = extract(helper, kind, bytes, documents) else {
+                return String::new();
+            };
+            remember(key, &text);
+            text
+        }
+        _ => String::new(),
+    }
+}
+
+/// Runs `--extract-document` with the bytes on standard input, so the helper never opens
+/// a path itself. Stops on cancel or after the timeout, and reads a bounded reply.
+fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> Option<String> {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let mut child = Command::new(helper)
+        .args(["--extract-document", kind])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(&bytes);
+    });
+    let reader = std::thread::spawn(move || {
+        let mut reply = Vec::new();
+        let _ = stdout.take(MAX_HELPER_OUTPUT + 1).read_to_end(&mut reply);
+        reply
+    });
+    let started = Instant::now();
+    let finished = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break true,
+            Ok(None)
+                if started.elapsed() < Duration::from_secs(documents.seconds)
+                    && !documents.cancel.load(Ordering::Relaxed) =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    // A stopped helper's pipes close with it; the threads are not waited on in case
+    // anything it started still holds them.
+    if !finished {
+        return None;
+    }
+    let _ = writer.join();
+    let reply = reader.join().ok()?;
+    if reply.len() as u64 > MAX_HELPER_OUTPUT {
+        return None;
+    }
+    document_text(&reply)
+}
+
+/// The helper's one-line reply as text, or nothing when it refused the file.
+fn document_text(reply: &[u8]) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Reply {
+        text: String,
+        #[allow(dead_code)]
+        truncated: bool,
+    }
+    let line = reply.split(|byte| *byte == b'\n').next()?;
+    let reply: Reply = serde_json::from_slice(line).ok()?;
+    let mut text = reply.text.replace('\0', "");
+    if text.len() > MAX_READ as usize {
+        let mut end = MAX_READ as usize;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Some(text)
 }
 
 /// A conservative regular-plural alternative, never a replacement for the
@@ -192,9 +421,10 @@ pub(crate) fn singular_search_term(term: &str) -> Option<String> {
 pub fn search(
     roots: &[String],
     query: &str,
+    documents: &Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<(String, FileHit, String)>, String> {
-    search_group(roots, query, cancel).map(|group| group.hits)
+    search_group(roots, query, documents, cancel).map(|group| group.hits)
 }
 
 /// A search backend returns one homogeneous group: literal matches when any
@@ -223,6 +453,7 @@ pub(crate) fn prefer_literal<T>(literal: Vec<T>, fallback: Vec<T>) -> MatchGroup
 pub(crate) fn search_group(
     roots: &[String],
     query: &str,
+    documents: &Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<MatchGroup<(String, FileHit, String)>, String> {
     let query = query.trim();
@@ -272,15 +503,7 @@ pub(crate) fn search_group(
             };
             let name = entry.file_name().to_string_lossy().into_owned();
             let name_lower = name.to_lowercase();
-            let mut content = String::new();
-            if text_extension(entry.path()) && metadata.len() <= MAX_READ {
-                let mut bytes = Vec::new();
-                if file.by_ref().take(MAX_READ).read_to_end(&mut bytes).is_ok()
-                    && !bytes.contains(&0)
-                {
-                    content = String::from_utf8(bytes).unwrap_or_default();
-                }
-            }
+            let content = read_content(&mut file, entry.path(), documents);
             let lower = content.to_lowercase();
             let exact = words
                 .iter()
@@ -469,6 +692,14 @@ pub fn system_answer(s: &SystemSnapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Plain-text searches; document tests pass their own reader.
+    fn search(
+        roots: &[String],
+        query: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Vec<(String, FileHit, String)>, String> {
+        super::search(roots, query, &Documents::none(), cancel)
+    }
     #[cfg(unix)]
     #[test]
     fn symlink_escape_and_hidden_files_are_denied() {
@@ -651,6 +882,169 @@ mod tests {
         assert!(system_answer(&snapshot).starts_with("Your Mac is using"));
     }
 
+
+    #[test]
+    fn one_extension_list_decides_text_documents_and_name_only_files() {
+        for (name, kind) in [
+            ("notes.txt", Some(Content::Text)),
+            ("README.MD", Some(Content::Text)),
+            ("Lease.PDF", Some(Content::Document("pdf"))),
+            ("offer.docx", Some(Content::Document("docx"))),
+            ("old.doc", Some(Content::Document("doc"))),
+            ("letter.rtf", Some(Content::Document("rtf"))),
+            ("flat.rtfd", Some(Content::Document("rtfd"))),
+            ("plan.pages", Some(Content::Document("pages"))),
+            ("page.webarchive", None),
+            ("photo.jpg", None),
+            ("Makefile", None),
+        ] {
+            assert_eq!(content_kind(Path::new(name)), kind, "{name}");
+        }
+    }
+
+    fn folder_root(path: &Path) -> String {
+        path.canonicalize().unwrap().to_string_lossy().into_owned()
+    }
+
+    /// A stand-in for the Apple helper: a shell script with the same command line.
+    #[cfg(unix)]
+    fn fake_helper(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("buntini-fm");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn documents_are_read_from_piped_bytes_and_found_by_their_text() {
+        let tools = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let runs = tools.path().join("runs");
+        // The helper gets only the kind and the bytes, never the file's path.
+        let helper = fake_helper(
+            tools.path(),
+            &format!(
+                r#"echo run >> '{}'
+[ "$#" = 2 ] && [ "$1" = --extract-document ] && [ "$2" = pdf ] || exit 2
+[ "$(wc -c | tr -d ' ')" = 11 ] || exit 3
+printf '%s\n' '{{"text":"Lease renewal total 680","truncated":false}}'"#,
+                runs.display()
+            ),
+        );
+        let pdf = folder.path().join("scan.pdf");
+        fs::write(&pdf, "%PDF-binary").unwrap();
+        let roots = vec![folder_root(folder.path())];
+        let cancel = Arc::new(AtomicBool::new(false));
+        let hits = super::search(&roots, "renewal", &Documents::for_search(&helper, &cancel), &cancel).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1.name, "scan.pdf");
+        assert!(hits[0].1.excerpt.as_deref().unwrap().contains("680"));
+        // Unchanged documents come from memory; a changed one is read again.
+        super::search(&roots, "renewal", &Documents::for_search(&helper, &cancel), &cancel).unwrap();
+        assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 1);
+        fs::write(&pdf, "%PDF-binarY").unwrap();
+        let later = std::time::SystemTime::now() + Duration::from_secs(5);
+        File::options().write(true).open(&pdf).unwrap().set_modified(later).unwrap();
+        super::search(&roots, "renewal", &Documents::for_search(&helper, &cancel), &cancel).unwrap();
+        assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 2);
+        // Without the helper the document is still found by name, never by content.
+        assert!(search(&roots, "renewal", &cancel).unwrap().is_empty());
+        assert_eq!(search(&roots, "scan", &cancel).unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refused_hung_oversized_and_over_budget_documents_give_no_text() {
+        let tools = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let read = |name: &str, documents: Documents| {
+            let path = folder.path().join(name);
+            read_content(&mut File::open(&path).unwrap(), &path, &documents)
+        };
+        fs::write(folder.path().join("locked.pdf"), "x").unwrap();
+        let refusing = fake_helper(tools.path(), r#"cat >/dev/null; printf '%s\n' '{"error":"locked"}'"#);
+        assert_eq!(read("locked.pdf", Documents::for_search(&refusing, &cancel)), "");
+
+        let slow = tempfile::tempdir().unwrap();
+        let hung = fake_helper(slow.path(), "sleep 30 && echo late");
+        fs::write(folder.path().join("hang.docx"), "x").unwrap();
+        let started = Instant::now();
+        let documents = Documents { seconds: 1, ..Documents::for_search(&hung, &cancel) };
+        assert_eq!(read("hang.docx", documents), "");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let flag = stopped.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::Relaxed);
+        });
+        fs::write(folder.path().join("cancel.doc"), "x").unwrap();
+        let started = Instant::now();
+        assert_eq!(read("cancel.doc", Documents::for_search(&hung, &stopped)), "");
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        let noisy = tempfile::tempdir().unwrap();
+        let flood = fake_helper(noisy.path(), "cat >/dev/null; head -c 3000000 /dev/zero | tr '\\0' a");
+        fs::write(folder.path().join("flood.rtf"), "x").unwrap();
+        assert_eq!(read("flood.rtf", Documents::for_search(&flood, &cancel)), "");
+
+        let long = tempfile::tempdir().unwrap();
+        let wordy = fake_helper(
+            long.path(),
+            "cat >/dev/null; printf '{\"text\":\"'; head -c 70000 /dev/zero | tr '\\0' a; printf '\",\"truncated\":true}\\n'",
+        );
+        fs::write(folder.path().join("long.pages"), "x").unwrap();
+        let text = read("long.pages", Documents::for_search(&wordy, &cancel));
+        assert_eq!(text.len(), MAX_READ as usize);
+
+        let counted = tempfile::tempdir().unwrap();
+        let runs = counted.path().join("runs");
+        let counting = fake_helper(
+            counted.path(),
+            &format!(r#"echo run >> '{}'; cat >/dev/null; printf '%s\n' '{{"text":"ok","truncated":false}}'"#, runs.display()),
+        );
+        let big = folder.path().join("big.pdf");
+        File::create(&big).unwrap().set_len(MAX_DOCUMENT_BYTES + 1).unwrap();
+        assert_eq!(read("big.pdf", Documents::for_search(&counting, &cancel)), "");
+        assert!(!runs.exists(), "an oversized document is never handed to the helper");
+        fs::write(folder.path().join("one.pdf"), "1").unwrap();
+        fs::write(folder.path().join("two.pdf"), "2").unwrap();
+        let documents = Documents { fresh: 1.into(), ..Documents::for_search(&counting, &cancel) };
+        let path = folder.path().join("one.pdf");
+        assert_eq!(read_content(&mut File::open(&path).unwrap(), &path, &documents), "ok");
+        let path = folder.path().join("two.pdf");
+        assert_eq!(read_content(&mut File::open(&path).unwrap(), &path, &documents), "");
+        assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 1);
+    }
+
+    /// Runs the real Apple helper when this Mac built it (Apple silicon, macOS 26 SDK).
+    #[test]
+    fn the_apple_helper_reads_an_rtf_document() {
+        let helper = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native/buntini-fm");
+        if !helper.is_file() {
+            return;
+        }
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join("letter.rtf"),
+            r#"{\rtf1\ansi Finch lease renewal costs 745 {\field{\*\fldinst HYPERLINK "https://tracker.invalid/"}{\fldrslt here}}.}"#,
+        )
+        .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let hits = super::search(
+            &[folder_root(folder.path())],
+            "renewal",
+            &Documents::for_search(&helper, &cancel),
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].2.contains("Finch lease renewal costs 745"), "{}", hits[0].2);
+        assert!(!hits[0].2.contains("tracker.invalid"));
+    }
     #[test]
     #[ignore = "Run explicitly on the target Mac to record current tool latency"]
     fn measure_system_snapshot_latency() {
