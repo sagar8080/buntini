@@ -198,7 +198,7 @@ Effort scale: S is under half a day, M is 1–3 days, L is about a week, XL is s
 8. **Proactive nudges from local data** (M). Meeting prep, people waiting on a reply, reminders due. Needs C3's cached triage and A2's no-launch reads.
 9. **List the user's Shortcuts for run_shortcut** (S). Smart home through Shortcuts. Cheap, and could be done earlier as filler. *Done in iteration 2: `list_shortcuts` bound before any model call, and `run_shortcut` limited to a listed name. Real HomeKit shortcuts need device acceptance.*
 10. **Hands-free voice** (L). Partial results, then end-of-speech detection and conversation mode, then an optional wake word last.
-11. **Goals that span days** (L). Needs item 6.
+11. **Goals that span days** (L). Needs item 6. *Done in iteration 3: `create_goal` from the user's words, the goals table with one check-in routine per goal, check-ins in the goal's conversation (headless runs, or reminders without a model), ends verified from the last day, a reply's Mail headers or the user's Done, and History → Goals with Pause, Done and Delete. Check-ins need Buntini open and the Mac awake; reply matching is by name or address, and Mail's inbox query and the alerts need device acceptance.*
 12. **MCP client for local stdio servers** (L).
 13. **Codex and Claude Code as opt-in brains through a Buntini MCP mode** (L). Needs item 12 and the approval inbox.
 14. **Supervised browser operator** (XL). Highest risk. Do it after items 2 and 6 have proven the approval inbox and receipts.
