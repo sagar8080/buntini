@@ -499,19 +499,29 @@ fn verified_read(step: &Step) -> bool {
 /// first (it replied; Buntini can't check what it changed), then the model's words about
 /// the reply. English parsing of built-in actions doesn't apply to the tool's request.
 fn connector_answer(text: &str, steps: &[Step]) -> Result<String, String> {
-    let step = steps
+    let ran: Vec<(&Step, ActionReceipt)> = steps
         .iter()
-        .rev()
-        .find(|step| crate::mcp::is_tool(&step.tool) && step.state == "succeeded" && verified_write(step))
-        .ok_or("The tool you added hasn’t confirmed a reply. This task is unfinished.")?;
-    let receipt: ActionReceipt = step
-        .evidence
-        .as_ref()
-        .and_then(|evidence| evidence.get("receipt"))
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-        .ok_or("The tool you added hasn’t confirmed a reply. This task is unfinished.")?;
-    Ok(format!("{}\n\n{}", receipt.message, text.trim()))
+        .filter(|step| crate::mcp::is_tool(&step.tool) && step.state == "succeeded" && verified_write(step))
+        .filter_map(|step| {
+            let receipt = step.evidence.as_ref()?.get("receipt")?.clone();
+            Some((step, serde_json::from_value(receipt).ok()?))
+        })
+        .collect();
+    if ran.is_empty() {
+        return Err("The tool you added hasn’t confirmed a reply. This task is unfinished.".into());
+    }
+    // Only calls the user approved could have changed anything. After reads alone, an
+    // answer saying something was done is not one the receipts back.
+    if !ran.iter().any(|(step, _)| step.effect) && completion::claims_own_write(text) {
+        return Err("Only a tool that reads ran, so nothing was changed. This task is unfinished: the call that does what you asked hasn’t been approved.".into());
+    }
+    let mut said: Vec<&str> = Vec::new();
+    for (_, receipt) in &ran {
+        if !said.contains(&receipt.message.as_str()) {
+            said.push(&receipt.message);
+        }
+    }
+    Ok(format!("{}\n\n{}", said.join("\n"), text.trim()))
 }
 
 impl TaskContract {
@@ -1609,6 +1619,12 @@ impl TaskContract {
         let shortcuts = self.shortcut_choices(steps);
         // And searching the inbox for the sender of an email a reply names.
         let reply_read = self.reply_lookup(steps);
+        // A safe-to-read call answers a lookup, but the request may ask the tool to do
+        // something more ("open an issue"): until a call the user approved has run, the
+        // tools they named stay offered, a few calls at most, each shown or checked anew.
+        let connector_more = self.connector_request()
+            && !steps.iter().any(|step| crate::mcp::is_tool(&step.tool) && step.effect)
+            && steps.iter().filter(|step| crate::mcp::is_tool(&step.tool)).count() < 4;
         let selected = definitions
             .as_array()
             .into_iter()
@@ -1621,7 +1637,8 @@ impl TaskContract {
                     || crate::control_actions::TOOLS.contains(&name)
                     || crate::mcp::is_tool(name);
                 let write_allowed = !unresolved
-                    && next_write.is_some_and(|o| o.accepted_tools.iter().any(|t| t == name));
+                    && (next_write.is_some_and(|o| o.accepted_tools.iter().any(|t| t == name))
+                        || (connector_more && self.connector_tools.iter().any(|t| t == name)));
                 if effect && !write_allowed && name != "control_music" {
                     return None;
                 }
@@ -1942,6 +1959,36 @@ mod tests {
             }),
         }
     }
+    #[test]
+    fn a_safe_read_never_stands_in_for_the_call_a_request_asked_for() {
+        let goal = "Use GitHub to open an issue titled Login bug";
+        let mut contract = TaskContract::from_request(goal);
+        contract.use_connector(vec!["mcp_github_list_issues".into(), "mcp_github_create_issue".into()]);
+        let read = Step {
+            effect: false,
+            approved_at: None,
+            evidence: Some(json!({"receipt":ActionReceipt {outcome:ActionOutcome::Succeeded,tool:"mcp_github_list_issues".into(),object_id:None,destination:Some("GitHub".into()),message:"GitHub ran list_issues and replied. Buntini can’t check what it changed.".into(),evidence:json!({}),error:None}})),
+            ..step("s1", "mcp_github_list_issues", json!({}), false)
+        };
+        let steps = vec![read];
+        contract.refresh(goal, &steps);
+        let definitions = json!([
+            {"name":"mcp_github_list_issues","parameters":{"type":"object","properties":{}}},
+            {"name":"mcp_github_create_issue","parameters":{"type":"object","properties":{}}}
+        ]);
+        let offered = contract.relevant_tools(&steps, &definitions);
+        assert!(offered.as_array().unwrap().iter().any(|tool| tool["name"] == "mcp_github_create_issue"), "{offered}");
+        assert!(contract.validate_answer("I've opened the issue Login bug.", &steps).is_err());
+        let answer = contract.validate_answer("There are two open issues; none is called Login bug.", &steps).unwrap();
+        assert!(answer.starts_with("GitHub ran list_issues and replied."), "{answer}");
+        // Once a call the user approved has run, nothing more is offered.
+        let mut approved = step("s2", "mcp_github_create_issue", json!({}), true);
+        approved.evidence = Some(json!({"receipt":ActionReceipt {outcome:ActionOutcome::Succeeded,tool:"mcp_github_create_issue".into(),object_id:None,destination:Some("GitHub".into()),message:"GitHub ran create_issue and replied. Buntini can’t check what it changed.".into(),evidence:json!({}),error:None}}));
+        let steps = vec![steps[0].clone(), approved];
+        contract.refresh(goal, &steps);
+        assert!(contract.relevant_tools(&steps, &definitions).as_array().unwrap().is_empty());
+    }
+
     #[test]
     fn a_title_resolved_from_the_screen_constrains_the_reminder_but_not_its_time() {
         let goal = "Remind me about this tomorrow at 9";

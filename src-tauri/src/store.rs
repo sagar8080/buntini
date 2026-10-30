@@ -569,6 +569,8 @@ impl Store {
     }
     /// "Delete everything": every table back to empty, as on a fresh install.
     pub fn erase_everything(&self) -> Result<(), String> {
+        // Tokens of the tools the user added live in the Keychain, not in these tables.
+        let tool_servers = self.mcp_server_ids()?;
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx
             .execute_batch(
@@ -587,6 +589,7 @@ impl Store {
         // The morning brief comes back as on a fresh install: there, but off.
         crate::routines::initialize(self)?;
         tx.commit().map_err(|e| e.to_string())?;
+        crate::mcp::forget_secrets(&tool_servers)?;
         // DELETE alone leaves private text in free pages and older WAL frames.
         // Rebuild the emptied database and truncate the WAL before reporting
         // successful erasure. This is logical removal, not disk sanitization.

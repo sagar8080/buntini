@@ -615,7 +615,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     }
 }
 
-fn claims_own_write(text: &str) -> bool {
+pub(crate) fn claims_own_write(text: &str) -> bool {
     let text = unquoted(text);
     let tokens = words(&text);
     let writes = [

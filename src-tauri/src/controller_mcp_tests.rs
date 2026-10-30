@@ -15,7 +15,6 @@ for line in sys.stdin:
         emit('tool_call',name='mcp_fake_ok_echo',arguments={'text':'hello'})
         emit('done',text='',finish_reason='tool_call')
     else:
-        assert not any(n.startswith('mcp_') for n in names), names
         emit('done',text='It replied hello.',finish_reason='stop')
 "#;
 
@@ -103,6 +102,20 @@ async fn a_tool_the_user_marked_safe_to_read_runs_without_the_sheet() {
     assert!(!flow.steps[0].effect);
     assert!(task.action.is_none());
     assert!(task.answer.contains("It replied hello."));
+    crate::mcp::stop(task.id.trim_start_matches("mcp-"));
+}
+
+#[tokio::test]
+async fn a_safe_tool_still_asks_when_its_details_are_not_the_users_own_words() {
+    let dir = tempfile::tempdir().unwrap();
+    // The model fills in "hello", which the request never said: it might have come from
+    // the screen or an email, so the sheet shows it before it leaves.
+    let (_, _, task, flow, result) = journey(dir.path(), "Ask Fake ok to echo what I said earlier", true).await;
+    result.unwrap();
+    assert_eq!(task.state, "waiting_action", "{}", task.answer);
+    let step = flow.steps.last().unwrap();
+    assert!(step.effect);
+    assert_eq!(step.evidence.as_ref().unwrap()["addedTool"]["tool"], "echo", "the sheet's tool is kept with it");
     crate::mcp::stop(task.id.trim_start_matches("mcp-"));
 }
 

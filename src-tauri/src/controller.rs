@@ -932,6 +932,7 @@ where
             return Err("This task is no longer waiting for an action approval.".into());
         }
         let tool = intent.tool.clone();
+        let added_tool = intent.evidence.as_ref().and_then(|evidence| evidence.get("addedTool")).cloned();
         // Which email a reply answers, and its recipient, are not the sheet's to change;
         // when the user picked one the search found, they come from that search.
         let proposed = crate::recipes::picked_reply(&tool, &flow.contract.current_request, &flow.steps, &intent.arguments, &args)?;
@@ -939,7 +940,9 @@ where
         let mut normalized = validate_action(&tool, &args)?;
         if crate::mcp::is_tool(&tool) {
             // The tool may have been removed or changed since it was proposed.
-            normalized = crate::mcp::validate(&store.mcp_servers()?, &tool, &Value::Object(normalized))?;
+            let servers = store.mcp_servers()?;
+            crate::mcp::check_binding(&servers, &tool, added_tool.as_ref())?;
+            normalized = crate::mcp::validate(&servers, &tool, &Value::Object(normalized))?;
             touch(&mut task, privacy::Share::Connectors);
         }
         // A changed item must be one this task read for what the user named.
@@ -3496,7 +3499,12 @@ where
             args = Value::Object(crate::mcp::validate(&servers, &name, &args)?);
             touch(task, privacy::Share::Connectors);
         }
-        let connector_write = connector && !crate::mcp::is_safe(&servers, &name);
+        // A safe-to-read call skips the sheet only with details from the user's own words:
+        // its server may send them off the Mac, and text the model copied from the screen,
+        // an email or an earlier reply must never leave without the user seeing it.
+        let connector_write = connector
+            && !(crate::mcp::is_safe(&servers, &name)
+                && crate::mcp::from_request(&servers, &name, args.as_object().unwrap(), &flow.contract.current_request));
         let is_action = action_call(&name, &args);
         if is_action {
             args = Value::Object(validate_action(&name, &args)?);
@@ -3544,6 +3552,15 @@ where
             flow.contract
                 .record_proposal(&id, &args, Some(&bound.source));
             flow.steps.last_mut().unwrap().evidence = Some(json!({"planningSource":bound.source}));
+        }
+        // The server and tool the sheet names, so approving runs exactly that one.
+        if connector_write {
+            if let Some(added) = crate::mcp::binding(&servers, &name) {
+                let step = flow.steps.last_mut().unwrap();
+                let mut evidence = step.evidence.take().unwrap_or_else(|| json!({}));
+                evidence["addedTool"] = added;
+                step.evidence = Some(evidence);
+            }
         }
         if approval {
             task.state = flow.state.clone();
