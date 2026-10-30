@@ -248,7 +248,7 @@ pub fn purge(db: &Connection, source: &str, scope: Option<&str>) -> Result<usize
 /// with the item as it was before (a meeting's old time, a reminder still open).
 pub fn app_changed(db: &Connection, tool: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
     let source = match tool {
-        "complete_reminder" | "add_reminder" => "reminders",
+        "complete_reminder" | "reschedule_reminder" | "add_reminder" => "reminders",
         "update_calendar_event" | "add_calendar_event" => "calendar",
         "append_to_note" | "create_note" => "notes",
         _ => return Ok(()),

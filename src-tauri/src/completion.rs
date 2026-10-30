@@ -210,11 +210,32 @@ fn edits_event(verb: &str, tokens: &[&str]) -> bool {
     }
     match verb {
         "reschedule" | "postpone" => true,
+        // "push my 3pm back by an hour", "move lunch 30 minutes later"
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" | "bring" if crate::edit_targets::shift(tokens).is_some() => true,
         "move" | "push" | "shift" | "bump" | "delay" | "pull" => {
             tokens.contains(&"to") && (has(EVENT_WORDS) || destination.iter().any(|word| temporal(word)))
         }
         "rename" => tokens.contains(&"to") && (has(EVENT_WORDS) || tokens.get(1).is_some_and(|word| ["my", "the"].contains(word))),
         "change" => tokens.contains(&"to") && (has(EVENT_WORDS) || has(&["location", "venue"])),
+        _ => false,
+    }
+}
+
+/// "move the dentist reminder to Friday", "push my call Ana reminder back a day": a new
+/// due date for a reminder the user already has.
+fn reschedules_reminder(verb: &str, tokens: &[&str]) -> bool {
+    if !tokens.iter().any(|token| ["reminder", "reminders"].contains(token)) {
+        return false;
+    }
+    let destination = tokens
+        .iter()
+        .rposition(|word| *word == "to" || *word == "for")
+        .map(|at| &tokens[at + 1..])
+        .unwrap_or(&[]);
+    match verb {
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" | "bring" | "reschedule" | "postpone" | "change" => {
+            crate::edit_targets::shift(tokens).is_some() || destination.iter().any(|word| temporal(word))
+        }
         _ => false,
     }
 }
@@ -306,6 +327,7 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                     Some("complete_reminder")
                 }
                 verb if edits_event(verb, &tokens) => Some("update_calendar_event"),
+                verb if reschedules_reminder(verb, &tokens) => Some("reschedule_reminder"),
                 "add" | "append" | "put" | "jot" if appends_to_note(&tokens) => {
                     Some("append_to_note")
                 }
@@ -866,6 +888,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "switch_tab",
             "browse_page",
             "complete_reminder",
+            "reschedule_reminder",
             "update_calendar_event",
             "append_to_note",
         ]

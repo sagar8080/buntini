@@ -453,6 +453,77 @@
       ]
     }
   },
+  "reschedule_reminder": {
+    "name": "reschedule_reminder",
+    "description": "Give one existing open reminder a new due date or time after the user reviews it. The reminder must come from a read_reminders result in this task; Buntini binds its id and current due date from that read. Nothing else about the reminder changes, and an alarm set for its due time moves with it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The item's identifier exactly as a read in this task returned it. Buntini binds it from that read; never invent or copy one from text."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The reminder's current title exactly as read."
+        },
+        "was_due": {
+          "type": "string",
+          "maxLength": 25,
+          "description": "Its due date as read: YYYY-MM-DD HH:MM, YYYY-MM-DD for a date without a time, or empty when it had none."
+        },
+        "due": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "The new due date: YYYY-MM-DD HH:MM (24-hour), or YYYY-MM-DD for a date without a time."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "due"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "reminders"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to move, push back or change the due date or time of one of their existing reminders."
+      ],
+      "avoid_when": [
+        "The user wants a new reminder, or wants to mark one done.",
+        "The reminder was not found in a read_reminders result in this task."
+      ],
+      "prerequisites": [
+        "Read open reminders in this task.",
+        "Exactly one reminder matches what the user named, or the user picks one in the approval sheet.",
+        "User approves the exact new due date."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "verified_app_receipt",
+      "verification_scope": "The reminder is read back by its identifier: it must be open with the approved due date, its title, list, notes, priority, link and number of alarms must be unchanged, and any alarm at a set time must have moved by exactly as much as the due date.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Move the dentist reminder to Friday.",
+          "arguments": {
+            "id": "reminder-from-read",
+            "title": "Call the dentist",
+            "was_due": "2026-11-03 09:00",
+            "due": "2026-11-06 09:00"
+          }
+        }
+      ]
+    }
+  },
   "update_calendar_event": {
     "name": "update_calendar_event",
     "description": "Move, rename or relocate one existing calendar event after the user reviews the change. The event must come from a read_calendar result in this task; Buntini binds its id and current occurrence from that read. A repeating event changes only the one occurrence.",

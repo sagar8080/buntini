@@ -537,6 +537,7 @@ mod tests {
     fn changes_to_existing_items_are_verified_writes_to_one_app() {
         for (name, resource, read) in [
             ("complete_reminder", "reminders", "read_reminders"),
+            ("reschedule_reminder", "reminders", "read_reminders"),
             ("update_calendar_event", "calendar", "read_calendar"),
             ("append_to_note", "notes", "find_notes"),
         ] {

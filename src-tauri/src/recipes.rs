@@ -214,6 +214,8 @@ impl Recipe for EditItem {
     fn bind(&self, plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
         let tool = match (next.kind.as_str(), next.tool.as_deref()) {
             ("read", Some(read)) if next.description.starts_with(crate::task_contract::EDIT_READ) => match read {
+                // The read's description is the clause it was made for.
+                "read_reminders" if crate::completion::requested_actions(&next.description[crate::task_contract::EDIT_READ.len()..]).0.contains(&"reschedule_reminder") => "reschedule_reminder",
                 "read_reminders" => "complete_reminder",
                 "read_calendar" => "update_calendar_event",
                 "find_notes" => "append_to_note",

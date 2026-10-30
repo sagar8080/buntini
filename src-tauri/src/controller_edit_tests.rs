@@ -325,3 +325,53 @@ async fn an_event_named_without_a_day_is_looked_for_day_by_day() {
     assert_eq!(task.action.as_ref().unwrap()["fields"][0]["key"], "now");
     state.models.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_reminder_moves_by_the_users_words_and_keeps_its_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, settings, mut task, mut flow) = journey(dir.path(), "Push the dentist reminder back a day");
+    let reads = plan_with(
+        &state,
+        &settings,
+        &mut task,
+        &mut flow,
+        vec![
+            crate::apps::Reminder { due: "2026-11-03 09:00".into(), ..open("r-1", "Dentist") },
+            open("r-2", "Buy milk"),
+        ],
+    )
+    .await;
+    assert_eq!(reads, ["read_reminders"]);
+    let action = task.action.as_ref().unwrap();
+    assert_eq!(action["tool"], "reschedule_reminder");
+    assert!(action["fields"][0]["value"].as_str().unwrap().contains("due Tue 3 Nov 09:00"));
+    let proposal = flow.steps.last().unwrap().clone();
+    assert_eq!(proposal.arguments, json!({"id":"r-1","title":"Dentist","was_due":"2026-11-03 09:00","due":"2026-11-04 09:00"}));
+    assert_eq!(flow.contract.provenance[&proposal.id]["due"].origin, "source_record");
+    // The new due is the user's to edit; which reminder and its due as read are not.
+    let never = |_: String, _: serde_json::Map<String, Value>, _| async { panic!("nothing may run") };
+    let refused = run_workflow_action_with_reads(
+        &state,
+        &proposal.id,
+        json!({"id":"r-1","title":"Dentist","was_due":"2026-11-02 09:00","due":"2026-11-04 09:00"}),
+        &Channel::new(|_| Ok(())),
+        never,
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await;
+    assert!(refused.unwrap_err().contains("only an item it read"));
+    run_workflow_action_with_reads(
+        &state,
+        &proposal.id,
+        json!({"id":"r-1","title":"Dentist","was_due":"2026-11-03 09:00","due":"2026-11-05 08:30"}),
+        &Channel::new(|_| Ok(())),
+        |tool, args, _| async move { receipt(tool, args) },
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    let saved = state.store.lock().unwrap().workflow(&task.id).unwrap().unwrap();
+    let step = saved.steps.last().unwrap();
+    assert_eq!((step.tool.as_str(), step.state.as_str(), step.arguments["due"].as_str()), ("reschedule_reminder", "succeeded", Some("2026-11-05 08:30")));
+    state.models.shutdown().await;
+}

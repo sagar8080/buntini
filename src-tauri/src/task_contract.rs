@@ -408,6 +408,7 @@ fn verified_write(step: &Step) -> bool {
             "switch_tab",
             "browse_page",
             "complete_reminder",
+            "reschedule_reminder",
             "update_calendar_event",
             "append_to_note",
         ]
