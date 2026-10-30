@@ -163,6 +163,31 @@ mod native {
             center.removeAllDeliveredNotifications();
         }
     }
+    /// Identifiers of the scheduled alerts macOS has not shown yet.
+    pub async fn pending() -> Result<Vec<String>, String> {
+        if !bundled() {
+            return Ok(vec![]);
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Mutex::new(Some(tx));
+        {
+            let block = RcBlock::new(move |list: NonNull<NSArray<UNNotificationRequest>>| {
+                let ids = unsafe { list.as_ref() }
+                    .iter()
+                    .map(|request| request.identifier().to_string())
+                    .collect();
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(ids);
+                }
+            });
+            UNUserNotificationCenter::currentNotificationCenter()
+                .getPendingNotificationRequestsWithCompletionHandler(&block);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            .await
+            .map_err(|_| "Reading pending notifications timed out.".to_string())?
+            .map_err(|_| "The pending notification list was lost.".into())
+    }
     /// Identifiers of the alerts still listed in Notification Center.
     pub async fn delivered() -> Result<Vec<String>, String> {
         if !bundled() {
@@ -434,6 +459,21 @@ pub(crate) async fn delivered_identifiers() -> std::collections::HashSet<String>
         .unwrap_or_default();
     #[cfg(not(target_os = "macos"))]
     std::collections::HashSet::new()
+}
+
+/// Scheduled alerts macOS still holds, when it can be trusted: only in the installed
+/// app and while alerts are allowed (otherwise macOS may have refused the request, so
+/// its absence proves nothing).
+pub(crate) async fn pending_identifiers() -> Option<std::collections::HashSet<String>> {
+    #[cfg(target_os = "macos")]
+    {
+        if !matches!(native::status().await.ok()?.as_str(), "authorized" | "provisional") {
+            return None;
+        }
+        return native::pending().await.ok().map(|ids| ids.into_iter().collect());
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 use crate::{controller::AppState, store::Store};

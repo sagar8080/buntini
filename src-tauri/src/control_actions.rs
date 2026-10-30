@@ -170,6 +170,7 @@ fn local_execute(
         Ok(tx) => tx,
         Err(error) => return failure(tool, ActionOutcome::Failed, error.to_string(), json!({})),
     };
+    let mut created = None;
     let result = (|| -> Result<ActionReceipt, String> {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled before saving.".into());
@@ -237,7 +238,10 @@ fn local_execute(
             let timer = if let Some((_, _, id)) = &previous {
                 crate::delivery::timer(store, id)?.ok_or("This timer was already created and later removed. The old approval cannot recreate it.")?
             } else {
-                crate::delivery::schedule(store, seconds, chrono::Utc::now())?
+                // macOS hears about it only once this transaction commits.
+                let timer = crate::delivery::save_timer(store, seconds, chrono::Utc::now())?;
+                created = Some(timer.clone());
+                timer
             };
             if timer.seconds != seconds {
                 return Err("The saved timer does not match the approved duration.".into());
@@ -264,7 +268,12 @@ fn local_execute(
         Err(error) => return failure(tool, ActionOutcome::Failed, error, json!({})),
     };
     match transaction.commit() {
-        Ok(()) => receipt,
+        Ok(()) => {
+            if let Some(timer) = &created {
+                crate::delivery::register_os(timer);
+            }
+            receipt
+        }
         Err(error) => failure(
             tool,
             ActionOutcome::Unknown,

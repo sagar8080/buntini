@@ -53,6 +53,10 @@ pub struct TimerRecord {
     pub late_seconds: i64,
     pub delivery_state: Option<String>,
     pub error: Option<String>,
+    /// Whether macOS was handed this timer's alert, so it may have shown it while
+    /// Buntini was quit.
+    #[serde(default)]
+    pub os_request: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -185,6 +189,24 @@ pub fn timer(store: &Store, id: &str) -> Result<Option<TimerRecord>, String> {
         .transpose()
 }
 pub fn schedule(store: &Store, seconds: u64, at: DateTime<Utc>) -> Result<TimerRecord, String> {
+    let timer = save_timer(store, seconds, at)?;
+    register_os(&timer);
+    Ok(timer)
+}
+/// Hands macOS the alert for a saved timer. Callers inside a transaction call this
+/// only after it commits, so a rolled-back timer never leaves an alert behind.
+pub fn register_os(timer: &TimerRecord) {
+    if timer.os_request && timer.state == "pending" {
+        os().schedule(
+            &os_identifier(&timer.id),
+            timer.seconds,
+            "Timer",
+            &timer_body(timer.seconds),
+        );
+    }
+}
+/// Saves a new pending timer without telling macOS yet (see `register_os`).
+pub fn save_timer(store: &Store, seconds: u64, at: DateTime<Utc>) -> Result<TimerRecord, String> {
     if !(1..=86400).contains(&seconds) {
         return Err("Set a timer between one second and 24 hours.".into());
     }
@@ -210,16 +232,9 @@ pub fn schedule(store: &Store, seconds: u64, at: DateTime<Utc>) -> Result<TimerR
         late_seconds: 0,
         delivery_state: None,
         error: None,
+        os_request: store.settings()?.notifications_enabled,
     };
     write_timer(&store.db, &timer)?;
-    if store.settings()?.notifications_enabled {
-        os().schedule(
-            &os_identifier(&timer.id),
-            seconds,
-            "Timer",
-            &timer_body(seconds),
-        );
-    }
     Ok(timer)
 }
 pub fn cancel(store: &Store, id: Option<&str>) -> Result<usize, String> {
@@ -246,7 +261,7 @@ pub fn cancel(store: &Store, id: Option<&str>) -> Result<usize, String> {
 pub fn sync_os_requests(store: &Store, at: DateTime<Utc>) -> Result<(), String> {
     let enabled = store.settings()?.notifications_enabled;
     let mut withdrawn = vec![];
-    for timer in timers(store)?.into_iter().filter(|t| t.state == "pending") {
+    for mut timer in timers(store)?.into_iter().filter(|t| t.state == "pending") {
         let remaining = DateTime::parse_from_rfc3339(&timer.due_at)
             .map(|due| (due.with_timezone(&Utc) - at).num_seconds())
             .unwrap_or(0);
@@ -258,8 +273,16 @@ pub fn sync_os_requests(store: &Store, at: DateTime<Utc>) -> Result<(), String> 
                 "Timer",
                 &timer_body(timer.seconds),
             );
+            if !timer.os_request {
+                timer.os_request = true;
+                write_timer(&store.db, &timer)?;
+            }
         } else if !enabled {
             withdrawn.push(os_identifier(&timer.id));
+            if timer.os_request {
+                timer.os_request = false;
+                write_timer(&store.db, &timer)?;
+            }
         }
     }
     os().remove_pending(&withdrawn);
@@ -267,10 +290,14 @@ pub fn sync_os_requests(store: &Store, at: DateTime<Utc>) -> Result<(), String> 
 }
 /// After a quit, a past-due timer whose macOS alert is still in Notification
 /// Center already alerted the person: record that instead of alerting again.
-/// The rest stay pending and the claim delivers them now, marked late.
+/// So did one macOS was handed and no longer holds as pending (`pending` is
+/// `None` when that list or the permission to show alerts is unknown): clicking
+/// or clearing the alert takes it out of Notification Center. The rest stay
+/// pending and the claim delivers them now, marked late.
 pub fn reconcile(
     store: &Store,
     delivered: &std::collections::HashSet<String>,
+    pending: Option<&std::collections::HashSet<String>>,
     at: DateTime<Utc>,
 ) -> Result<Vec<TimerRecord>, String> {
     let transaction = store
@@ -282,7 +309,9 @@ pub fn reconcile(
         let due = DateTime::parse_from_rfc3339(&timer.due_at)
             .map(|due| due.with_timezone(&Utc) <= at)
             .unwrap_or(false);
-        if timer.state == "pending" && due && delivered.contains(&os_identifier(&timer.id)) {
+        let identifier = os_identifier(&timer.id);
+        let fired = timer.os_request && pending.is_some_and(|pending| !pending.contains(&identifier));
+        if timer.state == "pending" && due && (delivered.contains(&identifier) || fired) {
             timer.state = "completed".into();
             timer.finished_at = Some(at.to_rfc3339());
             timer.delivery_state = Some("os_scheduled".into());
@@ -553,9 +582,10 @@ pub fn start(app: tauri::AppHandle) {
             // Before the first claim: settle timers macOS already showed while
             // Buntini was quit, then re-register the future ones.
             let delivered = crate::notifications::delivered_identifiers().await;
+            let pending = crate::notifications::pending_identifiers().await;
             let state = app.state::<AppState>();
             let store = state.store.lock().unwrap();
-            if let Err(error) = reconcile(&store, &delivered, Utc::now())
+            if let Err(error) = reconcile(&store, &delivered, pending.as_ref(), Utc::now())
                 .and_then(|_| sync_os_requests(&store, Utc::now()))
             {
                 let _ = store.audit("timer.reconcile_failed", &error);
@@ -707,7 +737,7 @@ mod tests {
         let delivered = [os_identifier(&shown.id), os_identifier(&future.id)]
             .into_iter()
             .collect();
-        let settled = reconcile(&store, &delivered, later).unwrap();
+        let settled = reconcile(&store, &delivered, None, later).unwrap();
         assert_eq!(
             settled.len(),
             1,
@@ -722,6 +752,35 @@ mod tests {
         assert_eq!(claimed.late_seconds, 540);
         assert!(claim_due(&store, later).unwrap().is_none());
         assert_eq!(timer(&store, &future.id).unwrap().unwrap().state, "pending");
+    }
+    #[test]
+    fn a_timer_alert_clicked_while_quit_is_not_repeated() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let quiet = schedule(&store, 60, at()).unwrap();
+        notifying(&store);
+        let clicked = schedule(&store, 60, at()).unwrap();
+        let waiting = schedule(&store, 3600, at()).unwrap();
+        let later = at() + chrono::Duration::minutes(10);
+        // Clicking the banner launched Buntini and took it out of Notification Center;
+        // macOS no longer holds it as pending either.
+        let delivered = std::collections::HashSet::new();
+        let pending: std::collections::HashSet<_> = [os_identifier(&waiting.id)].into_iter().collect();
+        let settled = reconcile(&store, &delivered, Some(&pending), later).unwrap();
+        assert_eq!(settled.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), [clicked.id.clone()]);
+        assert_eq!(timer(&store, &clicked.id).unwrap().unwrap().delivery_state.as_deref(), Some("os_scheduled"));
+        // macOS never had the first one, so it alerts now, marked late.
+        assert_eq!(claim_due(&store, later).unwrap().unwrap().id, quiet.id);
+        assert!(claim_due(&store, later).unwrap().is_none());
+    }
+    #[test]
+    fn a_timer_rolled_back_before_commit_never_reaches_macos() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        notifying(&store);
+        let transaction = store.db.unchecked_transaction().unwrap();
+        let timer = save_timer(&store, 300, at()).unwrap();
+        drop(transaction);
+        assert!(!fake::pending().contains_key(&os_identifier(&timer.id)));
+        assert!(super::timer(&store, &timer.id).unwrap().is_none());
     }
     fn at() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-22T12:00:00Z")
