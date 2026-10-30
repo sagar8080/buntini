@@ -35,6 +35,7 @@ impl Store {
         crate::chat_threads::initialize(&store)?;
         crate::memory_index::initialize(&store.db)?;
         crate::routines::initialize(&store)?;
+        crate::mcp::initialize(&store.db)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -552,6 +553,7 @@ impl Store {
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
             "routines": rows("SELECT data FROM routines ORDER BY created_at")?,
+            "toolsYouAdded": self.mcp_export()?,
             "memories": self.memories()?,
             "workflows": self.workflows()?,
             "timers": rows("SELECT data FROM timers")?,
@@ -567,7 +569,7 @@ impl Store {
         tx
             .execute_batch(
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines;
-                 DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
+                 DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
                  DELETE FROM memory_records; DELETE FROM memory_fts;",
             )
@@ -1099,6 +1101,17 @@ mod tests {
                 "INSERT INTO file_index(path,root,name,content) VALUES(?1,?1,?1,?1)",
                 [secret],
             )
+            .unwrap();
+        // A tool the user added, with the token they gave it.
+        store
+            .save_mcp_server(&crate::mcp::McpServer {
+                id: "tool".into(),
+                name: "GitHub".into(),
+                program: "npx".into(),
+                env: [("GITHUB_TOKEN".to_string(), format!("{secret}-token"))].into(),
+                created_at: now(),
+                ..Default::default()
+            })
             .unwrap();
         let mut db = Connection::open(&path).unwrap();
         crate::memory_index::replace_source(

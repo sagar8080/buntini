@@ -243,6 +243,8 @@ where
     let mut failures = Vec::new();
     state.approvals.lock().unwrap().clear();
     state.pending_actions.lock().unwrap().clear();
+    // Tools the user added stop before their settings and values are erased.
+    crate::mcp::stop_servers(&state.store.lock().unwrap());
     if let Err(error) = state.voice.cancel().await {
         failures.push(error);
     }

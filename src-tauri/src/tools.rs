@@ -252,6 +252,13 @@ fn parse_catalog(raw: &str) -> Result<Catalog, String> {
     Ok(catalog)
 }
 
+/// Whether a catalog would load, so added tools' cleaned schemas can be held to the
+/// same rules as the fixed ones.
+#[cfg(test)]
+pub(crate) fn catalog_accepts(raw: &str) -> Result<(), String> {
+    parse_catalog(raw).map(|_| ())
+}
+
 /// Catalog examples only. Actual calls use stricter domain validators before
 /// approval/execution; a schema-valid example does not authorize any operation.
 fn validate_example(schema: &Value, arguments: &Value) -> Result<(), String> {

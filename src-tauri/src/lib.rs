@@ -31,6 +31,7 @@ mod indexer;
 mod integrations;
 mod local;
 mod login;
+mod mcp;
 mod memory_index;
 mod migration;
 mod model;
@@ -313,7 +314,14 @@ pub fn run() {
             watches::delete_price_watch,
             watches::run_price_watch,
             routines::update_routine,
-            routines::delete_routine
+            routines::delete_routine,
+            mcp::added_tools,
+            mcp::add_tool_server,
+            mcp::pick_tool_config,
+            mcp::add_tool_server_from_config,
+            mcp::remove_tool_server,
+            mcp::reconnect_tool_server,
+            mcp::set_tool_safe
         ])
         .build(app_context())
         .expect("Buntini could not start")
@@ -347,6 +355,7 @@ pub fn run() {
                         }
                         state.voice.shutdown().await;
                         state.models.shutdown().await;
+                        mcp::stop_all();
                         app.exit(0);
                     });
                 }
