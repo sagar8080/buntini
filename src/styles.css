@@ -11,10 +11,11 @@
   --surface: #ffffff;
   --surface-soft: #eceef3;
   --text: #171a21;
-  --muted: #687082;
+  --muted: #646c7d;
   --border: #dde1e9;
-  --accent: #c2561c;
+  --accent: #ab4c19;
   --accent-soft: #fbe5d8;
+  /* themes.ts sets --on-accent from the accent's luminance; these are the defaults. */
   --on-accent: #ffffff;
   --danger: #b4423a;
   --error: #fae4e0;
@@ -33,15 +34,15 @@
   --shadow: 0 24px 60px #00000070, 0 2px 10px #00000045;
 }
 /* Theme presets: surfaces, text and accent for light, then dark. Classic is the default above. */
-:root[data-preset=midnight]:not([data-mode=dark]) { --panel: #f4f5fb; --surface: #ffffff; --surface-soft: #e7e9f5; --text: #2b2f45; --muted: #7c809b; --border: #dcdff0; --accent: #4f5fd1; --accent-soft: #e3e6fb; }
+:root[data-preset=midnight]:not([data-mode=dark]) { --panel: #f4f5fb; --surface: #ffffff; --surface-soft: #e7e9f5; --text: #2b2f45; --muted: #64687e; --border: #dcdff0; --accent: #4d5dcd; --accent-soft: #e3e6fb; }
 :root[data-preset=midnight][data-mode=dark] { --panel: #171a2b; --surface: #1f2338; --surface-soft: #262b44; --text: #e7e9f7; --muted: #9aa0c3; --border: #2f3553; --accent: #8c9bff; --accent-soft: #2c3260; }
-:root[data-preset=paper]:not([data-mode=dark]) { --panel: #f7f4ec; --surface: #fffdf7; --surface-soft: #ece6d8; --text: #2f2a22; --muted: #8a8170; --border: #e2dbcb; --accent: #3d5a80; --accent-soft: #e1e7f0; }
+:root[data-preset=paper]:not([data-mode=dark]) { --panel: #f7f4ec; --surface: #fffdf7; --surface-soft: #ece6d8; --text: #2f2a22; --muted: #6d6658; --border: #e2dbcb; --accent: #3d5a80; --accent-soft: #e1e7f0; }
 :root[data-preset=paper][data-mode=dark] { --panel: #22201c; --surface: #2b2924; --surface-soft: #34312b; --text: #ece6da; --muted: #a59d8e; --border: #3f3b33; --accent: #9db4d6; --accent-soft: #2f3744; }
-:root[data-preset=sakura]:not([data-mode=dark]) { --panel: #fdf5f7; --surface: #fffafb; --surface-soft: #f6e3e8; --text: #4a3238; --muted: #a38690; --border: #f0dbe1; --accent: #d4577a; --accent-soft: #fbe1e8; }
+:root[data-preset=sakura]:not([data-mode=dark]) { --panel: #fdf5f7; --surface: #fffafb; --surface-soft: #f6e3e8; --text: #4a3238; --muted: #776269; --border: #f0dbe1; --accent: #aa4662; --accent-soft: #fbe1e8; }
 :root[data-preset=sakura][data-mode=dark] { --panel: #2a2226; --surface: #33292e; --surface-soft: #3b2f35; --text: #f3e4e8; --muted: #b8a0a8; --border: #4a3a41; --accent: #f08aa7; --accent-soft: #4c2f39; }
-:root[data-preset=forest]:not([data-mode=dark]) { --panel: #f3f6f1; --surface: #fbfdf9; --surface-soft: #e3eadd; --text: #2c3a2c; --muted: #7d8c7a; --border: #dbe4d4; --accent: #4f7d4a; --accent-soft: #e0ecdc; }
+:root[data-preset=forest]:not([data-mode=dark]) { --panel: #f3f6f1; --surface: #fbfdf9; --surface-soft: #e3eadd; --text: #2c3a2c; --muted: #5f6a5d; --border: #dbe4d4; --accent: #487243; --accent-soft: #e0ecdc; }
 :root[data-preset=forest][data-mode=dark] { --panel: #1d231e; --surface: #252c26; --surface-soft: #2c352d; --text: #e4ece2; --muted: #9fb09c; --border: #364237; --accent: #8fc286; --accent-soft: #2f4230; }
-:root[data-preset=ocean]:not([data-mode=dark]) { --panel: #f2f7f9; --surface: #fbfdfe; --surface-soft: #e1edf2; --text: #23383f; --muted: #75909a; --border: #d6e6ec; --accent: #2f7f9a; --accent-soft: #dbeef4; }
+:root[data-preset=ocean]:not([data-mode=dark]) { --panel: #f2f7f9; --surface: #fbfdfe; --surface-soft: #e1edf2; --text: #23383f; --muted: #596d75; --border: #d6e6ec; --accent: #2a728b; --accent-soft: #dbeef4; }
 :root[data-preset=ocean][data-mode=dark] { --panel: #182326; --surface: #1f2c30; --surface-soft: #263539; --text: #e1eef2; --muted: #93adb5; --border: #2f4248; --accent: #6cc3dc; --accent-soft: #24434d; }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; height: 100%; }
@@ -85,7 +86,14 @@ button svg { vertical-align: middle; }
 .overlay-welcome button { display: flex; align-items: center; gap: 5px; background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text); border: 1px solid var(--hairline); font-size: 11.5px; padding: 6px 11px; border-radius: 99px; white-space: nowrap; transition: color .12s, border-color .12s, box-shadow .12s; }
 .overlay-welcome button svg { color: var(--accent); }
 .overlay-welcome button:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 14px -6px var(--glow); }
-.composer-area { padding: 8px 14px 11px; }
+/* A shortcut that needs an app first asks for it right here (setupSteps.ts shortcutNeeds). */
+.overlay-welcome > .welcome-allow { display: block; margin-top: 12px; padding: 10px 12px; background: var(--accent-soft); border: 1px solid var(--hairline); border-radius: var(--radius-card, 12px); }
+.welcome-allow p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text); }
+.overlay-welcome .welcome-allow > div { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 9px; }
+.overlay-welcome .welcome-allow .text-button { background: transparent; border: 0; padding: 0; color: var(--muted); box-shadow: none; }
+.overlay-welcome .welcome-allow .primary-button { background: var(--accent); color: var(--on-accent); border: 0; border-radius: 8px; padding: 7px 11px; font-weight: 600; }
+.overlay-welcome .welcome-allow .primary-button svg { color: inherit; }
+.composer-area { padding: 8px 14px 11px; position: relative; }
 .mode-picker { display: flex; gap: 2px; align-items: center; margin-bottom: 9px; }
 .mode-picker button { display: flex; align-items: center; gap: 4px; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; padding: 5px 6px; white-space: nowrap; }
 .mode-picker button.active { background: var(--accent-soft); color: var(--accent); }
@@ -134,8 +142,8 @@ button svg { vertical-align: middle; }
 .pet-caption, .collapsed-label, .shortcut { display: none; }
 .dock-tools { position: absolute; bottom: 30px; right: 4px; }
 .dock-menu-wrap { position: relative; }
-.dock-menu-button { background: var(--panel); color: var(--accent); border: 1px solid var(--hairline); box-shadow: 0 0 10px -4px var(--glow); width: 18px; height: 18px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
-.dock-menu-button svg { width: 12px; height: 12px; }
+.dock-menu-button { background: var(--panel); color: var(--accent); border: 1px solid var(--hairline); box-shadow: 0 0 10px -4px var(--glow); width: 24px; height: 24px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+.dock-menu-button svg { width: 14px; height: 14px; }
 .dock-menu { position: absolute; bottom: 24px; right: 0; width: 170px; padding: 5px; z-index: 30; background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px; box-shadow: var(--shadow); }
 .dock-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; width: 100%; font-size: 11px; background: transparent; padding: 8px; border-radius: 5px; }
 .dock-menu > button:hover { background: var(--accent-soft); }
@@ -264,13 +272,16 @@ button svg { vertical-align: middle; }
 .audit-list { display: flex; flex-direction: column; gap: 8px; }
 .audit-list article { background: var(--surface); border: 1px solid var(--hairline); border-radius: 7px; padding: 10px; }
 .audit-list article > div { display: flex; align-items: center; gap: 5px; color: var(--accent); }
-.audit-list strong { text-transform: capitalize; font-size: 11px; font-weight: 500; }
+.audit-list strong { font-size: 11px; font-weight: 500; }
 .audit-list small { margin-left: auto; font-size: 11px; color: var(--muted); }
 .audit-list p { font-size: 11px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin: 7px 0 0; }
 .toast { position: absolute; bottom: 9px; left: 10px; right: 10px; z-index: 25; display: flex; align-items: flex-start; gap: 10px; background: var(--accent-soft); border: 1px solid var(--hairline); border-radius: 8px; box-shadow: var(--shadow); padding: 10px 11px; font-size: 11px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
 .toast > span { flex: 1; min-width: 0; }
 .toast > button { background: transparent; color: inherit; padding: 2px 0; }
 .toast-error, .error-box { background: var(--error); color: var(--danger); }
+/* Above the composer or setup's buttons (App.tsx), so a message never covers Send or the mic. */
+.composer-area > .toast, .setup-actions > .toast { bottom: calc(100% + 4px); }
+.setup-actions { position: relative; }
 .error-box { font-size: 12px; line-height: 1.7; padding: 10px; border-radius: 7px; margin-top: 10px; }
 .system-card { margin-top: 15px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 9px; padding: 12px; }
 .system-card-heading { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
@@ -495,6 +506,8 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 /* Only a living pet (the desktop cat, the profile preview) has its toy; icons and swatches don't. */
 .pet:not(.pet--alive) .cat-yarn { display: none; }
 .cat--walk .cat-yarn, .cat--leap .cat-yarn { opacity: 0; }
+/* A falling cat sits in the air; its ball stays behind rather than falling with it. */
+.pet--falling .cat-yarn { opacity: 0; transition: none; }
 .pet.pet--act-bat .cat-look, .pet.pet--act-pounce .cat-look, .pet.pet--act-nudge .cat-look { transform: translate(-2.4px, 1.8px); transition: transform .2s; }
 .pet.pet--act-bat .cat-pupil, .pet.pet--act-pounce .cat-pupil { transform: scale(1.25); }
 /* Bat: two swipes, the ball rolls away and back. */
@@ -888,7 +901,8 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 :root[data-font=rounded] .panel { font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
 :root[data-font=serif] .panel { font-family: ui-serif, 'New York', Georgia, serif; }
 :root[data-font=mono] .panel { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.thread, .overlay-welcome { zoom: var(--text-scale, 1); }
+/* Text size reaches settings, sheets and small labels too, not only the chat. */
+.thread, .overlay-welcome, .subpage > *, .approval-sheet > *, .setup-actions, .header-status, .composer-bottom > span, .composer-hint, .planning-status, .mode-pill, .dock-menu { zoom: var(--text-scale, 1); }
 .composer textarea { font-size: calc(13px * var(--text-scale, 1)); }
 :root[data-density=compact] .thread { gap: 9px; padding: 6px 12px 12px; }
 :root[data-density=compact] .turn { gap: 4px; }

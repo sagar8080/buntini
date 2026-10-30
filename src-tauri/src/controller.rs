@@ -1367,10 +1367,12 @@ fn brief_key() -> String {
 }
 
 /// Today's brief, written from the calendar and reminders on this Mac. The automatic
-/// once-a-day brief never opens Mail; the "My day" button may.
+/// once-a-day brief never opens Mail; the "My day" button may. The window passes its own
+/// id so Stop can cancel the brief with `cancel_task` like any other turn.
 #[tauri::command]
 pub async fn morning_brief(
     automatic: Option<bool>,
+    id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TaskRecord, String> {
     let launch = if automatic.unwrap_or(false) {
@@ -1378,7 +1380,9 @@ pub async fn morning_brief(
     } else {
         crate::apps::Launch::Allow
     };
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = id
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let cancel = Arc::new(AtomicBool::new(false));
     let settings = {
         let mut active = state.active.lock().unwrap();

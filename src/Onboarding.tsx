@@ -7,13 +7,14 @@ import { appleStatus, cloudProviders } from './brain.ts';
 import { coats, lookFrom } from './petOptions';
 import { applyAnswers, blocker, initialAnswers, keysToSave, message, next, previous, reply, steps, type Answers, type Step } from './setupSteps';
 import { errorMessage } from './bridge';
+import { stillMotion } from './themes.ts';
 import ChatGPTAccount from './ChatGPTAccount';
 import type { Bootstrap, CatCoat, CloudProvider, KeyProvider, Settings } from './types';
 
-type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void> };
+type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void>; toast?: ReactNode };
 
 /** First-run setup as a conversation: Buntini asks, the user answers with inline controls. */
-export default function Onboarding({ data, onFinish, onSkip, onRefresh }: Props) {
+export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }: Props) {
   const [step, setStep] = useState<Step>('hello');
   const [answers, setAnswers] = useState<Answers>(() => initialAnswers(data.settings, data.diagnostics));
   const [said, setSaid] = useState<{ step: Step; buntini: string; you: string }[]>([]);
@@ -24,12 +25,12 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh }: Props)
   const set = <K extends keyof Answers>(key: K, value: Answers[K]) => { setAnswers(previous => ({ ...previous, [key]: value })); setError(''); };
   const look = lookFrom({ ...data.settings, catCoat: answers.coat });
   useEffect(() => {
-    const still = data.settings.reducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const still = stillMotion(data.settings.reducedMotion);
     setTyping(!still);
     const id = window.setTimeout(() => setTyping(false), still ? 0 : 650);
     return () => window.clearTimeout(id);
   }, [step, data.settings.reducedMotion]);
-  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' }); }, [step, typing, said.length]);
+  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: stillMotion(data.settings.reducedMotion) ? 'instant' : 'smooth' }); }, [step, typing, said.length]);
 
   async function advance() {
     const problem = blocker(step, answers, data.diagnostics);
@@ -71,6 +72,7 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh }: Props)
       </div>
     </div>
     <div className="setup-actions">
+      {toast}
       {error && <p className="setup-error" role="alert">{error}</p>}
       <div>
         <button type="button" className="text-button" onClick={back} disabled={index === 0 || saving}><ArrowLeft size={12} /> Back</button>

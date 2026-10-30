@@ -55,6 +55,12 @@ export function nextIdleDelay(motion: PetMotion, random = Math.random, afterPlay
   return afterPlay && motion !== 'sleepy' && random() < .4 ? delay * .35 : delay;
 }
 
+/** The wait before the next habit, counted from when this one ends. Counted from its start, a
+    quick return after playing would come due while the play is still going and be skipped. */
+export function nextHabitDelay(motion: PetMotion, played: PetAction | null, random = Math.random): number {
+  return (played ? actionDuration[played] : 0) + nextIdleDelay(motion, random, isToyAction(played));
+}
+
 /** Blinks every few seconds; sleepy pets blink less often. */
 export function nextBlinkDelay(motion: PetMotion, random = Math.random): number {
   return (motion === 'sleepy' ? 4000 : 2400) + random() * 4200;

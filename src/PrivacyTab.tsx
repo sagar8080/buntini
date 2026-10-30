@@ -45,7 +45,7 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Cloud models may see</h3></div>
       {shares.map(item => <Toggle key={item.id} label={item.label} checked={draft.externalShares.includes(item.id)} onChange={value => toggle(item.id, value)} />)}
-      <p className="field-help">Your messages always go to a cloud model. Everything else stays here unless you turn it on.</p>
+      <p className="field-help">{draft.modelBackend === 'cloud' ? 'You use a cloud brain, so your messages go to it. Everything else stays here unless you turn it on.' : 'Your brain runs on this Mac, so nothing goes to a cloud model. These choices apply if you switch to one.'}</p>
     </section>
     {children}
     <MacUpdates onError={onError} />

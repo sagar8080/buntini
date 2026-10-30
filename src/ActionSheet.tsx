@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CalendarPlus, Bell, ExternalLink, Mail, NotebookPen, Play, AppWindow } from 'lucide-react';
+import ModalSheet from './ModalSheet';
 
 export interface ActionField { key: string; label: string; value: string; kind: 'text' | 'long' | 'when' }
 /** A value the user can pick for a field, such as one of several matching contacts. */
@@ -17,7 +18,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
   const Icon = icons[proposal.tool] || Play;
   const allow = () => onAllow(Object.fromEntries(Object.entries(values).filter(([, value]) => value.trim() !== '').map(([key, value]) => [key, key === 'minutes' ? Number(value) : value])));
   const set = (key: string, value: string) => setValues(previous => ({ ...previous, [key]: value }));
-  return <div className="approval-backdrop"><section className="approval-sheet action-sheet" role="alertdialog" aria-modal="true" aria-labelledby="action-title">
+  return <ModalSheet className="action-sheet" labelledBy="action-title">
     <Icon size={22} /><h3 id="action-title">{proposal.title}</h3>
     <form className="action-fields" onSubmit={event => { event.preventDefault(); if (!running) allow(); }}>
       {proposal.fields.map(field => {
@@ -36,5 +37,5 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     {proposal.note && <small>{proposal.note}</small>}
     {error && <p role="alert">{error}</p>}
     <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>
-  </section></div>;
+  </ModalSheet>;
 }

@@ -10,15 +10,24 @@ export function WaitingForYou({ items, disabled, onReview }: { items: PendingApp
 
 const labels: Record<string, string> = { complete: 'Complete', ready: 'Next', pending: 'Still to do', blocked: 'Needs attention', waiting: 'Waiting for approval', running: 'In progress', succeeded: 'Verified', failed: 'Failed', superseded: 'Resolved by a later read', unknown: 'Outcome unknown', cancelled: 'Cancelled' };
 
+// Steps in plain words; anything else reads as its words with the first one capitalized.
+const steps: Record<string, string> = {
+  read_mail: 'Read your email', read_calendar: 'Read your calendar', read_reminders: 'Read your reminders', find_notes: 'Find notes', search_files: 'Search your files',
+  search_memory: 'Look through what I remember', read_page: 'Read the page', read_source: 'Read a source', read_evidence: 'Check what was found',
+  add_reminder: 'Add a reminder', add_calendar_event: 'Add a calendar event', create_note: 'Write a note', draft_email: 'Draft an email', set_timer: 'Set a timer',
+  open_link: 'Open a link', open_app: 'Open an app', run_shortcut: 'Run a shortcut', create_saved_search: 'Save a search', create_price_watch: 'Watch a price',
+};
+export const stepLabel = (tool: string) => steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));
+
 export function ProgressDetails({ progress }: { progress?: TaskProgress }) {
   if (!progress || (!progress.steps.length && !progress.contract?.outcomes.length)) return null;
   const contract = progress.contract;
   return <details className="research-evidence task-progress"><summary>Task progress · {contract?.outcomes.length ? `${contract.outcomes.filter(outcome => outcome.status === 'complete').length}/${contract.outcomes.length} requested results complete` : `${progress.steps.filter(step => step.state === 'succeeded').length}/${progress.steps.length} steps completed`}</summary>
     {!!contract?.outcomes.length && <><p>Requested results</p><ol>{contract.outcomes.map(outcome => <li key={outcome.id}><strong>{outcome.description}</strong><span> · {labels[outcome.status] || (outcome.status === 'pending' ? 'Still to do' : outcome.status.replaceAll('_', ' '))}</span></li>)}</ol></>}
     {!!contract?.unresolvedFields.length && <ul>{contract.unresolvedFields.filter(field => field.status === 'missing').map(field => <li key={`${field.outcomeId}-${field.field}`}>{field.reason}</li>)}</ul>}
-    <ol>{progress.steps.map(step => <li key={step.id}><strong>{step.tool.replaceAll('_', ' ')}</strong><span> · {labels[step.state] || step.state}</span>
+    <ol>{progress.steps.map(step => <li key={step.id}><strong>{stepLabel(step.tool)}</strong><span> · {labels[step.state] || step.state}</span>
       {step.approvedAt && <small>Approved {new Date(step.approvedAt).toLocaleString()}</small>}
-      <details><summary>Inspect inputs and result</summary><pre>{JSON.stringify({ inputs: step.arguments, fieldSources: contract?.provenance[step.id], result: step.evidence }, null, 2)}</pre></details>
+      <details><summary>Show details</summary><pre>{JSON.stringify({ 'What was used': step.arguments, 'Where each detail came from': contract?.provenance[step.id], 'What came back': step.evidence }, null, 2)}</pre></details>
     </li>)}</ol>
   </details>;
 }

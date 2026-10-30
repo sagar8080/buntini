@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { applyAnswers, blocker, initialAnswers, keysToSave, message, next, previous, reply, steps } from './setupSteps.ts';
+import { applyAnswers, blocker, initialAnswers, keysToSave, message, next, previous, reply, shortcutNeeds, steps } from './setupSteps.ts';
 import type { Diagnostics, Settings } from './types';
 
 const settings = {
@@ -58,4 +58,13 @@ test('answers read naturally and become settings and keys', () => {
   assert.match(blocker('brain', chatgpt, diagnostics('available')), /Sign in with ChatGPT/);
   assert.equal(blocker('brain', chatgpt, { ...diagnostics('available'), chatgptAccount: 'sam@example.com' }), '', 'signed in is enough; no key or cap');
   assert.equal(reply('brain', chatgpt), 'Use ChatGPT with my own plan.');
+});
+
+test('welcome shortcuts ask for the apps they read instead of dead-ending', () => {
+  assert.deepEqual(shortcutNeeds('reply', [])?.apps, ['mail']);
+  assert.match(shortcutNeeds('reply', [])!.allow, /Allow Mail/);
+  assert.equal(shortcutNeeds('reply', ['mail']), null);
+  assert.deepEqual(shortcutNeeds('day', ['music'])?.apps, ['calendar', 'reminders']);
+  assert.equal(shortcutNeeds('day', ['reminders']), null, 'the brief works with any one of its apps');
+  assert.equal(shortcutNeeds('day', ['mail']), null);
 });

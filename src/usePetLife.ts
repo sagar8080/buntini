@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { desktop } from './bridge';
-import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, type PetAction } from './petLife';
+import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextHabitDelay, pickIdleAction, randomGlance, toyPlay, type PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
 export interface PetReaction { kind: PetAction; id: number }
@@ -91,7 +91,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
           play(played);
         }
         schedule();
-      }, nextIdleDelay(motion, Math.random, isToyAction(played)));
+      }, nextHabitDelay(motion, played));
     };
     schedule();
     return () => { cancelled = true; window.clearTimeout(timer); };

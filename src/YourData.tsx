@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ClipboardCopy, Download, LoaderCircle, Trash2 } from 'lucide-react';
 import { command, errorMessage } from './bridge';
+import ConfirmInline from './ConfirmInline';
 
 type Props = { onNotice: (text: string) => void; onError: (text: string) => void; onErased: () => Promise<void> };
 
@@ -19,9 +20,6 @@ export default function YourData({ onNotice, onError, onErased }: Props) {
       <button type="button" className="secondary-button" disabled={!!working} onClick={() => void act('support', async () => { await navigator.clipboard.writeText(await command<string>('support_info')); onNotice('Support info copied. It has no messages, files or keys.'); })}>{working === 'support' ? <LoaderCircle size={14} className="spin" /> : <ClipboardCopy size={14} />} Copy support info</button>
     </div>
     {!confirming ? <button type="button" className="text-button danger erase-button" onClick={() => setConfirming(true)}><Trash2 size={13} /> Delete everything…</button>
-      : <div className="inline-approval erase-confirm" role="alertdialog" aria-label="Delete everything">
-        <p>This erases your conversation, settings, folders, lists, saved keys and recordings on this Mac. It can’t be undone.</p>
-        <div><button type="button" className="text-button" onClick={() => setConfirming(false)} disabled={!!working}>Cancel</button><button type="button" className="danger-button" disabled={!!working} onClick={() => void act('erase', async () => { await command('delete_all_data', { confirm: 'delete everything' }); setConfirming(false); await onErased(); })}>{working === 'erase' ? <LoaderCircle size={13} className="spin" /> : null}Delete everything</button></div>
-      </div>}
+      : <ConfirmInline label="Delete everything" action="Delete everything" working={working === 'erase'} onCancel={() => setConfirming(false)} onConfirm={() => void act('erase', async () => { await command('delete_all_data', { confirm: 'delete everything' }); setConfirming(false); await onErased(); })}>This erases your conversation, settings, folders, lists, saved keys and recordings on this Mac. It can’t be undone.</ConfirmInline>}
   </section>;
 }

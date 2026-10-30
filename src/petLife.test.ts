@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay } from './petLife.ts';
+import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextHabitDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, toyActions } from './petLife.ts';
 
 const sequence = (...values: number[]) => () => values.shift() ?? 0;
 
@@ -36,6 +36,15 @@ test('each play has its own strength and play comes in bursts', () => {
   assert.equal(nextIdleDelay('playful', sequence(.5, .1), true), usual * .35, 'a quick return after playing');
   assert.equal(nextIdleDelay('playful', sequence(.5, .9), true), usual, 'or the usual wait');
   assert.equal(nextIdleDelay('sleepy', sequence(.5, .1), true), nextIdleDelay('sleepy', sequence(.5)), 'sleepy cats don\u2019t rush back');
+});
+
+test('a quick return after playing comes once the play has finished, so it is not skipped', () => {
+  for (const motion of ['calm', 'playful'] as const) for (const toy of toyActions) {
+    const burst = nextHabitDelay(motion, toy, sequence(0, .1));
+    assert.ok(burst > actionDuration[toy], `${motion} ${toy}: the next habit comes after the play ends`);
+    assert.ok(burst < nextHabitDelay(motion, toy, sequence(0, .9)), `${motion} ${toy}: and sooner than usual`);
+  }
+  assert.equal(nextHabitDelay('calm', null, sequence(.5)), nextIdleDelay('calm', sequence(.5)), 'nothing played: the usual wait');
 });
 
 test('every action has a duration and playful pets act more often', () => {
