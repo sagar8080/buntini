@@ -250,7 +250,7 @@ fn target(text: &str, today: NaiveDate) -> Target {
 }
 
 /// The part of the request that asks for `tool`, in the user's own case.
-fn clause(goal: &str, tool: &str) -> Option<String> {
+pub(crate) fn clause(goal: &str, tool: &str) -> Option<String> {
     let goal = goal.replace("Additional details: ", "\n");
     let mut sentences = Vec::new();
     let mut start = 0;

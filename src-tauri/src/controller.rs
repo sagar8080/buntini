@@ -1815,6 +1815,12 @@ async fn memory_tool(
     Ok((evidence, shares))
 }
 
+fn offers(definitions: &Value, name: &str) -> bool {
+    definitions
+        .as_array()
+        .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == name))
+}
+
 fn chat_tools(
     settings: &Settings,
     locality: privacy::Locality,
@@ -3253,10 +3259,13 @@ where
                 source: json!({"kind":"user_fields","source":"user_request","fields":{"name":name}}),
             })
         } else if let Some(query) = flow.contract.shortcut_lookup(&flow.steps).filter(|_| {
-            definitions
-                .as_array()
-                .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "list_shortcuts"))
+            offers(&definitions, "list_shortcuts") || offers(&definitions, "run_shortcut")
         }) {
+            // Shortcuts is allowed but this brain may not see their names: a run is
+            // bound only to a name read from them, so say what to allow.
+            if !offers(&definitions, "list_shortcuts") {
+                return Err("This brain isn’t allowed to see the names of your shortcuts. You can allow Your shortcuts in Settings → Privacy.".into());
+            }
             // "Turn on the living room lights": read the user's shortcuts with their own
             // words first, so the run is bound to a shortcut they really have.
             Some(crate::planning::BoundAction {
@@ -3431,7 +3440,19 @@ where
                     } else {
                         crate::actions::describe(&name, args.as_object().unwrap())
                     };
-                let fields: Vec<_> = now.into_iter().chain(fields).collect();
+                // Several shortcuts fit and none plainly names the request: none is chosen
+                // for the user, who picks one.
+                let pick_shortcut = !shortcut_choices.is_empty();
+                let fields: Vec<_> = now
+                    .into_iter()
+                    .chain(fields)
+                    .map(|mut field| {
+                        if pick_shortcut && field.key == "name" {
+                            field.value.clear();
+                        }
+                        field
+                    })
+                    .collect();
                 task.handoff = Some("action".into());
                 task.action = Some(
                     serde_json::to_value(crate::actions::Proposal {

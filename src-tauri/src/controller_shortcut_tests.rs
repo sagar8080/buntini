@@ -107,7 +107,7 @@ async fn several_fitting_shortcuts_are_offered_and_none_fitting_runs_nothing() {
     .await;
     result.unwrap();
     let action = task.action.as_ref().unwrap();
-    assert_eq!(action["fields"][0]["value"], "Lights On");
+    assert_eq!(action["fields"][0]["value"], "", "none is chosen for the user when none plainly fits");
     let choices: Vec<&str> = action["choices"]
         .as_array()
         .unwrap()
@@ -124,4 +124,16 @@ async fn several_fitting_shortcuts_are_offered_and_none_fitting_runs_nothing() {
     assert!(task.action.is_none());
     assert!(!flow.steps.iter().any(|step| step.tool == "run_shortcut"));
     state.models.shutdown().await;
+}
+
+#[test]
+fn a_cloud_brain_sees_shortcut_names_only_when_privacy_allows_them() {
+    let mut settings = Settings { apps: vec!["shortcuts".into()], ..Settings::default() };
+    let external = chat_tools(&settings, privacy::Locality::External, false, true);
+    assert!(external.contains(&"run_shortcut"));
+    assert!(!external.contains(&"list_shortcuts"), "names stay on the Mac");
+    assert!(chat_tools(&settings, privacy::Locality::OnDevice, false, true).contains(&"list_shortcuts"));
+    settings.external_shares = vec!["shortcuts".into()];
+    assert!(chat_tools(&settings, privacy::Locality::External, false, true).contains(&"list_shortcuts"));
+    assert_eq!(crate::apps::app("shortcuts").unwrap().share, Some(privacy::Share::Shortcuts));
 }

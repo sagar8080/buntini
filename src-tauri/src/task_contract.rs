@@ -1127,9 +1127,9 @@ impl TaskContract {
                     .any(|c| c.outcome_id.as_deref() == Some(&o.id) && c.field == "name")
         })
     }
-    /// The user's own words for a requested shortcut run. A single run may use the whole
-    /// request, quoted names included ("run my “Start work” shortcut"); one of several
-    /// uses only its own clause, so "and lock the front door" never picks the lights.
+    /// The user's own words for a requested shortcut run: its own clause, so "and lock
+    /// the front door" or "Don't unlock the door" never picks another shortcut. A single
+    /// run also takes a name the user quoted anywhere ("run my “Start work” shortcut").
     fn shortcut_query(&self, outcome: &Outcome) -> String {
         let runs = self
             .outcomes
@@ -1137,10 +1137,12 @@ impl TaskContract {
             .filter(|o| o.tool.as_deref() == Some("run_shortcut"))
             .count();
         let words = if runs == 1 {
-            self.current_request.replace(['“', '”', '"', '‘', '’', '`'], " ")
+            crate::edit_targets::clause(&self.current_request, "run_shortcut")
+                .unwrap_or_else(|| self.current_request.clone())
         } else {
             outcome.description.clone()
-        };
+        }
+        .replace(['“', '”', '"', '‘', '’', '`'], " ");
         let mut query = String::new();
         for word in words.split_whitespace() {
             if query.chars().count() + word.chars().count() + 1 > 100 {
@@ -1213,6 +1215,8 @@ impl TaskContract {
             return Ok(None);
         };
         let choices = self.shortcut_choices(steps);
+        // When none plainly names what was asked, the first is only a placeholder: the
+        // sheet offers every one that fits with none chosen (`shortcut_alternatives`).
         let Some(name) = choices
             .iter()
             .find(|name| crate::apps::shortcut_covers(&query, name))
@@ -1942,6 +1946,16 @@ mod tests {
         let mut contract = TaskContract::from_request(quoted);
         contract.refresh(quoted, &[]);
         assert_eq!(contract.shortcut_lookup(&[]).as_deref(), Some("Run my Start work shortcut"));
+        // A single run's words are its own part of the request, never a sentence saying
+        // what not to do or another request.
+        for (goal, query) in [
+            ("Turn on the lights. Don't unlock the front door.", "Turn on the lights"),
+            ("Turn on the office lights and tell me if the garage door is open", "Turn on the office lights"),
+        ] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.refresh(goal, &[]);
+            assert_eq!(contract.shortcut_lookup(&[]).as_deref(), Some(query), "{goal}");
+        }
         assert_eq!(read_tools("which shortcuts do I have"), ["list_shortcuts"]);
     }
     fn names(definitions: &Value) -> Vec<&str> {
