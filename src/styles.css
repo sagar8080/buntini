@@ -844,7 +844,8 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .erase-confirm > div { display: flex; justify-content: flex-end; gap: 10px; }
 .danger-button { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 7px 12px; border-radius: 7px; background: var(--danger); color: var(--on-accent); }
 .action-fields { display: flex; flex-direction: column; gap: 9px; width: 100%; margin: 12px 0 8px; text-align: left; }
-.action-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.action-fields label, .action-fields .action-pick { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.action-fields input[readonly] { color: var(--muted); background: transparent; }
 .action-fields input, .action-fields textarea { width: 100%; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--hairline); border-radius: 7px; padding: 7px 9px; }
 .action-fields input:focus, .action-fields textarea:focus { outline: none; border-color: var(--accent); }
 .action-fields textarea { resize: vertical; line-height: 1.5; }
