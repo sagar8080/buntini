@@ -19,6 +19,7 @@ const shares: { id: string; label: string }[] = [
   { id: 'selection', label: 'What you select' },
   { id: 'contacts', label: 'People in Contacts' },
   { id: 'shortcuts', label: 'Your shortcuts' },
+  { id: 'tools', label: 'Tools you added' },
 ];
 type Props = {
   draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; roots: string[];
