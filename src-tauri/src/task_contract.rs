@@ -1004,9 +1004,10 @@ impl TaskContract {
             return None;
         }
         let name = crate::source_fields::named_recipient(&self.current_request)?;
-        (!steps
-            .iter()
-            .any(|s| s.tool == "find_contact" && s.arguments["name"] == name.as_str()))
+        (crate::source_fields::user_named(&self.current_request, &name)
+            && !steps
+                .iter()
+                .any(|s| s.tool == "find_contact" && s.arguments["name"] == name.as_str()))
         .then_some(name)
     }
     /// Addresses the draft from a Contacts read in this journal, only when exactly one
@@ -1300,8 +1301,9 @@ impl TaskContract {
             .any(|s| ["failed", "unknown", "running", "waiting"].contains(&s.state.as_str()));
         let next = self.next_outcome();
         let next_write = next.filter(|o| o.kind == "write" && o.status == "ready");
-        // Looking up the person a draft is for is part of preparing that draft.
-        let contact_read = self.awaiting_recipient().is_some();
+        // Looking up the person a draft is for is part of preparing that draft, once:
+        // after that lookup the user picks among its matches in the sheet.
+        let contact_read = self.contact_lookup(steps).is_some();
         let selected = definitions
             .as_array()
             .into_iter()
@@ -1397,14 +1399,15 @@ impl TaskContract {
                 }
                 return Ok(());
             }
-            // Before a draft, Contacts may be read only for someone the user named.
+            // Before a draft, Contacts may be read only for the one recipient the user
+            // named, never for anyone else the request or a source mentions.
             if tool == "find_contact" && self.awaiting_recipient().is_some() {
                 return if arguments["name"].as_str().is_some_and(|name| {
-                    crate::source_fields::user_named(&self.current_request, name)
+                    crate::source_fields::is_named_recipient(&self.current_request, name)
                 }) {
                     Ok(())
                 } else {
-                    Err("Buntini looks up only people you named in your request.".into())
+                    Err("Buntini looks up only the person you asked to write to.".into())
                 };
             }
             if outcome.kind == "answer"

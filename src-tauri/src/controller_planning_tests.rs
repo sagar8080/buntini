@@ -837,12 +837,22 @@ async fn contact_journey(
     people: Vec<crate::apps::Contact>,
     worker: &str,
 ) -> (AppState, TaskRecord, Workflow) {
+    contact_journey_reading(dir, apps, people, None, worker).await
+}
+
+async fn contact_journey_reading(
+    dir: &std::path::Path,
+    apps: &[&str],
+    people: Vec<crate::apps::Contact>,
+    failure: Option<&'static str>,
+    worker: &str,
+) -> (AppState, TaskRecord, Workflow) {
     let goal = "Draft an email to Ana about lunch on Friday";
     let (mut state, settings, mut task, _) = fixture_task_state(dir, goal, worker);
     // Contacts are read through the Apple helper; the fixture below stands in for it.
     // Intel Macs have no helper, and an "Apple helper missing" error must not stop a draft.
     let helper = dir.join("buntini-fm");
-    if apps.contains(&"contacts") && !people.is_empty() {
+    if apps.contains(&"contacts") && (!people.is_empty() || failure.is_some()) {
         std::fs::write(&helper, "").unwrap();
     }
     state.models = ModelHub::new(dir.join("task_contract_worker.py"), helper);
@@ -874,7 +884,9 @@ async fn contact_journey(
             let evidence =
                 crate::apps::contact_evidence(args["name"].as_str().unwrap_or(""), &found);
             async move {
-                if tool == "find_contact" {
+                if let Some(error) = failure {
+                    Err(error.to_string())
+                } else if tool == "find_contact" {
                     Ok(evidence)
                 } else {
                     Err("Unexpected app read".into())
@@ -1017,6 +1029,36 @@ for line in sys.stdin:
         saved.contract.provenance[&step.id]["to"].origin,
         "user_approved_edit"
     );
+    state.models.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_contacts_read_that_fails_still_drafts_the_email() {
+    // macOS refused Contacts access: Buntini's own lookup must not stop the draft.
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    assert 'find_contact' not in [t['name'] for t in req['tools']], 'one lookup only'
+    emit('tool_call',name='draft_email',arguments={'subject':'Lunch on Friday','body':'Are you free for lunch on Friday?'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let (state, task, flow) = contact_journey_reading(
+        dir.path(),
+        &["mail", "contacts"],
+        vec![],
+        Some("Allow Contacts for Buntini in System Settings."),
+        worker,
+    )
+    .await;
+    assert_eq!(task.state, "waiting_action");
+    assert_eq!(proposed_to(&task), "");
+    assert_eq!(flow.steps.len(), 2);
+    assert_eq!(flow.steps[0].tool, "find_contact");
+    assert_eq!(flow.steps[0].state, "cancelled");
+    assert_eq!(flow.steps[1].tool, "draft_email");
     state.models.shutdown().await;
 }
 

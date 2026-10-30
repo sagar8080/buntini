@@ -5,8 +5,9 @@ use crate::workflows::Step;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-/// Text outside quotation marks, keeping its case: quoted text is content the user is
-/// passing along (a message to rewrite, an email to answer), not who to write to.
+/// Text outside quotation marks and pasted `>` lines, keeping its case: quoted text is
+/// content the user is passing along (a message to rewrite, an email to answer), not who
+/// to write to. It drops exactly what `completion::unquoted` drops.
 fn outside_quotes(text: &str) -> String {
     let text = text.replace(['’', '‘'], "'").replace(['“', '”'], "\"");
     let chars: Vec<char> = text.chars().collect();
@@ -33,7 +34,20 @@ fn outside_quotes(text: &str) -> String {
         }
     }
     result
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
+
+/// Titles before a name: "Dr. Patel" is Patel, not a person called Dr.
+const TITLES: &[&str] = &["dr", "mr", "mrs", "ms", "mx", "miss", "prof", "sir", "dame"];
+
+/// Words after "to" that make someone other than a named person the recipient: "to my
+/// landlord", "to the team", "to this sender".
+const ROLE_STARTS: &[&str] = &[
+    "my", "our", "your", "his", "her", "their", "the", "a", "an", "this", "that",
+];
 
 /// Words that start a clause or a name position but are never a person to look up.
 const NOT_NAMES: &[&str] = &[
@@ -53,8 +67,9 @@ pub fn named_recipient(goal: &str) -> Option<String> {
     if text.contains('@') {
         return None;
     }
-    // Each word with whether a clause or name ends after it ("Ana," or "Ana's").
-    let words: Vec<(String, bool)> = text
+    // Each word with whether a clause or name ends after it ("Ana," or "Ana's"), and
+    // whether it was possessive.
+    let parsed: Vec<(String, bool, bool)> = text
         .split_whitespace()
         .filter_map(|raw| {
             let word = raw.trim_matches(|c: char| !c.is_alphanumeric());
@@ -66,8 +81,12 @@ pub fn named_recipient(goal: &str) -> Option<String> {
                 _ => (word, false),
             };
             let ends = possessive || !raw.ends_with(char::is_alphanumeric);
-            Some((word.to_string(), ends))
+            Some((word.to_string(), ends, possessive))
         })
+        .collect();
+    let words: Vec<(String, bool)> = parsed
+        .iter()
+        .map(|(word, ends, _)| (word.clone(), *ends))
         .collect();
     let capitalised = |word: &str| {
         word.chars().next().is_some_and(char::is_uppercase)
@@ -92,9 +111,23 @@ pub fn named_recipient(goal: &str) -> Option<String> {
         if !drafting {
             continue;
         }
+        let cue = word.to_lowercase();
+        // "to my landlord for Ana's birthday": the landlord is the recipient, so a name
+        // later in the request is not.
+        if cue == "to"
+            && words
+                .get(index + 1)
+                .is_some_and(|(word, _)| ROLE_STARTS.contains(&word.as_str()))
+        {
+            return None;
+        }
         let mut name = Vec::new();
         let mut next = index + 1;
         while let Some((word, ends)) = words.get(next) {
+            if name.is_empty() && TITLES.contains(&word.to_lowercase().as_str()) {
+                next += 1;
+                continue;
+            }
             if name.len() == 3 || !capitalised(word) {
                 break;
             }
@@ -105,6 +138,10 @@ pub fn named_recipient(goal: &str) -> Option<String> {
             }
         }
         if name.is_empty() {
+            continue;
+        }
+        // "for Ana's birthday" is about Ana, not to her.
+        if cue == "for" && parsed[next - 1].2 {
             continue;
         }
         // "to Ana and Sam": a draft goes to one person, so neither is chosen.
@@ -162,17 +199,37 @@ pub enum ContactRecipient {
     Several(Vec<ContactChoice>),
 }
 
-/// The latest verified Contacts read in this journal for a name the user wrote. Only a
-/// complete read with one person and one address decides the recipient; anything else
-/// is offered as choices, and a model's own guess never enters either.
+/// Lowercase whole words of a name, for comparing names without caring about case.
+fn name_words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Whether `name` is the one recipient the user named in `goal`. Any other person the
+/// request mentions ("ask whether Bob can join") is never who the draft goes to.
+pub fn is_named_recipient(goal: &str, name: &str) -> bool {
+    named_recipient(goal).is_some_and(|named| {
+        name_words(&named) == name_words(name) && user_named(goal, name)
+    })
+}
+
+/// The latest verified Contacts read in this journal for the one recipient the user
+/// named. Only a complete read with one person, whose name has every word the user
+/// wrote, and one address decides the recipient; anything else is offered as choices,
+/// and a model's own guess never enters either.
 pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
+    let Some(named) = named_recipient(goal) else {
+        return ContactRecipient::Unknown;
+    };
     let Some(step) = steps.iter().rev().find(|step| {
         step.tool == "find_contact"
             && !step.effect
             && step.state == "succeeded"
             && step.arguments["name"]
                 .as_str()
-                .is_some_and(|name| user_named(goal, name))
+                .is_some_and(|name| is_named_recipient(goal, name))
             && step.evidence.as_ref().is_some_and(|evidence| {
                 crate::apps::validate_evidence(&step.tool, &step.arguments, evidence, false).is_ok()
             })
@@ -190,7 +247,13 @@ pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
             .map(str::to_owned)
             .collect()
     };
-    if evidence["complete"] == true && records.len() == 1 {
+    // Contacts matches name prefixes, so "Ana" also finds "Anabel Reed": only a record
+    // whose name has every word the user wrote is the person they meant.
+    let same_person = |record: &Value| {
+        let have = name_words(record["name"].as_str().unwrap_or_default());
+        name_words(&named).iter().all(|word| have.contains(word))
+    };
+    if evidence["complete"] == true && records.len() == 1 && same_person(&records[0]) {
         if let [address] = &addresses(&records[0])[..] {
             return ContactRecipient::One {
                 address: address.clone(),
@@ -555,6 +618,8 @@ mod tests {
             ("Reply to Ana's email saying yes", "Ana"),
             ("Write back to Sam, thanks for the photos", "Sam"),
             ("Draft a message for Priya about Friday", "Priya"),
+            ("Draft an email to Dr. Patel about the results", "Patel"),
+            ("Draft an email to Ana Silva asking whether Bob can join Friday", "Ana Silva"),
         ] {
             assert_eq!(named_recipient(goal).as_deref(), Some(name), "{goal}");
         }
@@ -566,6 +631,9 @@ mod tests {
             "Draft an email for Monday's meeting",
             "Remind me to call Ana tomorrow",
             "Rewrite this: \"Draft an email to Bob saying hi\"",
+            "Draft a reply to this email:\n> Can you email to Bob the schedule?",
+            "Draft an email to my landlord for Ana's birthday",
+            "Write a message to my boss for Sam's farewell card",
         ] {
             assert_eq!(named_recipient(goal), None, "{goal}");
         }
@@ -659,6 +727,55 @@ mod tests {
         assert_eq!(contact_recipient("Draft an email to Ana", &[tampered]), ContactRecipient::Unknown);
         let nobody = lookup("Ana", vec![person("c-1", "Ana Silva", &[])], 1);
         assert_eq!(contact_recipient("Draft an email to Ana", &[nobody]), ContactRecipient::Unknown);
+    }
+
+    #[test]
+    fn only_a_lookup_of_the_named_recipient_addresses_the_draft() {
+        let bob = || lookup("Bob", vec![person("c-9", "Bob Reed", &["bob@example.com"])], 1);
+        // The lookup of Ana Silva found nobody; a lookup of Bob, whom the request only
+        // mentions, must not make Bob the recipient.
+        let goal = "Draft an email to Ana Silva asking whether Bob can join Friday";
+        let steps = vec![lookup("Ana Silva", vec![], 0), bob()];
+        assert_eq!(contact_recipient(goal, &steps), ContactRecipient::Unknown);
+        let mut contract = crate::task_contract::TaskContract::from_request(goal);
+        contract.refresh(goal, &steps);
+        assert!(!contract.constraints.iter().any(|c| c.field == "to"));
+        assert!(contract.recipient_choices(&steps).is_empty());
+        assert!(contract
+            .validate_proposal("find_contact", &json!({"name":"Bob"}), &steps[..1])
+            .is_err());
+        assert!(contract
+            .validate_proposal("find_contact", &json!({"name":"ana silva"}), &[])
+            .is_ok());
+        // Once Ana Silva was looked up, Contacts is no longer offered for the draft.
+        let menu = json!([{"name":"find_contact","parameters":{"properties":{}}},{"name":"draft_email","parameters":{"properties":{}}}]);
+        let offered = |steps: &[Step]| -> Vec<String> {
+            contract.relevant_tools(steps, &menu).as_array().unwrap().iter()
+                .map(|tool| tool["name"].as_str().unwrap().to_string()).collect()
+        };
+        assert!(offered(&[]).contains(&"find_contact".to_string()));
+        assert!(!offered(&steps[..1]).contains(&"find_contact".to_string()));
+        // "to Ana and Sam" names nobody to look up, so a lookup of Sam decides nothing.
+        let goal = "Draft an email to Ana and Sam about Friday";
+        let sam = lookup("Sam", vec![person("c-3", "Sam Lee", &["sam@example.com"])], 1);
+        assert_eq!(contact_recipient(goal, &[sam]), ContactRecipient::Unknown);
+    }
+
+    #[test]
+    fn a_single_prefix_match_is_offered_not_chosen() {
+        // Contacts matches name prefixes: Anabel is not the Ana the user wrote.
+        let goal = "Draft an email to Ana about lunch";
+        let steps = vec![lookup("Ana", vec![person("c-4", "Anabel Reed", &["anabel@example.com"])], 1)];
+        assert_eq!(
+            contact_recipient(goal, &steps),
+            ContactRecipient::Several(vec![ContactChoice {
+                name: "Anabel Reed".into(),
+                address: "anabel@example.com".into()
+            }])
+        );
+        let mut contract = crate::task_contract::TaskContract::from_request(goal);
+        contract.refresh(goal, &steps);
+        assert!(!contract.constraints.iter().any(|c| c.field == "to"));
     }
 
     #[test]

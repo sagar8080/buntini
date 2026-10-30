@@ -3095,7 +3095,8 @@ where
         }) {
             // "Draft an email to Ana": look Ana up in Contacts before drafting, by the
             // name the user wrote, so the model never has to guess her address. Without
-            // the Apple helper there is nothing to read, and the draft goes ahead as before.
+            // the Apple helper there is nothing to read, and when the read fails (access
+            // denied, an older helper) the draft goes ahead unaddressed as before.
             Some(crate::planning::BoundAction {
                 tool: "find_contact",
                 arguments: json!({"name":name}),
@@ -3175,6 +3176,10 @@ where
         }
         flow.contract.fill_resolved_fields(&name, &mut args);
         flow.contract.validate_proposal(&name, &args, &flow.steps)?;
+        // Looking up the person a draft is for is a convenience, not a read the user
+        // asked for: if Contacts can't be read, the draft goes ahead without an address.
+        let optional_read = name == "find_contact"
+            && flow.contract.contact_lookup(&flow.steps).as_deref() == args["name"].as_str();
         if crate::apps::READ_TOOLS.contains(&name.as_str()) {
             args = Value::Object(crate::apps::validate(&name, &args)?);
             if name == "control_music" {
@@ -3364,6 +3369,10 @@ where
         };
         let (status, evidence) = match result {
             Ok(value) => ("succeeded", value),
+            Err(error) if optional_read => (
+                "cancelled",
+                json!({"error":error,"executed":true,"reason":"Contacts could not be read, so the draft is left for you to address."}),
+            ),
             Err(error) => (
                 if effect { "unknown" } else { "failed" },
                 json!({"error":error}),
