@@ -50,6 +50,7 @@ pub struct Settings {
     pub voice_rate: u32,
     pub notifications_enabled: bool,
     /// A short brief from today's calendar and reminders when you first open Buntini each day.
+    /// Mirrors the built-in morning brief routine, which is what decides whether it runs.
     pub morning_brief: bool,
     /// Open Buntini when you log in, through macOS login items. Saved only as
     /// what macOS confirmed.
@@ -416,6 +417,33 @@ pub struct AuditEntry {
     pub detail: String,
     pub created_at: String,
 }
+/// Something Buntini does on its own at a set time ("every weekday at 8, brief me"),
+/// approved once by the user. The morning brief is the built-in one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Routine {
+    pub id: String,
+    /// The request run each time, in the user's own words.
+    pub task: String,
+    /// every_day, weekdays, weekends or a weekday name such as monday.
+    pub days: String,
+    /// Local time as HH:MM.
+    pub time: String,
+    pub enabled: bool,
+    /// The morning brief: it runs when you first open Buntini each day, not on the clock,
+    /// and can be paused but not deleted.
+    #[serde(default)]
+    pub built_in: bool,
+    pub created_at: String,
+    /// The next scheduled run (RFC 3339, UTC); empty for the built-in brief.
+    pub next_run_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSearch {
@@ -539,6 +567,7 @@ pub struct Bootstrap {
     pub audit: Vec<AuditEntry>,
     pub saved_searches: Vec<SavedSearch>,
     pub price_watches: Vec<PriceWatch>,
+    pub routines: Vec<Routine>,
     pub os_update_check: Option<OsUpdateCheck>,
     /// When the user last started a new topic; earlier turns are not remembered.
     pub conversation_start: Option<String>,
