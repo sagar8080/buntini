@@ -267,6 +267,13 @@ impl Store {
         self.db
             .execute("DELETE FROM conversation_turns WHERE task_id=?1", [id])
             .map_err(|e| e.to_string())?;
+        // The emails a "What needs a reply?" turn listed go with that turn.
+        self.db
+            .execute(
+                "DELETE FROM preferences WHERE key=?1 AND json_extract(value,'$.taskId')=?2",
+                [crate::triage::LISTING, id],
+            )
+            .map_err(|e| e.to_string())?;
         crate::memory_index::purge_record(&self.db, "history", id)?;
         self.bump_index();
         Ok(())
@@ -531,7 +538,7 @@ impl Store {
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start');").map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');").map_err(|e| e.to_string())?;
         // Earlier conversations and folder text leave the memory index with them.
         crate::memory_index::purge(&tx, "history", None)?;
         crate::memory_index::purge(&tx, "files", None)?;

@@ -15,7 +15,7 @@ const labels: Record<string, string> = { complete: 'Complete', ready: 'Next', pe
 const steps: Record<string, string> = {
   read_mail: 'Read your email', read_calendar: 'Read your calendar', read_reminders: 'Read your reminders', find_notes: 'Find notes', search_files: 'Search your files',
   search_memory: 'Look through what I remember', read_page: 'Read the page', read_source: 'Read a source', read_evidence: 'Check what was found',
-  add_reminder: 'Add a reminder', add_calendar_event: 'Add a calendar event', create_note: 'Write a note', draft_email: 'Draft an email', set_timer: 'Set a timer',
+  add_reminder: 'Add a reminder', add_calendar_event: 'Add a calendar event', create_note: 'Write a note', draft_email: 'Draft an email', reply_email: 'Reply to an email', set_timer: 'Set a timer',
   open_link: 'Open a link', open_app: 'Open an app', run_shortcut: 'Run a shortcut', create_saved_search: 'Save a search', create_price_watch: 'Watch a price',
 };
 export const stepLabel = (tool: string) => steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));

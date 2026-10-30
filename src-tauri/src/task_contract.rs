@@ -373,6 +373,7 @@ fn verified_write(step: &Step) -> bool {
             "add_calendar_event",
             "create_note",
             "draft_email",
+            "reply_email",
             "create_saved_search",
             "create_price_watch",
             "remember",
@@ -1067,12 +1068,26 @@ impl TaskContract {
         };
         for constraint in self.constraints.iter().filter(|c| {
             c.outcome_id.as_deref() == Some(&outcome.id)
-                && ["contact_record", "focus_referent"].contains(&c.source.as_str())
+                && ["contact_record", "focus_referent", "mail_listing"].contains(&c.source.as_str())
         }) {
             fields
                 .entry(constraint.field.clone())
                 .or_insert_with(|| constraint.value.clone());
         }
+    }
+    /// Whether a requested reply has nothing bound for the email it answers. Only the
+    /// email on screen or one Buntini listed can be (recipes.rs); without either there
+    /// is nothing to reply to, so the task says so instead of planning a guess.
+    pub fn unbound_reply(&self) -> bool {
+        self.outcomes.iter().any(|o| {
+            o.kind == "write"
+                && o.status != "complete"
+                && o.tool.as_deref() == Some("reply_email")
+                && !self
+                    .constraints
+                    .iter()
+                    .any(|c| c.outcome_id.as_deref() == Some(&o.id) && c.field == "message")
+        })
     }
     pub fn next_outcome(&self) -> Option<&Outcome> {
         self.outcomes.iter().find(|o| o.status != "complete")
@@ -1161,6 +1176,13 @@ impl TaskContract {
             .filter(|c| c.outcome_id == outcome_id && c.source == "contact_record")
             .cloned()
             .collect();
+        // The email on screen or one Buntini listed: Mail's own values, not the model's.
+        let mail: Vec<_> = self
+            .constraints
+            .iter()
+            .filter(|c| c.outcome_id == outcome_id && ["focus_referent", "mail_listing"].contains(&c.source.as_str()))
+            .cloned()
+            .collect();
         let fields = self.provenance.entry(step_id.into()).or_default();
         for (field, value) in arguments.as_object().into_iter().flatten() {
             if fields.get(field).is_some_and(|p| p.approved) {
@@ -1192,6 +1214,15 @@ impl TaskContract {
                 provenance.field_ref = Some("emails/0".into());
                 provenance.source = Some(
                     json!({"kind":"task_constraint","source":"contacts","outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
+                );
+            } else if let Some(constraint) = mail
+                .iter()
+                .find(|c| c.field == *field && c.value == *value)
+            {
+                provenance.origin = constraint.source.clone();
+                provenance.field_ref = Some(field.clone());
+                provenance.source = Some(
+                    json!({"kind":"task_constraint","source":"mail","outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
                 );
             }
             if let Some(source) = source {
@@ -1874,7 +1905,36 @@ mod tests {
             assert!(contract.validate_proposal("draft_email", &json!({"subject":"Re:","body":"Hi"}), &[]).is_err());
         }
         let reply = TaskContract::from_request("Reply to Ana's email saying yes");
-        assert!(reply.outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("draft_email")));
+        assert!(reply.outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("reply_email")));
+    }
+
+    #[test]
+    fn a_reply_answers_a_bound_email_and_a_new_email_never_does() {
+        let goal = "Reply to the second one saying yes";
+        let mut reply = TaskContract::from_request(goal);
+        reply.refresh(goal, &[]);
+        let outcome = reply.next_outcome().unwrap();
+        assert_eq!((outcome.kind.as_str(), outcome.tool.as_deref()), ("write", Some("reply_email")));
+        assert_eq!(outcome.required_fields, ["body"], "the model writes only the body");
+        // Until the email it answers is bound, there is nothing to reply to.
+        assert!(reply.unbound_reply());
+        assert!(reply.validate_proposal("draft_email", &json!({"to":"ana@example.com","subject":"Re: Lease","body":"Yes"}), &[]).is_err());
+        for (field, value) in [("message", "4821"), ("message_id", "m-1@x.com"), ("to", "ana@example.com"), ("subject", "Re: Lease")] {
+            assert!(reply.bind_write_field("reply_email", field, json!(value), "mail_listing"));
+        }
+        reply.refresh(goal, &[]);
+        assert!(!reply.unbound_reply());
+        let mut proposal = json!({"body":"Yes, that works."});
+        reply.fill_resolved_fields("reply_email", &mut proposal);
+        assert_eq!(proposal["message"], "4821");
+        assert_eq!(proposal["to"], "ana@example.com");
+        assert!(reply.validate_proposal("reply_email", &proposal, &[]).is_ok());
+        let mut redirected = proposal.clone();
+        redirected["message"] = json!("99");
+        assert!(reply.validate_proposal("reply_email", &redirected, &[]).is_err(), "a model can't pick another email");
+        let fresh = TaskContract::from_request("Draft an email to Ana about Friday");
+        assert!(!fresh.unbound_reply());
+        assert!(fresh.outcomes.iter().all(|outcome| outcome.tool.as_deref() != Some("reply_email")));
     }
 
     #[test]

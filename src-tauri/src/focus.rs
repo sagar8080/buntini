@@ -701,11 +701,11 @@ mod tests {
         for prompt in ["reply to this saying yes", "Please write back to her", "respond to him: no"] {
             assert!(replies_to_this(prompt), "{prompt}");
         }
-        // Whenever a reply needs a Mail draft, it is the email on screen that it answers,
-        // so its sender is bound rather than left to the model.
+        // Whenever "this" needs a threaded reply, it is the email on screen that it answers,
+        // so that email and its sender are bound rather than left to the model.
         for prompt in ["Reply to her question saying yes", "reply to this saying yes", "respond to this question in one sentence"] {
-            let drafts = crate::completion::requested_actions(prompt).0.contains(&"draft_email");
-            assert_eq!(replies_to_this(prompt), drafts, "{prompt}");
+            let replies = crate::completion::requested_actions(prompt).0.contains(&"reply_email");
+            assert_eq!(replies_to_this(prompt), replies, "{prompt}");
         }
         for prompt in [
             "reply to Ana",

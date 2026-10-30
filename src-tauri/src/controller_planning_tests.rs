@@ -1094,3 +1094,89 @@ for line in sys.stdin:
     assert_eq!(flow.steps[0].tool, "draft_email");
     state.models.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_reply_to_a_listed_email_answers_that_email_and_the_model_writes_only_the_body() {
+    // The model sees a body field and nothing else: which email, its sender and subject
+    // come from what "What needs a reply?" listed.
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    names=[t['name'] for t in req['tools']]
+    assert 'draft_email' not in names, names
+    reply=[t for t in req['tools'] if t['name']=='reply_email'][0]
+    assert list(reply['parameters']['properties'])==['body'], reply
+    emit('tool_call',name='reply_email',arguments={'body':'Yes, Friday works for me.'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let goal = "Reply to the second one saying yes";
+    let (state, settings, mut task, mut flow) = fixture_task_state(dir.path(), goal, worker);
+    let settings = Settings { apps: vec!["mail".into()], ..settings };
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+    flow.offered = offered.iter().map(|tool| tool.to_string()).collect();
+    let listed = crate::triage::Listed {
+        number: 2,
+        id: "4821".into(),
+        message_id: "lease-7@example.com".into(),
+        sender: "Ana Silva <ana@example.com>".into(),
+        subject: "Lease".into(),
+        received: "2026-10-21 09:00".into(),
+    };
+    assert_eq!(crate::triage::pick(goal), Some(crate::triage::Pick::Number(2)));
+    assert!(crate::recipes::reply_to_listed(&listed, &mut flow.contract));
+    continue_workflow_using(
+        &state,
+        &mut task,
+        &Channel::new(|_| Ok(())),
+        Arc::new(AtomicBool::new(false)),
+        &settings,
+        &mut flow,
+        |_, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    assert_eq!(task.state, "waiting_action");
+    let action = task.action.clone().unwrap();
+    assert_eq!(action["tool"], "reply_email");
+    let shown = |key: &str| {
+        action["fields"].as_array().unwrap().iter().find(|field| field["key"] == key).map(|field| (field["value"].clone(), field["kind"].clone()))
+    };
+    assert_eq!(shown("answers"), Some((json!("Ana Silva · “Lease” · Wed 21 Oct"), json!("fixed"))));
+    assert_eq!(shown("to"), Some((json!("ana@example.com"), json!("fixed"))));
+    assert_eq!(shown("subject"), Some((json!("Re: Lease"), json!("text"))));
+    assert_eq!(shown("body"), Some((json!("Yes, Friday works for me."), json!("long"))));
+    assert!(shown("message").is_none() && shown("message_id").is_none());
+    let step = flow.steps.last().unwrap().clone();
+    assert_eq!(step.arguments["message"], "4821");
+    assert_eq!(flow.contract.provenance[&step.id]["message"].origin, "mail_listing");
+    // The sheet sends back what it shows; an edited recipient can't redirect the reply.
+    let sheet = json!({"answers":"Someone else","to":"eve@example.com","subject":"Re: Lease","body":"Yes, Friday works."});
+    let dispatched = std::sync::Mutex::new(None);
+    run_workflow_action_with_reads(
+        &state,
+        &step.id,
+        sheet,
+        &Channel::new(|_| Ok(())),
+        |tool, args, _| {
+            *dispatched.lock().unwrap() = Some(args.clone());
+            async move { fixture_receipt(tool, args) }
+        },
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    let sent = dispatched.into_inner().unwrap().unwrap();
+    assert_eq!(sent["to"], "ana@example.com");
+    assert_eq!(sent["message"], "4821");
+    assert_eq!(sent["message_id"], "lease-7@example.com");
+    assert_eq!(sent["answers"], "Ana Silva · “Lease” · Wed 21 Oct");
+    assert_eq!(sent["body"], "Yes, Friday works.");
+    let saved = state.store.lock().unwrap().workflow(&task.id).unwrap().unwrap();
+    assert_eq!(saved.steps.last().unwrap().state, "succeeded");
+    assert_eq!(saved.contract.provenance[&step.id]["body"].origin, "user_approved_edit");
+    state.models.shutdown().await;
+}
