@@ -139,6 +139,19 @@ fn addressed_reply(tokens: &[&str]) -> bool {
     !object.is_empty() && !answered_in_chat(object)
 }
 
+/// "Draft a reply to this email", "write a response to the second one": the same form
+/// `focus::reply_object` reads the target from.
+fn noun_reply(tokens: &[&str]) -> bool {
+    let mut rest = &tokens[1..];
+    if rest.first().is_some_and(|word| ["a", "an", "my"].contains(word)) {
+        rest = &rest[1..];
+    }
+    match rest {
+        [noun, "to", object @ ..] if ["reply", "response"].contains(noun) => !object.is_empty() && !answered_in_chat(object),
+        _ => false,
+    }
+}
+
 /// Whether a clause asks to change a home device ("turn on the living room lights", "lock
 /// the front door", "set the thermostat to 20"), which Buntini does with one of the
 /// user's shortcuts. Mac settings ("turn on dark mode") are not devices.
@@ -341,11 +354,9 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 // to her", "draft a reply to this email"); a new email is a draft. Neither
                 // is ever sent: the user sends it from Mail.
                 "reply" | "respond" | "write" if addressed_reply(&tokens) => Some("reply_email"),
-                "draft" | "prepare" | "write"
-                    if has(&["reply", "response"]) && has(&["email", "mail", "message"]) =>
-                {
-                    Some("reply_email")
-                }
+                // Only when the reply is what to write ("draft a reply to this email");
+                // "an email to my landlord in response to …" is a new email.
+                "draft" | "prepare" | "write" if noun_reply(&tokens) => Some("reply_email"),
                 "draft" | "prepare" | "write" if has(&["email", "mail", "message"]) => {
                     Some("draft_email")
                 }
@@ -1271,11 +1282,30 @@ mod tests {
             "reply to the second one saying thanks",
             "draft a reply to this email",
             "write back to her email",
+            "draft a reply to this email saying I'll be there",
+            "write a reply to the second one",
+            "prepare a response to Ana's message",
         ] {
             assert_eq!(requested_actions(prompt), (vec!["reply_email"], false), "{prompt}");
         }
+        // Whatever is classed as a reply to a named email can also be bound to one.
+        for prompt in [
+            "reply to this saying yes",
+            "draft a reply to this email saying I'll be there",
+            "please write a reply to her",
+        ] {
+            assert!(crate::focus::replies_to_this(prompt), "{prompt}");
+        }
+        assert_eq!(crate::triage::pick("write a reply to the second one"), Some(crate::triage::Pick::Number(2)));
+        assert_eq!(crate::triage::pick("prepare a response to Ana's message"), Some(crate::triage::Pick::Sender("ana".into())));
         // A new email is a draft, never a reply in someone's thread.
-        for prompt in ["Draft an email to my landlord", "write an email to Ana about Friday", "prepare a message for Sam"] {
+        for prompt in [
+            "Draft an email to my landlord",
+            "write an email to Ana about Friday",
+            "prepare a message for Sam",
+            "Draft an email to my landlord in response to the rent increase",
+            "Write a message to Sam with my response to his offer",
+        ] {
             assert_eq!(requested_actions(prompt), (vec!["draft_email"], false), "{prompt}");
         }
         for prompt in [

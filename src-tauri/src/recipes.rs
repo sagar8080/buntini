@@ -128,7 +128,7 @@ impl Recipe for ReplyToThis {
         let Some(mail) = referent.mail() else {
             return false;
         };
-        crate::focus::replies_to_this(goal)
+        replies_on_screen(goal, referent)
             && bind_reply(
                 contract,
                 [&mail.id, &mail.message_id, &mail.sender, &mail.subject],
@@ -137,6 +137,24 @@ impl Recipe for ReplyToThis {
             )
     }
 }
+
+/// Whether `goal` replies to the one email open in Mail: it says "reply to this" (or
+/// "her", "the email"), exactly one email is selected (a conversation selection is every
+/// message in it, and the first need not be the one the user reads), and any sender it
+/// names ("the email from Ana") is that email's sender.
+pub fn replies_on_screen(goal: &str, referent: &Referent) -> bool {
+    let Some(mail) = referent.mail() else {
+        return false;
+    };
+    let named_other = match crate::triage::pick(goal) {
+        Some(crate::triage::Pick::Sender(name)) => !crate::triage::from_sender(&name, &mail.sender),
+        _ => false,
+    };
+    mail.selected <= 1 && !named_other && crate::focus::replies_to_this(goal)
+}
+
+/// What the task says when a reply names the open email but several are selected.
+pub const SEVERAL_SELECTED: &str = "More than one email is selected in Mail. Select just the email to answer, then ask again.";
 
 /// What the task says when a reply has no email to answer.
 pub const NOTHING_TO_REPLY: &str = "I can reply only to an email I can see. Open it in Mail and ask again, or ask “What needs a reply?” and then say which one. For a new email, say “Draft an email to …”.";
@@ -414,6 +432,32 @@ mod tests {
         // A sender without an address can't be replied to.
         let mut contract = TaskContract::from_request(goal);
         assert!(prepare(goal, &mail("Ana Silva", "Friday"), &mut contract).is_empty());
+    }
+
+    #[test]
+    fn a_reply_binds_the_open_email_only_when_it_is_the_one_meant() {
+        let open = mail("Sam Lee <sam@example.com>", "Friday");
+        // The user named someone else: the open email isn't the one to answer.
+        let goal = "reply to the email from Ana saying this works";
+        let mut contract = TaskContract::from_request(goal);
+        assert!(prepare(goal, &open, &mut contract).is_empty());
+        assert!(contract.unbound_reply());
+        let goal = "reply to the email from Sam saying this works";
+        let mut contract = TaskContract::from_request(goal);
+        assert_eq!(prepare(goal, &open, &mut contract), ["reply_to_this"]);
+        // A whole conversation selected: which message is meant isn't known.
+        let Referent::Mail(mut several) = open else { unreachable!() };
+        several.selected = 3;
+        let goal = "reply to this saying yes";
+        let mut contract = TaskContract::from_request(goal);
+        assert!(prepare(goal, &Referent::Mail(several), &mut contract).is_empty());
+        // A page in front doesn't answer "the second one", so the saved list does.
+        let page = Referent::Page { browser: "safari", title: "Docs".into() };
+        assert!(!replies_on_screen("reply to the second one saying this works for me", &page));
+        // The noun form binds like the verb form.
+        let goal = "draft a reply to this email saying I'll be there";
+        let mut contract = TaskContract::from_request(goal);
+        assert_eq!(prepare(goal, &mail("Ana <ana@example.com>", "Friday"), &mut contract), ["reply_to_this"]);
     }
 
     #[test]

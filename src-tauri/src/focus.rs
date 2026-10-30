@@ -240,11 +240,9 @@ pub fn reminds_about_this(prompt: &str) -> bool {
 /// "write back to her"), rather than to someone it names.
 pub fn replies_to_this(prompt: &str) -> bool {
     let text = crate::skills::words(prompt);
-    let Some((_, rest)) = crate::skills::from_verb(&text, &["reply", "respond", "write"]) else {
+    let Some((rest, _)) = reply_object(&text) else {
         return false;
     };
-    let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
-    let rest = rest.strip_prefix("to ").unwrap_or(rest);
     // "Respond to this question in one sentence" is answered in chat, not replied to;
     // the same test decides whether the request needs a Mail draft at all.
     if crate::completion::answered_in_chat(&rest.split(' ').collect::<Vec<_>>()) {
@@ -256,6 +254,31 @@ pub fn replies_to_this(prompt: &str) -> bool {
     ]
     .iter()
     .any(|target| rest == *target || rest.starts_with(&format!("{target} ")))
+}
+
+/// What a reply request answers, in its own words (from `skills::words`): the rest after
+/// "reply to", "write back to" or "draft a reply to", e.g. "this email saying yes" or "the
+/// second one". The flag says whether "to" came before it. Every reply binder reads the
+/// target through this, so a request classed as a reply is one they can bind.
+pub fn reply_object(text: &str) -> Option<(&str, bool)> {
+    if let Some((verb, rest)) = crate::skills::from_verb(text, &["reply", "respond", "write"]) {
+        if verb != "write" || noun_reply(rest).is_none() {
+            let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
+            return Some(match rest.strip_prefix("to ") {
+                Some(object) => (object, true),
+                None => (rest, false),
+            });
+        }
+    }
+    let (_, rest) = crate::skills::from_verb(text, &["draft", "prepare", "write"])?;
+    noun_reply(rest).map(|object| (object, true))
+}
+
+/// "a reply to this email" → "this email": a reply or response as the thing to write.
+fn noun_reply(rest: &str) -> Option<&str> {
+    let rest = ["a ", "an ", "my "].iter().find_map(|article| rest.strip_prefix(article)).unwrap_or(rest);
+    let rest = rest.strip_prefix("reply ").or_else(|| rest.strip_prefix("response "))?;
+    rest.strip_prefix("to ").filter(|object| !object.is_empty())
 }
 
 /// "Ana Silva <ana@example.com>" as "ana@example.com"; a bare address as itself.

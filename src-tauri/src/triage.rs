@@ -343,11 +343,11 @@ fn number(word: &str) -> Option<usize> {
 /// which mean the email on screen.
 pub fn pick(prompt: &str) -> Option<Pick> {
     let text = crate::skills::words(prompt);
-    let (_, rest) = crate::skills::from_verb(&text, &["reply", "respond", "write"])?;
-    let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
-    let rest = rest.strip_prefix("to ")?;
+    let (rest, true) = crate::focus::reply_object(&text)? else {
+        return None;
+    };
     let words: Vec<&str> = rest.split(' ').collect();
-    let mut at = usize::from(words.first() == Some(&"the"));
+    let mut at = usize::from(words.first().is_some_and(|word| ["the", "this", "that"].contains(word)));
     if words.get(at) == Some(&"last") {
         return Some(Pick::Last);
     }
@@ -393,14 +393,7 @@ pub fn find<'a>(pick: &Pick, emails: &'a [Listed]) -> Result<&'a Listed, String>
         Pick::Last => emails.last().ok_or_else(|| "I didn’t list any emails.".to_string()),
         Pick::Sender(name) => {
             let wanted: Vec<&str> = name.split(' ').collect();
-            let from = |email: &&Listed| {
-                let lower = email.sender.to_lowercase();
-                let display: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'').filter(|w| !w.is_empty()).collect();
-                let local = crate::focus::sender_address(&email.sender)
-                    .and_then(|address| address.split('@').next().map(str::to_string))
-                    .unwrap_or_default();
-                wanted.iter().all(|word| display.contains(word)) || (wanted.len() == 1 && local == wanted[0])
-            };
+            let from = |email: &&Listed| from_sender(name, &email.sender);
             let shown: String = wanted
                 .iter()
                 .map(|word| {
@@ -417,6 +410,18 @@ pub fn find<'a>(pick: &Pick, emails: &'a [Listed]) -> Result<&'a Listed, String>
             }
         }
     }
+}
+
+/// Whether `sender` ("Ana Silva <ana@example.com>") is who the user named ("ana", "ana
+/// silva").
+pub fn from_sender(name: &str, sender: &str) -> bool {
+    let wanted: Vec<&str> = name.split(' ').collect();
+    let lower = sender.to_lowercase();
+    let display: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'').filter(|w| !w.is_empty()).collect();
+    let local = crate::focus::sender_address(sender)
+        .and_then(|address| address.split('@').next().map(str::to_string))
+        .unwrap_or_default();
+    wanted.iter().all(|word| display.contains(word)) || (wanted.len() == 1 && local == wanted[0])
 }
 
 /// The count for the morning brief, e.g. "2 emails look like they need a reply: Ana, Sam."
