@@ -194,7 +194,7 @@ Effort scale: S is under half a day, M is 1–3 days, L is about a week, XL is s
 4. **Threaded Mail replies** (M). Bind `in_reply_to` from `Referent::Mail.message_id` and from triage ids, then use Mail's `reply`. Makes "needs a reply → reply to it" actually useful. Depends on B11 and B7.
 5. **Change existing items** (L). complete_reminder, update_calendar_event and append_to_note, with item ids bound to the source, before/after shown in the sheet, and a receipt that reads the item back. Makes "My day" actionable.
 6. **Scheduled routines** (L). Requires `run_task_headless(app, prompt, sink)`, the routines table and item 2. The morning brief becomes a built-in routine.
-7. **Read PDF, Word, RTF and Pages files in the helper** (M). Merge the duplicate extension lists (`local.rs:130-155`, `indexer.rs:61-82`). Parse in the helper process with caps.
+7. **Read PDF, Word, RTF and Pages files in the helper** (M). Merge the duplicate extension lists (`local.rs:130-155`, `indexer.rs:61-82`). Parse in the helper process with caps. *Done in iteration 2: one list in `local::content_kind`; `--extract-document` in the helper. Pages files without a PDF preview stay name-only.*
 8. **Proactive nudges from local data** (M). Meeting prep, people waiting on a reply, reminders due. Needs C3's cached triage and A2's no-launch reads.
 9. **List the user's Shortcuts for run_shortcut** (S). Smart home through Shortcuts. Cheap, and could be done earlier as filler.
 10. **Hands-free voice** (L). Partial results, then end-of-speech detection and conversation mode, then an optional wake word last.
