@@ -161,7 +161,10 @@ pub fn mentions_this(prompt: &str) -> bool {
         let before = |back: usize| index.checked_sub(back).map(|at| words[at]);
         match *word {
             "selection" | "selected" => true,
-            "this" | "these" => words.get(index + 1).is_none_or(|next| !TIMES.contains(next)),
+            // "this morning's emails" is a time too.
+            "this" | "these" => words
+                .get(index + 1)
+                .is_none_or(|next| !TIMES.contains(&next.trim_end_matches("'s"))),
             "him" | "her" => {
                 before(1).is_some_and(|word| ADDRESSING.contains(&word))
                     || (before(1) == Some("to")
@@ -170,6 +173,44 @@ pub fn mentions_this(prompt: &str) -> bool {
             _ => false,
         }
     })
+}
+
+/// Nouns after "this" that name something on screen ("this email", "this page").
+const ON_SCREEN: &[&str] = &[
+    "email", "mail", "message", "page", "tab", "site", "website", "article", "window", "file",
+    "files", "folder", "document", "doc", "pdf", "screen", "selection", "image", "picture",
+    "photo", "screenshot", "note", "link", "video", "thread", "chart", "table", "spreadsheet",
+];
+
+/// Words that may follow a bare "this" without giving it a meaning ("explain this please").
+const FILLER: &[&str] = &["please", "for", "me", "now", "again", "quickly", "briefly", "up"];
+
+/// Whether a request is plainly about what is on screen ("summarise this", "reply to
+/// her", "what's on this page"), so it can't be answered without reading it. "Is this
+/// sentence correct" or "how do I do this in Python" are not.
+pub fn plainly_on_screen(prompt: &str) -> bool {
+    if replies_to_this(prompt) || reminds_about_this(prompt) {
+        return true;
+    }
+    let text = crate::skills::words(prompt);
+    let words: Vec<&str> = text.split(' ').collect();
+    words.iter().enumerate().any(|(index, word)| match *word {
+        "selection" | "selected" => true,
+        "this" | "these" => {
+            words.get(index + 1).is_some_and(|next| ON_SCREEN.contains(next))
+                || words[index + 1..].iter().all(|word| FILLER.contains(word))
+        }
+        _ => false,
+    })
+}
+
+/// Whether the request itself holds what "this" means: text after a colon or in quotes
+/// ("Translate this to Spanish: good morning").
+fn carries_its_own_text(prompt: &str) -> bool {
+    prompt
+        .split_once(':')
+        .is_some_and(|(_, rest)| rest.chars().filter(|c| c.is_alphanumeric()).count() >= 2)
+        || prompt.chars().filter(|c| matches!(c, '"' | '“' | '”')).count() >= 2
 }
 
 /// Whether a request asks for a reminder about the thing on screen itself
@@ -202,12 +243,9 @@ pub fn replies_to_this(prompt: &str) -> bool {
     };
     let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
     let rest = rest.strip_prefix("to ").unwrap_or(rest);
-    // "Respond to this question in one sentence" is answered in chat, not replied to.
-    if rest
-        .split(' ')
-        .nth(1)
-        .is_some_and(|noun| crate::completion::ANSWERED_IN_CHAT.contains(&noun))
-    {
+    // "Respond to this question in one sentence" is answered in chat, not replied to;
+    // the same test decides whether the request needs a Mail draft at all.
+    if crate::completion::answered_in_chat(&rest.split(' ').collect::<Vec<_>>()) {
         return false;
     }
     [
@@ -326,6 +364,9 @@ pub enum ThisContext {
     /// It couldn't be read: an app to allow, a private window or a password field. The
     /// user sees why, as they do when a skill asks about "this".
     Refused(String),
+    /// It couldn't be read, but the request may not need it ("is this a good idea?"): the
+    /// model is told why and answers from what the user wrote.
+    Unread(String),
 }
 
 /// Resolves "this" for the model path, under the same app checks as the skill path and
@@ -336,11 +377,15 @@ pub async fn this_context(
     settings: &Settings,
     locality: Locality,
 ) -> ThisContext {
-    let Some(snapshot) = snapshot.filter(|_| mentions_this(prompt)) else {
+    let on_screen = plainly_on_screen(prompt);
+    let Some(snapshot) = snapshot
+        .filter(|_| mentions_this(prompt) && (on_screen || !carries_its_own_text(prompt)))
+    else {
         return ThisContext::Nothing;
     };
     match referent(snapshot, settings, prompt).await {
-        Err(message) => ThisContext::Refused(message),
+        Err(message) if on_screen => ThisContext::Refused(message),
+        Err(message) => ThisContext::Unread(message),
         Ok(found)
             if found
                 .shares()
@@ -568,6 +613,27 @@ mod tests {
             ThisContext::Nothing
         );
         assert_eq!(this_context("summarise this", None, &settings, Locality::OnDevice).await, ThisContext::Nothing);
+        // A browser that isn't allowed is still in front: a request that carries its own
+        // text never reads it, and one that may not need it is answered with a note.
+        let chrome = snapshot("com.google.Chrome", "News", "", false);
+        for prompt in [
+            "Translate this to Spanish: good morning",
+            "Is this sentence correct: \"me and him went\"",
+            "how do I do this in Python: read a file line by line",
+            "Summarise this morning's emails",
+        ] {
+            assert_eq!(this_context(prompt, Some(&chrome), &settings, Locality::OnDevice).await, ThisContext::Nothing, "{prompt}");
+        }
+        assert!(matches!(
+            this_context("is this a good time to refinance", Some(&chrome), &settings, Locality::OnDevice).await,
+            ThisContext::Unread(message) if message.contains("Google Chrome")
+        ));
+        for prompt in ["summarise this", "what's on this page", "explain this please"] {
+            assert!(matches!(
+                this_context(prompt, Some(&chrome), &settings, Locality::OnDevice).await,
+                ThisContext::Refused(_)
+            ), "{prompt}");
+        }
     }
 
     #[test]
@@ -634,6 +700,12 @@ mod tests {
         }
         for prompt in ["reply to this saying yes", "Please write back to her", "respond to him: no"] {
             assert!(replies_to_this(prompt), "{prompt}");
+        }
+        // Whenever a reply needs a Mail draft, it is the email on screen that it answers,
+        // so its sender is bound rather than left to the model.
+        for prompt in ["Reply to her question saying yes", "reply to this saying yes", "respond to this question in one sentence"] {
+            let drafts = crate::completion::requested_actions(prompt).0.contains(&"draft_email");
+            assert_eq!(replies_to_this(prompt), drafts, "{prompt}");
         }
         for prompt in [
             "reply to Ana",

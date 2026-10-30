@@ -605,6 +605,10 @@ fn merge_touched(task: &mut TaskRecord, touched: &[String]) {
     }
 }
 
+/// How long an earlier turn counts as what "that" or "it" points back at: as long as a
+/// snapshot of the screen stays fresh.
+const FOLLOW_UP_SECONDS: i64 = 600;
+
 fn skill_history(turns: &[TaskRecord], boundary: Option<&str>, current_id: &str) -> Vec<String> {
     let mut turns: Vec<_> = turns
         .iter()
@@ -2072,7 +2076,7 @@ pub(crate) async fn web_tool(
     query: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<(Vec<Source>, Option<String>), String> {
-    if query.trim().is_empty() || query.len() > 2000 {
+    if query.trim().is_empty() || query.chars().count() > 2000 {
         return Err("Enter a web query of up to 2,000 characters.".into());
     }
     let cache_key = format!("{}:{}", settings.search_provider, query.trim());
@@ -2610,11 +2614,14 @@ async fn execute_with_settings(
     // skill: quicker and more dependable than a small model, and the reply says what
     // actually happened. Everything else goes to the model.
     if mode == "auto" && approved.is_none() {
+        // Follow-ups ("summarise that", "yes, play it") mean the last answer only while it
+        // is recent; a conversation left yesterday doesn't turn "that" away from the screen.
+        let boundary = (chrono::Utc::now() - chrono::Duration::seconds(FOLLOW_UP_SECONDS)).to_rfc3339();
         let recent: Vec<String> = {
             let store = state.store.lock().unwrap();
             skill_history(
                 &store.conversation_history_for_task(&task.id)?,
-                None,
+                Some(&boundary),
                 &task.id,
             )
         };
@@ -2759,7 +2766,10 @@ async fn execute_with_settings(
         crate::focus::ThisContext::Nothing => None,
         // Same as the skill path: say what to allow rather than answer without it.
         crate::focus::ThisContext::Refused(message) => return Err(message),
-        crate::focus::ThisContext::Withheld => Some(" The user may mean something on their screen, but your privacy settings don't let you see that kind of data. Say so rather than guessing what it is.".to_string()),
+        // The request may not need the screen ("is this a good idea?"): answer from what
+        // the user wrote, and say what's missing only if it does.
+        crate::focus::ThisContext::Unread(message) => Some(format!(" The user may mean something on their screen, but it couldn't be read ({message}). Answer from what they wrote; if the request depends on what's on screen, say so rather than guessing.")),
+        crate::focus::ThisContext::Withheld => Some(" The user may mean something on their screen, but your privacy settings don't let you see that kind of data. Answer from what they wrote; if the request depends on what's on screen, say so rather than guessing what it is.".to_string()),
         crate::focus::ThisContext::Seen(found) => {
             for share in found.shares() {
                 touch(task, share);
@@ -4252,6 +4262,11 @@ for line in sys.stdin:
         assert!(
             skill_history(&[previous.clone()], Some("2026-10-22T11:00:00Z"), "current").is_empty()
         );
+        // A turn from yesterday is not what "explain that" points back at today.
+        let fresh = (chrono::Utc::now() - chrono::Duration::seconds(FOLLOW_UP_SECONDS)).to_rfc3339();
+        assert!(skill_history(&[previous.clone()], Some(&fresh), "current").is_empty());
+        previous.created_at = crate::types::now();
+        assert_eq!(skill_history(&[previous.clone()], Some(&fresh), "current").len(), 1);
         previous.state = "error".into();
         assert!(skill_history(&[previous], None, "current").is_empty());
     }
