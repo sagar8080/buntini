@@ -567,14 +567,29 @@ pub async fn stop_speaking(state: State<'_, AppState>) -> Result<(), String> {
     state.voice.stop_speaking().await
 }
 #[tauri::command]
-pub async fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_recording(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    barge_in: Option<bool>,
+) -> Result<crate::voice::Listening, String> {
     // Keep startup inside the erasure/settings gate so it cannot reopen the
     // microphone while Delete everything is cancelling and clearing audio.
     let _gate = state.config_gate.lock().await;
     let settings = state.store.lock().unwrap().settings()?;
     state.models.voice_ready(&settings)?;
-    state.audit("microphone.start", "User started push to talk");
-    state.voice.start().await
+    let barge_in = barge_in.unwrap_or(false);
+    state.audit(
+        "microphone.start",
+        if barge_in {
+            "Voice conversation listening while Buntini answers"
+        } else {
+            "User started push to talk"
+        },
+    );
+    state
+        .voice
+        .start(crate::voice::Listen { barge_in }, crate::voice::events(app))
+        .await
 }
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {

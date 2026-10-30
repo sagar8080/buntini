@@ -16,7 +16,8 @@ import wave
 root = Path(sys.argv[1])
 binary = sys.argv[2]
 events = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()]
-assert [event["event"] for event in events] == ["ready", "stopped"], events
+assert [event["event"] for event in events] == ["ready", "level", "stopped"], events
+assert 0.06 <= events[1]["rms"] <= 0.08, events[1]
 stopped = events[-1]
 assert stopped["path"] == str(root / "test.wav")
 assert 90 <= stopped["durationMs"] <= 110, stopped
@@ -40,7 +41,33 @@ for args in (["--output", "relative.wav"], ["--output", str(root / "bad.wav"), "
     assert invalid.returncode != 0
     assert json.loads(invalid.stdout)["code"] == "invalid_arguments"
 assert not (root / "bad.wav").exists()
-print("Native audio checks passed: 16 kHz mono PCM, resampling, private permissions, duration and overwrite protection.")
+# Self-tests write to a named file; live capture alone needs none.
+assert json.loads(subprocess.run([binary, "--self-test"], capture_output=True, text=True).stdout)["code"] == "invalid_arguments"
+print("Native audio checks passed: 16 kHz mono PCM, resampling, loudness, private permissions, duration and overwrite protection.")
+PY
+
+# Live recognition: synthetic speech from macOS's own voice goes through the same
+# converter and recognizer as the microphone. Macs without macOS 26 or without the
+# speech model report why; the check never downloads a model or opens a microphone.
+say -o "$BUNTINI_AUDIO_TEST_DIR/speech.aiff" "What is on my calendar tomorrow morning?"
+"$BUNTINI_NATIVE_DIR/buntini-audio" --self-test-live --input "$BUNTINI_AUDIO_TEST_DIR/speech.aiff" > "$BUNTINI_AUDIO_TEST_DIR/live.jsonl"
+python3 - "$BUNTINI_AUDIO_TEST_DIR" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+events = [json.loads(line) for line in (root / "live.jsonl").read_text().splitlines()]
+live = next(event for event in events if event["event"] == "live")
+if not live["available"]:
+    print("Live speech recognition not available here (" + live["reason"] + "); push to talk falls back to recorded audio.")
+    sys.exit(0)
+partials = [event["text"] for event in events if event["event"] == "partial"]
+stopped = events[-1]
+assert stopped["event"] == "stopped" and "path" not in stopped, stopped
+words = stopped["transcript"].lower()
+assert "calendar" in words and "tomorrow" in words, stopped
+assert len(partials) >= 2 and partials[-1].lower().startswith(partials[0].lower()), partials
+assert [path.name for path in root.glob("*.wav")] == ["test.wav"], "live recognition must not write audio"
+print("Live speech checks passed:", len(partials), "partial results, final transcript", repr(stopped["transcript"]))
 PY
 
 # Apple Intelligence helper: builds where the SDK allows, then reports availability.

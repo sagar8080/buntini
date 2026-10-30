@@ -7,6 +7,6 @@
     <key>CFBundleName</key>
     <string>Buntini Audio</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Buntini records your voice while push-to-talk is active so it can transcribe your request locally on this Mac.</string>
+    <string>Buntini listens only after you press the mic, and during a voice conversation you start, so it can turn your request into words on this Mac.</string>
 </dict>
 </plist>
