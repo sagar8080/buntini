@@ -7,7 +7,10 @@
 //! files selected in Finder) is read only when a request actually refers to it, under that
 //! app's own permission. Nothing here is written to disk; a task that uses it records the
 //! data category it touched like any other read.
-use crate::{privacy::Share, types::Settings};
+use crate::{
+    privacy::{self, Locality, Share},
+    types::Settings,
+};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -42,7 +45,13 @@ pub struct Snapshot {
 /// What a request's "this" resolves to, most specific first.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Referent {
-    Selection { app: String, text: String },
+    Selection {
+        app: String,
+        text: String,
+        /// The email the text was selected in, read only for a reply to it, so "reply to
+        /// her" still knows who "her" is.
+        mail: Option<crate::apps::SelectedMail>,
+    },
     Mail(crate::apps::SelectedMail),
     /// A browser page; the browser skill reads it, honouring private windows.
     Page { browser: &'static str, title: String },
@@ -105,6 +114,12 @@ pub fn capture_focus() {
     capture();
 }
 
+/// Whether a snapshot still says what "this" is: taken recently, and of the app the user
+/// was in last. After a switch from Mail to Safari, the Mail snapshot no longer applies.
+fn still_current(snapshot: &Snapshot, last: Option<&Front>) -> bool {
+    snapshot.at.elapsed() < FRESH && last.is_none_or(|front| front.pid == snapshot.app.pid)
+}
+
 /// The latest fresh snapshot. Waits briefly for one still being taken, so a request typed
 /// straight after the shortcut sees it.
 pub async fn current() -> Option<Snapshot> {
@@ -114,7 +129,8 @@ pub async fn current() -> Option<Snapshot> {
         let done = SNAPSHOT.lock().unwrap().clone();
         match done {
             Some((generation, snapshot)) if generation >= wanted => {
-                return snapshot.filter(|s| s.at.elapsed() < FRESH)
+                let last = LAST.lock().unwrap().clone();
+                return snapshot.filter(|s| still_current(s, last.as_ref()));
             }
             _ if wanted == 0 || Instant::now() >= deadline => return None,
             _ => tokio::time::sleep(Duration::from_millis(25)).await,
@@ -122,11 +138,38 @@ pub async fn current() -> Option<Snapshot> {
     }
 }
 
-/// Whether a request points at something on screen ("this", "these", "him", "her").
+/// Words after "this" that make it a time ("this weekend"), not something on screen.
+const TIMES: &[&str] = &[
+    "morning", "afternoon", "evening", "week", "weekend", "month", "year", "time", "season",
+    "spring", "summer", "autumn", "fall", "winter", "quarter", "term", "semester", "monday",
+    "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "week's", "month's",
+    "year's", "weekend's",
+];
+
+/// Words before "him" or "her" that address the person on screen ("reply to her", "email
+/// him"). Elsewhere "her" is usually possessive ("her birthday") or a third party.
+const ADDRESSING: &[&str] = &[
+    "reply", "respond", "answer", "email", "message", "text", "thank", "forward", "ping",
+];
+
+/// Whether a request points at something on screen ("this email", "these", "reply to
+/// her"), not at a time ("this weekend") or someone in passing ("her birthday").
 pub fn mentions_this(prompt: &str) -> bool {
-    crate::skills::words(prompt)
-        .split(' ')
-        .any(|word| ["this", "these", "him", "her", "selection", "selected"].contains(&word))
+    let text = crate::skills::words(prompt);
+    let words: Vec<&str> = text.split(' ').collect();
+    words.iter().enumerate().any(|(index, word)| {
+        let before = |back: usize| index.checked_sub(back).map(|at| words[at]);
+        match *word {
+            "selection" | "selected" => true,
+            "this" | "these" => words.get(index + 1).is_none_or(|next| !TIMES.contains(next)),
+            "him" | "her" => {
+                before(1).is_some_and(|word| ADDRESSING.contains(&word))
+                    || (before(1) == Some("to")
+                        && before(2).is_some_and(|word| ADDRESSING.contains(&word) || word == "back"))
+            }
+            _ => false,
+        }
+    })
 }
 
 /// Whether a request asks for a reminder about the thing on screen itself
@@ -159,6 +202,14 @@ pub fn replies_to_this(prompt: &str) -> bool {
     };
     let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
     let rest = rest.strip_prefix("to ").unwrap_or(rest);
+    // "Respond to this question in one sentence" is answered in chat, not replied to.
+    if rest
+        .split(' ')
+        .nth(1)
+        .is_some_and(|noun| crate::completion::ANSWERED_IN_CHAT.contains(&noun))
+    {
+        return false;
+    }
     [
         "this", "this email", "this message", "this mail", "him", "her", "them", "it",
         "the email", "that email",
@@ -190,19 +241,47 @@ fn browser_id(bundle: &str) -> Option<&'static str> {
 }
 
 impl Snapshot {
-    /// The allowed browser this snapshot was taken in, if it was one.
+    /// The browser this snapshot was taken in, if it was one.
     pub fn browser(&self) -> Option<&'static str> {
         browser_id(&self.app.bundle)
     }
 }
 
+/// A browser's window title and selection come from its page, so reading them needs the
+/// browser allowed in Settings → Apps, with the same message the browser skill gives.
+fn allowed_browser(id: &str, settings: &Settings) -> Result<&'static crate::apps::App, String> {
+    let app = crate::apps::app(id).ok_or("Unknown browser.")?;
+    if !crate::apps::allowed(settings, id) {
+        return Err(format!("Allow {} in Settings → Apps so I can read its tabs.", app.name));
+    }
+    Ok(app)
+}
+
 /// Resolves "this" against a snapshot: selected text first, then the app's own object,
-/// then just the window. App reads need that app to be allowed in Settings → Apps.
-pub async fn referent(snapshot: &Snapshot, settings: &Settings) -> Result<Referent, String> {
+/// then just the window. App reads need that app to be allowed in Settings → Apps, and a
+/// browser's private window is never read. `prompt` is the request, so a reply to a
+/// selection in Mail can also read the email it belongs to.
+pub async fn referent(
+    snapshot: &Snapshot,
+    settings: &Settings,
+    prompt: &str,
+) -> Result<Referent, String> {
+    if let Some(browser) = snapshot.browser() {
+        crate::apps::ensure_public_window(allowed_browser(browser, settings)?).await?;
+    }
     if !snapshot.selection.is_empty() {
+        let mail = if snapshot.app.bundle == MAIL
+            && replies_to_this(prompt)
+            && crate::apps::allowed(settings, "mail")
+        {
+            crate::apps::selected_mail().await?
+        } else {
+            None
+        };
         return Ok(Referent::Selection {
             app: snapshot.app.name.clone(),
             text: snapshot.selection.clone(),
+            mail,
         });
     }
     if snapshot.secure {
@@ -235,6 +314,45 @@ pub async fn referent(snapshot: &Snapshot, settings: &Settings) -> Result<Refere
     })
 }
 
+/// What "this" adds to a request that goes to the model.
+#[derive(Debug, PartialEq)]
+pub enum ThisContext {
+    /// The request doesn't point at the screen, or nothing was captured.
+    Nothing,
+    /// What "this" is, for a brain allowed every kind of data it shows.
+    Seen(Referent),
+    /// This brain may not see it, so it is told that instead of guessing.
+    Withheld,
+    /// It couldn't be read: an app to allow, a private window or a password field. The
+    /// user sees why, as they do when a skill asks about "this".
+    Refused(String),
+}
+
+/// Resolves "this" for the model path, under the same app checks as the skill path and
+/// the privacy rules of the brain that will see it.
+pub async fn this_context(
+    prompt: &str,
+    snapshot: Option<&Snapshot>,
+    settings: &Settings,
+    locality: Locality,
+) -> ThisContext {
+    let Some(snapshot) = snapshot.filter(|_| mentions_this(prompt)) else {
+        return ThisContext::Nothing;
+    };
+    match referent(snapshot, settings, prompt).await {
+        Err(message) => ThisContext::Refused(message),
+        Ok(found)
+            if found
+                .shares()
+                .into_iter()
+                .all(|share| privacy::allows(locality, settings, share)) =>
+        {
+            ThisContext::Seen(found)
+        }
+        Ok(_) => ThisContext::Withheld,
+    }
+}
+
 fn clip(text: &str, limit: usize) -> String {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.chars().count() <= limit {
@@ -250,22 +368,38 @@ fn file_name(path: &str) -> &str {
 }
 
 impl Referent {
-    /// The kind of data it shows, for what an external brain may see.
-    pub fn share(&self) -> Share {
+    /// Every kind of data it shows, for what an external brain may see.
+    pub fn shares(&self) -> Vec<Share> {
         match self {
-            Referent::Selection { .. } | Referent::Window { .. } => Share::Selection,
-            Referent::Mail(_) => Share::Mail,
-            Referent::Page { .. } => Share::Browser,
-            Referent::Finder { .. } => Share::Files,
+            Referent::Selection { mail: Some(_), .. } => vec![Share::Selection, Share::Mail],
+            Referent::Selection { .. } | Referent::Window { .. } => vec![Share::Selection],
+            Referent::Mail(_) => vec![Share::Mail],
+            Referent::Page { .. } => vec![Share::Browser],
+            Referent::Finder { .. } => vec![Share::Files],
+        }
+    }
+
+    /// The email a reply to "this" answers, if there is one.
+    pub fn mail(&self) -> Option<&crate::apps::SelectedMail> {
+        match self {
+            Referent::Mail(mail) | Referent::Selection { mail: Some(mail), .. } => Some(mail),
+            _ => None,
         }
     }
 
     /// One line for the model about what "this" is. Quoted content is untrusted data.
     pub fn describe(&self) -> String {
         match self {
-            Referent::Selection { app, text } => {
+            Referent::Selection { app, text, mail: None } => {
                 format!("Text the user selected in {app}: “{}”", clip(text, 2_000))
             }
+            Referent::Selection { text, mail: Some(mail), .. } => format!(
+                "Text the user selected in an email in Mail, from {}, subject “{}”, received {}: “{}”",
+                mail.sender,
+                mail.subject,
+                mail.received,
+                clip(text, 2_000)
+            ),
             Referent::Mail(mail) => format!(
                 "The email open in Mail, from {}, subject “{}”, received {}: “{}”",
                 mail.sender,
@@ -338,38 +472,102 @@ mod tests {
     #[tokio::test]
     async fn selected_text_wins_over_the_app_and_its_window() {
         let settings = Settings::default();
-        let found = referent(&snapshot(MAIL, "Inbox", "Pick up keys at 6", false), &settings)
+        let found = referent(&snapshot(MAIL, "Inbox", "Pick up keys at 6", false), &settings, "summarise this")
             .await
             .unwrap();
         assert_eq!(
             found,
-            Referent::Selection { app: "Notes".into(), text: "Pick up keys at 6".into() }
+            Referent::Selection { app: "Notes".into(), text: "Pick up keys at 6".into(), mail: None }
         );
-        assert_eq!(found.share(), Share::Selection);
+        assert_eq!(found.shares(), [Share::Selection]);
+        // Mail isn't allowed, so a reply to the selection can't read the email behind it.
+        let reply = referent(&snapshot(MAIL, "Inbox", "Pick up keys at 6", false), &settings, "reply to her saying yes")
+            .await
+            .unwrap();
+        assert_eq!(reply.mail(), None);
     }
 
     #[tokio::test]
     async fn password_fields_and_unallowed_mail_are_refused_not_guessed() {
         let settings = Settings::default();
-        let secure = referent(&snapshot("com.example.app", "Login", "", true), &settings).await;
+        let secure = referent(&snapshot("com.example.app", "Login", "", true), &settings, "").await;
         assert!(secure.unwrap_err().contains("password"));
-        let mail = referent(&snapshot(MAIL, "Inbox", "", false), &settings).await;
+        let mail = referent(&snapshot(MAIL, "Inbox", "", false), &settings, "").await;
         assert!(mail.unwrap_err().contains("Allow Mail"));
     }
 
     #[tokio::test]
-    async fn browsers_become_pages_and_other_apps_their_window() {
-        let settings = Settings::default();
-        let page = referent(&snapshot("com.google.Chrome", "Lease FAQ", "", false), &settings)
+    async fn browsers_need_their_permission_before_anything_is_read() {
+        let mut settings = Settings::default();
+        // Not even the window title or a selection is read from a browser that isn't allowed.
+        for selection in ["", "Rent is due on the 1st"] {
+            let refused = referent(&snapshot("com.google.Chrome", "Lease FAQ", selection, false), &settings, "")
+                .await
+                .unwrap_err();
+            assert_eq!(refused, "Allow Google Chrome in Settings → Apps so I can read its tabs.");
+        }
+        // Safari has no private-window flag to check (Settings → Apps says so).
+        settings.apps = vec!["safari".into()];
+        let page = referent(&snapshot("com.apple.Safari", "Lease FAQ", "", false), &settings, "")
             .await
             .unwrap();
-        assert_eq!(page, Referent::Page { browser: "chrome", title: "Lease FAQ".into() });
-        assert_eq!(page.share(), Share::Browser);
-        let window = referent(&snapshot("com.apple.dt.Xcode", "main.rs", "", false), &settings)
+        assert_eq!(page, Referent::Page { browser: "safari", title: "Lease FAQ".into() });
+        assert_eq!(page.shares(), [Share::Browser]);
+        let window = referent(&snapshot("com.apple.dt.Xcode", "main.rs", "", false), &settings, "")
             .await
             .unwrap();
         assert_eq!(window.describe(), "Notes, window “main.rs”");
         assert_eq!(window.reminder_title(), None);
+    }
+
+    #[test]
+    fn a_snapshot_of_an_app_the_user_has_left_is_stale() {
+        let taken = snapshot(MAIL, "Inbox", "", false);
+        let mail = taken.app.clone();
+        let safari = Front { pid: 2, name: "Safari".into(), bundle: "com.apple.Safari".into() };
+        assert!(still_current(&taken, Some(&mail)));
+        assert!(still_current(&taken, None));
+        assert!(!still_current(&taken, Some(&safari)));
+        if let Some(at) = Instant::now().checked_sub(FRESH + Duration::from_secs(1)) {
+            assert!(!still_current(&Snapshot { at, ..taken }, Some(&mail)));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_model_path_shows_refusals_and_keeps_what_it_may_not_see() {
+        let settings = Settings::default();
+        let selected = snapshot("com.apple.Notes", "Groceries", "Oat milk, eggs", false);
+        let seen = this_context("summarise this", Some(&selected), &settings, Locality::OnDevice).await;
+        assert_eq!(
+            seen,
+            ThisContext::Seen(Referent::Selection { app: "Notes".into(), text: "Oat milk, eggs".into(), mail: None })
+        );
+        let mut external = Settings { external_shares: vec!["history".into()], ..Settings::default() };
+        assert_eq!(
+            this_context("summarise this", Some(&selected), &external, Locality::External).await,
+            ThisContext::Withheld
+        );
+        external.external_shares.push("selection".into());
+        assert!(matches!(
+            this_context("summarise this", Some(&selected), &external, Locality::External).await,
+            ThisContext::Seen(_)
+        ));
+        let open_mail = snapshot(MAIL, "Inbox", "", false);
+        assert_eq!(
+            this_context("reply to her saying yes", Some(&open_mail), &settings, Locality::OnDevice).await,
+            ThisContext::Refused("Allow Mail in Settings → Apps so I can read the email you have open.".into())
+        );
+        let password = snapshot("com.example.app", "Login", "", true);
+        assert!(matches!(
+            this_context("what is this", Some(&password), &settings, Locality::OnDevice).await,
+            ThisContext::Refused(message) if message.contains("password")
+        ));
+        // Requests that don't point at the screen never read it.
+        assert_eq!(
+            this_context("weather this weekend", Some(&open_mail), &settings, Locality::OnDevice).await,
+            ThisContext::Nothing
+        );
+        assert_eq!(this_context("summarise this", None, &settings, Locality::OnDevice).await, ThisContext::Nothing);
     }
 
     #[test]
@@ -383,7 +581,7 @@ mod tests {
             Some("Email from Ana Silva <ana@example.com>")
         );
         assert_eq!(
-            Referent::Selection { app: "Notes".into(), text: "\n  Call the bank\nabout fees".into() }
+            Referent::Selection { app: "Notes".into(), text: "\n  Call the bank\nabout fees".into(), mail: None }
                 .reminder_title()
                 .as_deref(),
             Some("Call the bank")
@@ -398,10 +596,14 @@ mod tests {
     #[test]
     fn descriptions_are_bounded_and_mail_is_its_own_share() {
         let long = "word ".repeat(1_000);
-        let text = Referent::Selection { app: "Pages".into(), text: long }.describe();
+        let text = Referent::Selection { app: "Pages".into(), text: long, mail: None }.describe();
         assert!(text.chars().count() < 2_100 && text.ends_with("…”"));
-        assert_eq!(Referent::Mail(mail("Hi")).share(), Share::Mail);
-        assert_eq!(Referent::Finder { paths: vec![] }.share(), Share::Files);
+        assert_eq!(Referent::Mail(mail("Hi")).shares(), [Share::Mail]);
+        assert_eq!(Referent::Finder { paths: vec![] }.shares(), [Share::Files]);
+        // A selection inside an email shows both, and names the email it came from.
+        let quoted = Referent::Selection { app: "Mail".into(), text: "Friday works".into(), mail: Some(mail("Lunch")) };
+        assert_eq!(quoted.shares(), [Share::Selection, Share::Mail]);
+        assert!(quoted.describe().contains("subject “Lunch”") && quoted.describe().contains("Friday works"));
     }
 
     #[test]
@@ -410,6 +612,17 @@ mod tests {
             assert!(mentions_this(prompt), "{prompt}");
         }
         for prompt in ["remind me to call Ana", "what's the weather", "thistle seeds"] {
+            assert!(!mentions_this(prompt), "{prompt}");
+        }
+        for prompt in ["Summarise this email", "reply to her saying yes", "write back to him", "what are these?"] {
+            assert!(mentions_this(prompt), "{prompt}");
+        }
+        for prompt in [
+            "weather this weekend",
+            "gift for her birthday",
+            "what's on this Friday",
+            "I told her about the lease",
+        ] {
             assert!(!mentions_this(prompt), "{prompt}");
         }
         for prompt in [
@@ -422,7 +635,12 @@ mod tests {
         for prompt in ["reply to this saying yes", "Please write back to her", "respond to him: no"] {
             assert!(replies_to_this(prompt), "{prompt}");
         }
-        for prompt in ["reply to Ana", "don't reply to this", "how do I reply to this"] {
+        for prompt in [
+            "reply to Ana",
+            "don't reply to this",
+            "how do I reply to this",
+            "respond to this question in one sentence",
+        ] {
             assert!(!replies_to_this(prompt), "{prompt}");
         }
         assert_eq!(sender_address("Ana Silva <Ana@Example.com>").as_deref(), Some("ana@example.com"));

@@ -286,7 +286,7 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
     music::recognise(&text, &recent)
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
-        .or_else(|| this::recognise(&text).map(Skill::This))
+        .or_else(|| this::recognise(&text, &recent).map(Skill::This))
         .or_else(|| day::recognise(&text).map(Skill::Day))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }

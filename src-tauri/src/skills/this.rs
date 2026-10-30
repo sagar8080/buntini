@@ -17,7 +17,14 @@ const VERBS: &[&str] = &[
     "summarise", "summarize", "explain", "translate", "simplify", "proofread",
 ];
 
-fn target(rest: &str) -> Option<Command> {
+/// Words that qualify a language ("plain English", "Brazilian Portuguese"). Anything else
+/// after the language is text the user pasted, which the model should translate itself.
+const QUALIFIERS: &[&str] = &[
+    "plain", "simple", "simplified", "traditional", "formal", "informal", "casual", "british",
+    "american", "brazilian", "european", "mexican", "swiss", "canadian", "modern",
+];
+
+fn target(rest: &str, follow_up: bool) -> Option<Command> {
     let rest = without_politeness(rest);
     let named = [
         "the selection",
@@ -32,23 +39,36 @@ fn target(rest: &str) -> Option<Command> {
         return Some(Command::Selection);
     }
     let vague = [
-        "this", "that", "this text", "this email", "this message", "this mail", "this paragraph",
-        "this for me", "it",
+        "this", "this text", "this email", "this message", "this mail", "this paragraph",
+        "this for me",
     ];
     if vague.contains(&rest) {
         return Some(Command::About);
     }
+    // "That" and "it" point back at the last answer once there is one; the model has it.
+    if ["that", "it"].contains(&rest) {
+        return (!follow_up).then_some(Command::About);
+    }
     // "translate this into Portuguese", "translate this to plain English"
-    let language = rest
+    let language: Vec<&str> = rest
         .strip_prefix("this into ")
-        .or_else(|| rest.strip_prefix("this to "))?;
-    (!language.is_empty() && language.split(' ').count() <= 3).then_some(Command::About)
+        .or_else(|| rest.strip_prefix("this to "))?
+        .split(' ')
+        .collect();
+    match language[..] {
+        [_] => Some(Command::About),
+        [qualifier, _] if QUALIFIERS.contains(&qualifier) => Some(Command::About),
+        ["latin", "american", _] => Some(Command::About),
+        _ => None,
+    }
 }
 
-/// `text` is the request in lowercase words (`super::words`).
-pub fn recognise(text: &str) -> Option<Command> {
+/// `text` is the request in lowercase words (`super::words`); `recent` holds the user's
+/// earlier messages, newest first, so "summarise that" can mean the last answer.
+pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
+    let follow_up = recent.iter().any(|before| !before.trim().is_empty());
     if let Some((_, rest)) = from_verb(text, VERBS) {
-        return target(rest);
+        return target(rest, follow_up);
     }
     [
         "what is this",
@@ -73,8 +93,8 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
         return browser::run(browser::Command::Page, context).await;
     };
     let done = |answer: String, share: Share| Ok(Outcome::Done { answer, shares: vec![share] });
-    match crate::focus::referent(snapshot, context.settings).await? {
-        Referent::Selection { app, text } => Ok(Outcome::Page {
+    match crate::focus::referent(snapshot, context.settings, context.prompt).await? {
+        Referent::Selection { app, text, .. } => Ok(Outcome::Page {
             kind: "selected text",
             title: format!("selected in {app}"),
             text,
@@ -135,10 +155,10 @@ mod tests {
             "TL;DR",
             "proofread this for me",
         ] {
-            assert_eq!(recognise(&words(prompt)), Some(Command::About), "{prompt}");
+            assert_eq!(recognise(&words(prompt), &[]), Some(Command::About), "{prompt}");
         }
         for prompt in ["explain the selected text", "summarize what I selected"] {
-            assert_eq!(recognise(&words(prompt)), Some(Command::Selection), "{prompt}");
+            assert_eq!(recognise(&words(prompt), &[]), Some(Command::Selection), "{prompt}");
         }
     }
 
@@ -152,8 +172,25 @@ mod tests {
             "explain quantum computing",
             "translate this whole long thing into many different languages",
             "what is this week's weather",
+            "Translate this to Spanish: good morning",
+            "translate this into French: see you on Friday",
         ] {
-            assert_eq!(recognise(&words(prompt)), None, "{prompt}");
+            assert_eq!(recognise(&words(prompt), &[]), None, "{prompt}");
         }
+        for prompt in ["translate this to plain English", "translate this into Brazilian Portuguese"] {
+            assert_eq!(recognise(&words(prompt), &[]), Some(Command::About), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn that_and_it_mean_the_last_answer_once_there_is_one() {
+        let earlier = ["what's the history of the lease law".to_string()];
+        for prompt in ["summarise that", "explain it", "simplify that for me"] {
+            assert_eq!(recognise(&words(prompt), &earlier), None, "{prompt}");
+            assert_eq!(recognise(&words(prompt), &[]), Some(Command::About), "{prompt}");
+        }
+        assert_eq!(recognise(&words("summarise this"), &earlier), Some(Command::About));
+        // Through the router too, which passes the conversation's recent messages.
+        assert_eq!(crate::skills::recognise("summarise that", &earlier.to_vec()), None);
     }
 }
