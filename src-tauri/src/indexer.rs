@@ -309,16 +309,20 @@ pub fn verify_candidates(
     documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
-    verify_candidate_group(roots, candidates, query, documents, cancel).map(|group| group.hits)
+    verify_candidate_group(roots, candidates, query, documents, &|_| None, cancel).map(|group| group.hits)
 }
 
 /// Candidates are reread now, so a document's excerpt is its current text, not what
 /// the index stored. Unchanged documents come from `local::read_content`'s memory.
+///
+/// A document this search had no time to read again is matched on the text the index
+/// stored (`stored`), with no excerpt, rather than dropped as if it didn't match.
 pub(crate) fn verify_candidate_group(
     roots: &[String],
     candidates: &[IndexCandidate],
     query: &str,
     documents: &local::Documents,
+    stored: &dyn Fn(&IndexCandidate) -> Option<String>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<local::MatchGroup<FileHit>, String> {
     let words = terms(query)?;
@@ -347,12 +351,17 @@ pub(crate) fn verify_candidate_group(
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let content = local::read_content(&mut file, path, documents);
-        let exact = matches_terms(name, &content, &words, false);
+        let (content, unread) = match local::read_text(&mut file, path, documents) {
+            Some(content) => (content, None),
+            None if documents.reads_documents() => (String::new(), stored(candidate)),
+            None => (String::new(), None),
+        };
+        let matched = unread.as_deref().unwrap_or(&content);
+        let exact = matches_terms(name, matched, &words, false);
         if !exact
             && (!hits.is_empty()
                 || fallback.len() >= MAX_HITS
-                || !matches_terms(name, &content, &words, true))
+                || !matches_terms(name, matched, &words, true))
         {
             continue;
         }
@@ -744,6 +753,17 @@ mod tests {
         std::fs::write(&pdf, "Deposit withheld 300").unwrap();
         let hits = super::query_index(&db, &roots, "deposit", &search, &token()).unwrap();
         assert_eq!(hits[0].excerpt.as_deref(), Some("Deposit withheld 300"));
+        // A search with no reads left still finds it by the text the index stored, and
+        // shows no excerpt it didn't read.
+        std::fs::write(&pdf, "Deposit returned 1200 again").unwrap();
+        let candidates = indexed_candidates(&db, &roots, "deposit").unwrap();
+        let spent = local::Documents::spent(&helper, &token());
+        let stored = |candidate: &IndexCandidate| {
+            db.query_row("SELECT content FROM file_index WHERE path=?1", [&candidate.path], |row| row.get(0)).ok()
+        };
+        let found = verify_candidate_group(&roots, &candidates, "deposit", &spent, &stored, &token()).unwrap();
+        assert_eq!(found.hits.len(), 1);
+        assert!(found.hits[0].excerpt.is_none());
     }
 
     #[test]

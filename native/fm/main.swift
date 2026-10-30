@@ -1273,8 +1273,15 @@ enum Documents {
             "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         }
         guard let helper = Bundle.main.executableURL?.resolvingSymlinksInPath().deletingLastPathComponent().path, helper != "/" else { return false }
-        let userFolders = ["/Users", "/Volumes", NSHomeDirectory()].map { "(subpath \(quoted($0)))" }.joined(separator: " ")
-        let profile = "(version 1)(allow default)(deny network*)(deny file-write*)(deny process-exec*)(deny process-fork)(deny file-read* \(userFolders))(allow file-read* (subpath \(quoted(helper))))"
+        // The user's folders and the per-user temporary and cache folders, where other
+        // apps' data can sit. The rest of the system stays readable for the parsers.
+        let userFolders = ["/Users", "/Volumes", NSHomeDirectory(), "/private/var/folders", "/private/tmp", "/private/var/tmp"]
+            .map { "(subpath \(quoted($0)))" }.joined(separator: " ")
+        // Nothing in a document may reach out: no network, no other process (no Apple
+        // events, no opening URLs or apps through Launch Services, no background downloads).
+        let services = ["com.apple.nsurlsessiond", "com.apple.nsurlsessiond.NSURLSessionProxyService", "com.apple.coreservices.quarantine-resolver"]
+            .map { "(global-name \(quoted($0)))" }.joined(separator: " ")
+        let profile = "(version 1)(allow default)(deny network*)(deny file-write*)(deny process-exec*)(deny process-fork)(deny appleevent-send)(deny lsopen)(deny mach-lookup \(services))(deny file-read* \(userFolders))(allow file-read* (subpath \(quoted(helper))))"
         var error: UnsafeMutablePointer<CChar>?
         let result = sandboxInit(profile, 0, &error)
         if let error { free(error) }
@@ -1320,32 +1327,37 @@ func documentChecks(_ require: (Bool, String) throws -> Void) throws {
     let styled = NSMutableAttributedString(string: phrase + " ")
     styled.append(NSAttributedString(string: "details", attributes: [.link: URL(string: "https://tracker.invalid/open")!]))
     let range = NSRange(location: 0, length: styled.length)
-    for (kind, type) in [("docx", NSAttributedString.DocumentType.officeOpenXML), ("doc", .docFormat), ("rtf", .rtf), ("rtfd", .rtfd)] {
-        let data = try styled.data(from: range, documentAttributes: [.documentType: type])
+    let documents = try [("docx", NSAttributedString.DocumentType.officeOpenXML), ("doc", .docFormat), ("rtf", .rtf), ("rtfd", .rtfd)].map { kind, type in
+        (kind, try styled.data(from: range, documentAttributes: [.documentType: type]))
+    }
+    let twoPages = pdf(["Invoice total 680", "Second page 745"])
+    let locked = pdf(["Private"], password: "secret")
+    let pagesPreviews = [false, true].map { zip("QuickLook/Preview.pdf", pdf(["Pages preview 312"]), deflate: $0) }
+    let noPreview = zip("Index/Document.iwa", Data("x".utf8), deflate: false)
+    let damaged = zip("QuickLook/Preview.pdf", pdf(["Pages preview"]), deflate: true)
+    // Every read below runs confined, as a real document read does.
+    try require(Documents.confine(), "Document reading must be able to confine itself")
+    for (kind, data) in documents {
         let text = try Documents.extract(data, kind: kind).text
         try require(text.contains(phrase) && text.contains("details"), "A \(kind) document must yield its text")
         try require(!text.contains("tracker.invalid"), "A \(kind) document's links must never become its text")
     }
-    let twoPages = pdf(["Invoice total 680", "Second page 745"])
     let both = try Documents.extract(twoPages, kind: "pdf")
     try require(both.text.contains("Invoice total 680") && both.text.contains("Second page 745") && !both.truncated, "A PDF must yield every page's text")
     let first = try Documents.extract(twoPages, kind: "pdf", pages: 1)
     try require(first.truncated && !first.text.contains("Second page"), "Pages past the cap must not be read")
     let short = try Documents.extract(twoPages, kind: "pdf", characters: 7)
     try require(short.truncated && short.text.count == 7, "Text past the character cap must be cut and marked")
-    try require(code { try Documents.extract(pdf(["Private"], password: "secret"), kind: "pdf") } == "locked", "A password-protected PDF must be refused, never guessed")
+    try require(code { try Documents.extract(locked, kind: "pdf") } == "locked", "A password-protected PDF must be refused, never guessed")
     try require(code { try Documents.extract(Data("not a pdf".utf8), kind: "pdf") } == "unreadable", "A damaged PDF must be refused")
     try require(code { try Documents.extract(Data("{\\rtf1 x}".utf8), kind: "html") } == "unsupported", "Unknown kinds must be refused")
     try require(!Documents.kinds.contains("html") && !Documents.kinds.contains("webarchive"), "Formats that load from the network must never be read")
     try require(Documents.clean("a\u{FFFC}b\u{0}c\r", characters: 10, truncated: false).text == "abc\n", "Attachments and control characters must be dropped")
-    for deflate in [false, true] {
-        let pages = zip("QuickLook/Preview.pdf", pdf(["Pages preview 312"]), deflate: deflate)
-        try require(try Documents.extract(pages, kind: "pages").text.contains("Pages preview 312"), "A Pages preview must be read (deflate: \(deflate))")
+    for (index, pages) in pagesPreviews.enumerated() {
+        try require(try Documents.extract(pages, kind: "pages").text.contains("Pages preview 312"), "A Pages preview must be read (deflate: \(index == 1))")
     }
-    try require(code { try Documents.extract(zip("Index/Document.iwa", Data("x".utf8), deflate: false), kind: "pages") } == "no_preview", "A Pages file without a preview must be refused honestly")
-    let damaged = zip("QuickLook/Preview.pdf", pdf(["Pages preview"]), deflate: true)
+    try require(code { try Documents.extract(noPreview, kind: "pages") } == "no_preview", "A Pages file without a preview must be refused honestly")
     try require(code { try Documents.extract(damaged.prefix(damaged.count / 2) + damaged.suffix(22), kind: "pages") } == "no_preview", "A damaged Pages archive must be refused")
-    try require(Documents.confine(), "Document reading must be able to confine itself")
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
@@ -1361,6 +1373,9 @@ func documentChecks(_ require: (Bool, String) throws -> Void) throws {
                 && (try? FileManager.default.contentsOfDirectory(atPath: NSHomeDirectory())) == nil,
                 "A confined document reader must not read the user's folders")
     try require(!FileManager.default.createFile(atPath: NSTemporaryDirectory() + "buntini-confined-\(getpid())", contents: Data()), "A confined document reader must not write files")
+    try require((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) == nil
+                && (try? FileManager.default.contentsOfDirectory(atPath: "/private/tmp")) == nil,
+                "A confined document reader must not read temporary or cache folders")
 }
 
 /// The approved change to one event, as Rust validated it: which occurrence it was (id,

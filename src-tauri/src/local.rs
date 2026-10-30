@@ -190,6 +190,12 @@ impl Documents {
         }
     }
 
+    /// A search that has used all its fresh reads.
+    #[cfg(test)]
+    pub fn spent(helper: &Path, cancel: &Arc<AtomicBool>) -> Self {
+        Self { fresh: 0.into(), ..Self::for_search(helper, cancel) }
+    }
+
     pub fn for_search(helper: &Path, cancel: &Arc<AtomicBool>) -> Self {
         Self {
             helper: Some(helper.to_path_buf()),
@@ -209,6 +215,11 @@ impl Documents {
         }
     }
 
+    /// Whether documents can be read at all (the helper is there).
+    pub fn reads_documents(&self) -> bool {
+        self.helper.as_deref().is_some_and(Path::is_file)
+    }
+
     fn take_fresh(&self) -> bool {
         self.until.is_none_or(|until| Instant::now() < until)
             && self
@@ -220,9 +231,19 @@ impl Documents {
 
 type CacheKey = (PathBuf, u64, Option<std::time::SystemTime>, u64);
 
+/// What the helper made of an unchanged document.
+#[derive(Clone)]
+enum Cached {
+    Text(String),
+    /// It refused the file (locked, unreadable, too much text): it has no text to give.
+    Refused,
+    /// It ran out of time. A search doesn't try it again; a rebuild the user asked for does.
+    Stalled,
+}
+
 #[derive(Default)]
 struct DocumentCache {
-    texts: HashMap<CacheKey, String>,
+    texts: HashMap<CacheKey, Cached>,
     order: VecDeque<CacheKey>,
     bytes: usize,
 }
@@ -239,26 +260,34 @@ fn cache_key(path: &Path, metadata: &fs::Metadata) -> CacheKey {
     (path.to_path_buf(), metadata.len(), metadata.modified().ok(), inode)
 }
 
-fn cached(key: &CacheKey) -> Option<String> {
+fn cached(key: &CacheKey) -> Option<Cached> {
     DOCUMENT_CACHE.lock().ok()?.texts.get(key).cloned()
 }
 
-fn remember(key: CacheKey, text: &str) {
+fn size(entry: &Cached) -> usize {
+    match entry {
+        Cached::Text(text) => text.len(),
+        _ => 0,
+    }
+}
+
+fn remember(key: CacheKey, entry: Cached) {
     let Ok(mut cache) = DOCUMENT_CACHE.lock() else {
         return;
     };
-    if let Some(old) = cache.texts.insert(key.clone(), text.to_string()) {
-        cache.bytes -= old.len();
+    let added = size(&entry);
+    if let Some(old) = cache.texts.insert(key.clone(), entry) {
+        cache.bytes -= size(&old);
         cache.order.retain(|existing| existing != &key);
     }
-    cache.bytes += text.len();
+    cache.bytes += added;
     cache.order.push_back(key);
     while cache.order.len() > CACHE_ENTRIES || cache.bytes > CACHE_BYTES {
         let Some(oldest) = cache.order.pop_front() else {
             break;
         };
         if let Some(old) = cache.texts.remove(&oldest) {
-            cache.bytes -= old.len();
+            cache.bytes -= size(&old);
         }
     }
 }
@@ -268,8 +297,15 @@ fn remember(key: CacheKey, text: &str) {
 /// files give no text and stay searchable by name. Either way the text is untrusted file
 /// content, never instructions.
 pub fn read_content(file: &mut File, path: &Path, documents: &Documents) -> String {
+    read_text(file, path, documents).unwrap_or_default()
+}
+
+/// Like `read_content`, but None when a document's text wasn't read this time (the
+/// search's budget ran out, the helper is missing, stalled or was stopped), which says
+/// nothing about the file. Some("") means the file has no text to give.
+pub fn read_text(file: &mut File, path: &Path, documents: &Documents) -> Option<String> {
     let Ok(metadata) = file.metadata() else {
-        return String::new();
+        return Some(String::new());
     };
     match content_kind(path) {
         Some(Content::Text) if metadata.len() <= MAX_READ => {
@@ -278,53 +314,84 @@ pub fn read_content(file: &mut File, path: &Path, documents: &Documents) -> Stri
                 || bytes.len() > MAX_READ as usize
                 || bytes.contains(&0)
             {
-                return String::new();
+                return Some(String::new());
             }
-            String::from_utf8(bytes).unwrap_or_default()
+            Some(String::from_utf8(bytes).unwrap_or_default())
         }
         Some(Content::Document(kind)) if metadata.len() <= MAX_DOCUMENT_BYTES => {
-            let Some(helper) = documents.helper.as_deref().filter(|helper| helper.is_file()) else {
-                return String::new();
-            };
+            let helper = documents.helper.as_deref().filter(|helper| helper.is_file())?;
             let key = cache_key(path, &metadata);
-            if let Some(text) = cached(&key) {
-                return text;
+            match cached(&key) {
+                Some(Cached::Text(text)) => return Some(text),
+                Some(Cached::Refused) => return Some(String::new()),
+                // A slow document doesn't hold up every search; a rebuild tries it again.
+                Some(Cached::Stalled) if documents.until.is_some() => return None,
+                _ => {}
             }
             if !documents.take_fresh() {
-                return String::new();
+                return None;
             }
             let mut bytes = Vec::with_capacity(metadata.len() as usize);
             if file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes).is_err()
                 || bytes.len() as u64 > MAX_DOCUMENT_BYTES
             {
-                return String::new();
+                return None;
             }
-            let Some(text) = extract(helper, kind, bytes, documents) else {
-                return String::new();
-            };
-            remember(key, &text);
-            text
+            match extract(helper, kind, bytes, documents) {
+                Ok(text) => {
+                    remember(key, Cached::Text(text.clone()));
+                    Some(text)
+                }
+                Err(Unread::Refused) => {
+                    remember(key, Cached::Refused);
+                    Some(String::new())
+                }
+                Err(Unread::Stalled) => {
+                    remember(key, Cached::Stalled);
+                    None
+                }
+                Err(Unread::Stopped) => None,
+            }
         }
-        _ => String::new(),
+        _ => Some(String::new()),
     }
+}
+
+/// Why the helper gave no text.
+enum Unread {
+    /// It answered without text, or with more than a reply may hold.
+    Refused,
+    /// It used all its time.
+    Stalled,
+    /// It was cancelled, cut short by the search's deadline, or couldn't start.
+    Stopped,
 }
 
 /// Runs `--extract-document` with the bytes on standard input, so the helper never opens
 /// a path itself. Stops on cancel or after the timeout, and reads a bounded reply.
-fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> Option<String> {
+fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> Result<String, Unread> {
     use std::{
         io::Write,
         process::{Command, Stdio},
     };
+    // A search's deadline bounds the read as well as when it may start.
+    let full = Duration::from_secs(documents.seconds);
+    let limit = documents
+        .until
+        .map(|until| full.min(until.saturating_duration_since(Instant::now()).max(Duration::from_millis(500))))
+        .unwrap_or(full);
     let mut child = Command::new(helper)
         .args(["--extract-document", kind])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
-    let mut stdin = child.stdin.take()?;
-    let stdout = child.stdout.take()?;
+        .map_err(|_| Unread::Stopped)?;
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(Unread::Stopped);
+    };
     let writer = std::thread::spawn(move || {
         let _ = stdin.write_all(&bytes);
     });
@@ -338,7 +405,7 @@ fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> 
         match child.try_wait() {
             Ok(Some(_)) => break true,
             Ok(None)
-                if started.elapsed() < Duration::from_secs(documents.seconds)
+                if started.elapsed() < limit
                     && !documents.cancel.load(Ordering::Relaxed) =>
             {
                 std::thread::sleep(Duration::from_millis(10));
@@ -353,14 +420,15 @@ fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> 
     // A stopped helper's pipes close with it; the threads are not waited on in case
     // anything it started still holds them.
     if !finished {
-        return None;
+        let stalled = limit == full && started.elapsed() >= full && !documents.cancel.load(Ordering::Relaxed);
+        return Err(if stalled { Unread::Stalled } else { Unread::Stopped });
     }
     let _ = writer.join();
-    let reply = reader.join().ok()?;
+    let reply = reader.join().map_err(|_| Unread::Stopped)?;
     if reply.len() as u64 > MAX_HELPER_OUTPUT {
-        return None;
+        return Err(Unread::Refused);
     }
-    document_text(&reply)
+    document_text(&reply).ok_or(Unread::Refused)
 }
 
 /// The helper's one-line reply as text, or nothing when it refused the file.
@@ -424,7 +492,13 @@ pub fn search(
     documents: &Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<(String, FileHit, String)>, String> {
-    search_group(roots, query, documents, cancel).map(|group| group.hits)
+    search_group(roots, query, documents, cancel).map(|group| {
+        group
+            .hits
+            .into_iter()
+            .map(|(root, hit, content)| (root, hit, content.unwrap_or_default()))
+            .collect()
+    })
 }
 
 /// A search backend returns one homogeneous group: literal matches when any
@@ -455,7 +529,7 @@ pub(crate) fn search_group(
     query: &str,
     documents: &Documents,
     cancel: &Arc<AtomicBool>,
-) -> Result<MatchGroup<(String, FileHit, String)>, String> {
+) -> Result<MatchGroup<(String, FileHit, Option<String>)>, String> {
     let query = query.trim();
     if query.is_empty() || query.len() > 512 {
         return Err("Enter a file name or a few search words (up to 512 characters).".into());
@@ -503,7 +577,8 @@ pub(crate) fn search_group(
             };
             let name = entry.file_name().to_string_lossy().into_owned();
             let name_lower = name.to_lowercase();
-            let content = read_content(&mut file, entry.path(), documents);
+            let read = read_text(&mut file, entry.path(), documents);
+            let content = read.clone().unwrap_or_default();
             let lower = content.to_lowercase();
             let exact = words
                 .iter()
@@ -571,7 +646,7 @@ pub(crate) fn search_group(
                     modified_at,
                     excerpt,
                 },
-                content,
+                read,
             );
             if exact {
                 fallback.clear();
@@ -1018,6 +1093,50 @@ printf '%s\n' '{{"text":"Lease renewal total 680","truncated":false}}'"#,
         let path = folder.path().join("two.pdf");
         assert_eq!(read_content(&mut File::open(&path).unwrap(), &path, &documents), "");
         assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_document_the_helper_refused_or_stalled_on_is_not_tried_again_by_search() {
+        let tools = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let runs = tools.path().join("runs");
+        let refusing = fake_helper(
+            tools.path(),
+            &format!(r#"echo run >> '{}'; cat >/dev/null; printf '%s\n' '{{"error":"locked"}}'"#, runs.display()),
+        );
+        let path = folder.path().join("locked.pdf");
+        fs::write(&path, "x").unwrap();
+        let read = |documents: &Documents| read_text(&mut File::open(&path).unwrap(), &path, documents);
+        assert_eq!(read(&Documents::for_search(&refusing, &cancel)).as_deref(), Some(""), "it has no text");
+        assert_eq!(read(&Documents::for_search(&refusing, &cancel)).as_deref(), Some(""));
+        assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 1, "refused once, remembered");
+
+        let slow = tempfile::tempdir().unwrap();
+        let stalled_runs = slow.path().join("runs");
+        let hung = fake_helper(slow.path(), &format!("echo run >> '{}'; sleep 30", stalled_runs.display()));
+        let stalled = folder.path().join("slow.docx");
+        fs::write(&stalled, "x").unwrap();
+        let read = |documents: &Documents| read_text(&mut File::open(&stalled).unwrap(), &stalled, documents);
+        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_search(&hung, &cancel) }), None, "not read, which says nothing about the file");
+        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_search(&hung, &cancel) }), None);
+        assert_eq!(fs::read_to_string(&stalled_runs).unwrap().lines().count(), 1, "a search doesn't wait on it again");
+        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_index(&hung, &cancel) }), None);
+        assert_eq!(fs::read_to_string(&stalled_runs).unwrap().lines().count(), 2, "a rebuild tries again");
+
+        // The search's deadline bounds a read that has started, not only when it starts.
+        let late = folder.path().join("late.pages");
+        fs::write(&late, "x").unwrap();
+        let documents = Documents { until: Some(Instant::now() + Duration::from_millis(600)), ..Documents::for_search(&hung, &cancel) };
+        let started = Instant::now();
+        assert_eq!(read_text(&mut File::open(&late).unwrap(), &late, &documents), None);
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        // Out of budget: not read.
+        let documents = Documents { fresh: 0.into(), ..Documents::for_search(&refusing, &cancel) };
+        let other = folder.path().join("other.pdf");
+        fs::write(&other, "y").unwrap();
+        assert_eq!(read_text(&mut File::open(&other).unwrap(), &other, &documents), None);
     }
 
     /// Runs the real Apple helper when this Mac built it (Apple silicon, macOS 26 SDK).

@@ -623,6 +623,12 @@ impl Store {
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     }
+    /// The text the file index holds for one file, if it has it.
+    pub fn indexed_content(&self, root: &str, path: &str) -> Option<String> {
+        self.db
+            .query_row("SELECT content FROM file_index WHERE path=?1 AND root=?2", params![path, root], |row| row.get(0))
+            .ok()
+    }
     pub fn index_file(&self, root: &str, hit: &FileHit, content: &str) -> Result<(), String> {
         self.db
             .execute("DELETE FROM file_index WHERE path=?1", [&hit.path])

@@ -1970,13 +1970,17 @@ async fn file_tool(
         }
     };
     let mut indexed = local::MatchGroup { hits: Vec::new(), literal: false };
+    // One budget of fresh document reads for the whole search, both passes.
+    let documents = Arc::new(local::Documents::for_search(state.models.apple_helper(), &cancel));
     if let Some(candidates) = candidates {
         let q = query.to_string();
         let indexed_roots = roots.clone();
         let indexed_cancel = cancel.clone();
-        let documents = local::Documents::for_search(state.models.apple_helper(), &cancel);
+        let documents = documents.clone();
+        let store = state.store.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            crate::indexer::verify_candidate_group(&indexed_roots, &candidates, &q, &documents, &indexed_cancel)
+            let stored = |candidate: &crate::indexer::IndexCandidate| store.lock().ok()?.indexed_content(&candidate.root, &candidate.path);
+            crate::indexer::verify_candidate_group(&indexed_roots, &candidates, &q, &documents, &stored, &indexed_cancel)
         })
         .await
         .map_err(|_| "Indexed file verification stopped unexpectedly.".to_string())??;
@@ -1994,7 +1998,6 @@ async fn file_tool(
     // A completed index is a snapshot, not a live directory watcher. Discover
     // newly created/renamed files with the same bounded, scoped filesystem walk.
     let q = query.to_string();
-    let documents = local::Documents::for_search(state.models.apple_helper(), &cancel);
     let rows = tauri::async_runtime::spawn_blocking(move || local::search_group(&roots, &q, &documents, &cancel))
         .await
         .map_err(|_| "The file search stopped unexpectedly.".to_string())??;
@@ -2004,7 +2007,10 @@ async fn file_tool(
     let mut live = Vec::new();
     for (root, hit, content) in rows.hits {
         if current_roots.contains(&root) {
-            store.index_file(&root, &hit, &content)?;
+            // A document this search didn't read keeps the text the index has for it.
+            if let Some(content) = content {
+                store.index_file(&root, &hit, &content)?;
+            }
             live.push(hit);
         }
     }

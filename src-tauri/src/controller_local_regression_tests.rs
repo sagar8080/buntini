@@ -157,7 +157,7 @@ async fn a_new_literal_file_displaces_a_full_indexed_plural_fallback_group() {
             .unwrap();
         let candidates = crate::indexer::indexed_candidates(&store.db, &roots, "quotes").unwrap();
         let group =
-            crate::indexer::verify_candidate_group(&roots, &candidates, "quotes", &crate::local::Documents::none(), &token).unwrap();
+            crate::indexer::verify_candidate_group(&roots, &candidates, "quotes", &crate::local::Documents::none(), &|_| None, &token).unwrap();
         assert!(!group.literal);
         assert_eq!(group.hits.len(), 40);
     }
