@@ -407,7 +407,7 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
     };
     Ok(Outcome::Done {
         answer,
-        share: None,
+        shares: Vec::new(),
     })
 }
 

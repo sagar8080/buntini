@@ -347,7 +347,9 @@ async fn open(target: &str) -> Result<(), String> {
 }
 
 pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, String> {
-    let done = |answer: String, share: Option<Share>| Ok(Outcome::Done { answer, share });
+    let done = |answer: String, share: Option<Share>| {
+        Ok(Outcome::Done { answer, shares: share.into_iter().collect() })
+    };
     match command {
         Command::OpenSite { name, url } => {
             open(&url).await?;

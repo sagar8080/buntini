@@ -1328,7 +1328,11 @@ pub async fn morning_brief(state: State<'_, AppState>) -> Result<TaskRecord, Str
         prices: vec![],
         cards: vec![],
         backend: "brief".into(),
-        touched: vec![],
+        // The brief is indexed like any turn, so it records everything it shows.
+        touched: crate::skills::day::shares(&day, battery_low)
+            .into_iter()
+            .map(|share| share.id().to_string())
+            .collect(),
         handoff: None,
         action: None,
     };
@@ -2533,8 +2537,8 @@ async fn execute_with_settings(
                 helper: state.models.apple_helper(),
             };
             match crate::skills::run(skill, &context).await? {
-                crate::skills::Outcome::Done { answer, share } => {
-                    if let Some(share) = share {
+                crate::skills::Outcome::Done { answer, shares } => {
+                    for share in shares {
                         touch(task, share);
                     }
                     task.answer = answer;

@@ -73,7 +73,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             let triage = crate::triage::run().await?;
             Ok(Outcome::Done {
                 answer: crate::triage::compose(&triage),
-                share: Some(Share::Mail),
+                shares: vec![Share::Mail],
             })
         }
         Command::MyDay => {
@@ -87,14 +87,26 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
                 &day,
                 battery_low,
             );
-            let share = if day.mail.is_some() {
-                Share::Mail
-            } else {
-                Share::Calendar
-            };
-            Ok(Outcome::Done { answer, share: Some(share) })
+            Ok(Outcome::Done { answer, shares: shares(&day, battery_low) })
         }
     }
+}
+
+/// Every kind of data a day summary shows: events and reminders are Calendar, the inbox
+/// is Mail and the battery line is System. A turn is only replayed to an external brain
+/// allowed all of them, so none may be left out.
+pub fn shares(day: &crate::brief::Day, battery_low: bool) -> Vec<Share> {
+    let mut shares = Vec::new();
+    if day.events.is_some() || day.reminders.is_some() {
+        shares.push(Share::Calendar);
+    }
+    if day.mail.is_some() {
+        shares.push(Share::Mail);
+    }
+    if battery_low {
+        shares.push(Share::System);
+    }
+    shares
 }
 
 #[cfg(test)]
@@ -110,6 +122,31 @@ mod tests {
         for prompt in ["My day", "What does my day look like?", "brief me"] {
             assert_eq!(recognise(&words(prompt)), Some(Command::MyDay), "{prompt}");
         }
+    }
+
+    fn day(events: bool, reminders: bool, mail: bool) -> crate::brief::Day {
+        crate::brief::Day {
+            events: events.then(|| vec![("09:00".into(), "Standup".into())]),
+            reminders: reminders.then(|| vec!["Call mum".into()]),
+            calendar_allowed: events,
+            reminders_allowed: reminders,
+            calendar_coverage: None,
+            reminders_coverage: None,
+            mail: mail.then(crate::triage::Triage::default),
+            mail_allowed: mail,
+        }
+    }
+
+    #[test]
+    fn my_day_touches_every_category_it_read() {
+        assert_eq!(shares(&day(true, false, true), false), [Share::Calendar, Share::Mail]);
+        assert_eq!(shares(&day(false, true, false), false), [Share::Calendar]);
+        assert_eq!(shares(&day(false, false, false), false), []);
+        assert_eq!(
+            shares(&day(true, true, true), true),
+            [Share::Calendar, Share::Mail, Share::System]
+        );
+        assert_eq!(shares(&day(false, false, false), true), [Share::System]);
     }
 
     #[test]

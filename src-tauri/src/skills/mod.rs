@@ -24,10 +24,11 @@ pub enum Skill {
 }
 
 pub enum Outcome {
-    /// Done: what to tell the user, and the kind of data the reply shows.
+    /// Done: what to tell the user, and every kind of data the reply shows, so an
+    /// external brain is never replayed a turn it may not see.
     Done {
         answer: String,
-        share: Option<Share>,
+        shares: Vec<Share>,
     },
     /// Text to summarise or answer from (a web page, a selection, an email); the model
     /// writes the reply. `kind` names it for the model; `share` is the data it shows.

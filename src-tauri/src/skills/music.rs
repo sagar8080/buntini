@@ -281,7 +281,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
     .await?;
     Ok(Outcome::Done {
         answer,
-        share: Some(Share::Music),
+        shares: vec![Share::Music],
     })
 }
 

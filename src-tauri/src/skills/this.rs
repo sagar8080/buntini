@@ -72,7 +72,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
         // Without a snapshot "this" keeps meaning the page in the browser.
         return browser::run(browser::Command::Page, context).await;
     };
-    let done = |answer: String, share: Option<Share>| Ok(Outcome::Done { answer, share });
+    let done = |answer: String, share: Share| Ok(Outcome::Done { answer, shares: vec![share] });
     match crate::focus::referent(snapshot, context.settings).await? {
         Referent::Selection { app, text } => Ok(Outcome::Page {
             kind: "selected text",
@@ -106,7 +106,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
                     if names.len() == 1 { "one item".to_string() } else { format!("{} items", names.len()) },
                     names.join(", ")
                 ),
-                Some(Share::Files),
+                Share::Files,
             )
         }
         Referent::Window { app, title } => done(
@@ -115,7 +115,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             } else {
                 format!("You were in {app} (“{title}”), with nothing selected. Select the text you mean and ask again.")
             },
-            Some(Share::Selection),
+            Share::Selection,
         ),
     }
 }
