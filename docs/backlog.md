@@ -179,7 +179,7 @@ Effort scale: S is under half a day, M is 1–3 days, L is about a week, XL is s
    - Take prices and cost per search from built-in tables.
    - Reduce the cosmetic options.
 
-   Effort M.
+   Effort M. *Done in iteration 2: setup is three questions and Settings drops the technical knobs; saved values from earlier versions still load.*
 
 ### E. Test and evaluation gaps not covered by a fix above
 
@@ -191,12 +191,12 @@ Effort scale: S is under half a day, M is 1–3 days, L is about a week, XL is s
 1. **Keep working across quit, login and sleep: phases A–C** (M). Open at login through SMAppService, OS-scheduled timer notifications, and a scheduler run on wake. This is what makes timers and watches trustworthy. *Next iteration.*
 2. **Approval inbox and actionable "Review" notifications** (M). Lets work pause for approval without the window open. Routines and goals depend on it. *Next iteration.*
 3. **Find people in Contacts** (M). "Email Ana" works today only if the model guesses the address. *Next iteration.*
-4. **Threaded Mail replies** (M). Bind `in_reply_to` from `Referent::Mail.message_id` and from triage ids, then use Mail's `reply`. Makes "needs a reply → reply to it" actually useful. Depends on B11 and B7.
+4. **Threaded Mail replies** (M). Bind `in_reply_to` from `Referent::Mail.message_id` and from triage ids, then use Mail's `reply`. Makes "needs a reply → reply to it" actually useful. Depends on B11 and B7. *Done in iteration 2: `reply_email`, bound from Mail's selected message or the saved triage list, with a receipt that checks recipient, subject, text and thread headers. Replying to an email that was neither open nor listed is not supported, and Mail's reply behaviour needs device acceptance.*
 5. **Change existing items** (L). complete_reminder, update_calendar_event and append_to_note, with item ids bound to the source, before/after shown in the sheet, and a receipt that reads the item back. Makes "My day" actionable. *Done in iteration 2 (see [capabilities](capabilities.md)); the EventKit and Notes writes still need device acceptance.*
-6. **Scheduled routines** (L). Requires `run_task_headless(app, prompt, sink)`, the routines table and item 2. The morning brief becomes a built-in routine.
+6. **Scheduled routines** (L). Requires `run_task_headless(app, prompt, sink)`, the routines table and item 2. The morning brief becomes a built-in routine. *Done in iteration 2: `create_routine`, the routines table, `run_task_headless`, and History → Routines with Pause and Delete. Runs need Buntini open and the Mac awake.*
 7. **Read PDF, Word, RTF and Pages files in the helper** (M). Merge the duplicate extension lists (`local.rs:130-155`, `indexer.rs:61-82`). Parse in the helper process with caps. *Done in iteration 2: one list in `local::content_kind`; `--extract-document` in the helper. Pages files without a PDF preview stay name-only.*
 8. **Proactive nudges from local data** (M). Meeting prep, people waiting on a reply, reminders due. Needs C3's cached triage and A2's no-launch reads.
-9. **List the user's Shortcuts for run_shortcut** (S). Smart home through Shortcuts. Cheap, and could be done earlier as filler.
+9. **List the user's Shortcuts for run_shortcut** (S). Smart home through Shortcuts. Cheap, and could be done earlier as filler. *Done in iteration 2: `list_shortcuts` bound before any model call, and `run_shortcut` limited to a listed name. Real HomeKit shortcuts need device acceptance.*
 10. **Hands-free voice** (L). Partial results, then end-of-speech detection and conversation mode, then an optional wake word last.
 11. **Goals that span days** (L). Needs item 6.
 12. **MCP client for local stdio servers** (L).
