@@ -38,7 +38,7 @@ pub const APPS: [App; 13] = [
     App { id: "contacts", name: "Contacts", can: &["Find the people you name, with their email addresses and phone numbers"], tools: &["find_contact"], share: Some(Share::Contacts), note: Some("A draft is addressed from Contacts only when exactly one person and one address match. Otherwise you pick the address when you approve it.") },
     App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
-    App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None, note: None },
+    App { id: "shortcuts", name: "Shortcuts", can: &["Find your shortcuts", "Run them after you approve, like one that turns on your lights"], tools: &["list_shortcuts", "run_shortcut"], share: None, note: None },
     App { id: "safari", name: "Safari", can: &["List and find your open tabs", "Switch to a tab", "Read the page you’re on"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.") },
     App { id: "chrome", name: "Google Chrome", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
     App { id: "brave", name: "Brave Browser", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
@@ -50,12 +50,13 @@ pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
 
 /// App read/control schemas. The workflow controller requires durable approval
 /// for playback mutations and tab switching; now_playing remains a read.
-pub const READ_TOOLS: [&str; 9] = [
+pub const READ_TOOLS: [&str; 10] = [
     "read_mail",
     "read_calendar",
     "read_reminders",
     "find_notes",
     "find_contact",
+    "list_shortcuts",
     "control_music",
     "browser_tabs",
     "switch_tab",
@@ -195,6 +196,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "read_reminders" => &[],
         "find_notes" => &["query"],
         "find_contact" => &["name"],
+        "list_shortcuts" => &["query"],
         "control_music" => &["app", "action", "query"],
         "browser_tabs" => &["browser", "query"],
         "switch_tab" => &["browser", "query"],
@@ -252,6 +254,11 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                 return Err("Say whose contact to find, by name or email address.".into());
             }
             out.insert("name".into(), name.into());
+        }
+        "list_shortcuts" => {
+            if let Some(query) = text(args, "query", 100)? {
+                out.insert("query".into(), query.into());
+            }
         }
         "control_music" => {
             let selected = text(args, "app", 10)?;
@@ -1094,6 +1101,134 @@ pub async fn find_contact(helper_path: &Path, name: &str) -> Result<Value, Strin
     Ok(contact_evidence(name, &parse_contacts(&output)?))
 }
 
+/// At most this many shortcuts per read; a request rarely fits more than a few.
+const SHORTCUT_LIMIT: usize = 32;
+/// The list is read again after this long, so a shortcut made a moment ago shows up.
+const SHORTCUTS_FRESH: std::time::Duration = std::time::Duration::from_secs(30);
+static SHORTCUTS: std::sync::Mutex<Option<(std::time::Instant, Vec<String>)>> =
+    std::sync::Mutex::new(None);
+
+/// The names of the user's shortcuts, as `shortcuts list` prints them (one per line),
+/// kept briefly so a request and its follow-up don't each run the command.
+pub async fn shortcut_names() -> Result<Vec<String>, String> {
+    if let Some((at, names)) = SHORTCUTS.lock().unwrap().as_ref() {
+        if at.elapsed() < SHORTCUTS_FRESH {
+            return Ok(names.clone());
+        }
+    }
+    let mut command = Command::new("/usr/bin/shortcuts");
+    command.arg("list");
+    let names = parse_shortcuts(&crate::actions::output(command, 15).await?);
+    *SHORTCUTS.lock().unwrap() = Some((std::time::Instant::now(), names.clone()));
+    Ok(names)
+}
+
+fn parse_shortcuts(output: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for name in output.lines().map(str::trim) {
+        if !name.is_empty() && name.chars().count() <= 100 && !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Words that only frame a request ("please run my … shortcut", "turn on the …"), so a
+/// shortcut name needs none of them and a request's own words don't count them.
+const SHORTCUT_FILLER: [&str; 30] = [
+    "a", "all", "an", "and", "buntini", "can", "could", "for", "hey", "hi", "i", "in", "it",
+    "just", "like", "me", "my", "now", "of", "please", "run", "shortcut", "shortcuts", "switch",
+    "the", "to", "turn", "want", "will", "would",
+];
+
+/// Lowercase words, with a plural "s" dropped so "lights" and "Light" compare equal.
+fn shortcut_words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| match word.strip_suffix('s') {
+            Some(stem) if stem.chars().count() >= 3 && !stem.ends_with('s') => stem.to_string(),
+            _ => word.to_string(),
+        })
+        .collect()
+}
+
+/// The user's shortcuts whose every word is in `words`, most specific first: for
+/// "turn on the living room lights", "Living Room Lights On" before "Lights On", and
+/// never "Lights Off". A name made only of framing words never fits.
+pub fn matching_shortcuts(words: &str, names: &[String]) -> Vec<String> {
+    let said = shortcut_words(words);
+    let mut found: Vec<(usize, &String)> = names
+        .iter()
+        .filter_map(|name| {
+            let have = shortcut_words(name);
+            (have.iter().any(|word| !SHORTCUT_FILLER.contains(&word.as_str()))
+                && have.iter().all(|word| said.contains(word)))
+            .then_some((have.len(), name))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().map(|(_, name)| name.clone()).collect()
+}
+
+/// Whether a shortcut's name covers everything `words` asks for beyond framing words, so
+/// it is plainly the one meant: "Living Room Lights On" for "turn on the living room
+/// lights", but not "Lights On", which leaves out the room.
+pub fn shortcut_covers(words: &str, name: &str) -> bool {
+    let have = shortcut_words(name);
+    shortcut_words(words)
+        .iter()
+        .filter(|word| !SHORTCUT_FILLER.contains(&word.as_str()))
+        .all(|word| have.contains(word))
+}
+
+/// The user's shortcuts that fit `query` (all of them without one), as source records:
+/// a name here is one the user really has, so a run can be bound to it.
+pub fn shortcut_evidence(query: &str, names: &[String]) -> Value {
+    let found = if query.is_empty() {
+        names.to_vec()
+    } else {
+        matching_shortcuts(query, names)
+    };
+    let shown = &found[..found.len().min(SHORTCUT_LIMIT)];
+    let records = shown
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            json!({"id":name, "reference":source_reference("shortcuts", Some(name), index), "name":name})
+        })
+        .collect();
+    let display = if found.is_empty() && query.is_empty() {
+        "You don’t have any shortcuts yet.".to_string()
+    } else if found.is_empty() {
+        format!("None of your shortcuts fits “{query}”.")
+    } else {
+        let listed = shown
+            .iter()
+            .map(|name| format!("“{name}”"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = if shown.len() < found.len() {
+            format!(" and {} more", found.len() - shown.len())
+        } else {
+            String::new()
+        };
+        if query.is_empty() {
+            format!("Your shortcuts: {listed}{more}.")
+        } else {
+            format!("Your shortcuts that fit “{query}”: {listed}{more}.")
+        }
+    };
+    evidence(
+        "shortcuts",
+        json!({"app":"shortcuts","query":query,"matches":"name_words","limit":SHORTCUT_LIMIT}),
+        records,
+        Some(found.len()),
+        found.len() <= SHORTCUT_LIMIT,
+        display,
+    )
+}
+
 /// Asks macOS for Contacts right after the user allows it, so the prompt shows in Settings.
 async fn contacts_access(helper_path: &Path) -> Result<String, String> {
     if !helper_path.is_file() {
@@ -1262,6 +1397,7 @@ pub async fn run_evidence(
         }
         "find_notes" => find_notes_evidence(get("query")).await,
         "find_contact" => find_contact(helper_path, get("name")).await,
+        "list_shortcuts" => Ok(shortcut_evidence(get("query"), &shortcut_names().await?)),
         "control_music" if get("action") == "now_playing" => {
             let selected = if get("app").is_empty() {
                 "music"
@@ -1314,6 +1450,7 @@ pub fn model_evidence(value: &Value) -> Value {
                 "browser_page",
                 "music",
                 "contacts",
+                "shortcuts",
             ]
             .contains(&kind)
         })
@@ -1343,6 +1480,7 @@ pub fn validate_evidence(
         "read_mail" => "mail",
         "find_notes" => "notes",
         "find_contact" => "contacts",
+        "list_shortcuts" => "shortcuts",
         "browser_tabs" => "browser_tabs",
         "read_page" => "browser_page",
         "control_music" if args["action"] == "now_playing" => "music",
@@ -1388,6 +1526,7 @@ pub fn validate_evidence(
         "mail" => "mail",
         "notes" => "notes",
         "contacts" => "contacts",
+        "shortcuts" => "shortcuts",
         "browser_page" => "safari",
         "music" => args["app"].as_str().unwrap_or("music"),
         _ => "",
@@ -1471,6 +1610,14 @@ pub fn validate_evidence(
                 || scope["matches"] != "name_or_email"
                 || scope["limit"] != CONTACT_LIMIT as u64
                 || count > CONTACT_LIMIT as u64 =>
+        {
+            return Err(invalid())
+        }
+        "shortcuts"
+            if scope["query"] != query
+                || scope["matches"] != "name_words"
+                || scope["limit"] != SHORTCUT_LIMIT as u64
+                || count > SHORTCUT_LIMIT as u64 =>
         {
             return Err(invalid())
         }
@@ -1642,6 +1789,14 @@ pub fn validate_evidence(
                 {
                     return Err(invalid());
                 }
+            }
+            // A saved name must still fit the words it was listed for.
+            "shortcuts"
+                if record["name"] != record["id"]
+                    || !query.is_empty()
+                        && matching_shortcuts(query, &[record["name"].as_str().unwrap_or_default().to_string()]).is_empty() =>
+            {
+                return Err(invalid())
             }
             "music"
                 if !record["title"].is_string()
@@ -2582,6 +2737,10 @@ pub async fn run(
             .as_str()
             .unwrap_or_default()
             .to_string()),
+        "list_shortcuts" => Ok(shortcut_evidence(&get("query"), &shortcut_names().await?)["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()),
         "control_music" => control_music(&get("app"), &get("action"), &get("query"), false).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
@@ -3157,6 +3316,55 @@ mod tests {
         .unwrap();
         assert!(play.get("query").is_none(), "only play takes a query");
         assert!(validate("send_mail", &json!({})).is_err());
+    }
+
+    #[test]
+    fn shortcuts_fit_by_the_users_words_and_records_are_checked() {
+        let names = parse_shortcuts(
+            "Lights On\nLiving Room Lights On\nLiving Room Lights Off\n  \nLock Front Door\nStart work\nLights On\nRun\n",
+        );
+        assert_eq!(names, ["Lights On", "Living Room Lights On", "Living Room Lights Off", "Lock Front Door", "Start work", "Run"]);
+        let request = "Turn on the living room lights";
+        // Most specific first, never the opposite switch, never a name of framing words.
+        assert_eq!(matching_shortcuts(request, &names), ["Living Room Lights On", "Lights On"]);
+        assert!(shortcut_covers(request, "Living Room Lights On"));
+        assert!(!shortcut_covers(request, "Lights On"), "leaves out the room");
+        assert_eq!(matching_shortcuts("please run my Start Work shortcut", &names), ["Start work"]);
+        assert_eq!(matching_shortcuts("lock the front door", &names), ["Lock Front Door"]);
+        assert!(matching_shortcuts("turn on the kitchen fan", &names).is_empty());
+        assert!(matching_shortcuts("run it", &names).is_empty());
+
+        assert_eq!(validate("list_shortcuts", &json!({})).unwrap(), Map::new());
+        assert_eq!(validate("list_shortcuts", &json!({"query":" lights on "})).unwrap()["query"], "lights on");
+        for invalid in [json!({"query":"a".repeat(101)}), json!({"name":"Lights On"}), json!({"query":7})] {
+            assert!(validate("list_shortcuts", &invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(for_call("list_shortcuts", &Map::new()).unwrap().id, "shortcuts");
+        assert_eq!(for_call("run_shortcut", &Map::new()).unwrap().id, "shortcuts");
+
+        let args = json!({"query":request});
+        let evidence = shortcut_evidence(request, &names);
+        assert_eq!(evidence["count"], 2);
+        assert_eq!(evidence["records"][0]["name"], "Living Room Lights On");
+        assert!(evidence["text"].as_str().unwrap().contains("“Living Room Lights On”"));
+        assert!(validate_evidence("list_shortcuts", &args, &evidence, true).is_ok());
+        // A record that doesn't fit the words, or a read for other words, is refused.
+        let mut smuggled = evidence.clone();
+        smuggled["records"][1] = json!({"id":"Unlock Front Door","reference":source_reference("shortcuts", Some("Unlock Front Door"), 1),"name":"Unlock Front Door"});
+        assert!(validate_evidence("list_shortcuts", &args, &smuggled, false).is_err());
+        assert!(validate_evidence("list_shortcuts", &json!({"query":"lock the front door"}), &evidence, false).is_err());
+        let none = shortcut_evidence("turn on the kitchen fan", &names);
+        assert_eq!(none["count"], 0);
+        assert_eq!(none["text"], "None of your shortcuts fits “turn on the kitchen fan”.");
+        let all = shortcut_evidence("", &names);
+        assert_eq!(all["count"], names.len());
+        assert!(validate_evidence("list_shortcuts", &json!({}), &all, true).is_ok());
+        let many: Vec<String> = (0..40).map(|n| format!("Scene {n}")).collect();
+        let partial = shortcut_evidence("", &many);
+        assert_eq!((partial["count"].as_u64(), partial["complete"].as_bool()), (Some(32), Some(false)));
+        assert!(partial["text"].as_str().unwrap().ends_with("and 8 more."));
+        assert!(validate_evidence("list_shortcuts", &json!({}), &partial, true).is_err());
+        assert!(model_evidence(&evidence).get("text").is_none());
     }
 
     #[test]

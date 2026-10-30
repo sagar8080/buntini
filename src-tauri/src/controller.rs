@@ -3177,6 +3177,24 @@ where
                 arguments: json!({"name":name}),
                 source: json!({"kind":"user_fields","source":"user_request","fields":{"name":name}}),
             })
+        } else if let Some(query) = flow.contract.shortcut_lookup(&flow.steps).filter(|_| {
+            definitions
+                .as_array()
+                .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "list_shortcuts"))
+        }) {
+            // "Turn on the living room lights": read the user's shortcuts with their own
+            // words first, so the run is bound to a shortcut they really have.
+            Some(crate::planning::BoundAction {
+                tool: "list_shortcuts",
+                arguments: json!({"query":query}),
+                source: json!({"kind":"user_fields","source":"user_request","fields":{"query":query}}),
+            })
+        } else if let Some((name, source)) = flow.contract.shortcut_proposal(&flow.steps)? {
+            Some(crate::planning::BoundAction {
+                tool: "run_shortcut",
+                arguments: json!({"name":name}),
+                source,
+            })
         } else if clarified {
             None
         } else if let Some(next) = flow.contract.next_outcome() {
@@ -3298,6 +3316,13 @@ where
                 fields.remove("to");
             }
         }
+        // Several of the user's shortcuts fit: the sheet offers them all to pick from.
+        let shortcut_choices = match args["name"].as_str() {
+            Some(proposed) if name == "run_shortcut" => {
+                flow.contract.shortcut_alternatives(&flow.steps, proposed)
+            }
+            _ => vec![],
+        };
         let approval = is_action || name == "look_up_online";
         let effect = is_action && name != "browse_page";
         let assistant = assistant_call(&turn.text, turn.raw, &name, if literal_inputs.is_some() {original_call.get("arguments").unwrap_or(&args)} else {&args});
@@ -3342,6 +3367,11 @@ where
                                 },
                                 value: choice.address,
                             })
+                            .chain(shortcut_choices.into_iter().map(|name| crate::actions::Choice {
+                                field: "name".into(),
+                                label: name.clone(),
+                                value: name,
+                            }))
                             .collect(),
                     })
                     .map_err(|e| e.to_string())?,
@@ -4817,3 +4847,7 @@ mod controller_search_tests;
 #[cfg(test)]
 #[path = "controller_search_resume_tests.rs"]
 mod controller_search_resume_tests;
+
+#[cfg(test)]
+#[path = "controller_shortcut_tests.rs"]
+mod controller_shortcut_tests;

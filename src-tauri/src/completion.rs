@@ -139,6 +139,33 @@ fn addressed_reply(tokens: &[&str]) -> bool {
     !object.is_empty() && !answered_in_chat(object)
 }
 
+/// Whether a clause asks to change a home device ("turn on the living room lights", "lock
+/// the front door", "set the thermostat to 20"), which Buntini does with one of the
+/// user's shortcuts. Mac settings ("turn on dark mode") are not devices.
+fn home_device(verb: &str, tokens: &[&str]) -> bool {
+    const DEVICES: &[&str] = &[
+        "light", "lights", "lamp", "lamps", "fan", "fans", "heater", "heating", "thermostat",
+        "aircon", "tv", "plug", "plugs", "blinds", "curtains", "kettle", "sprinklers", "purifier",
+        "humidifier", "garage", "door", "doors", "gate",
+    ];
+    let has = |set: &[&str]| tokens.iter().any(|token| set.contains(token));
+    // A later or repeated change ("at 7", "every night") is not something to run now.
+    if !has(DEVICES)
+        || has(&[
+            "mode", "timer", "reminder", "volume", "at", "tomorrow", "tonight", "later", "every",
+            "when", "minutes", "hours",
+        ])
+    {
+        return false;
+    }
+    match verb {
+        "turn" | "switch" => has(&["on", "off"]),
+        "dim" | "brighten" => has(&["light", "lights", "lamp", "lamps"]),
+        "lock" | "unlock" => has(&["door", "doors", "garage", "gate"]),
+        _ => has(&["thermostat", "heating", "aircon"]),
+    }
+}
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
     let prompt = unquoted(&prompt.replace("Additional details: ", "\n"));
     let mut expected = Vec::new();
@@ -228,6 +255,12 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 }
                 "open" => Some("open_app"),
                 "run" if has(&["shortcut", "shortcuts"]) => Some("run_shortcut"),
+                // Home devices are run through the user's own shortcuts, never guessed.
+                "turn" | "switch" | "dim" | "brighten" | "lock" | "unlock" | "set"
+                    if home_device(verb, &tokens) =>
+                {
+                    Some("run_shortcut")
+                }
                 "send" | "email" | "text" | "post" | "publish" | "book" | "reserve" | "buy"
                 | "purchase" | "order" | "pay" | "delete" | "cancel" | "move" | "update"
                 | "change" => {
@@ -810,6 +843,36 @@ mod tests {
         assert!(!claims_own_write(&answer));
         assert!(validate_answer("Thanks", "I ordered a monitor.", &[]).is_err());
         assert!(validate_answer("Rewrite this and add a reminder", "I created the reminder.", &[]).is_err());
+    }
+
+    #[test]
+    fn home_device_requests_run_one_of_the_users_shortcuts() {
+        for prompt in [
+            "Turn on the living room lights",
+            "please switch off the kitchen lights",
+            "Dim the bedroom lamp",
+            "Lock the front door",
+            "Set the thermostat to 20",
+            "turn the fan off",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec!["run_shortcut"], false), "{prompt}");
+        }
+        assert_eq!(
+            requested_actions("Turn on the lights and lock the front door").0,
+            ["run_shortcut", "run_shortcut"]
+        );
+        for prompt in [
+            "Turn on dark mode",
+            "turn the volume down",
+            "Don't turn on the lights",
+            "How do I turn on the lights in Home?",
+            "Turn on the lights at 7pm",
+            "turn on the lights every night",
+            "Lock my screen",
+            "switch to the lights tab",
+        ] {
+            assert!(!requested_actions(prompt).0.contains(&"run_shortcut"), "{prompt}");
+        }
     }
 
     fn saved(tool: &str, message: &str) -> Step {
