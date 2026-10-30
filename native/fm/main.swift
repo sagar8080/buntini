@@ -174,8 +174,13 @@ func requiredNextTool(_ step: [String: Any]?, offered: [String]) -> String? {
         let sourceAvailable = (step["contentBodySourceAvailable"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false
         let creativeNoteBody = candidates[0] == "create_note" && sourceAvailable
             && (known["title"] as? String).map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true
+        // The controller binds which email a reply answers, its sender and subject;
+        // the reply text is the one thing left for the model to write.
+        let replyBody = candidates[0] == "reply_email"
+            && (known["message"] as? String).map { !$0.isEmpty } == true
+            && (known["to"] as? String).map { !$0.isEmpty } == true
         guard fields.allSatisfy({ field in
-                  if field == "body" && creativeNoteBody { return true }
+                  if field == "body" && (creativeNoteBody || replyBody) { return true }
                   guard let value = known[field], !(value is NSNull) else { return false }
                   return (value as? String).map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true
               }) else { return nil }
@@ -309,7 +314,7 @@ func previousToolCalls(_ messages: ArraySlice<[String: Any]>) -> [(name: String,
 }
 
 func repeatsWrite(_ name: String, _ arguments: [String: Any], history: ArraySlice<[String: Any]>) -> Bool {
-    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer"]
+    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer"]
     guard writes.contains(name) else { return false }
     if name == "control_music", arguments["action"] as? String == "now_playing" { return false }
     return previousToolCalls(history).contains { previous in
@@ -339,7 +344,7 @@ func routingPrompt(goal: String, guidance: String, steps: [[String: Any]], nextS
     return "Original user request: \(goal)\nLatest user guidance: \(guidance)\nExecution states (not new requests): \(String(data: data, encoding: .utf8) ?? "[]")\nController's next requested step and verified numeric calculations: \(String(data: facts, encoding: .utf8) ?? "{}")"
 }
 
-let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
+let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
 
 func unresolvedJournal(_ steps: [[String: Any]]) -> Bool {
     steps.contains { ["failed", "unknown", "running", "waiting"].contains($0["state"] as? String ?? "unknown") }
@@ -531,6 +536,7 @@ let toolExamples: [String: String] = [
     "add_calendar_event": "put lunch with Sam on Friday at 1pm in my calendar",
     "create_note": "make a note of these packing ideas",
     "draft_email": "draft an email to my landlord about the leak",
+    "reply_email": "reply to this email saying I will be there",
     "run_shortcut": "run my Morning Routine shortcut",
     "open_app": "open Safari",
     "open_link": "open github.com",
@@ -1578,6 +1584,10 @@ func contractSelfTest() async -> Int32 {
         try require(requiredNextTool(["kind":"answer","availableTools":["calculate"]], offered:["calculate"]) == nil, "Answer outcomes must not force optional tools")
         try require(requiredNextTool(["kind":"write","availableTools":["create_note"],"requiredFields":["title","body"],"requiredArguments":["title":"Known"]], offered:["create_note"]) == nil, "A required write with unknown essential fields must retain an answer/clarification branch")
         try require(requiredNextTool(["kind":"write","availableTools":["create_note"],"requiredFields":["title","body"],"requiredArguments":["title":"Known","body":"Supplied text"]], offered:["create_note"]) == "create_note", "A single requested write may be filled when every required field is already known")
+        try require(requiredNextTool(["kind":"write","availableTools":["reply_email"],"requiredFields":["body"],"requiredArguments":["message":"4821","message_id":"m@x","to":"ana@example.com","subject":"Re: Lease"]], offered:["reply_email"]) == "reply_email", "A reply whose email the controller bound needs only its text written")
+        try require(requiredNextTool(["kind":"write","availableTools":["reply_email"],"requiredFields":["body"],"requiredArguments":[String:Any]()], offered:["reply_email"]) == nil, "A reply without a bound email must not be forced")
+        let earlierReply: [[String: Any]] = [["tool_calls": [["function": ["name": "reply_email", "arguments": ["body": "Yes"]]]]]]
+        try require(effectTools.contains("reply_email") && repeatsWrite("reply_email", ["body":"Yes"], history: earlierReply[...]), "A reply is a write that is never repeated")
         try require(requiredNextTool(["kind":"read","availableTools":["find_notes","search_files"]], offered:["find_notes","search_files"]) == nil, "Ambiguous source choices must still be routed")
         try require(emptySourceReply(goal:"Summarize source",guidance:"Search the corrected title",steps:noNotes) == nil, "New user guidance must be able to retry an empty lookup")
         let priorFile: [[String:Any]] = [["tool":"search_files","state":"succeeded","effect":false,"evidence":"File: facts from an actual document"]]

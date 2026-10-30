@@ -38,6 +38,13 @@ pub enum Outcome {
         text: String,
         share: Share,
     },
+    /// Done, naming emails by number. The controller saves them with the turn, so a
+    /// follow-up ("reply to the second one") answers exactly that email.
+    Listed {
+        answer: String,
+        shares: Vec<Share>,
+        emails: Vec<crate::triage::Listed>,
+    },
 }
 
 pub struct Context<'a> {

@@ -3,7 +3,11 @@
 //! A message needs a reply when a person (not an automated sender) wrote to the user
 //! directly and asked something; flagged messages count too. Everything else from people
 //! is listed as worth a look; automated mail is only counted.
+//!
+//! The emails an answer names are numbered and saved with that turn, so "reply to the
+//! second one" or "reply to Ana's email" afterwards answers exactly that email.
 use crate::apps::MailHeader;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// How far back "what needs a reply" looks.
@@ -128,17 +132,40 @@ fn sender(header: &MailHeader) -> String {
     }
 }
 
-fn line(item: &Item) -> String {
-    let when = chrono::NaiveDateTime::parse_from_str(&item.header.received, "%Y-%m-%d %H:%M")
+fn day(received: &str) -> String {
+    chrono::NaiveDateTime::parse_from_str(received, "%Y-%m-%d %H:%M")
         .map(|at| at.format("%a %-d %b").to_string())
-        .unwrap_or_else(|_| item.header.received.clone());
-    let subject = if item.header.subject.is_empty() { "(no subject)" } else { &item.header.subject };
-    format!("• {} — “{}” ({when}): {}", sender(&item.header), subject, item.reason)
+        .unwrap_or_else(|_| received.to_string())
 }
 
-/// The answer as Buntini says it.
+fn line(number: usize, item: &Item) -> String {
+    let subject = if item.header.subject.is_empty() { "(no subject)" } else { &item.header.subject };
+    format!("{number}. {} — “{}” ({}): {}", sender(&item.header), subject, day(&item.header.received), item.reason)
+}
+
+/// The emails an answer names, in the order it numbers them: those that need a reply,
+/// then the ones it didn't open, then the rest from people.
+fn shown(triage: &Triage) -> Vec<&Item> {
+    let (unread, others): (Vec<&Item>, Vec<&Item>) =
+        triage.look.iter().partition(|item| item.reason == UNOPENED);
+    triage
+        .reply
+        .iter()
+        .take(8)
+        .chain(unread.into_iter().take(5))
+        .chain(others.into_iter().take(5))
+        .collect()
+}
+
+/// The answer as Buntini says it. Each email it names has a number, the same one
+/// `listed` saves for a follow-up.
 pub fn compose(triage: &Triage) -> String {
     let mut lines = Vec::new();
+    let mut number = 0;
+    let mut numbered = |item: &Item| {
+        number += 1;
+        line(number, item)
+    };
     let unopened = match triage.unopened {
         1 => "1 email sent to you that I didn’t open".to_string(),
         n => format!("{n} emails sent to you that I didn’t open"),
@@ -146,8 +173,8 @@ pub fn compose(triage: &Triage) -> String {
     // The ones past the reading limit are named, so "check them" says which.
     let (unread, others): (Vec<&Item>, Vec<&Item>) =
         triage.look.iter().partition(|item| item.reason == UNOPENED);
-    let list_unread = |lines: &mut Vec<String>| {
-        lines.extend(unread.iter().take(5).map(|item| line(item)));
+    let list_unread = |lines: &mut Vec<String>, numbered: &mut dyn FnMut(&Item) -> String| {
+        lines.extend(unread.iter().take(5).map(|item| numbered(item)));
         if unread.len() > 5 {
             lines.push(format!("…and {} more.", unread.len() - 5));
         }
@@ -162,22 +189,22 @@ pub fn compose(triage: &Triage) -> String {
         n => lines.push(format!("{n} emails look like they need a reply:")),
     }
     if triage.reply.is_empty() {
-        list_unread(&mut lines);
+        list_unread(&mut lines, &mut numbered);
     }
-    lines.extend(triage.reply.iter().take(8).map(line));
+    lines.extend(triage.reply.iter().take(8).map(&mut numbered));
     if triage.reply.len() > 8 {
         lines.push(format!("…and {} more.", triage.reply.len() - 8));
     }
     if !triage.reply.is_empty() && triage.unopened > 0 {
         lines.push(format!("I only open the newest {READ_AT_MOST} emails sent to you, so the {unopened} may need a reply too:"));
-        list_unread(&mut lines);
+        list_unread(&mut lines, &mut numbered);
     }
     if !others.is_empty() {
         lines.push(format!(
             "{} from people that may not need an answer:",
             if others.len() == 1 { "One more".to_string() } else { format!("{} more", others.len()) }
         ));
-        lines.extend(others.iter().take(5).map(|item| line(item)));
+        lines.extend(others.iter().take(5).map(|item| numbered(item)));
     }
     if triage.automated > 0 {
         lines.push(format!(
@@ -191,6 +218,205 @@ pub fn compose(triage: &Triage) -> String {
     }
     lines.push(format!("This covers unreplied messages in your inbox from the last {DAYS} days."));
     lines.join("\n")
+}
+
+/// One email an answer named, by its number there. The ids are Mail's own, read with
+/// the rest of the header; a reply to it is checked against all of them again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listed {
+    pub number: usize,
+    pub id: String,
+    pub message_id: String,
+    pub sender: String,
+    pub subject: String,
+    pub received: String,
+}
+
+impl Listed {
+    /// "Ana Silva · “Lease” · Wed 21 Oct", for the approval sheet.
+    pub fn describe(&self) -> String {
+        about(&self.sender, &self.subject, &self.received)
+    }
+}
+
+/// An email in a few words, as the approval sheet names the one a reply answers.
+pub fn about(sender: &str, subject: &str, received: &str) -> String {
+    let name = match sender.split_once('<') {
+        Some((name, _)) if !name.trim().is_empty() => name.trim().trim_matches('"'),
+        _ => sender.trim(),
+    };
+    let subject = if subject.is_empty() { "(no subject)" } else { subject };
+    format!("{name} · “{subject}” · {}", day(received))
+}
+
+/// The emails `compose` numbered, with those numbers.
+pub fn listed(triage: &Triage) -> Vec<Listed> {
+    shown(triage)
+        .into_iter()
+        .enumerate()
+        .map(|(index, item)| Listed {
+            number: index + 1,
+            id: item.header.id.clone(),
+            message_id: item.header.message_id.clone(),
+            sender: item.header.sender.clone(),
+            subject: item.header.subject.clone(),
+            received: item.header.received.clone(),
+        })
+        .collect()
+}
+
+/// The latest list, saved beside the turn that showed it. One at a time: a new list
+/// replaces it, and deleting that turn or the history removes it (store.rs).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listing {
+    pub task_id: String,
+    pub listed_at: String,
+    pub emails: Vec<Listed>,
+}
+
+/// The preference that holds the latest `Listing`.
+pub const LISTING: &str = "mail-listing";
+/// How long a list stays what "the second one" means. Mail changes; every reply is
+/// checked against the email again anyway.
+const LISTING_HOURS: i64 = 12;
+
+pub fn save_listing(store: &crate::store::Store, task_id: &str, emails: Vec<Listed>) -> Result<(), String> {
+    let listing = Listing { task_id: task_id.into(), listed_at: chrono::Utc::now().to_rfc3339(), emails };
+    store.set_preference(LISTING, &serde_json::to_string(&listing).map_err(|e| e.to_string())?)
+}
+
+/// The saved list, while it is recent and its turn is one of `turns` (the earlier turns of
+/// this conversation), so a list from another conversation never answers "the second one".
+pub fn recent_listing(store: &crate::store::Store, turns: &[crate::types::TaskRecord]) -> Option<Listing> {
+    let listing: Listing = serde_json::from_str(&store.preference(LISTING).ok()??).ok()?;
+    current(listing, turns, chrono::Utc::now())
+}
+
+fn current(listing: Listing, turns: &[crate::types::TaskRecord], now: chrono::DateTime<chrono::Utc>) -> Option<Listing> {
+    let at = chrono::DateTime::parse_from_rfc3339(&listing.listed_at).ok()?;
+    (now.signed_duration_since(at) < chrono::Duration::hours(LISTING_HOURS)
+        && turns.iter().any(|turn| turn.id == listing.task_id))
+        .then_some(listing)
+}
+
+/// Which listed email a reply means, in the user's own words.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pick {
+    /// "the second one", "number 2", "2"
+    Number(usize),
+    /// "the last one"
+    Last,
+    /// "Ana's email", "the email from Ana", "Ana"
+    Sender(String),
+}
+
+const ORDINALS: [&str; 10] = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+/// Words that end a sender's name ("reply to Ana saying yes").
+const AFTER_NAME: &[&str] = &[
+    "saying", "and", "with", "that", "telling", "to", "about", "asking", "please", "thanking",
+    "then", "but", "so", "in", "for", "letting", "yes", "no", "email", "emails", "message",
+    "mail", "one",
+];
+/// Words after "reply to" that are never a sender's name.
+const NOT_A_NAME: &[&str] = &[
+    "this", "that", "it", "her", "him", "them", "the", "my", "me", "these", "those", "all",
+    "everyone", "everybody", "email", "message", "mail", "emails", "messages", "one", "a", "an",
+    "back", "you", "us", "following",
+];
+
+fn number(word: &str) -> Option<usize> {
+    let word = word.trim_end_matches(['.', ':']);
+    ORDINALS
+        .iter()
+        .position(|ordinal| *ordinal == word)
+        .map(|index| index + 1)
+        .or_else(|| {
+            let digits = word.trim_end_matches("st").trim_end_matches("nd").trim_end_matches("rd").trim_end_matches("th");
+            digits.parse::<usize>().ok().filter(|n| (1..=99).contains(n))
+        })
+}
+
+/// "Reply to the second one saying yes", "respond to number 3", "reply to Ana's email",
+/// "write back to the email from Sam". None for "reply to this" or "reply to her",
+/// which mean the email on screen.
+pub fn pick(prompt: &str) -> Option<Pick> {
+    let text = crate::skills::words(prompt);
+    let (_, rest) = crate::skills::from_verb(&text, &["reply", "respond", "write"])?;
+    let rest = rest.strip_prefix("back").map(str::trim_start).unwrap_or(rest);
+    let rest = rest.strip_prefix("to ")?;
+    let words: Vec<&str> = rest.split(' ').collect();
+    let mut at = usize::from(words.first() == Some(&"the"));
+    if words.get(at) == Some(&"last") {
+        return Some(Pick::Last);
+    }
+    if ["number", "no", "email", "message"].contains(words.get(at).unwrap_or(&"")) && words.get(at + 1).and_then(|w| number(w)).is_some() {
+        at += 1;
+    }
+    if let Some(n) = words.get(at).and_then(|w| number(w)) {
+        return Some(Pick::Number(n));
+    }
+    // "the email from Ana", "the one from Ana"
+    if at == 1 && ["email", "message", "mail", "one"].contains(words.get(1).unwrap_or(&"")) && words.get(2) == Some(&"from") {
+        at = 3;
+    } else if at == 1 {
+        return None;
+    }
+    let mut name = Vec::new();
+    for word in &words[at..] {
+        if let Some(owner) = word.strip_suffix("'s") {
+            name.push(owner);
+            break;
+        }
+        if AFTER_NAME.contains(word) || name.len() == 3 {
+            break;
+        }
+        name.push(word);
+    }
+    match name.first() {
+        Some(first) if !NOT_A_NAME.contains(first) && first.chars().all(|c| c.is_alphabetic() || c == '-' || c == '\'') => {
+            Some(Pick::Sender(name.join(" ")))
+        }
+        _ => None,
+    }
+}
+
+/// The one listed email `pick` means, or what to tell the user when it means none or
+/// several.
+pub fn find<'a>(pick: &Pick, emails: &'a [Listed]) -> Result<&'a Listed, String> {
+    match pick {
+        Pick::Number(n) => emails.iter().find(|email| email.number == *n).ok_or_else(|| match emails.len() {
+            1 => "I listed only one email.".to_string(),
+            count => format!("I listed {count} emails, so there’s no number {n}."),
+        }),
+        Pick::Last => emails.last().ok_or_else(|| "I didn’t list any emails.".to_string()),
+        Pick::Sender(name) => {
+            let wanted: Vec<&str> = name.split(' ').collect();
+            let from = |email: &&Listed| {
+                let lower = email.sender.to_lowercase();
+                let display: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'').filter(|w| !w.is_empty()).collect();
+                let local = crate::focus::sender_address(&email.sender)
+                    .and_then(|address| address.split('@').next().map(str::to_string))
+                    .unwrap_or_default();
+                wanted.iter().all(|word| display.contains(word)) || (wanted.len() == 1 && local == wanted[0])
+            };
+            let shown: String = wanted
+                .iter()
+                .map(|word| {
+                    let mut letters = word.chars();
+                    letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
+                })
+                .collect::<Vec<String>>()
+                .join(" ");
+            let found: Vec<&Listed> = emails.iter().filter(from).collect();
+            match found[..] {
+                [one] => Ok(one),
+                [] => Err(format!("None of the emails I listed is from {shown}.")),
+                _ => Err(format!("More than one email I listed is from {shown}. Say which one by its number.")),
+            }
+        }
+    }
 }
 
 /// The count for the morning brief, e.g. "2 emails look like they need a reply: Ana, Sam."
@@ -238,6 +464,7 @@ mod tests {
             to_count,
             sender: sender.into(),
             subject: format!("Subject {id}"),
+            message_id: format!("m-{id}@x.com"),
         }
     }
 
@@ -278,7 +505,16 @@ mod tests {
         assert_eq!(triage.partial, Some((5, 9)));
         let text = compose(&triage);
         assert!(text.starts_with("2 emails look like they need a reply:"));
-        assert!(text.contains("• Ana — “Subject 1” (Wed 21 Oct): asks you something"));
+        assert!(text.contains("1. Ana — “Subject 1” (Wed 21 Oct): asks you something"));
+        // Every email named has the number a follow-up can use, and the same is saved.
+        assert!(text.contains("2. Lee — “Subject 5”") && text.contains("3. Sam — “Subject 2”") && text.contains("4. Team — “Subject 3”"), "{text}");
+        let listed = listed(&triage);
+        assert_eq!(
+            listed.iter().map(|email| (email.number, email.id.as_str())).collect::<Vec<_>>(),
+            [(1, "1"), (2, "5"), (3, "2"), (4, "3")]
+        );
+        assert_eq!(listed[0].message_id, "m-1@x.com");
+        assert_eq!(listed[0].describe(), "Ana · “Subject 1” · Wed 21 Oct");
         assert!(text.contains("I skipped 1 automated message."));
         assert!(text.contains("newest 5 of 9"));
         assert_eq!(
@@ -316,6 +552,92 @@ mod tests {
         both.reply.push(both.look.remove(0));
         let text = compose(&both);
         assert!(text.contains("may need a reply too") && text.contains("P13"), "{text}");
+    }
+
+    #[test]
+    fn unopened_emails_are_numbered_where_they_are_shown() {
+        let headers = vec![
+            header("1", "Ana <ana@x.com>", Some(true), 1, false),
+            header("2", "Team <team@x.com>", Some(false), 40, false),
+        ];
+        // Nothing was opened, so Ana's email comes first, before the one to several people.
+        let triage = sort(headers, 2, &HashMap::new());
+        let text = compose(&triage);
+        assert!(text.contains("1. Ana — ") && text.contains("2. Team — "), "{text}");
+        assert_eq!(listed(&triage).iter().map(|email| email.id.as_str()).collect::<Vec<_>>(), ["1", "2"]);
+    }
+
+    fn email(number: usize, sender: &str) -> Listed {
+        Listed {
+            number,
+            id: format!("{number}0"),
+            message_id: format!("m-{number}@x.com"),
+            sender: sender.into(),
+            subject: format!("Subject {number}"),
+            received: "2026-10-21 09:00".into(),
+        }
+    }
+
+    #[test]
+    fn follow_ups_pick_a_listed_email_by_number_or_sender() {
+        for (prompt, expected) in [
+            ("Reply to the second one saying yes", Pick::Number(2)),
+            ("reply to number 3: thanks", Pick::Number(3)),
+            ("Please respond to the first email and say no", Pick::Number(1)),
+            ("reply to 2 saying I'll call", Pick::Number(2)),
+            ("reply to the 4th one", Pick::Number(4)),
+            ("reply to the last one", Pick::Last),
+            ("Reply to Ana's email saying yes", Pick::Sender("ana".into())),
+            ("reply to ana silva's message", Pick::Sender("ana silva".into())),
+            ("write back to the email from Sam saying thanks", Pick::Sender("sam".into())),
+            ("reply to Lee saying I'll be there", Pick::Sender("lee".into())),
+        ] {
+            assert_eq!(pick(prompt), Some(expected), "{prompt}");
+        }
+        for prompt in [
+            "reply to this saying yes",
+            "reply to her saying yes",
+            "Reply to the email saying yes",
+            "reply to it",
+            "don't reply to the second one",
+            "how do I reply to Ana",
+            "reply in French",
+            "what needs a reply?",
+        ] {
+            assert_eq!(pick(prompt), None, "{prompt}");
+        }
+        let emails = vec![email(1, "Ana Silva <ana@x.com>"), email(2, "Sam <sam@x.com>"), email(3, "Ana Lopes <al@y.com>"), email(4, "lee@z.com")];
+        assert_eq!(find(&Pick::Number(2), &emails).unwrap().id, "20");
+        assert_eq!(find(&Pick::Last, &emails).unwrap().id, "40");
+        assert_eq!(find(&Pick::Sender("sam".into()), &emails).unwrap().id, "20");
+        assert_eq!(find(&Pick::Sender("ana silva".into()), &emails).unwrap().id, "10");
+        assert_eq!(find(&Pick::Sender("lee".into()), &emails).unwrap().id, "40");
+        assert_eq!(find(&Pick::Number(9), &emails).unwrap_err(), "I listed 4 emails, so there’s no number 9.");
+        assert_eq!(find(&Pick::Sender("ana".into()), &emails).unwrap_err(), "More than one email I listed is from Ana. Say which one by its number.");
+        assert_eq!(find(&Pick::Sender("noah".into()), &emails).unwrap_err(), "None of the emails I listed is from Noah.");
+    }
+
+    #[test]
+    fn a_list_counts_only_in_its_own_recent_conversation() {
+        let now = chrono::Utc::now();
+        let listing = Listing { task_id: "triage".into(), listed_at: now.to_rfc3339(), emails: vec![email(1, "ana@x.com")] };
+        let turn = |id: &str| -> crate::types::TaskRecord {
+            serde_json::from_value(serde_json::json!({"id":id,"prompt":"What needs a reply?","answer":"1. Ana","state":"completed","createdAt":"2026-10-30T09:00:00Z","sources":[],"files":[]})).unwrap()
+        };
+        assert!(current(listing.clone(), &[turn("triage")], now).is_some());
+        assert!(current(listing.clone(), &[turn("other")], now).is_none(), "another conversation's list");
+        assert!(current(listing, &[turn("triage")], now + chrono::Duration::hours(13)).is_none(), "an old list");
+        // The list goes with its turn and with the history.
+        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        save_listing(&store, "triage", vec![email(1, "ana@x.com")]).unwrap();
+        assert!(recent_listing(&store, &[turn("triage")]).is_some());
+        store.delete_task("other").unwrap();
+        assert!(store.preference(LISTING).unwrap().is_some());
+        store.delete_task("triage").unwrap();
+        assert!(store.preference(LISTING).unwrap().is_none());
+        save_listing(&store, "triage", vec![email(1, "ana@x.com")]).unwrap();
+        store.clear_history().unwrap();
+        assert!(store.preference(LISTING).unwrap().is_none());
     }
 
     #[test]

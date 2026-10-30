@@ -71,9 +71,10 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
                 return Err("Allow Mail in Settings → Apps so I can check what needs a reply.".into());
             }
             let triage = crate::triage::run(crate::apps::Launch::Allow).await?;
-            Ok(Outcome::Done {
+            Ok(Outcome::Listed {
                 answer: crate::triage::compose(&triage),
                 shares: vec![Share::Mail],
+                emails: crate::triage::listed(&triage),
             })
         }
         Command::MyDay => {

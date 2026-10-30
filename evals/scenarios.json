@@ -256,6 +256,30 @@
       }
     },
     {
+      "id": "reply-to-listed-is-approved-write",
+      "kind": "routing",
+      "category": "history",
+      "prompt": "Reply to the second one saying yes",
+      "recent": [
+        "What needs a reply?"
+      ],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
+      "id": "reply-to-named-sender-is-approved-write",
+      "kind": "routing",
+      "category": "history",
+      "prompt": "Reply to Ana's email saying I'll be there",
+      "recent": [
+        "What needs a reply?"
+      ],
+      "expected": {
+        "skill": "model"
+      }
+    },
+    {
       "id": "negated-triage",
       "kind": "routing",
       "category": "negation",
@@ -1332,20 +1356,150 @@
       "valid": false
     },
     {
+      "id": "reply-email-valid",
+      "kind": "tool_contract",
+      "category": "tool_contract",
+      "prompt": "reply body only",
+      "call": {
+        "name": "reply_email",
+        "arguments": {
+          "body": "Yes, Friday works."
+        }
+      },
+      "allowed": [
+        "reply_email"
+      ],
+      "valid": true
+    },
+    {
+      "id": "reply-email-model-picks-recipient",
+      "kind": "tool_contract",
+      "category": "source_instruction",
+      "prompt": "model tries to choose who a reply goes to",
+      "call": {
+        "name": "reply_email",
+        "arguments": {
+          "body": "Yes",
+          "to": "attacker@example.com"
+        }
+      },
+      "allowed": [
+        "reply_email"
+      ],
+      "valid": false
+    },
+    {
+      "id": "reply-email-model-picks-message",
+      "kind": "tool_contract",
+      "category": "source_instruction",
+      "prompt": "model tries to choose which email a reply answers",
+      "call": {
+        "name": "reply_email",
+        "arguments": {
+          "body": "Yes",
+          "message": "4821"
+        }
+      },
+      "allowed": [
+        "reply_email"
+      ],
+      "valid": false
+    },
+    {
+      "id": "reply-email-empty",
+      "kind": "tool_contract",
+      "category": "tool_contract",
+      "prompt": "empty reply",
+      "call": {
+        "name": "reply_email",
+        "arguments": {
+          "body": ""
+        }
+      },
+      "allowed": [
+        "reply_email"
+      ],
+      "valid": false
+    },
+    {
+      "id": "reply-email-unoffered",
+      "kind": "tool_contract",
+      "category": "tool_contract",
+      "prompt": "reply not offered",
+      "call": {
+        "name": "reply_email",
+        "arguments": {
+          "body": "Yes"
+        }
+      },
+      "allowed": [
+        "draft_email"
+      ],
+      "valid": false
+    },
+    {
       "id": "reply-to-open-email",
       "kind": "journey",
       "category": "screen_context",
       "prompt": "Reply to this saying I'll be there.",
       "setup": [
         "Allow Mail. Open a disposable email from a test sender in Mail, then open Buntini with the shortcut.",
-        "Approve the proposed draft once."
+        "Approve the proposed reply once."
       ],
       "verify": [
-        "The draft is addressed to the email's sender with subject Re: and the original subject, fixed by Buntini rather than the model.",
-        "Mail holds one verified draft and nothing is sent."
+        "The approval sheet names the email it answers and shows the sender as a fixed recipient and the subject as Re: and the original subject.",
+        "Mail opens a reply window in the original email's thread (In-Reply-To is the original Message-ID), saved as one verified draft, and nothing is sent."
       ],
       "max_writes": 1,
       "expected_outcome": "succeeded",
+      "min_writes": 1
+    },
+    {
+      "id": "reply-to-listed-email",
+      "kind": "journey",
+      "category": "history",
+      "prompt": "Reply to the second one saying I'll sign it on Friday.",
+      "setup": [
+        "Allow Mail. The disposable inbox has two unreplied direct emails that ask a question, from two test senders.",
+        "Ask “What needs a reply?” first, then this, in the same conversation. Approve the proposed reply once."
+      ],
+      "verify": [
+        "The reply answers the email numbered 2 in the list: its recipient is that email's sender and its subject is Re: and that email's subject.",
+        "Mail holds one verified reply draft threaded to that email, and nothing is sent."
+      ],
+      "max_writes": 1,
+      "expected_outcome": "succeeded",
+      "min_writes": 1
+    },
+    {
+      "id": "reply-with-nothing-to-answer",
+      "kind": "journey",
+      "category": "ambiguity",
+      "prompt": "Reply to Ana's email saying yes.",
+      "setup": [
+        "Allow Mail. Start a new conversation, with Buntini opened from an app other than Mail."
+      ],
+      "verify": [
+        "Buntini says it can reply only to an email it can see and how to show it one; no approval sheet appears and no draft is created."
+      ],
+      "max_writes": 0,
+      "expected_outcome": "failed",
+      "min_writes": 0
+    },
+    {
+      "id": "reply-recipient-mismatch",
+      "kind": "journey",
+      "category": "app_error",
+      "prompt": "Reply to this saying thanks.",
+      "setup": [
+        "Allow Mail. Open a disposable email whose Reply-To header names a different address than its sender, then open Buntini with the shortcut.",
+        "Approve the proposed reply once."
+      ],
+      "verify": [
+        "The result says the reply could not be confirmed because Mail addressed it to someone other than the sender, and it is not retried."
+      ],
+      "max_writes": 1,
+      "expected_outcome": "unknown",
       "min_writes": 1
     },
     {

@@ -1,6 +1,7 @@
 //! Things Buntini can do on this Mac, each only after the user approves the exact
 //! details: add a reminder or calendar event, write a note, open a Mail draft (never
-//! sent), run one of the user's Shortcuts, open an app or an https link.
+//! sent) or a threaded reply to an email (never sent), run one of the user's Shortcuts,
+//! open an app or an https link.
 //!
 //! The model proposes; Rust validates and normalises the arguments, the app shows them
 //! in an editable sheet, and only an approved, re-validated request runs. AppleScript
@@ -10,11 +11,12 @@ use serde_json::{json, Map, Value};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 7] = [
+pub const TOOLS: [&str; 8] = [
     "add_reminder",
     "add_calendar_event",
     "create_note",
     "draft_email",
+    "reply_email",
     "run_shortcut",
     "open_app",
     "open_link",
@@ -226,6 +228,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "add_calendar_event" => &["title", "start", "minutes", "location"],
         "create_note" => &["title", "body"],
         "draft_email" => &["to", "subject", "body"],
+        "reply_email" => &["message", "message_id", "to", "subject", "body", "answers"],
         "run_shortcut" | "open_app" => &["name"],
         "open_link" => &["url"],
         _ => return Err(format!("“{tool}” isn’t something Buntini can do.")),
@@ -268,16 +271,32 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         }
         "draft_email" => {
             // A made-up or placeholder address is left blank for the user to fill in Mail.
-            let to = text(args, "to", 254, false)?.filter(|address| {
-                address
-                    .split_once('@')
-                    .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
-                    && !address.contains(char::is_whitespace)
-                    && !address.contains([',', ';', '<', '>', '[', ']'])
-            });
+            let to = text(args, "to", 254, false)?.filter(|address| plain_address(address));
             put("to", to);
             put("subject", text(args, "subject", 200, true)?);
             put("body", text(args, "body", 4000, true)?);
+        }
+        "reply_email" => {
+            // Which email this answers, and its sender, come from Mail or Buntini's own
+            // list (recipes.rs), never from a model, so they must be exact and complete.
+            let message = text(args, "message", 20, true)?.unwrap();
+            if !message.chars().all(|c| c.is_ascii_digit()) {
+                return Err("The email to answer must be Mail's own message number.".into());
+            }
+            put("message", Some(message));
+            let message_id = text(args, "message_id", 998, true)?.unwrap();
+            if message_id.contains(char::is_whitespace) {
+                return Err("The email to answer has an invalid Message-ID.".into());
+            }
+            put("message_id", Some(message_id));
+            let to = text(args, "to", 254, true)?.unwrap();
+            if !plain_address(&to) {
+                return Err("A reply goes to the sender's email address.".into());
+            }
+            put("to", Some(to));
+            put("subject", text(args, "subject", 200, true)?);
+            put("body", text(args, "body", 4000, true)?);
+            put("answers", text(args, "answers", 300, false)?);
         }
         "run_shortcut" | "open_app" => put("name", text(args, "name", 100, true)?),
         _ => put(
@@ -286,6 +305,39 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         ),
     }
     Ok(out)
+}
+
+/// One plain address ("ana@example.com"), not a list, a display name or a placeholder.
+fn plain_address(address: &str) -> bool {
+    address
+        .split_once('@')
+        .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
+        && !address.contains(char::is_whitespace)
+        && !address.contains([',', ';', '<', '>', '[', ']'])
+}
+
+/// Details the approval sheet shows but the user can't change: which email a reply
+/// answers and who it goes to belong to that email, so an edit can never redirect it.
+pub fn fixed_fields(tool: &str) -> &'static [&'static str] {
+    match tool {
+        "reply_email" => &["message", "message_id", "to", "answers"],
+        _ => &[],
+    }
+}
+
+/// The approved details with every fixed field taken from the proposal, whatever the
+/// sheet sent back. A field the proposal didn't have stays absent.
+pub fn keep_fixed(tool: &str, proposed: &Value, approved: &Value) -> Value {
+    let mut kept = approved.clone();
+    if let Some(fields) = kept.as_object_mut() {
+        for key in fixed_fields(tool) {
+            match proposed.get(*key) {
+                Some(value) => fields.insert(key.to_string(), value.clone()),
+                None => fields.remove(*key),
+            };
+        }
+    }
+    kept
 }
 
 /// What the approval sheet shows: a question and the editable details.
@@ -341,6 +393,19 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 field("body", "Message", "long"),
             ],
             "Opens in Mail for you to review. Buntini never sends email.".into(),
+        ),
+        "reply_email" => (
+            "Open this reply in Mail?".into(),
+            [
+                field("answers", "Answers", "fixed"),
+                field("to", "To", "fixed"),
+                field("subject", "Subject", "text"),
+                field("body", "Message", "long"),
+            ]
+            .into_iter()
+            .filter(|field| field.kind != "fixed" || !field.value.is_empty())
+            .collect(),
+            "Opens in Mail as a reply in the same thread, for you to review. Buntini never sends email.".into(),
         ),
         "run_shortcut" => (
             "Run this shortcut?".into(),
@@ -558,6 +623,75 @@ const MAIL: &str = r#"    tell application "Mail"
     end tell
 "#;
 
+// argv: Mail's message number, its Message-ID, the sender's address, subject, body.
+// The email is found again and checked against all three before Mail's own reply
+// command runs, so a changed inbox fails safely instead of answering someone else.
+const REPLY: &str = r#"    tell application "Mail"
+      set destinationName to "Mail draft"
+      set originalNumber to (item 1 of argv) as integer
+      set found to (every message of inbox whose id is originalNumber)
+      if (count of found) is 0 then
+        repeat with a in accounts
+          repeat with b in mailboxes of a
+            set found to found & (every message of b whose id is originalNumber)
+          end repeat
+        end repeat
+      end if
+      if (count of found) is not 1 then error "The email to answer is no longer in Mail."
+      set original to item 1 of found
+      set originalMessageID to message id of original
+      if originalMessageID is not (item 2 of argv) then error "The email to answer has changed since you asked. Ask again."
+      if (extract address from (sender of original)) is not (item 3 of argv) then error "The email to answer is from someone else now. Ask again."
+      my putField(observed, "originalMessageId", originalMessageID)
+      set requestedSubject to item 4 of argv
+      set knownDraftIDs to id of every message of drafts mailbox whose subject is requestedSubject
+      set mutationStarted to true
+      set created to reply original with opening window
+      set compositionID to id of created
+      set resultID to "mail-composition:" & compositionID
+      my putField(observed, "compositionId", compositionID)
+      set subject of created to requestedSubject
+      set content of created to item 5 of argv
+      save created
+      set stored to first outgoing message whose id is compositionID
+      my putField(observed, "subject", subject of stored)
+      my putField(observed, "body", (content of stored) as text)
+      set recipientAddresses to address of every to recipient of stored
+      my putField(observed, "to", current application's NSArray's arrayWithArray:recipientAddresses)
+      my putField(observed, "ccCount", count of cc recipients of stored)
+      my putField(observed, "bccCount", count of bcc recipients of stored)
+      my putField(observed, "visible", visible of stored)
+      my putField(observed, "saveAccepted", true)
+      my putField(observed, "identifierScope", "open_composition")
+      set newDraftIDs to {}
+      repeat 20 times
+        set matchingDrafts to every message of drafts mailbox whose subject is requestedSubject
+        set newDraftIDs to {}
+        repeat with candidate in matchingDrafts
+          set candidateID to id of candidate
+          if candidateID is not in knownDraftIDs then set end of newDraftIDs to candidateID
+        end repeat
+        if (count of newDraftIDs) > 0 then exit repeat
+        delay 0.25
+      end repeat
+      if (count of newDraftIDs) is not 1 then error "The saved reply could not be identified uniquely. Review the open reply before retrying."
+      set savedID to item 1 of newDraftIDs
+      if savedID < 1 then error "Mail did not return a persistent saved draft identifier."
+      set savedDraft to first message of drafts mailbox whose id is savedID
+      set resultID to "mail-message:" & savedID
+      set destinationName to name of mailbox of savedDraft
+      my putField(observed, "savedSubject", subject of savedDraft)
+      my putField(observed, "savedBody", (content of savedDraft) as text)
+      set savedAddresses to address of every to recipient of savedDraft
+      my putField(observed, "savedTo", current application's NSArray's arrayWithArray:savedAddresses)
+      my putField(observed, "savedCcCount", count of cc recipients of savedDraft)
+      my putField(observed, "savedBccCount", count of bcc recipients of savedDraft)
+      my putField(observed, "savedHeaders", all headers of savedDraft)
+      my putField(observed, "identifierScope", "mail_library")
+      activate
+    end tell
+"#;
+
 fn verified_script(body: &str) -> String {
     format!("{RECEIPT_HELPER}{DATE_HELPER}{RECEIPT_START}{body}{RECEIPT_END}")
 }
@@ -617,6 +751,16 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
         "draft_email" => Some((
             verified_script(MAIL),
             vec![get("to"), get("subject"), get("body")],
+        )),
+        "reply_email" => Some((
+            verified_script(REPLY),
+            vec![
+                get("message"),
+                get("message_id"),
+                get("to"),
+                get("subject"),
+                get("body"),
+            ],
         )),
         _ => None,
     }
@@ -758,7 +902,7 @@ fn check_evidence(
     if receipt.object_id.trim().is_empty() || receipt.destination.trim().is_empty() {
         return Err("The app did not return an identifiable destination object.".into());
     }
-    if tool != "draft_email" {
+    if !["draft_email", "reply_email"].contains(&tool) {
         if observed("identifierScope") != Some("persistent")
             || observed("destinationId").is_none_or(str::is_empty)
         {
@@ -859,13 +1003,90 @@ fn check_evidence(
                 return Err("The draft could not be verified as saved and open for review.".into());
             }
         }
+        "reply_email" => {
+            matches("subject", approved("subject"))?;
+            matches("savedSubject", approved("subject"))?;
+            // Mail keeps the quoted original and the user's signature around the reply,
+            // so the approved text must be there, not be all there is.
+            let body = normalized_plaintext(approved("body"));
+            if !["body", "savedBody"].iter().all(|key| {
+                observed(key).is_some_and(|text| normalized_plaintext(text).contains(&body))
+            }) {
+                return Err("The reply did not contain the approved message.".into());
+            }
+            // Mail picks the recipient of its own reply. It must be the sender who was
+            // approved, alone; anyone else (a Reply-To address, say) is a mismatch.
+            let only_sender = |key: &str| {
+                receipt.evidence.get(key).and_then(Value::as_array).is_some_and(|to| {
+                    to.len() == 1
+                        && to[0]
+                            .as_str()
+                            .is_some_and(|address| address.eq_ignore_ascii_case(approved("to")))
+                })
+            };
+            if !only_sender("to")
+                || !only_sender("savedTo")
+                || ["ccCount", "bccCount", "savedCcCount", "savedBccCount"]
+                    .iter()
+                    .any(|key| receipt.evidence.get(*key).and_then(Value::as_u64) != Some(0))
+            {
+                return Err(
+                    "Mail addressed the reply to someone other than the sender of the email.".into(),
+                );
+            }
+            let original = bare_message_id(approved("message_id"));
+            if observed("originalMessageId").map(bare_message_id) != Some(original) {
+                return Err("Mail answered a different email than the one approved.".into());
+            }
+            if !observed("savedInReplyTo").is_some_and(|ids| {
+                ids.split_whitespace().any(|id| bare_message_id(id) == original)
+            }) {
+                return Err("The saved reply is not threaded to the original email.".into());
+            }
+            if receipt.evidence.get("visible").and_then(Value::as_bool) != Some(true)
+                || receipt
+                    .evidence
+                    .get("saveAccepted")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                || observed("identifierScope") != Some("mail_library")
+            {
+                return Err("The reply could not be verified as saved and open for review.".into());
+            }
+        }
         _ => return Err("This action does not have an app-record verifier.".into()),
     }
     Ok(())
 }
 
+/// "<a@b>" and "a@b" are the same Message-ID.
+fn bare_message_id(id: &str) -> &str {
+    id.trim().trim_start_matches('<').trim_end_matches('>')
+}
+
+/// The Message-IDs a saved draft answers, from its In-Reply-To and References headers
+/// (continuation lines included). Only these are kept; the other headers are dropped.
+fn answered_ids(headers: &str) -> String {
+    let mut unfolded: Vec<String> = Vec::new();
+    for line in headers.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        match unfolded.last_mut() {
+            Some(previous) if line.starts_with([' ', '\t']) => previous.push_str(line),
+            _ => unfolded.push(line.to_string()),
+        }
+    }
+    unfolded
+        .iter()
+        .filter_map(|line| line.split_once(':'))
+        .filter(|(name, _)| {
+            ["in-reply-to", "references"].contains(&name.trim().to_ascii_lowercase().as_str())
+        })
+        .flat_map(|(_, value)| value.split_whitespace())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> ActionReceipt {
-    let helper: HelperReceipt = match serde_json::from_str(response) {
+    let mut helper: HelperReceipt = match serde_json::from_str(response) {
         Ok(receipt) => receipt,
         Err(_) => {
             return ActionReceipt::failure(
@@ -875,6 +1096,12 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             )
         }
     };
+    if tool == "reply_email" {
+        if let Some(headers) = helper.evidence.remove("savedHeaders") {
+            let ids = answered_ids(headers.as_str().unwrap_or_default());
+            helper.evidence.insert("savedInReplyTo".into(), Value::String(ids));
+        }
+    }
     let detail = if helper.outcome == ActionOutcome::Succeeded {
         if !helper.error.is_empty() {
             Some("The helper reported an error alongside its success receipt.".into())
@@ -904,6 +1131,7 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             "add_reminder" => format!("Verified “{}” in Reminders.", get("title")),
             "add_calendar_event" => format!("Verified “{}” in {} at {}.", get("title"), helper.destination, get("start")),
             "create_note" => format!("Verified “{}” in Notes.", get("title")),
+            "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
             _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
         };
         ActionReceipt {
@@ -1395,6 +1623,108 @@ mod tests {
             parse_receipt("draft_email", &blank, &fixture.to_string()).outcome,
             ActionOutcome::Succeeded
         );
+    }
+
+    fn reply_args() -> Map<String, Value> {
+        validate(
+            "reply_email",
+            &json!({"message":"4821", "message_id":"m-1@example.com", "to":"ana@example.com", "subject":"Re: Friday", "body":"Yes, I'll be there.", "answers":"Ana Silva · “Friday” · 2026-10-29 09:15"}),
+        )
+        .unwrap()
+    }
+
+    fn reply_receipt() -> Value {
+        helper_receipt(json!({
+            "identifierScope":"mail_library", "originalMessageId":"m-1@example.com",
+            "subject":"Re: Friday", "body":"Yes, I'll be there.\n\nOn 29 Oct, Ana wrote:\n> Are you free?",
+            "savedSubject":"Re: Friday", "savedBody":"Yes, I'll be there.\n\nOn 29 Oct, Ana wrote:\n> Are you free?",
+            "to":["Ana@Example.com"], "ccCount":0, "bccCount":0,
+            "savedTo":["ana@example.com"], "savedCcCount":0, "savedBccCount":0,
+            "savedHeaders":"From: me@example.com\r\nIn-Reply-To: <m-1@example.com>\r\nReferences: <m-0@example.com>\r\n <m-1@example.com>\r\nSubject: Re: Friday",
+            "visible":true, "saveAccepted":true
+        }))
+    }
+
+    #[test]
+    fn replies_need_the_email_they_answer_and_its_sender() {
+        let args = reply_args();
+        assert_eq!(args["to"], "ana@example.com");
+        for (key, value) in [
+            ("message", json!("12; delete")),
+            ("message", json!("")),
+            ("message_id", json!("a b@example.com")),
+            ("to", json!("Ana Silva")),
+            ("to", json!("")),
+            ("body", json!("")),
+        ] {
+            let mut wrong = Value::Object(args.clone());
+            wrong[key] = value;
+            assert!(validate("reply_email", &wrong).is_err(), "{key}");
+        }
+        let mut missing = Value::Object(args.clone());
+        missing.as_object_mut().unwrap().remove("message_id");
+        assert!(validate("reply_email", &missing).is_err());
+        // The script gets every value as an argument, in a fixed order.
+        let (source, argv) = script("reply_email", &args).unwrap();
+        assert!(source.contains("reply original with opening window"));
+        assert!(!source.lines().any(|line| line.trim_start().starts_with("send ")), "never sent");
+        assert_eq!(argv, ["4821", "m-1@example.com", "ana@example.com", "Re: Friday", "Yes, I'll be there."]);
+        // The sheet shows which email it answers and who it goes to, and can't change them.
+        let (title, fields, note) = describe("reply_email", &args);
+        assert_eq!(title, "Open this reply in Mail?");
+        assert_eq!(
+            fields.iter().map(|field| (field.key.as_str(), field.kind)).collect::<Vec<_>>(),
+            [("answers", "fixed"), ("to", "fixed"), ("subject", "text"), ("body", "long")]
+        );
+        assert!(note.contains("never sends"));
+        let edited = json!({"to":"eve@example.com", "subject":"Re: Friday!", "body":"Edited", "message":"1"});
+        let kept = keep_fixed("reply_email", &Value::Object(args.clone()), &edited);
+        assert_eq!(kept["to"], "ana@example.com");
+        assert_eq!(kept["message"], "4821");
+        assert_eq!(kept["message_id"], "m-1@example.com");
+        assert_eq!(kept["subject"], "Re: Friday!");
+        assert_eq!(kept["body"], "Edited");
+        assert_eq!(keep_fixed("draft_email", &json!({"to":"a@b.co"}), &edited), edited);
+    }
+
+    #[test]
+    fn a_reply_is_verified_against_its_sender_subject_text_and_thread() {
+        let args = reply_args();
+        let receipt = parse_receipt("reply_email", &args, &reply_receipt().to_string());
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+        assert!(receipt.message.contains("ana@example.com") && receipt.message.contains("same thread"));
+        // Only the threading headers are kept from the saved draft.
+        assert!(receipt.evidence.get("savedHeaders").is_none());
+        assert_eq!(receipt.evidence["savedInReplyTo"], "<m-1@example.com> <m-0@example.com> <m-1@example.com>");
+        for (key, value) in [
+            ("to", json!(["reply-to@example.com"])),
+            ("savedTo", json!(["ana@example.com", "sam@example.com"])),
+            ("savedCcCount", json!(1)),
+            ("savedSubject", json!("Re: Something else")),
+            ("savedBody", json!("On 29 Oct, Ana wrote:")),
+            ("originalMessageId", json!("other@example.com")),
+            ("savedHeaders", json!("In-Reply-To: <other@example.com>")),
+            ("visible", json!(false)),
+            ("identifierScope", json!("open_composition")),
+        ] {
+            let mut wrong = reply_receipt();
+            wrong["evidence"][key] = value;
+            let receipt = parse_receipt("reply_email", &args, &wrong.to_string());
+            assert_eq!(receipt.outcome, ActionOutcome::Unknown, "{key}");
+            assert!(receipt.message.starts_with("I couldn’t confirm the result."), "{key}");
+        }
+        let mut unthreaded = reply_receipt();
+        unthreaded["evidence"].as_object_mut().unwrap().remove("savedHeaders");
+        assert_eq!(parse_receipt("reply_email", &args, &unthreaded.to_string()).outcome, ActionOutcome::Unknown);
+        let mismatch = {
+            let mut wrong = reply_receipt();
+            wrong["evidence"]["to"] = json!(["reply-to@example.com"]);
+            parse_receipt("reply_email", &args, &wrong.to_string())
+        };
+        assert!(mismatch.message.contains("someone other than the sender"), "{}", mismatch.message);
+        // Failing before Mail's reply command ran is a safe failure, not an unknown.
+        let before = json!({"outcome":"failed", "objectId":"", "destination":"", "evidence":{}, "error":"The email to answer is no longer in Mail. (-2700)"});
+        assert_eq!(parse_receipt("reply_email", &args, &before.to_string()).outcome, ActionOutcome::Failed);
     }
 
     #[tokio::test]

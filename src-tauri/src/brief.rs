@@ -177,6 +177,7 @@ mod tests {
             to_count: 1,
             sender: "Ana Silva <ana@example.com>".into(),
             subject: "Lease".into(),
+            message_id: String::new(),
         };
         let triage = crate::triage::sort(vec![header], 1, &Default::default());
         let mut day = Day {

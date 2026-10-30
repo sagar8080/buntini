@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { CalendarPlus, Bell, ExternalLink, Mail, NotebookPen, Play, AppWindow } from 'lucide-react';
+import { CalendarPlus, Bell, ExternalLink, Mail, NotebookPen, Play, AppWindow, Reply } from 'lucide-react';
 import ModalSheet from './ModalSheet';
 
-export interface ActionField { key: string; label: string; value: string; kind: 'text' | 'long' | 'when' }
+/** `fixed` is shown but not editable, such as the email a reply answers and its recipient. */
+export interface ActionField { key: string; label: string; value: string; kind: 'text' | 'long' | 'when' | 'fixed' }
 /** A value the user can pick for a field, such as one of several matching contacts. */
 export interface ActionChoice { field: string; label: string; value: string }
 export interface ActionProposal { id: string; tool: string; title: string; fields: ActionField[]; note: string; choices?: ActionChoice[] }
 
-const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink };
+const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, reply_email: Reply, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink };
 // The sheet edits "YYYY-MM-DD HH:MM"; the browser's picker wants "YYYY-MM-DDTHH:MM".
 const toPicker = (value: string) => value.replace(' ', 'T');
 const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
@@ -23,6 +24,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     <form className="action-fields" onSubmit={event => { event.preventDefault(); if (!running) allow(); }}>
       {proposal.fields.map(field => {
         const choices = proposal.choices?.filter(choice => choice.field === field.key) ?? [];
+        if (field.kind === 'fixed') return <div key={field.key} className="action-fixed"><span>{field.label}</span><output>{field.value}</output></div>;
         return <label key={field.key}><span>{field.label}</span>
           {field.kind === 'long' ? <textarea disabled={running} rows={4} value={values[field.key]} onChange={event => set(field.key, event.target.value)} />
             : field.kind === 'when' ? <input disabled={running} type="datetime-local" value={toPicker(values[field.key])} onChange={event => set(field.key, fromPicker(event.target.value))} />

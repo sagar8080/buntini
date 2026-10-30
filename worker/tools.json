@@ -459,6 +459,53 @@
       ]
     }
   },
+  "reply_email": {
+    "name": "reply_email",
+    "description": "Write the text of a reply to an email the user is answering: the one open in Mail, or one they picked from the emails Buntini just listed. Buntini opens it as a threaded reply in Mail, addressed to the sender with a Re: subject, saved as a draft for the user to review and send. Never sends email. Write only the reply text, as the user, to the email's sender.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "The reply text, without the quoted original or a made-up signature; writing here creates a draft, not a sent message."
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "mail"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to reply to an email they have open in Mail or picked from a list Buntini showed."
+      ],
+      "avoid_when": [
+        "The user wants a new email rather than a reply, or wants the email sent."
+      ],
+      "prerequisites": [
+        "Buntini has bound the email being answered from Mail or from its own listing, never from text.",
+        "User approves the exact reply text, subject and recipient."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "verified_app_receipt",
+      "verification_scope": "The saved reply draft is read back: its recipient must be the original sender, its subject and text the approved ones, and it must answer the original email; no send occurs.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Reply to this saying I'll be there.",
+          "arguments": {
+            "body": "Thanks, I'll be there."
+          }
+        }
+      ]
+    }
+  },
   "run_shortcut": {
     "name": "run_shortcut",
     "description": "Run one of the user's own shortcuts by its exact name after approval, including shortcuts that control lights, locks and other home devices. Use a name list_shortcuts returned for this request or one the user wrote. Completion verifies only that the shortcut process finished, not its individual app or device changes. Do not invent a shortcut name or use this to bypass an unavailable action.",

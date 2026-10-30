@@ -31,7 +31,7 @@ pub struct App {
 }
 
 pub const APPS: [App; 13] = [
-    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email"], share: Some(Share::Mail), note: None },
+    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
@@ -679,7 +679,8 @@ end run
 
 // Unreplied inbox messages from the last N days, newest 60 first by Mail's order: time,
 // Mail-local numeric ID, read, flagged, whether a To recipient is one of the user's own
-// account addresses, how many To recipients, sender, subject. Then a count summary.
+// account addresses, how many To recipients, sender, subject, Message-ID (so a reply to
+// one of them can be checked against the same email later). Then a count summary.
 const MAIL_TRIAGE: &str = r#"on run argv
   set cutoff to (current date) - ((item 1 of argv) as integer) * days
   set out to {}
@@ -705,7 +706,7 @@ const MAIL_TRIAGE: &str = r#"on run argv
           end repeat
         end if
       end try
-      set end of out to my stamp(date received of m) & tab & my clean(id of m) & tab & (read status of m as text) & tab & (flagged status of m as text) & tab & toMe & tab & (toCount as text) & tab & my clean(sender of m) & tab & my clean(subject of m)
+      set end of out to my stamp(date received of m) & tab & my clean(id of m) & tab & (read status of m as text) & tab & (flagged status of m as text) & tab & toMe & tab & (toCount as text) & tab & my clean(sender of m) & tab & my clean(subject of m) & tab & my clean(message id of m)
       if (count of out) ≥ 60 then exit repeat
     end repeat
   end tell
@@ -2566,6 +2567,8 @@ pub struct MailHeader {
     pub to_count: usize,
     pub sender: String,
     pub subject: String,
+    /// The Message-ID header, which a reply to this email must answer.
+    pub message_id: String,
 }
 
 /// Unreplied inbox messages from the last `days` days (at most 60), and how many there were.
@@ -2574,7 +2577,7 @@ pub(crate) async fn unreplied_mail(days: u32, launch: Launch) -> Result<(Vec<Mai
 }
 
 fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
-    let found = counted_rows(output, 8, "Mail")?;
+    let found = counted_rows(output, 9, "Mail")?;
     let flag = |value: &str| match value {
         "true" => Ok(true),
         "false" => Ok(false),
@@ -2591,6 +2594,7 @@ fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
             to_count: row[5].parse().unwrap_or(0),
             sender: row[6].clone(),
             subject: row[7].clone(),
+            message_id: row[8].clone(),
         });
     }
     headers.sort_by(|a, b| b.received.cmp(&a.received));
@@ -2900,14 +2904,16 @@ mod tests {
 
     #[test]
     fn unreplied_mail_rows_are_typed_and_sorted_newest_first() {
-        let output = "2026-10-27 08:00\t11\ttrue\tfalse\ttrue\t1\tAna <ana@x.com>\tLease\n2026-10-28 10:00\t12\tfalse\ttrue\tunknown\t3\tnoreply@shop.com\tYour order\n__buntini_summary__\t5\t2\ttrue";
+        let output = "2026-10-27 08:00\t11\ttrue\tfalse\ttrue\t1\tAna <ana@x.com>\tLease\tl-1@x.com\n2026-10-28 10:00\t12\tfalse\ttrue\tunknown\t3\tnoreply@shop.com\tYour order\t\n__buntini_summary__\t5\t2\ttrue";
         let (headers, total) = parse_unreplied(output).unwrap();
         assert_eq!(total, 5);
         assert_eq!(headers[0].id, "12");
         assert_eq!(headers[0].to_me, None);
         assert!(headers[0].flagged && !headers[0].read);
         assert_eq!(headers[1].to_me, Some(true));
-        assert!(parse_unreplied("2026-10-27 08:00\t11\tmaybe\tfalse\ttrue\t1\tA\tB\n__buntini_summary__\t1\t1\ttrue").is_err());
+        assert_eq!(headers[1].message_id, "l-1@x.com");
+        assert_eq!(headers[0].message_id, "");
+        assert!(parse_unreplied("2026-10-27 08:00\t11\tmaybe\tfalse\ttrue\t1\tA\tB\tC\n__buntini_summary__\t1\t1\ttrue").is_err());
         assert!(parse_unreplied("__buntini_summary__\t1\t0\ttrue").unwrap().0.is_empty());
     }
 

@@ -235,11 +235,18 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("create_note")
                 }
+                // A reply answers one email, in its thread ("reply to this", "write back
+                // to her", "draft a reply to this email"); a new email is a draft. Neither
+                // is ever sent: the user sends it from Mail.
+                "reply" | "respond" | "write" if addressed_reply(&tokens) => Some("reply_email"),
+                "draft" | "prepare" | "write"
+                    if has(&["reply", "response"]) && has(&["email", "mail", "message"]) =>
+                {
+                    Some("reply_email")
+                }
                 "draft" | "prepare" | "write" if has(&["email", "mail", "message"]) => {
                     Some("draft_email")
                 }
-                // A reply is drafted for the user to send; Buntini never sends it.
-                "reply" | "respond" | "write" if addressed_reply(&tokens) => Some("draft_email"),
                 "open"
                     if has(&["page", "site", "website", "url", "link", "https"])
                         || clause.contains("https://") =>
@@ -729,6 +736,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "add_calendar_event",
             "create_note",
             "draft_email",
+            "reply_email",
             "create_saved_search",
             "create_price_watch",
             "remember",
@@ -1131,7 +1139,14 @@ mod tests {
             "respond to him: no",
             "reply to the email from my landlord",
             "write back saying I'll be there",
+            "reply to the second one saying thanks",
+            "draft a reply to this email",
+            "write back to her email",
         ] {
+            assert_eq!(requested_actions(prompt), (vec!["reply_email"], false), "{prompt}");
+        }
+        // A new email is a draft, never a reply in someone's thread.
+        for prompt in ["Draft an email to my landlord", "write an email to Ana about Friday", "prepare a message for Sam"] {
             assert_eq!(requested_actions(prompt), (vec!["draft_email"], false), "{prompt}");
         }
         for prompt in [

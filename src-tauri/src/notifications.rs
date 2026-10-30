@@ -336,6 +336,7 @@ fn review_requested(identifier: &str) {
 pub(crate) fn approval_body(tool: &str) -> &'static str {
     match tool {
         "draft_email" => "Buntini drafted an email and needs your OK.",
+        "reply_email" => "Buntini drafted a reply and needs your OK.",
         "add_reminder" => "Buntini prepared a reminder and needs your OK.",
         "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
         "create_note" => "Buntini wrote a note and needs your OK.",

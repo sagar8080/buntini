@@ -115,9 +115,9 @@ impl Recipe for ReminderAboutThis {
     }
 }
 
-/// "Reply to this saying I'll be there": a Mail draft to the sender of the open email,
-/// with its subject, also when the user selected text inside it. The model writes only
-/// the body, which the approval sheet shows.
+/// "Reply to this saying I'll be there": a threaded reply to the open email, also when
+/// the user selected text inside it. Which email, its sender and its subject come from
+/// Mail; the model writes only the body, which the approval sheet shows.
 struct ReplyToThis;
 impl Recipe for ReplyToThis {
     fn id(&self) -> &'static str {
@@ -127,17 +127,61 @@ impl Recipe for ReplyToThis {
         let Some(mail) = referent.mail() else {
             return false;
         };
-        if !crate::focus::replies_to_this(goal) {
-            return false;
-        }
-        let Some(address) = crate::focus::sender_address(&mail.sender) else {
-            return false;
-        };
-        let subject = reply_subject(&mail.subject);
-        let to = contract.bind_write_field("draft_email", "to", Value::String(address), "focus_referent");
-        let re = contract.bind_write_field("draft_email", "subject", Value::String(subject), "focus_referent");
-        to || re
+        crate::focus::replies_to_this(goal)
+            && bind_reply(
+                contract,
+                [&mail.id, &mail.message_id, &mail.sender, &mail.subject],
+                crate::triage::about(&mail.sender, &mail.subject, &mail.received),
+                "focus_referent",
+            )
     }
+}
+
+/// What the task says when a reply has no email to answer.
+pub const NOTHING_TO_REPLY: &str = "I can reply only to an email I can see. Open it in Mail and ask again, or ask “What needs a reply?” and then say which one. For a new email, say “Draft an email to …”.";
+
+/// "Reply to the second one", "reply to Ana's email": the email "What needs a reply?"
+/// listed, picked by the user's own words (`triage::pick`). Binds like `ReplyToThis`.
+pub fn reply_to_listed(email: &crate::triage::Listed, contract: &mut TaskContract) -> bool {
+    bind_reply(
+        contract,
+        [&email.id, &email.message_id, &email.sender, &email.subject],
+        email.describe(),
+        "mail_listing",
+    )
+}
+
+/// Binds everything Mail's reply needs from one email (its number, Message-ID, sender
+/// and subject) or nothing: a reply that knows its recipient but not its email, or the
+/// reverse, could answer the wrong thread.
+fn bind_reply(contract: &mut TaskContract, [id, message_id, sender, subject]: [&String; 4], answers: String, source: &str) -> bool {
+    let Some(address) = crate::focus::sender_address(sender) else {
+        return false;
+    };
+    let replies: Vec<&Outcome> = contract
+        .outcomes
+        .iter()
+        .filter(|o| o.kind == "write" && o.tool.as_deref() == Some("reply_email"))
+        .collect();
+    let [reply] = replies[..] else {
+        return false;
+    };
+    if id.is_empty()
+        || message_id.is_empty()
+        || contract.constraints.iter().any(|c| c.outcome_id.as_deref() == Some(&reply.id))
+    {
+        return false;
+    }
+    for (field, value) in [
+        ("message", id.clone()),
+        ("message_id", message_id.clone()),
+        ("to", address),
+        ("subject", reply_subject(subject)),
+        ("answers", answers),
+    ] {
+        contract.bind_write_field("reply_email", field, Value::String(value), source);
+    }
+    true
 }
 
 /// "Lease renewal" as "Re: Lease renewal", leaving an existing "Re:" alone.
@@ -225,15 +269,62 @@ mod tests {
         assert_eq!(applied, ["reply_to_this"]);
         contract.refresh(goal, &[]);
         let next = contract.next_outcome().unwrap();
-        assert_eq!(next.tool.as_deref(), Some("draft_email"));
+        assert_eq!(next.tool.as_deref(), Some("reply_email"));
+        assert_eq!(next.required_arguments["message"], "7");
+        assert_eq!(next.required_arguments["message_id"], "<m@x>");
         assert_eq!(next.required_arguments["to"], "ana@example.com");
         assert_eq!(next.required_arguments["subject"], "Re: Friday");
-        assert!(contract
-            .validate_proposal("draft_email", &json!({"to":"eve@example.com","subject":"Re: Friday","body":"Yes"}), &[])
-            .is_err());
+        assert_eq!(next.required_arguments["answers"], "Ana Silva · “Friday” · Thu 29 Oct");
+        // The model writes the body; everything else is filled from the email.
+        let mut proposal = json!({"body":"I'll be there."});
+        contract.fill_resolved_fields("reply_email", &mut proposal);
+        assert!(contract.validate_proposal("reply_email", &proposal, &[]).is_ok());
+        let mut other = proposal.clone();
+        other["to"] = json!("eve@example.com");
+        assert!(contract.validate_proposal("reply_email", &other, &[]).is_err());
         assert!(contract
             .validate_proposal("draft_email", &json!({"to":"ana@example.com","subject":"Re: Friday","body":"I'll be there."}), &[])
-            .is_ok());
+            .is_err(), "a reply is never a new email");
+    }
+
+    fn listed(number: usize, sender: &str) -> crate::triage::Listed {
+        crate::triage::Listed {
+            number,
+            id: format!("{number}0"),
+            message_id: format!("m-{number}@x.com"),
+            sender: sender.into(),
+            subject: "Lease".into(),
+            received: "2026-10-21 09:00".into(),
+        }
+    }
+
+    #[test]
+    fn a_reply_to_a_listed_email_binds_that_email_whole() {
+        let goal = "Reply to the second one saying yes";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert!(contract.unbound_reply());
+        assert!(reply_to_listed(&listed(2, "Sam <sam@x.com>"), &mut contract));
+        contract.refresh(goal, &[]);
+        assert!(!contract.unbound_reply());
+        let next = contract.next_outcome().unwrap();
+        assert_eq!(next.required_arguments["message"], "20");
+        assert_eq!(next.required_arguments["message_id"], "m-2@x.com");
+        assert_eq!(next.required_arguments["to"], "sam@x.com");
+        assert_eq!(next.required_arguments["subject"], "Re: Lease");
+        assert!(contract.constraints.iter().all(|c| c.source == "mail_listing"));
+        // Once bound it stays bound: neither a second listed email nor the screen rebinds it.
+        assert!(!reply_to_listed(&listed(1, "Ana <ana@x.com>"), &mut contract));
+        assert!(prepare("reply to this", &mail("Eve <eve@x.com>", "Other"), &mut contract).is_empty());
+        // An email without a Message-ID or a sender address binds nothing at all.
+        for email in [
+            crate::triage::Listed { message_id: String::new(), ..listed(1, "Ana <ana@x.com>") },
+            listed(1, "Ana"),
+        ] {
+            let mut contract = TaskContract::from_request(goal);
+            assert!(!reply_to_listed(&email, &mut contract));
+            assert!(contract.constraints.is_empty());
+        }
     }
 
     #[test]
