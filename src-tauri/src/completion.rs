@@ -109,6 +109,18 @@ pub(crate) const ANSWERED_IN_CHAT: &[&str] = &[
     "paragraph", "quiz", "riddle", "puzzle", "query", "above", "below", "poem", "joke",
 ];
 
+/// Whether the words after "reply to" are something to answer in chat: "the following",
+/// "this question", but not "her question", which is still a person's email.
+pub(crate) fn answered_in_chat(object: &[&str]) -> bool {
+    match object {
+        [first, ..] if ANSWERED_IN_CHAT.contains(first) => true,
+        ["the" | "this" | "that" | "these" | "those" | "my" | "your", noun, ..] => {
+            ANSWERED_IN_CHAT.contains(noun)
+        }
+        _ => false,
+    }
+}
+
 /// Whether "reply …", "respond …" or "write back …" is addressed to a person or an email,
 /// so it needs a Mail draft. "Reply in French", "respond with one word" and "reply to the
 /// following in a friendly tone" are about Buntini's own answer.
@@ -124,14 +136,7 @@ fn addressed_reply(tokens: &[&str]) -> bool {
         return tokens.get(1) == Some(&"back")
             || rest.iter().any(|word| ["email", "mail", "message"].contains(word));
     };
-    match object {
-        [] => false,
-        [first, ..] if ANSWERED_IN_CHAT.contains(first) => false,
-        ["the" | "this" | "that" | "these" | "those" | "my" | "your", noun, ..] => {
-            !ANSWERED_IN_CHAT.contains(noun)
-        }
-        _ => true,
-    }
+    !object.is_empty() && !answered_in_chat(object)
 }
 
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {

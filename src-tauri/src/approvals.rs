@@ -30,7 +30,7 @@ pub(crate) async fn plan(
     task_id: Option<&str>,
 ) -> Result<PendingApproval, String> {
     let prompt = prompt.trim().to_string();
-    if prompt.is_empty() || prompt.len() > 2000 {
+    if prompt.is_empty() || prompt.chars().count() > 2000 {
         return Err("Online requests must contain 1–2,000 characters.".into());
     }
     if plan_id.is_empty() || plan_id.len() > 64 {

@@ -184,7 +184,7 @@ pub fn set_credential(_provider: &str, _key: &str) -> Result<(), String> {
 
 pub async fn search(provider: &str, key: &str, query: &str) -> Result<Vec<Source>, SearchError> {
     provider_valid(provider)?;
-    if query.trim().is_empty() || query.len() > 2000 {
+    if query.trim().is_empty() || query.chars().count() > 2000 {
         return Err("Enter a web query of up to 2,000 characters.".into());
     }
     let client = private_client_builder()

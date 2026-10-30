@@ -289,13 +289,22 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     {
         return vec![];
     }
+    // "Find Ana's email address": a person in Contacts, not a search of the inbox. A
+    // clause that names the inbox, calendar, notes or reminders still reads that source.
+    let person = has(&["contact", "contacts"])
+        || clause.contains("email address")
+        || clause.contains("phone number");
+    let unaddressed = clause.replace("email address", " ");
+    let elsewhere = tokens(&unaddressed).iter().any(|word| {
+        [
+            "mail", "email", "emails", "inbox", "calendar", "event", "events", "appointments",
+            "meetings", "note", "notes", "reminders",
+        ]
+        .contains(word)
+    });
     if has(&["files", "file", "folder", "folders"]) {
         vec!["search_files"]
-    } else if has(&["contact", "contacts"])
-        || clause.contains("email address")
-        || clause.contains("phone number")
-    {
-        // "Find Ana's email address": a person in Contacts, not a search of the inbox.
+    } else if person && !elsewhere {
         vec!["find_contact"]
     } else if has(&["calendar", "event", "events", "appointments", "meetings"]) {
         vec!["read_calendar"]
@@ -1890,6 +1899,10 @@ mod tests {
             assert_eq!(read_tools(person), vec!["find_contact"], "{person}");
         }
         assert_eq!(read_tools("find the email from ana"), vec!["read_mail"]);
+        // A source the user names wins over the words "phone number" or "contact".
+        assert_eq!(read_tools("search my inbox for the plumber's phone number"), vec!["read_mail"]);
+        assert_eq!(read_tools("check my email for ana's new email address"), vec!["read_mail"]);
+        assert_eq!(read_tools("check my calendar for the contact meeting"), vec!["read_calendar"]);
         for recall in ["What did Ana say about the lease", "did Sam mention the trip", "What do you know about my landlord"] {
             assert_eq!(read_tools(recall), vec!["search_memory"], "{recall}");
         }
