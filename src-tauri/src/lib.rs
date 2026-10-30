@@ -27,6 +27,7 @@ mod delivery;
 mod embedding;
 mod explicit_fields;
 mod focus;
+mod goals;
 mod indexer;
 mod integrations;
 mod local;
@@ -323,7 +324,9 @@ pub fn run() {
             nudges::heads_ups,
             nudges::open_heads_up,
             nudges::dismiss_heads_up,
-            notifications::take_heads_up_request
+            notifications::take_heads_up_request,
+            goals::update_goal,
+            goals::delete_goal
         ])
         .build(app_context())
         .expect("Buntini could not start")

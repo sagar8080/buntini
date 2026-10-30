@@ -86,7 +86,9 @@
           "heads_ups",
           "open_heads_up",
           "dismiss_heads_up",
-          "take_heads_up_request"
+          "take_heads_up_request",
+          "update_goal",
+          "delete_goal"
         ]
       }
     }

@@ -589,6 +589,8 @@ pub struct Bootstrap {
     pub saved_searches: Vec<SavedSearch>,
     pub price_watches: Vec<PriceWatch>,
     pub routines: Vec<Routine>,
+    /// Goals that span days; their check-ins are routines left out of `routines`.
+    pub goals: Vec<crate::goals::Goal>,
     pub os_update_check: Option<OsUpdateCheck>,
     /// When the user last started a new topic; earlier turns are not remembered.
     pub conversation_start: Option<String>,

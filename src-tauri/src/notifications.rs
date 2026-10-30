@@ -402,19 +402,24 @@ pub(crate) async fn deliver_nudge(app: &tauri::AppHandle, nudge_id: &str, body: 
     }
 }
 
-/// Says a routine run finished. A proposal it made already asked for the person's OK
-/// (`announce_waiting`), so this covers the rest. Like approvals, the alert names the
-/// kind of result only, never the result, since it can show on the lock screen.
+/// Says a routine run or a goal's check-in finished. A proposal it made already asked
+/// for the person's OK (`announce_waiting`), so this covers the rest. Like approvals, the
+/// alert names the kind of result only, never the result, since it can show on the lock
+/// screen.
 pub(crate) async fn deliver_routine(
     app: &tauri::AppHandle,
     task: &crate::types::TaskRecord,
+    goal: bool,
 ) -> Result<String, String> {
     use tauri::Manager;
-    let body = match task.state.as_str() {
-        "waiting_action" | "waiting_online" => return Ok("approval_requested".into()),
-        "completed" => "A routine finished. Open Buntini to see what it found.",
-        _ => "A routine needs attention. Open Buntini to see what happened.",
+    let body = match (task.state.as_str(), goal) {
+        ("waiting_action" | "waiting_online", _) => return Ok("approval_requested".into()),
+        ("completed", false) => "A routine finished. Open Buntini to see what it found.",
+        ("completed", true) => "One of your goals has news. Open Buntini to see it.",
+        (_, false) => "A routine needs attention. Open Buntini to see what happened.",
+        (_, true) => "A goal’s check-in needs attention. Open Buntini to see what happened.",
     };
+    let title = if goal { "Goal" } else { "Routine" };
     let state = app.state::<AppState>();
     if !state.store.lock().unwrap().settings()?.notifications_enabled {
         return Ok("in_app_only".into());
@@ -422,13 +427,13 @@ pub(crate) async fn deliver_routine(
     #[cfg(target_os = "macos")]
     {
         notification_availability(&native::status().await?)?;
-        let pending = native::enqueue_as(&format!("routine-{}", task.id), None, "Routine", body);
+        let pending = native::enqueue_as(&format!("routine-{}", task.id), None, title, body);
         finish_delivery(&state, pending).await?;
         Ok("desktop_accepted".into())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = body;
+        let _ = (body, title);
         Err("Desktop notifications in this build require macOS. The result is in Buntini.".into())
     }
 }
@@ -457,6 +462,7 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
             "Buntini set up a recurring check and needs your OK."
         }
         "create_routine" => "Buntini set up a routine and needs your OK.",
+        "create_goal" => "Buntini set up a goal and needs your OK.",
         "browse_page" => "Buntini wants to read a web page and needs your OK.",
         "look_up_online" => "Buntini wants to look something up online and needs your OK.",
         _ => "A task is waiting for your OK.",

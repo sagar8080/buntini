@@ -405,6 +405,7 @@ fn verified_write(step: &Step) -> bool {
             "create_saved_search",
             "create_price_watch",
             crate::routines::TOOL,
+            crate::goals::TOOL,
             "remember",
             "set_timer",
             "control_music",
@@ -582,6 +583,19 @@ impl TaskContract {
             self.push_outcome("write", goal, tools, json!({}), vec![]);
             self.push_outcome("answer", goal, vec![], json!({}), vec![]);
             self.intent_status = "connector_request".into();
+            return;
+        }
+        // A goal is one write too: its aim, check-ins, last day and end are the user's own
+        // words, and each check-in is its own task later.
+        if let Some(request) = crate::goals::parse_request(goal) {
+            let arguments = request.arguments();
+            let fields = arguments.as_object().into_iter().flatten().map(|(field, _)| field.clone()).collect();
+            self.push_outcome("write", goal, vec![crate::goals::TOOL.into()], arguments.clone(), fields);
+            let id = self.outcomes[0].id.clone();
+            for (field, value) in arguments.as_object().into_iter().flatten() {
+                self.constraints.push(Constraint { outcome_id: Some(id.clone()), field: field.clone(), value: value.clone(), source: "user_literal".into(), revision: self.revision, record: None });
+            }
+            self.intent_status = "explicit_goal".into();
             return;
         }
         // A routine is one write whose request, days and time are the user's own words.

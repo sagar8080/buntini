@@ -251,14 +251,16 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             s.update_check()?,
         )
     };
-    let (conversation_start, onboarded, memories, brief_due, routines, conversation, conversations) = {
+    let (conversation_start, onboarded, memories, brief_due, routines, goals, conversation, conversations) = {
         let store = state.store.lock().unwrap();
         (
             store.conversation_start()?,
             store.onboarded()?,
             store.memories()?,
             crate::routines::brief_due(&store, chrono::Local::now())?,
-            store.routines()?,
+            // A goal's check-ins show with the goal, not as routines.
+            store.routines()?.into_iter().filter(|routine| crate::goals::owner(&routine.id).is_none()).collect(),
+            crate::goals::all(&store)?,
             store.conversation_page(&store.active_conversation_id()?, None, 100)?,
             store.conversation_list(None, 30)?,
         )
@@ -293,6 +295,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
         saved_searches,
         price_watches,
         routines,
+        goals,
         os_update_check,
         conversation_start,
         onboarded,
@@ -2651,6 +2654,32 @@ async fn execute_with_settings(
             task.state = flow.state.clone();
             task.handoff = Some("online".into());
             task.answer = "Your research task is saved and waiting for approval. I’ll search in the browser, read relevant sources, and use the selected API fallback only if needed.".into();
+            state.store.lock().unwrap().checkpoint(&mut flow, task)?;
+            return Ok(());
+        }
+    }
+    // "Follow up with Ana until she replies": like a routine below, a goal is proposed
+    // exactly as said, without the model, and a check-in never makes another goal.
+    if mode == "auto" && approved.is_none() && !headless() {
+        if let Some(request) = crate::goals::parse_request(&task.prompt) {
+            let args = Value::Object(crate::goals::validate(&request.arguments())?);
+            let messages = vec![
+                json!({"role":"system","content":instructions(state, &settings, crate::model::backend(&settings) == crate::model::Backend::Mlx, "")}),
+                json!({"role":"user","content":task.prompt}),
+            ];
+            let mut flow = Workflow::new(task, mode, &settings, messages, None, &[crate::goals::TOOL]);
+            flow.refresh_contract();
+            flow.contract.validate_proposal(crate::goals::TOOL, &args, &flow.steps)?;
+            let id = flow.begin(crate::goals::TOOL, args.clone(), assistant_call("", None, crate::goals::TOOL, &args), true, true)?;
+            flow.contract.record_proposal(&id, &args, None);
+            let (title, fields, note) = crate::goals::describe(args.as_object().unwrap());
+            task.state = flow.state.clone();
+            task.handoff = Some("action".into());
+            task.action = Some(
+                serde_json::to_value(crate::actions::Proposal { id, tool: crate::goals::TOOL.into(), title, fields, note, choices: vec![] })
+                    .map_err(|e| e.to_string())?,
+            );
+            task.answer = "Your goal is ready to set up. Check the details and allow it.".into();
             state.store.lock().unwrap().checkpoint(&mut flow, task)?;
             return Ok(());
         }
@@ -5229,6 +5258,47 @@ for line in sys.stdin:
         let intent = proposal["id"].as_str().unwrap().to_string();
         run_workflow_action_using(&state, &intent, approved, &channel, |_, _, _| async { panic!("an approval is used once") }).await.unwrap();
         assert_eq!(state.store.lock().unwrap().routines().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_goal_asked_for_in_chat_is_proposed_as_said_and_verified_once_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let prompt = "Follow up with Ana until she replies";
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"goal-chat","prompt":prompt,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        // No brain is set up: the proposal needs none.
+        execute(&state, &mut task, "auto", &channel, Arc::new(AtomicBool::new(false))).await.unwrap();
+        assert_eq!(task.state, "waiting_action", "{}", task.answer);
+        let proposal = task.action.clone().unwrap();
+        assert_eq!(proposal["tool"], "create_goal");
+        // The sheet sends back every field but the fixed "Ends" line, as it shows them.
+        let approved: serde_json::Map<String, Value> = proposal["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|field| field["kind"] != "fixed")
+            .map(|field| (field["key"].as_str().unwrap().to_string(), field["value"].clone()))
+            .collect();
+        assert_eq!((approved["person"].as_str(), approved["days"].as_str()), (Some("Ana"), Some("weekdays")));
+        let intent = proposal["id"].as_str().unwrap().to_string();
+        let (journal, id) = (&state, intent.clone());
+        let done = run_workflow_action_using(&state, &intent, Value::Object(approved.clone()), &channel, |tool, args, _| async move {
+            crate::monitor_actions::execute(&journal.store.lock().unwrap(), &id, &tool, &args)
+        })
+        .await
+        .unwrap();
+        assert_eq!(done.state, "completed", "{}", done.answer);
+        assert!(done.answer.starts_with("Set up your goal “Follow up with Ana”: check-ins weekdays at 9:00 AM until "), "{}", done.answer);
+        let goals = crate::goals::all(&state.store.lock().unwrap()).unwrap();
+        assert_eq!((goals.len(), goals[0].done_when.as_str(), goals[0].state.as_str()), (1, "reply", "active"));
+        // Its check-in is a routine, but only the goal shows in History.
+        let check_in = state.store.lock().unwrap().routine(&crate::goals::check_in_id(&goals[0].id)).unwrap().unwrap();
+        assert_eq!(check_in.task, "Draft a short follow-up email to Ana");
+        let intent = proposal["id"].as_str().unwrap().to_string();
+        run_workflow_action_using(&state, &intent, Value::Object(approved), &channel, |_, _, _| async { panic!("an approval is used once") }).await.unwrap();
+        assert_eq!(crate::goals::all(&state.store.lock().unwrap()).unwrap().len(), 1);
     }
 }
 

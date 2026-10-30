@@ -10,7 +10,7 @@ import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
-import Routines from './Routines';
+import Routines, { Goals } from './Routines';
 import Conversation from './Conversation';
 import { BackgroundWork, HeadsUps, WaitingForYou, stepLabel } from './TaskProgress';
 import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
@@ -814,6 +814,7 @@ export default function App() {
 
         {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>History</h2></div>
           <BackgroundWork status={background} onCancel={id => void safeAction(() => command('cancel_timer', { id }))} />
+          <Goals goals={data?.goals || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onOpen={taskId => { void openThread({ taskId }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <Routines routines={data?.routines || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onOpen={taskId => { void openThread({ taskId }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <SavedSearches searches={data?.savedSearches || []} keyReady={data?.settings.searchProvider === 'tavily' ? !!data?.diagnostics.tavilyConfigured : !!data?.diagnostics.braveConfigured} onAddKey={() => setPage('settings', 'connections')} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
