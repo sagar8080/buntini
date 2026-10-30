@@ -35,6 +35,7 @@ impl Store {
         crate::chat_threads::initialize(&store)?;
         crate::memory_index::initialize(&store.db)?;
         crate::routines::initialize(&store)?;
+        crate::goals::initialize(&store)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -552,6 +553,7 @@ impl Store {
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
             "routines": rows("SELECT data FROM routines ORDER BY created_at")?,
+            "goals": rows("SELECT data FROM goals ORDER BY created_at")?,
             "memories": self.memories()?,
             "workflows": self.workflows()?,
             "timers": rows("SELECT data FROM timers")?,
@@ -566,7 +568,7 @@ impl Store {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx
             .execute_batch(
-                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines;
+                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines; DELETE FROM goals;
                  DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
                  DELETE FROM memory_records; DELETE FROM memory_fts;",
@@ -600,7 +602,9 @@ impl Store {
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
-            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');").map_err(|e| e.to_string())?;
+            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');
+            DELETE FROM goals WHERE json_extract(data,'$.state') IN ('done','ended');
+            UPDATE goals SET data=json_remove(data,'$.lastTaskId','$.note');").map_err(|e| e.to_string())?;
         // Earlier conversations and folder text leave the memory index with them.
         crate::memory_index::purge(&tx, "history", None)?;
         crate::memory_index::purge(&tx, "files", None)?;
@@ -1093,6 +1097,17 @@ mod tests {
                 last_error: Some(format!("{secret}-error")),
             })
             .unwrap();
+        let goal = |id: &str, state: &str| -> crate::goals::Goal {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "aim": format!("Prepare for {secret}-trip"), "checkIn": format!("Help me prepare for {secret}-trip"),
+                "style": "run", "days": "every_day", "time": "09:00", "until": "2026-11-06", "doneWhen": "reply",
+                "person": format!("{secret}-person"), "state": state, "createdAt": now(),
+                "outcome": format!("{secret}-outcome"), "lastTaskId": format!("{secret}-check-in"), "note": format!("{secret}-note"),
+            }))
+            .unwrap()
+        };
+        crate::goals::save(&store, &goal("goal-sentinel", "active")).unwrap();
+        crate::goals::save(&store, &goal("goal-ended", "done")).unwrap();
         store
             .db
             .execute(
@@ -1128,6 +1143,7 @@ mod tests {
         assert!(contains(&std::fs::read(&path).unwrap()));
         store.erase_everything().unwrap();
         assert!(!contains(&std::fs::read(&path).unwrap()));
+        assert!(crate::goals::all(&store).unwrap().is_empty());
         // Only the built-in morning brief is left, off, as on a fresh install.
         let routines = store.routines().unwrap();
         assert_eq!(routines.len(), 1);
@@ -1162,6 +1178,27 @@ mod tests {
         assert_eq!(kept.last_task_id, None);
         assert_eq!(kept.last_error, None);
         assert_eq!(kept.last_run_at, routine.last_run_at);
+    }
+    #[test]
+    fn clearing_history_keeps_open_goals_but_not_their_results_or_finished_goals() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let goal = |id: &str, state: &str| -> crate::goals::Goal {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "aim": "Follow up with Ana", "checkIn": "Draft a short follow-up email to Ana", "style": "run",
+                "days": "weekdays", "time": "09:00", "until": "2026-11-13", "doneWhen": "reply", "person": "Ana",
+                "state": state, "createdAt": now(), "outcome": "An email from Ana arrived.", "lastTaskId": "run",
+                "note": "Mail wasn’t open, so I couldn’t check for a reply from Ana.",
+            }))
+            .unwrap()
+        };
+        crate::goals::save(&s, &goal("goal-open", "active")).unwrap();
+        crate::goals::save(&s, &goal("goal-done", "done")).unwrap();
+        assert_eq!(s.export_snapshot().unwrap()["goals"].as_array().unwrap().len(), 2);
+        s.clear_history().unwrap();
+        let kept = crate::goals::all(&s).unwrap();
+        assert_eq!(kept.len(), 1, "a finished goal is only history");
+        assert_eq!((kept[0].id.as_str(), kept[0].person.as_deref()), ("goal-open", Some("Ana")));
+        assert_eq!((kept[0].last_task_id.as_deref(), kept[0].note.as_deref()), (None, None));
     }
     #[test]
     fn memory_history_source_reads_up_to_history_turns() {

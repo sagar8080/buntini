@@ -262,6 +262,11 @@ pub(crate) fn joined_edit_lists(text: &str) -> String {
 }
 
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
+    // "Follow up with Ana until she replies" asks for a goal now; each follow-up is a
+    // check-in's own task.
+    if crate::goals::parse_request(prompt).is_some() {
+        return (vec![crate::goals::TOOL], false);
+    }
     // "Every weekday at 8, draft…" asks for a routine now; the draft is for each run.
     if crate::routines::parse_request(prompt).is_some() {
         return (vec![crate::routines::TOOL], false);
@@ -523,8 +528,8 @@ pub fn planning_tools(
 }
 
 fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
-    // A routine's reads happen when it runs, not when it is set up.
-    if crate::routines::parse_request(goal).is_some() {
+    // A routine's or a goal's reads happen when it runs, not when it is set up.
+    if crate::routines::parse_request(goal).is_some() || crate::goals::parse_request(goal).is_some() {
         return Ok(());
     }
     // Online topic words are not requests to read private apps. The durable
@@ -686,7 +691,7 @@ fn receipt_summary(messages: &[String]) -> String {
 /// Any other continuation keeps the answer phase, including verbs we have never
 /// classified (a blacklist would silently drop new kinds of requested work).
 pub(crate) fn receipt_only_goal(goal: &str) -> bool {
-    if crate::routines::parse_request(goal).is_some() {
+    if crate::routines::parse_request(goal).is_some() || crate::goals::parse_request(goal).is_some() {
         return true;
     }
     let plain = joined_edit_lists(&unquoted(&goal.replace("Additional details: ", "\n")))
@@ -860,6 +865,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "create_saved_search",
             "create_price_watch",
             crate::routines::TOOL,
+            crate::goals::TOOL,
             "remember",
             "set_timer",
             "control_music",

@@ -34,8 +34,9 @@ pub const MORNING_BRIEF: &str = "morning-brief";
 const CATCH_UP_HOURS: i64 = 4;
 const MAX_ROUTINES: usize = 20;
 const MAX_TASK: usize = 500;
+const GOAL_OWNED: &str = "This check-in belongs to a goal. Pause, finish or delete the goal instead.";
 
-const DAY_NAMES: [(&str, Weekday); 7] = [
+pub(crate) const DAY_NAMES: [(&str, Weekday); 7] = [
     ("monday", Weekday::Mon),
     ("tuesday", Weekday::Tue),
     ("wednesday", Weekday::Wed),
@@ -242,7 +243,7 @@ fn schedule(words: &[&str]) -> Option<(&'static str, String, usize)> {
 }
 
 const POLITE: [&str; 6] = ["please ", "can you ", "could you ", "would you ", "will you ", "buntini "];
-fn without_polite(mut text: &str) -> (&str, bool) {
+pub(crate) fn without_polite(mut text: &str) -> (&str, bool) {
     let mut asked = false;
     loop {
         let lower = text.to_lowercase();
@@ -261,6 +262,10 @@ fn without_polite(mut text: &str) -> (&str, bool) {
 pub fn parse_request(goal: &str) -> Option<Request> {
     let goal = goal.trim();
     if goal.len() > 2000 || goal.contains('\n') {
+        return None;
+    }
+    // "Every evening until it's done" is a goal, which ends; a routine never does.
+    if crate::goals::parse_request(goal).is_some() {
         return None;
     }
     let (body, asked) = without_polite(goal);
@@ -312,7 +317,23 @@ pub fn parse_request(goal: &str) -> Option<Request> {
     Some(Request { task, days, time })
 }
 
-fn normalize_days(text: &str) -> Option<&'static str> {
+/// The schedule that opens or closes `text` ("every evening", "every weekday at 9"), and
+/// the words left around it. For goals, whose check-ins are routines.
+pub(crate) fn split_schedule(text: &str) -> Option<(String, &'static str, String)> {
+    let found = tokens(text);
+    let words: Vec<&str> = found.iter().map(|(_, word)| word.as_str()).collect();
+    if let Some((days, time, used)) = schedule(&words) {
+        let rest = found.get(used).map(|(start, _)| &text[*start..]).unwrap_or("");
+        return Some((rest.trim_start_matches([',', ':', ';', '-', '—', ' ']).trim().to_string(), days, time));
+    }
+    let (start, days, time) = (1..words.len()).find_map(|start| {
+        let (days, time, used) = schedule(&words[start..])?;
+        (start + used == words.len()).then_some((start, days, time))
+    })?;
+    Some((text[..found[start].0].trim().trim_end_matches([',', ';', '-', '—']).trim().to_string(), days, time))
+}
+
+pub(crate) fn normalize_days(text: &str) -> Option<&'static str> {
     let text = text.trim().to_lowercase().replace('_', " ");
     let text = text
         .strip_prefix("every ")
@@ -326,7 +347,7 @@ fn normalize_days(text: &str) -> Option<&'static str> {
         _ => day_name(text),
     }
 }
-fn normalize_time(text: &str) -> Option<String> {
+pub(crate) fn normalize_time(text: &str) -> Option<String> {
     let text = text.trim().to_lowercase();
     let words: Vec<&str> = text.split_whitespace().collect();
     let (hour, minute, said, used) = clock(words.first()?, words.get(1).copied())?;
@@ -438,7 +459,7 @@ pub fn next_after<Tz: TimeZone>(days: &str, time: &str, after: DateTime<Tz>) -> 
 }
 
 /// "Monday, November 2 at 8:00 AM".
-fn when(at: &str) -> String {
+pub(crate) fn when(at: &str) -> String {
     DateTime::parse_from_rfc3339(at)
         .map(|at| at.with_timezone(&Local).format("%A, %B %-d at %-I:%M %p").to_string())
         .unwrap_or_else(|_| at.into())
@@ -568,7 +589,9 @@ pub fn execute(store: &Store, intent_id: &str, raw: &Map<String, Value>) -> Acti
                 return Err("This routine already exists with different details. It wasn’t changed.".into());
             }
         } else {
-            if store.routines()?.iter().filter(|routine| !routine.built_in).count() >= MAX_ROUTINES {
+            // A goal's check-ins count toward its goals, not here.
+            let own = |routine: &&Routine| !routine.built_in && crate::goals::owner(&routine.id).is_none();
+            if store.routines()?.iter().filter(own).count() >= MAX_ROUTINES {
                 return Err(format!("You can have up to {MAX_ROUTINES} routines. Delete one in History → Routines first."));
             }
             let (days, time) = (args["days"].as_str().unwrap(), args["time"].as_str().unwrap());
@@ -626,7 +649,14 @@ fn thread(routine: &Routine) -> (String, String) {
         format!("Routine: {}", routine.task.chars().take(85).collect::<String>()),
     )
 }
-fn assign_thread(store: &Store, task_id: &str, (id, title): &(String, String)) -> Result<(), String> {
+/// The thread a run goes to: a goal's check-ins all report in the goal's conversation.
+pub(crate) fn thread_in(store: &Store, routine: &Routine) -> Result<(String, String), String> {
+    match crate::goals::owner(&routine.id) {
+        Some(goal) => crate::goals::thread(store, goal),
+        None => Ok(thread(routine)),
+    }
+}
+pub(crate) fn assign_thread(store: &Store, task_id: &str, (id, title): &(String, String)) -> Result<(), String> {
     store
         .db
         .execute("INSERT INTO chat_threads(id,title,created_at,updated_at,legacy) VALUES(?1,?2,?3,?3,0) ON CONFLICT(id) DO NOTHING", rusqlite::params![id, title, now()])
@@ -644,7 +674,7 @@ fn monitor_key(id: &str) -> String {
 /// Claims one scheduled run, in the same transaction as the run's task: the routine must
 /// still be on and still due at `scheduled_for`, and its next time moves on before
 /// anything runs, so a crash or a second check can never run it twice.
-fn claim(store: &Store, id: &str, scheduled_for: &str, task_id: &str) -> Result<String, String> {
+pub(crate) fn claim(store: &Store, id: &str, scheduled_for: &str, task_id: &str) -> Result<String, String> {
     let mut routine = store.routine(id)?.ok_or("This routine was deleted.")?;
     if !routine.enabled || routine.built_in || routine.next_run_at != scheduled_for {
         return Err("This routine is paused or no longer due.".into());
@@ -657,8 +687,19 @@ fn claim(store: &Store, id: &str, scheduled_for: &str, task_id: &str) -> Result<
     routine.last_task_id = Some(task_id.into());
     routine.last_error = None;
     store.save_routine(&routine)?;
-    assign_thread(store, task_id, &thread(&routine))?;
+    assign_thread(store, task_id, &thread_in(store, &routine)?)?;
     crate::delivery::monitor_started(store, &monitor_key(id), Some(scheduled_for), at)
+}
+
+/// Moves a due run on to its next time without running it, as `claim` would: a goal's
+/// check-in that had nothing to do, or couldn't check what it needed.
+pub(crate) fn pass(store: &Store, id: &str, scheduled_for: &str) -> Result<(), String> {
+    let mut routine = store.routine(id)?.ok_or("This routine was deleted.")?;
+    if routine.next_run_at != scheduled_for {
+        return Ok(());
+    }
+    routine.next_run_at = next_after(&routine.days, &routine.time, Local::now()).ok_or("That time couldn’t be scheduled.")?.to_rfc3339();
+    store.save_routine(&routine)
 }
 
 /// What is due now: routines whose time has come, and those missed for longer than the
@@ -688,6 +729,10 @@ fn due(store: &Store, at: DateTime<Utc>) -> Result<Vec<(String, String)>, String
 /// Runs every routine that is due, one at a time, each only while nothing else runs.
 pub async fn run_due(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
+    // A goal whose last day has passed ends before any of its check-ins could run.
+    if let Err(error) = crate::goals::end_overdue(app).await {
+        state.audit("goal.skipped", &error);
+    }
     let due = due(&state.store.lock().unwrap(), Utc::now()).unwrap_or_default();
     for (id, scheduled_for) in due {
         if !state.active.lock().unwrap().is_empty() {
@@ -702,12 +747,23 @@ pub async fn run_due(app: &tauri::AppHandle) {
 async fn run(app: &tauri::AppHandle, id: &str, scheduled_for: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
     let routine = state.store.lock().unwrap().routine(id)?.ok_or("This routine was deleted.")?;
-    let (thread_id, _) = thread(&routine);
+    if let Some(goal) = crate::goals::owner(&routine.id) {
+        return crate::goals::check_in(app, &routine, goal, scheduled_for).await;
+    }
+    run_claimed(app, &routine, &routine.task, scheduled_for).await.map(|_| ())
+}
+
+/// Runs `prompt` headless for `routine`, claiming `scheduled_for` as the task starts, and
+/// tells the user when it's done. A run that gave way to the user runs again later.
+pub(crate) async fn run_claimed(app: &tauri::AppHandle, routine: &Routine, prompt: &str, scheduled_for: &str) -> Result<crate::types::TaskRecord, String> {
+    let state = app.state::<AppState>();
+    let id = routine.id.as_str();
+    let (thread_id, _) = thread_in(&state.store.lock().unwrap(), routine)?;
     let mut run_id = None;
     let yielded = Arc::new(AtomicBool::new(false));
     let task = crate::controller::run_task_headless(
         app,
-        &routine.task,
+        prompt,
         crate::controller::Headless {
             thread: &thread_id,
             events: tauri::ipc::Channel::new(|_| Ok(())),
@@ -719,12 +775,12 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled_for: &str) -> Result<()
         },
     )
     .await?;
-    finish(app, &routine, run_id.as_deref(), &task).await?;
+    finish(app, routine, run_id.as_deref(), &task).await?;
     if yielded.load(Ordering::SeqCst) {
         let store = state.store.lock().unwrap();
         retry_later(&store, id, scheduled_for, &task.id)?;
     }
-    Ok(())
+    Ok(task)
 }
 
 /// A run that stopped so the user could use Buntini runs again from the start once the
@@ -745,7 +801,7 @@ fn retry_later(store: &Store, id: &str, scheduled_for: &str, task_id: &str) -> R
 /// Journals the run and tells the user: a proposal asks for their OK; anything else
 /// says the result is ready. The alert never shows the result itself, since it can
 /// appear on the lock screen.
-async fn finish(app: &tauri::AppHandle, routine: &Routine, run_id: Option<&str>, task: &crate::types::TaskRecord) -> Result<(), String> {
+pub(crate) async fn finish(app: &tauri::AppHandle, routine: &Routine, run_id: Option<&str>, task: &crate::types::TaskRecord) -> Result<(), String> {
     use tauri::Emitter;
     let state = app.state::<AppState>();
     {
@@ -762,7 +818,7 @@ async fn finish(app: &tauri::AppHandle, routine: &Routine, run_id: Option<&str>,
     let delivery = if task.state == "cancelled" {
         Ok("in_app_only".to_string())
     } else {
-        crate::notifications::deliver_routine(app, task).await
+        crate::notifications::deliver_routine(app, task, crate::goals::owner(&routine.id).is_some()).await
     };
     crate::delivery::monitor_delivery(
         &state.store.lock().unwrap(),
@@ -776,7 +832,7 @@ async fn finish(app: &tauri::AppHandle, routine: &Routine, run_id: Option<&str>,
 /// Stops a routine's run in progress, if there is one. Takes the running-task map the
 /// caller already holds: everywhere locks `active` before `store`, so taking it here
 /// while the store is held could deadlock against a run that is just starting.
-fn stop_running(active: &HashMap<String, Arc<AtomicBool>>, routine: &Routine) {
+pub(crate) fn stop_running(active: &HashMap<String, Arc<AtomicBool>>, routine: &Routine) {
     if let Some(task_id) = &routine.last_task_id {
         if let Some(cancel) = active.get(task_id) {
             cancel.store(true, Ordering::SeqCst);
@@ -797,6 +853,9 @@ pub async fn update_routine(id: String, enabled: bool, state: State<'_, AppState
     let active = state.active.lock().unwrap();
     let store = state.store.lock().unwrap();
     let mut routine = store.routine(&id)?.ok_or("This routine no longer exists.")?;
+    if crate::goals::owner(&id).is_some() {
+        return Err(GOAL_OWNED.into());
+    }
     if !enabled {
         stop_running(&active, &routine);
     }
@@ -816,6 +875,9 @@ pub fn delete_routine(id: String, state: State<'_, AppState>) -> Result<(), Stri
     let routine = store.routine(&id)?.ok_or("This routine no longer exists.")?;
     if routine.built_in {
         return Err("The morning brief can be paused but not deleted.".into());
+    }
+    if crate::goals::owner(&id).is_some() {
+        return Err(GOAL_OWNED.into());
     }
     stop_running(&active, &routine);
     store.delete_routine(&id)

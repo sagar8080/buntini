@@ -27,6 +27,7 @@ mod delivery;
 mod embedding;
 mod explicit_fields;
 mod focus;
+mod goals;
 mod indexer;
 mod integrations;
 mod local;
@@ -313,7 +314,9 @@ pub fn run() {
             watches::delete_price_watch,
             watches::run_price_watch,
             routines::update_routine,
-            routines::delete_routine
+            routines::delete_routine,
+            goals::update_goal,
+            goals::delete_goal
         ])
         .build(app_context())
         .expect("Buntini could not start")
