@@ -10,6 +10,16 @@ Public distribution additionally requires the [production readiness gates](produ
 
 ## Automated evidence
 
+### Device checks for changing existing items — October 30, 2026
+
+`src-tauri/src/device_live_tests.rs` (opt-in: `cargo test --manifest-path src-tauri/Cargo.toml device_live -- --ignored --nocapture --test-threads=1`) runs the real Reminders, Calendar and Notes writes on this Mac against items it creates, all named "Buntini device test". The first run found three device-only faults, now fixed:
+
+- Marking a reminder done or moving it crashed the Apple helper after the save. EventKit throws from a reminder's alarms when the process that saved it reads it back, so the helper now reads the change back in a separate helper process.
+- Adding to a note worked but was reported as unconfirmed. Notes refuses `container of` a note (error -1728), so the note's folder is found through the folders' own note lists.
+- The same Notes refusal meant notes in Recently Deleted were never filtered out of note searches. They are now recognised by the Recently Deleted folders' note lists.
+
+After the fixes, complete_reminder, reschedule_reminder and append_to_note pass with verified receipts. update_calendar_event was not run: macOS had not given the test process Calendar access. Threaded Mail replies were not run: Mail has no account on this Mac. Both remain device checks in the app.
+
 ### Security and release review — October 29, 2026
 
 The [production readiness report](production-readiness.md#current-rollout-status) records the current build/test/audit evidence, runtime security repairs and remaining distribution blockers. The final Rust suite passed **379 tests** (8 opt-in checks excluded); the integrated frontend/worker/native checks and 24 release-tooling tests passed. Four protected Apple controller tests plus the blank WebKit isolation/deletion probe passed separately. All app observations and write receipts in those controlled journeys were synthetic. A production-mode app and both helpers now pass Developer ID, timestamp, hardened-runtime and entitlement checks. Four free public API checks and the signed packaged Apple helper also pass. Notarization and fresh-device/keyed-provider acceptance remain outstanding.

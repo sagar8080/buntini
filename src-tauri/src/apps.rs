@@ -374,10 +374,16 @@ const NOTES_FIND: &str = r#"on run argv
   tell application "Notes"
     -- Notes titled with the words first, then notes that only mention them.
     set found to (notes whose name contains q) & (notes whose name does not contain q and plaintext contains q)
+    -- Notes can refuse `container of` a note, so deleted notes are known by the
+    -- Recently Deleted folders' own lists instead.
+    set deletedIDs to {}
+    repeat with f in (folders whose name is "Recently Deleted")
+      set deletedIDs to deletedIDs & (id of notes of f)
+    end repeat
     repeat with n in found
       -- A deleted note is not one to read or add to. It still counts as found, so the
       -- result says it is partial rather than that nothing else matched.
-      if not my deleted(n) then
+      if deletedIDs does not contain (id of n) then
         set t to plaintext of n
         set originalLength to length of t
         if originalLength > 400 then set t to text 1 thru 400 of t
@@ -390,15 +396,6 @@ const NOTES_FIND: &str = r#"on run argv
   set AppleScript's text item delimiters to linefeed
   return out as text
 end run
-on deleted(n)
-  tell application "Notes"
-    try
-      return (name of (container of n)) is "Recently Deleted"
-    on error
-      return false
-    end try
-  end tell
-end deleted
 "#;
 // Notes changed in the last N days, for the memory index: modified time, ID, title and
 // the first 1,500 characters of plain text (at most 300 notes).

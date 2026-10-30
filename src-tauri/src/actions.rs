@@ -735,7 +735,7 @@ const NOTE: &str = r#"    tell application "Notes"
       set created to make new note with properties {body:item 2 of argv}
       set resultID to id of created
       set stored to first note whose id is resultID
-      set targetFolder to container of stored
+      set targetFolder to my folderOf(resultID)
       set destinationName to name of targetFolder
       my putField(observed, "destinationId", id of targetFolder)
       my putField(observed, "title", name of stored)
@@ -874,7 +874,7 @@ const NOTE_APPEND: &str = r#"    tell application "Notes"
       end considering
       if password protected of stored then error "That note is locked, so Buntini can’t add to it."
       if (count of attachments of stored) > 0 then error "That note has attachments, which Notes could drop when Buntini adds text. Add the text in Notes yourself."
-      set targetFolder to container of stored
+      set targetFolder to my folderOf(id of stored)
       set destinationName to name of targetFolder
       if destinationName is "Recently Deleted" then error "That note is in Recently Deleted, so Buntini won’t add to it."
       -- Setting a body through scripting rewrites it whole, and Notes' checklists (with
@@ -890,10 +890,25 @@ const NOTE_APPEND: &str = r#"    tell application "Notes"
       set stored to note id resultID
       my putField(observed, "title", name of stored)
       my putField(observed, "plaintext", plaintext of stored)
-      my putField(observed, "folderId", id of (container of stored))
+      my putField(observed, "folderId", id of my folderOf(resultID))
       my putField(observed, "attachmentCount", count of attachments of stored)
       my putField(observed, "identifierScope", "persistent")
     end tell
+"#;
+
+/// The folder holding a note. Notes sometimes refuses `container of` a note it just
+/// returned (error -1728), so the folders' own note lists answer when it does.
+const FOLDER_HELPER: &str = r#"on folderOf(noteID)
+  tell application "Notes"
+    try
+      return container of note id noteID
+    end try
+    repeat with f in folders
+      if (id of notes of f) contains noteID then return contents of f
+    end repeat
+  end tell
+  error "Notes didn’t say which folder the note is in."
+end folderOf
 "#;
 
 /// Text without spaces, tabs or line breaks around it, as Buntini reads titles.
@@ -955,7 +970,7 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
             Some((verified_script(EVENT), argv))
         }
         "create_note" => Some((
-            verified_script(NOTE),
+            format!("{RECEIPT_HELPER}{FOLDER_HELPER}{DATE_HELPER}{RECEIPT_START}{NOTE}{RECEIPT_END}"),
             vec![
                 get("title"),
                 format!(
@@ -982,7 +997,7 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
             ],
         )),
         "append_to_note" => Some((
-            format!("{RECEIPT_HELPER}{TRIM_HELPER}{DATE_HELPER}{RECEIPT_START}{NOTE_APPEND}{RECEIPT_END}"),
+            format!("{RECEIPT_HELPER}{TRIM_HELPER}{FOLDER_HELPER}{DATE_HELPER}{RECEIPT_START}{NOTE_APPEND}{RECEIPT_END}"),
             vec![get("id"), get("title"), html(&get("text"))],
         )),
         _ => None,

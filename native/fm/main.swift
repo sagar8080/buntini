@@ -1502,7 +1502,51 @@ enum Edits {
         return (try? await store.requestAccess(to: type)) ?? false
     }
 
+    /// A new store for reading a change back, so it shows what Reminders or Calendar
+    /// saved rather than this process's cache. It asks for access like any store: a store
+    /// read before that can crash inside EventKit.
+    static func fresh(_ type: EKEntityType) async -> EKEventStore {
+        let store = EKEventStore()
+        _ = await access(type, store)
+        return store
+    }
+
+    /// A reminder as a separate helper process reads it. Reading a reminder back in the
+    /// process that just saved it can crash inside EventKit (an exception from its alarms
+    /// that Swift can't catch), and another process also sees what Reminders stored.
+    static func readBack(_ id: String) -> (found: Bool, snapshot: [String: Any], list: String, title: String)? {
+        guard let executable = Bundle.main.executableURL else { return nil }
+        let child = Process()
+        child.executableURL = executable
+        child.arguments = ["--reminder-snapshot", id]
+        let output = Pipe()
+        child.standardOutput = output
+        child.standardError = FileHandle.nullDevice
+        guard (try? child.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        child.waitUntilExit()
+        guard child.terminationStatus == 0,
+              let read = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let found = read["found"] as? Bool else { return nil }
+        return (found, read["snapshot"] as? [String: Any] ?? [:], read["list"] as? String ?? "", read["title"] as? String ?? "")
+    }
+
+    static func reminderSnapshotCommand(_ id: String) async -> Int32 {
+        let store = EKEventStore()
+        guard await access(.reminder, store) else { return 1 }
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            emit(["found": false])
+            return 0
+        }
+        emit(["found": true, "snapshot": reminderSnapshot(reminder, stamp: localStamp()),
+              "list": reminder.calendar?.title ?? "", "title": reminder.title ?? ""])
+        return 0
+    }
+
     static func run(_ arguments: [String]) async -> Int32 {
+        if arguments.count == 3, arguments[1] == "--reminder-snapshot" {
+            return await reminderSnapshotCommand(arguments[2])
+        }
         if arguments.count == 4, arguments[1] == "--complete-reminder" {
             return await completeReminder(id: arguments[2], title: arguments[3])
         }
@@ -1539,15 +1583,15 @@ enum Edits {
         }
         reminder.isCompleted = true
         let saveError = (try? store.save(reminder, commit: true)) == nil
-        guard let stored = EKEventStore().calendarItem(withIdentifier: id) as? EKReminder else {
+        guard let stored = readBack(id), stored.found else {
             return receipt("unknown", id: id, error: "Reminders didn’t return the reminder after the change.")
         }
-        let after = reminderSnapshot(stored, stamp: stamp)
-        if saveError && !stored.isCompleted && NSDictionary(dictionary: after).isEqual(to: before) {
+        let after = stored.snapshot
+        if saveError && after["completed"] as? Bool != true && NSDictionary(dictionary: after).isEqual(to: before) {
             return receipt("failed", error: "Reminders didn’t accept the change. Nothing was changed.")
         }
-        return receipt("succeeded", id: id, destination: stored.calendar?.title ?? "Reminders",
-                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title ?? "",
+        return receipt("succeeded", id: id, destination: stored.list.isEmpty ? "Reminders" : stored.list,
+                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title,
                                   "before": before, "after": after], error: saveError ? "Reminders reported an error while saving." : "")
     }
 
@@ -1586,15 +1630,15 @@ enum Edits {
         }
         reminder.dueDateComponents = components
         let saveError = (try? store.save(reminder, commit: true)) == nil
-        guard let stored = EKEventStore().calendarItem(withIdentifier: id) as? EKReminder else {
+        guard let stored = readBack(id), stored.found else {
             return receipt("unknown", id: id, error: "Reminders didn’t return the reminder after the change.")
         }
-        let after = reminderSnapshot(stored, stamp: stamp)
+        let after = stored.snapshot
         if saveError && NSDictionary(dictionary: after).isEqual(to: before) {
             return receipt("failed", error: "Reminders didn’t accept the change. Nothing was changed.")
         }
-        return receipt("succeeded", id: id, destination: stored.calendar?.title ?? "Reminders",
-                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title ?? "",
+        return receipt("succeeded", id: id, destination: stored.list.isEmpty ? "Reminders" : stored.list,
+                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title,
                                   "before": before, "after": after], error: saveError ? "Reminders reported an error while saving." : "")
     }
 
@@ -1647,7 +1691,7 @@ enum Edits {
         event.endDate = newStart.addingTimeInterval(TimeInterval(change.minutes * 60))
         // `.thisEvent` changes only this occurrence of a repeating event.
         let saveError = (try? store.save(event, span: .thisEvent, commit: true)) == nil
-        let fresh = EKEventStore()
+        let fresh = await fresh(.event)
         let moved = occurrences(fresh, id: change.id, item: item, start: change.start, stamp: stamp)
         let left = change.start == change.occurrence ? [] : occurrences(fresh, id: change.id, item: item, start: change.occurrence, stamp: stamp)
         guard moved.count == 1, let stored = moved.first else {
@@ -2020,7 +2064,7 @@ struct Helper {
     static func main() async {
         // Checked first and by position, so a looked-up name or a reminder's title can
         // never select another mode.
-        if CommandLine.arguments.count > 1, ["--complete-reminder", "--reschedule-reminder", "--update-event"].contains(CommandLine.arguments[1]) {
+        if CommandLine.arguments.count > 1, ["--complete-reminder", "--reschedule-reminder", "--update-event", "--reminder-snapshot"].contains(CommandLine.arguments[1]) {
             exit(await Edits.run(CommandLine.arguments))
         }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {

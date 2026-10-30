@@ -70,6 +70,9 @@ mod worker;
 mod workflows;
 mod world;
 
+#[cfg(all(test, debug_assertions))]
+mod device_live_tests;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
