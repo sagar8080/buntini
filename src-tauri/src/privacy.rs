@@ -37,10 +37,12 @@ pub enum Share {
     Browser,
     /// Text selected and the window in front when Buntini opens ("this").
     Selection,
+    /// Names, emails and phone numbers from Contacts.
+    Contacts,
 }
 
 impl Share {
-    pub const ALL: [Share; 11] = [
+    pub const ALL: [Share; 12] = [
         Share::Activity,
         Share::System,
         Share::Files,
@@ -52,6 +54,7 @@ impl Share {
         Share::Music,
         Share::Browser,
         Share::Selection,
+        Share::Contacts,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -66,6 +69,7 @@ impl Share {
             Share::Music => "music",
             Share::Browser => "browser",
             Share::Selection => "selection",
+            Share::Contacts => "contacts",
         }
     }
 }
@@ -80,7 +84,7 @@ pub fn allows(locality: Locality, settings: &Settings, share: Share) -> bool {
 pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     for (index, id) in shares.iter().enumerate() {
         if !Share::ALL.iter().any(|share| share.id() == id) || shares[..index].contains(id) {
-            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, browser or selection at most once each.".into());
+            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, browser, selection or contacts at most once each.".into());
         }
     }
     Ok(())
@@ -323,6 +327,23 @@ mod tests {
         assert!(validate_shares(&["files".into(), "history".into()]).is_ok());
         assert!(validate_shares(&["files".into(), "files".into()]).is_err());
         assert!(validate_shares(&["passwords".into()]).is_err());
+        assert!(validate_shares(&["contacts".into()]).is_ok());
+    }
+
+    #[test]
+    fn contacts_need_their_own_external_share() {
+        let mut settings = Settings::default();
+        assert!(allows(Locality::OnDevice, &settings, Share::Contacts));
+        // Allowing mail, history and everything else still keeps the address book here.
+        settings.external_shares = Share::ALL
+            .iter()
+            .filter(|share| **share != Share::Contacts)
+            .map(|share| share.id().to_string())
+            .collect();
+        assert!(allows(Locality::External, &settings, Share::Mail));
+        assert!(!allows(Locality::External, &settings, Share::Contacts));
+        settings.external_shares.push("contacts".into());
+        assert!(allows(Locality::External, &settings, Share::Contacts));
     }
 
     #[test]

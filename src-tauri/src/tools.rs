@@ -13,6 +13,7 @@ pub const RESOURCES: &[&str] = &[
     "automation",
     "browser",
     "calendar",
+    "contacts",
     "currency",
     "files",
     "flights",
@@ -494,6 +495,22 @@ mod tests {
                 "accepted invalid {tool} example"
             );
         }
+    }
+
+    #[test]
+    fn contact_lookup_is_a_bounded_read_of_contacts_only() {
+        let tool = definition("find_contact").unwrap();
+        let contract = contract("find_contact").unwrap();
+        assert_eq!(contract.operation, ToolOperation::Read);
+        assert_eq!(contract.resources, vec!["contacts"]);
+        assert_eq!(contract.success_verifier, SuccessVerifier::AppReadResult);
+        assert_eq!(tool["parameters"]["required"], json!(["name"]));
+        assert_eq!(tool["parameters"]["properties"]["name"]["maxLength"], 100);
+        for example in &contract.examples {
+            assert!(crate::apps::validate("find_contact", &example.arguments).is_ok());
+        }
+        // Looking someone up never offers a write or a recipient on its own.
+        assert!(!contract.has_resource("mail"));
     }
 
     #[test]

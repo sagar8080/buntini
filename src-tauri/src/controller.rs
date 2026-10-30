@@ -2973,6 +2973,20 @@ where
                 arguments: json!({"query":query}),
                 source: json!({"kind":"user_fields","source":"user_request","query":query}),
             })
+        } else if let Some(name) = flow.contract.contact_lookup(&flow.steps).filter(|_| {
+            state.models.apple_helper().is_file()
+                && definitions
+                    .as_array()
+                    .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "find_contact"))
+        }) {
+            // "Draft an email to Ana": look Ana up in Contacts before drafting, by the
+            // name the user wrote, so the model never has to guess her address. Without
+            // the Apple helper there is nothing to read, and the draft goes ahead as before.
+            Some(crate::planning::BoundAction {
+                tool: "find_contact",
+                arguments: json!({"name":name}),
+                source: json!({"kind":"user_fields","source":"user_request","fields":{"name":name}}),
+            })
         } else if clarified {
             None
         } else if let Some(next) = flow.contract.next_outcome() {
@@ -3045,6 +3059,7 @@ where
         {
             return Err(format!("The tool {name} is not available for the remaining steps of this task. No action ran."));
         }
+        flow.contract.fill_resolved_fields(&name, &mut args);
         flow.contract.validate_proposal(&name, &args, &flow.steps)?;
         if crate::apps::READ_TOOLS.contains(&name.as_str()) {
             args = Value::Object(crate::apps::validate(&name, &args)?);
@@ -3075,6 +3090,18 @@ where
                 flow.contract.validate_proposal(&name, &args, &flow.steps)?;
             } else {
                 touch(task, privacy::Share::Browser);
+            }
+        }
+        // Several people in Contacts match the name the user gave: they pick the address
+        // in the sheet, so an address the model chose is left out rather than shown.
+        let choices = if name == "draft_email" {
+            flow.contract.recipient_choices(&flow.steps)
+        } else {
+            vec![]
+        };
+        if !choices.is_empty() {
+            if let Some(fields) = args.as_object_mut() {
+                fields.remove("to");
             }
         }
         let approval = is_action || name == "look_up_online";
@@ -3110,6 +3137,18 @@ where
                         title,
                         fields,
                         note,
+                        choices: choices
+                            .into_iter()
+                            .map(|choice| crate::actions::Choice {
+                                field: "to".into(),
+                                label: if choice.name.is_empty() {
+                                    choice.address.clone()
+                                } else {
+                                    format!("{} · {}", choice.name, choice.address)
+                                },
+                                value: choice.address,
+                            })
+                            .collect(),
                     })
                     .map_err(|e| e.to_string())?,
                 );
