@@ -314,7 +314,7 @@ func previousToolCalls(_ messages: ArraySlice<[String: Any]>) -> [(name: String,
 }
 
 func repeatsWrite(_ name: String, _ arguments: [String: Any], history: ArraySlice<[String: Any]>) -> Bool {
-    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "complete_reminder", "update_calendar_event", "append_to_note", "control_music", "switch_tab", "remember", "set_timer"]
+    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "complete_reminder", "reschedule_reminder", "update_calendar_event", "append_to_note", "control_music", "switch_tab", "remember", "set_timer"]
     guard writes.contains(name) else { return false }
     if name == "control_music", arguments["action"] as? String == "now_playing" { return false }
     return previousToolCalls(history).contains { previous in
@@ -344,7 +344,7 @@ func routingPrompt(goal: String, guidance: String, steps: [[String: Any]], nextS
     return "Original user request: \(goal)\nLatest user guidance: \(guidance)\nExecution states (not new requests): \(String(data: data, encoding: .utf8) ?? "[]")\nController's next requested step and verified numeric calculations: \(String(data: facts, encoding: .utf8) ?? "{}")"
 }
 
-let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "complete_reminder", "update_calendar_event", "append_to_note", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
+let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "complete_reminder", "reschedule_reminder", "update_calendar_event", "append_to_note", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
 
 func unresolvedJournal(_ steps: [[String: Any]]) -> Bool {
     steps.contains { ["failed", "unknown", "running", "waiting"].contains($0["state"] as? String ?? "unknown") }
@@ -536,6 +536,7 @@ let toolExamples: [String: String] = [
     "add_calendar_event": "put lunch with Sam on Friday at 1pm in my calendar",
     "create_note": "make a note of these packing ideas",
     "complete_reminder": "mark buy milk as done",
+    "reschedule_reminder": "move the dentist reminder to Friday",
     "update_calendar_event": "move my 3pm to 4",
     "append_to_note": "add milk to my shopping note",
     "draft_email": "draft an email to my landlord about the leak",
@@ -1412,11 +1413,45 @@ func eventChange(_ raw: String, timeZone: TimeZone = .current) -> EventChange? {
     return change
 }
 
+/// Each alarm's place relative to the reminder's due date: an alarm at a set time as its
+/// seconds from the due ("at:-900"), one set relative to it as its offset ("before:-900").
+/// Without a due date an alarm at a set time is its local time ("on:2026-11-03 09:00").
+/// A due date that moves with its alarms keeps these the same.
+func alarmOffsets(_ reminder: EKReminder, stamp: DateFormatter) -> [String] {
+    let due = reminderDueDate(reminder.dueDateComponents)
+    return (reminder.alarms ?? []).map { alarm in
+        guard let at = alarm.absoluteDate else { return "before:\(Int(alarm.relativeOffset))" }
+        guard let due else { return "on:\(stamp.string(from: at))" }
+        return "at:\(Int(at.timeIntervalSince(due).rounded()))"
+    }.sorted()
+}
+
 /// What a reminder is like, for comparing just before and after a change.
 func reminderSnapshot(_ reminder: EKReminder, stamp: DateFormatter) -> [String: Any] {
     ["title": reminder.title ?? "", "due": reminderDueText(reminder.dueDateComponents, stamp: stamp),
      "listId": reminder.calendar?.calendarIdentifier ?? "", "notes": reminder.notes ?? "", "priority": reminder.priority,
-     "url": reminder.url?.absoluteString ?? "", "alarms": reminder.alarms?.count ?? 0, "completed": reminder.isCompleted]
+     "url": reminder.url?.absoluteString ?? "", "alarms": reminder.alarms?.count ?? 0, "completed": reminder.isCompleted,
+     "alarmOffsets": alarmOffsets(reminder, stamp: stamp)]
+}
+
+/// The due date components for "YYYY-MM-DD HH:MM" or a date-only "YYYY-MM-DD", in the
+/// zone the reminder already used (none keeps it floating, as Reminders does). Nil
+/// unless the text is exactly one of those forms.
+func dueComponents(_ text: String, timeZone: TimeZone?) -> DateComponents? {
+    let calendar = Calendar(identifier: .gregorian)
+    let parts = text.split(separator: " ", omittingEmptySubsequences: false)
+    guard (1...2).contains(parts.count) else { return nil }
+    let day = parts[0].split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+    guard parts[0].count == 10, day.count == 3 else { return nil }
+    var components = DateComponents(calendar: calendar, timeZone: timeZone, year: day[0], month: day[1], day: day[2])
+    if parts.count == 2 {
+        let time = parts[1].split(separator: ":", omittingEmptySubsequences: false).compactMap { Int($0) }
+        guard parts[1].count == 5, time.count == 2, (0...23).contains(time[0]), (0...59).contains(time[1]) else { return nil }
+        components.hour = time[0]
+        components.minute = time[1]
+    }
+    guard components.isValidDate else { return nil }
+    return components
 }
 
 /// What an event occurrence is like, for comparing just before and after a change.
@@ -1450,6 +1485,9 @@ enum Edits {
     static func run(_ arguments: [String]) async -> Int32 {
         if arguments.count == 4, arguments[1] == "--complete-reminder" {
             return await completeReminder(id: arguments[2], title: arguments[3])
+        }
+        if arguments.count == 6, arguments[1] == "--reschedule-reminder" {
+            return await rescheduleReminder(id: arguments[2], title: arguments[3], wasDue: arguments[4], due: arguments[5])
         }
         if arguments.count == 3, arguments[1] == "--update-event", let change = eventChange(arguments[2]) {
             return await updateEvent(change)
@@ -1486,6 +1524,53 @@ enum Edits {
         }
         let after = reminderSnapshot(stored, stamp: stamp)
         if saveError && !stored.isCompleted && NSDictionary(dictionary: after).isEqual(to: before) {
+            return receipt("failed", error: "Reminders didn’t accept the change. Nothing was changed.")
+        }
+        return receipt("succeeded", id: id, destination: stored.calendar?.title ?? "Reminders",
+                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title ?? "",
+                                  "before": before, "after": after], error: saveError ? "Reminders reported an error while saving." : "")
+    }
+
+    /// `--reschedule-reminder <id> <title> <due as read> <new due>`: a new due date for one
+    /// open reminder. Alarms at a set time move with it, so each keeps its place before
+    /// the due; alarms set relative to the due follow on their own.
+    static func rescheduleReminder(id: String, title: String, wasDue: String, due: String) async -> Int32 {
+        let store = EKEventStore()
+        guard await access(.reminder, store) else {
+            return receipt("failed", error: "macOS hasn’t allowed Buntini to change Reminders. Allow it in System Settings → Privacy & Security → Reminders.")
+        }
+        let stamp = localStamp()
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            return receipt("failed", error: "That reminder isn’t in Reminders any more.")
+        }
+        let before = reminderSnapshot(reminder, stamp: stamp)
+        guard sameTitle(reminder.title, title), !reminder.isCompleted,
+              reminderDueText(reminder.dueDateComponents, stamp: stamp) == wasDue else {
+            return receipt("failed", error: "That reminder changed since Buntini read it. Ask again so it reads your reminders afresh.")
+        }
+        guard let components = dueComponents(due, timeZone: reminder.dueDateComponents?.timeZone),
+              let newDue = reminderDueDate(components) else {
+            return receipt("failed", error: "Buntini’s Apple helper didn’t understand that due date.")
+        }
+        let oldDue = reminderDueDate(reminder.dueDateComponents)
+        if oldDue == nil, (reminder.alarms ?? []).contains(where: { $0.absoluteDate != nil }) {
+            return receipt("failed", error: "That reminder has an alarm but no due date, so Buntini can’t tell when the alarm should move to. Change it in Reminders.")
+        }
+        guard reminder.calendar?.allowsContentModifications == true else {
+            return receipt("failed", error: "That reminder’s list can’t be changed.")
+        }
+        if let oldDue {
+            for alarm in reminder.alarms ?? [] {
+                if let at = alarm.absoluteDate { alarm.absoluteDate = newDue.addingTimeInterval(at.timeIntervalSince(oldDue)) }
+            }
+        }
+        reminder.dueDateComponents = components
+        let saveError = (try? store.save(reminder, commit: true)) == nil
+        guard let stored = EKEventStore().calendarItem(withIdentifier: id) as? EKReminder else {
+            return receipt("unknown", id: id, error: "Reminders didn’t return the reminder after the change.")
+        }
+        let after = reminderSnapshot(stored, stamp: stamp)
+        if saveError && NSDictionary(dictionary: after).isEqual(to: before) {
             return receipt("failed", error: "Reminders didn’t accept the change. Nothing was changed.")
         }
         return receipt("succeeded", id: id, destination: stored.calendar?.title ?? "Reminders",
@@ -1596,6 +1681,13 @@ func contractSelfTest() async -> Int32 {
         date.minute = 0
         try require(reminderDueText(date, stamp: stamp) == "2026-10-22 00:00", "Explicit midnight deadlines must retain their time")
         try require(reminderDueText(nil, stamp: stamp).isEmpty, "Undated reminders must remain undated")
+        let utc = TimeZone(secondsFromGMT: 0)!
+        try require(dueComponents("2026-11-06 09:30", timeZone: utc).map { reminderDueText($0, stamp: stamp) } == "2026-11-06 09:30", "A new due time must read back as written")
+        try require(dueComponents("2026-11-06", timeZone: utc).map { reminderDueText($0, stamp: stamp) } == "2026-11-06", "A new date without a time must stay without one")
+        try require(dueComponents("2026-11-06", timeZone: nil)?.timeZone == nil, "A floating reminder must stay floating")
+        for invalid in ["", "Friday", "2026-11-31", "2026-11-06 24:00", "2026-11-06 9:30", "2026-11-06T09:30", "2026-11-06 09:30 "] {
+            try require(dueComponents(invalid, timeZone: utc) == nil, "Invalid due dates must be refused: \(invalid)")
+        }
         let missingIdentity = agendaIdentity(id: nil, calendarId: "", modifiedAt: nil)
         try require(missingIdentity["id"] is NSNull && missingIdentity["calendarId"] is NSNull && missingIdentity["modifiedAt"] is NSNull,
                     "Unavailable source identity must remain null, never a title-derived ID")
@@ -1792,7 +1884,7 @@ func contractSelfTest() async -> Int32 {
         try require(requiredNextTool(["kind":"write","availableTools":["reply_email"],"requiredFields":["body"],"requiredArguments":[String:Any]()], offered:["reply_email"]) == nil, "A reply without a bound email must not be forced")
         let earlierReply: [[String: Any]] = [["tool_calls": [["function": ["name": "reply_email", "arguments": ["body": "Yes"]]]]]]
         try require(effectTools.contains("reply_email") && repeatsWrite("reply_email", ["body":"Yes"], history: earlierReply[...]), "A reply is a write that is never repeated")
-        try require(["complete_reminder", "update_calendar_event", "append_to_note", "create_routine"].allSatisfy { effectTools.contains($0) }, "Changes to existing items and new routines are effects that are never offered again while the journal is unresolved")
+        try require(["complete_reminder", "reschedule_reminder", "update_calendar_event", "append_to_note", "create_routine"].allSatisfy { effectTools.contains($0) }, "Changes to existing items and new routines are effects that are never offered again while the journal is unresolved")
         try require(requiredNextTool(["kind":"read","availableTools":["find_notes","search_files"]], offered:["find_notes","search_files"]) == nil, "Ambiguous source choices must still be routed")
         try require(emptySourceReply(goal:"Summarize source",guidance:"Search the corrected title",steps:noNotes) == nil, "New user guidance must be able to retry an empty lookup")
         let priorFile: [[String:Any]] = [["tool":"search_files","state":"succeeded","effect":false,"evidence":"File: facts from an actual document"]]
@@ -1902,7 +1994,7 @@ struct Helper {
     static func main() async {
         // Checked first and by position, so a looked-up name or a reminder's title can
         // never select another mode.
-        if CommandLine.arguments.count > 1, ["--complete-reminder", "--update-event"].contains(CommandLine.arguments[1]) {
+        if CommandLine.arguments.count > 1, ["--complete-reminder", "--reschedule-reminder", "--update-event"].contains(CommandLine.arguments[1]) {
             exit(await Edits.run(CommandLine.arguments))
         }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {

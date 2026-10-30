@@ -209,6 +209,97 @@ fn ordinal(word: &str) -> Option<Ordinal> {
     })
 }
 
+/// How far to move something the user named: "by an hour", "30 minutes later", "back a
+/// day", "forward by 15 min", "half an hour earlier".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Shift {
+    /// Minutes later (negative: earlier), or None when the words don't say which way
+    /// ("move it by an hour").
+    pub minutes: Option<i64>,
+    /// Where the words for it start in the clause.
+    pub start: usize,
+}
+
+/// Words that say which way a move goes.
+const LATER: &[&str] = &["later", "back"];
+const EARLIER: &[&str] = &["earlier", "forward", "up", "sooner"];
+
+/// An amount of time at `words[at]`, in minutes, with the index after it: "an hour",
+/// "30 minutes", "2 days", "half an hour".
+fn duration(words: &[&str], at: usize) -> Option<(i64, usize)> {
+    if words.get(at) == Some(&"half")
+        && words.get(at + 1).is_some_and(|w| ["an", "a"].contains(w))
+        && words.get(at + 2).is_some_and(|w| ["hour", "hr"].contains(w))
+    {
+        return Some((30, at + 3));
+    }
+    let count = match *words.get(at)? {
+        "a" | "an" | "one" => 1,
+        "two" => 2,
+        "three" => 3,
+        "four" => 4,
+        "five" => 5,
+        "ten" => 10,
+        "fifteen" => 15,
+        "twenty" => 20,
+        "thirty" => 30,
+        "forty-five" => 45,
+        number => number.parse::<i64>().ok().filter(|n| (1..=999).contains(n))?,
+    };
+    let unit = match *words.get(at + 1)? {
+        "minute" | "minutes" | "min" | "mins" => 1,
+        "hour" | "hours" | "hr" | "hrs" => 60,
+        "day" | "days" => 1440,
+        "week" | "weeks" => 10_080,
+        _ => return None,
+    };
+    Some((count * unit, at + 2))
+}
+
+/// A move by an amount of time in a clause that starts with its verb ("push my 3pm back
+/// by an hour"). Only an amount with "by" or a direction counts, so "move my 2 hour
+/// workshop to Friday" is a move to Friday, and nothing may follow but a direction.
+pub(crate) fn shift(words: &[&str]) -> Option<Shift> {
+    let verb = *words.first()?;
+    for at in 1..words.len() {
+        let Some((minutes, end)) = duration(words, at) else {
+            continue;
+        };
+        let mut start = at;
+        if start > 1 && words[start - 1] == "by" {
+            start -= 1;
+        }
+        let before = (start > 1).then(|| words[start - 1]).filter(|w| LATER.contains(w) || EARLIER.contains(w));
+        if before.is_some() {
+            start -= 1;
+        }
+        let after: Vec<&str> = words[end..].iter().copied().filter(|w| *w != "please").collect();
+        let after = match after[..] {
+            [] => None,
+            [word] if LATER.contains(&word) || EARLIER.contains(&word) => Some(word),
+            _ => continue,
+        };
+        let direction = after.or(before);
+        if direction.is_none() && words[start] != "by" && !["push", "delay", "postpone", "pull"].contains(&verb) {
+            continue;
+        }
+        let way = match direction {
+            Some(word) if EARLIER.contains(&word) => Some(-1),
+            Some(_) => Some(1),
+            None => match verb {
+                "push" | "delay" | "postpone" | "bump" => Some(1),
+                "pull" => Some(-1),
+                _ => None,
+            },
+        };
+        return Some(Shift {
+            minutes: way.map(|sign| sign * minutes),
+            start,
+        });
+    }
+    None
+}
+
 /// Which item the user named: words of its title, or its place in the list ("the first
 /// one"), or its time and day ("my 3pm tomorrow").
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -324,6 +415,7 @@ fn unquote(text: &str) -> (&str, bool) {
 #[derive(Debug, Clone, PartialEq)]
 enum Request {
     Complete(Target),
+    Reschedule { target: Target, due: DueChange },
     Event { target: Target, change: EventChange },
     Append { note: String, text: Option<String> },
 }
@@ -332,8 +424,31 @@ enum Request {
 struct EventChange {
     day: Option<NaiveDate>,
     clock: Option<Clock>,
+    /// Minutes later (negative: earlier), for "push it back an hour".
+    shift: Option<i64>,
     title: Option<String>,
     location: Option<String>,
+}
+
+/// A reminder's new due date, from the user's words: a day, a time, both, or a move by an
+/// amount of time ("back a day").
+#[derive(Debug, Clone, Default, PartialEq)]
+struct DueChange {
+    day: Option<NaiveDate>,
+    clock: Option<Clock>,
+    shift: Option<i64>,
+}
+
+/// The way a relative move says nothing about.
+const WHICH_WAY: &str = "Say whether to move it earlier or later, like “an hour later”.";
+
+/// A target without words that only point back ("push it by an hour"): those name no
+/// title, so every item of the day is a match to pick from.
+fn without_pointers(mut target: Target) -> Target {
+    if !target.words.is_empty() && target.words.iter().all(|w| POINTERS.contains(&w.as_str())) {
+        target.words.clear();
+    }
+    target
 }
 
 fn request(goal: &str, tool: &str, today: NaiveDate) -> Result<Request, String> {
@@ -341,6 +456,7 @@ fn request(goal: &str, tool: &str, today: NaiveDate) -> Result<Request, String> 
     let text = instruction(&part);
     match tool {
         "complete_reminder" => Ok(Request::Complete(complete_target(text, today))),
+        "reschedule_reminder" => reschedule_request(text, today),
         "update_calendar_event" => event_request(text, today),
         _ => append_request(text)
             .ok_or_else(|| "Say which note to add to, like “add milk to my shopping note”.".into()),
@@ -383,6 +499,17 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
         .find(' ')
         .ok_or("Say which event to change and how.")?;
     let verb = &lower[..verb_end];
+    let all = words(text);
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    if let Some(found) = shift(&all) {
+        let minutes = found.minutes.ok_or(WHICH_WAY)?;
+        let target = without_pointers(target(&all[1..found.start].join(" "), today));
+        let change = EventChange {
+            shift: Some(minutes),
+            ..EventChange::default()
+        };
+        return Ok(Request::Event { target, change });
+    }
     // A new title or place may itself say "to" ("rename my 3pm to Talk to Sam"): it starts
     // at a quote after "to", or else at the first "to" after the event. A new time is
     // after the last one ("move my trip to Paris to 4").
@@ -460,7 +587,7 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
             let word = all[index].as_str();
             if let Some(date) = day(word, today) {
                 change.day = Some(date);
-            } else if !["at", "on", "the", "next", "this", "o", "clock"].contains(&word) {
+            } else if !["at", "on", "the", "next", "this", "o", "clock", "same", "time"].contains(&word) {
                 return Err("I can move an event to a new day or time, like “Friday at 4”. To change where it is, say “change the location of … to …”.".into());
             }
             index += 1;
@@ -469,8 +596,94 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
             return Err("Say when to move it to, like “Friday at 4”.".into());
         }
     }
-    let target = target(&named, today);
+    let target = without_pointers(target(&named, today));
     Ok(Request::Event { target, change })
+}
+
+/// "move the dentist reminder to Friday", "push my call Ana reminder back a day", "change
+/// the due date of the rent reminder to Monday at 9".
+fn reschedule_request(text: &str, today: NaiveDate) -> Result<Request, String> {
+    const ASK: &str = "Say when it should be due, like “move the dentist reminder to Friday at 9”.";
+    let owned = words(text);
+    let all: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let (named, due) = if let Some(found) = shift(&all) {
+        let minutes = found.minutes.ok_or(WHICH_WAY)?;
+        (all[1..found.start].join(" "), DueChange { shift: Some(minutes), ..DueChange::default() })
+    } else {
+        let split = all
+            .iter()
+            .rposition(|w| *w == "to" || *w == "for")
+            .filter(|at| *at > 1)
+            .ok_or(ASK)?;
+        let mut due = DueChange::default();
+        let mut index = split + 1;
+        while index < all.len() {
+            if let Some((clock, used)) = clock(&owned, index) {
+                due.clock = Some(clock);
+                index += used;
+                continue;
+            }
+            let word = all[index];
+            if let Some(date) = day(word, today) {
+                due.day = Some(date);
+            } else if !["at", "on", "the", "next", "this", "o", "clock", "same", "time", "please"].contains(&word) {
+                return Err(ASK.into());
+            }
+            index += 1;
+        }
+        if due.day.is_none() && due.clock.is_none() {
+            return Err(ASK.into());
+        }
+        (all[1..split].join(" "), due)
+    };
+    // "the due date of the rent reminder": the words for the date aren't the title's.
+    let named = format!(" {named} ")
+        .replace(" due date of ", " ")
+        .replace(" due time of ", " ")
+        .replace(" due date ", " ")
+        .replace(" due time ", " ");
+    let target = without_pointers(target(&named, today));
+    Ok(Request::Reschedule { target, due })
+}
+
+/// "2026-11-03 09:00" or "2026-11-03" as read; None for no due date.
+fn read_due(text: &str) -> Option<(NaiveDate, Option<(u32, u32)>)> {
+    NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M")
+        .map(|at| (at.date(), Some((at.hour(), at.minute()))))
+        .ok()
+        .or_else(|| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok().map(|day| (day, None)))
+}
+
+/// The due date a reminder due `was` (as read) gets from the user's words. A date
+/// without a time stays one unless they named a time; a move by hours needs a time.
+fn new_due(was: &str, due: &DueChange, today: NaiveDate) -> Result<String, String> {
+    let old = read_due(was);
+    if let Some(minutes) = due.shift {
+        return match old {
+            Some((date, Some((hour, minute)))) => {
+                let at = date.and_hms_opt(hour, minute, 0).ok_or("That isn’t a time of day.")?;
+                Ok((at + chrono::Duration::minutes(minutes)).format("%Y-%m-%d %H:%M").to_string())
+            }
+            Some((date, None)) if minutes % 1440 == 0 => {
+                Ok((date + chrono::Duration::days(minutes / 1440)).format("%Y-%m-%d").to_string())
+            }
+            Some(_) => Err("That reminder is due on a day without a time, so move it by days or say the time, like “Friday at 9”.".into()),
+            None => Err("That reminder has no due date to move from. Say when it should be due, like “Friday at 9”.".into()),
+        };
+    }
+    let date = due.day.or(old.map(|(date, _)| date)).unwrap_or(today);
+    let time = match (due.clock, old.and_then(|(_, time)| time)) {
+        (Some(clock), near) => Some((resolve(clock, near.map_or(12, |(hour, _)| hour)), clock.minute)),
+        (None, kept) => kept,
+    };
+    Ok(match time {
+        Some((hour, minute)) => date
+            .and_hms_opt(hour, minute, 0)
+            .ok_or("That isn’t a time of day.")?
+            .format("%Y-%m-%d %H:%M")
+            .to_string(),
+        None => date.format("%Y-%m-%d").to_string(),
+    })
 }
 
 /// "add milk and eggs to my shopping note": the text and the note's name. The text is
@@ -677,15 +890,22 @@ pub(crate) fn edit_plan_at(
 ) -> Result<EditPlan, String> {
     let today = now.date();
     match request(goal, tool, today)? {
-        Request::Complete(target) => reminder_plan(&target, steps, now),
+        Request::Complete(target) => reminder_plan(&target, None, steps, now),
+        Request::Reschedule { target, due } => reminder_plan(&target, Some(&due), steps, now),
         Request::Event { target, change } => event_plan(&target, &change, steps, now),
         Request::Append { note, text } => note_plan(&note, text, steps),
     }
 }
 
-fn reminder_plan(target: &Target, steps: &[Step], now: NaiveDateTime) -> Result<EditPlan, String> {
+/// The open reminder the user named, marked done (`due` is None) or given a new due date.
+fn reminder_plan(
+    target: &Target,
+    due: Option<&DueChange>,
+    steps: &[Step],
+    now: NaiveDateTime,
+) -> Result<EditPlan, String> {
     if target.words.is_empty() && target.ordinal.is_none() {
-        return Err("Say which reminder to mark done.".into());
+        return Err(if due.is_some() { "Say which reminder to move." } else { "Say which reminder to mark done." }.into());
     }
     let Some(step) = latest_read(steps, "read_reminders", |_| true) else {
         return Ok(EditPlan::Read {
@@ -705,26 +925,35 @@ fn reminder_plan(target: &Target, steps: &[Step], now: NaiveDateTime) -> Result<
             .filter(|record| titled(record, &target.words))
             .collect(),
     };
-    let candidates: Vec<Candidate> = chosen
-        .into_iter()
-        .map(|record| {
-            let title = field(record, "title").trim();
-            let mut label = title.to_string();
-            if !field(record, "dueLocal").is_empty() {
-                label += &format!(" · due {}", pretty(field(record, "dueLocal")));
+    let mut candidates = Vec::new();
+    for record in chosen {
+        let title = field(record, "title").trim();
+        let mut label = title.to_string();
+        if !field(record, "dueLocal").is_empty() {
+            label += &format!(" · due {}", pretty(field(record, "dueLocal")));
+        }
+        if !field(record, "list").is_empty() {
+            label += &format!(" · {}", field(record, "list"));
+        }
+        let (arguments, shown) = match due {
+            None => (json!({"id":field(record, "id"), "title":title}), format!("{label} · not done yet")),
+            Some(change) => {
+                let was = field(record, "dueLocal");
+                let mut shown = label.clone();
+                if was.is_empty() {
+                    shown += " · no due date";
+                }
+                (json!({"id":field(record, "id"), "title":title, "was_due":was, "due":new_due(was, change, now.date())?}), shown)
             }
-            if !field(record, "list").is_empty() {
-                label += &format!(" · {}", field(record, "list"));
-            }
-            Candidate {
-                step_id: step.id.clone(),
-                record_id: field(record, "id").into(),
-                arguments: json!({"id":field(record, "id"), "title":title}),
-                now: format!("{label} · not done yet"),
-                label,
-            }
-        })
-        .collect();
+        };
+        candidates.push(Candidate {
+            step_id: step.id.clone(),
+            record_id: field(record, "id").into(),
+            arguments,
+            now: shown,
+            label,
+        });
+    }
     if candidates.is_empty() {
         let named = if target.words.is_empty() {
             "that one".to_string()
@@ -844,14 +1073,18 @@ fn event_candidate(step: &Step, record: &Value, change: &EventChange) -> Result<
                 .into(),
         );
     }
-    let date = change.day.unwrap_or(start.date());
-    let (hour, minute) = change
-        .clock
-        .map(|clock| (resolve(clock, start.hour()), clock.minute))
-        .unwrap_or((start.hour(), start.minute()));
-    let moved = date
-        .and_hms_opt(hour, minute, 0)
-        .ok_or("That isn’t a time of day.")?;
+    let moved = match change.shift {
+        Some(minutes) => start + chrono::Duration::minutes(minutes),
+        None => {
+            let date = change.day.unwrap_or(start.date());
+            let (hour, minute) = change
+                .clock
+                .map(|clock| (resolve(clock, start.hour()), clock.minute))
+                .unwrap_or((start.hour(), start.minute()));
+            date.and_hms_opt(hour, minute, 0)
+                .ok_or("That isn’t a time of day.")?
+        }
+    };
     let was = field(record, "title").trim();
     let title = change.title.clone().unwrap_or_else(|| was.to_string());
     let location = change
@@ -1051,6 +1284,7 @@ fn sheet_at(
 fn identity(tool: &str) -> &'static [&'static str] {
     match tool {
         "update_calendar_event" => &["id", "occurrence", "was_title"],
+        "reschedule_reminder" => &["id", "title", "was_due"],
         _ => &["id", "title"],
     }
 }
@@ -1116,7 +1350,7 @@ pub fn check(
 /// reminders, the day the user named (any day, when they named none), or notes by name.
 pub fn source(tool: &str, clause: &str, today: NaiveDate) -> Option<(&'static str, Value)> {
     match tool {
-        "complete_reminder" => Some(("read_reminders", json!({}))),
+        "complete_reminder" | "reschedule_reminder" => Some(("read_reminders", json!({}))),
         "update_calendar_event" => {
             let named = match event_request(instruction(clause), today) {
                 Ok(Request::Event { target, .. }) => target.day,
@@ -1753,5 +1987,104 @@ mod tests {
         assert!(propose("read_mail", json!({})).is_err());
         // A write for an item nobody read is refused, whatever the model says its id is.
         assert!(propose("update_calendar_event", json!({"id":"invented","occurrence":format!("{} 09:00", stamp(0)),"was_title":"Dentist","title":"Dentist","start":format!("{} 10:00", stamp(0)),"minutes":30})).is_err());
+    }
+
+    #[test]
+    fn moves_by_an_amount_of_time_say_how_far_and_which_way() {
+        let shifted = |text: &str| {
+            let all = words(text);
+            let all: Vec<&str> = all.iter().map(String::as_str).collect();
+            shift(&all).map(|found| (found.minutes, all[1..found.start].join(" ")))
+        };
+        assert_eq!(shifted("push my 3pm back by an hour"), Some((Some(60), "my 3pm".into())));
+        assert_eq!(shifted("push it by an hour"), Some((Some(60), "it".into())));
+        assert_eq!(shifted("move lunch 30 minutes earlier"), Some((Some(-30), "lunch".into())));
+        assert_eq!(shifted("bring the review forward by half an hour"), Some((Some(-30), "the review".into())));
+        assert_eq!(shifted("delay the standup 15 minutes"), Some((Some(15), "the standup".into())));
+        assert_eq!(shifted("push the dentist reminder back a day"), Some((Some(1440), "the dentist reminder".into())));
+        // "By an hour" alone doesn't say which way a move goes.
+        assert_eq!(shifted("move it by an hour"), Some((None, "it".into())));
+        // A length inside the name, or a move to a time, is not a move by an amount.
+        assert_eq!(shifted("move my 2 hour workshop to Friday"), None);
+        assert_eq!(shifted("move my 3pm to 4"), None);
+        assert_eq!(shifted("push the dentist to Friday"), None);
+        for goal in ["Push my 3pm back by an hour", "move lunch 30 minutes later", "bring my 4pm forward an hour"] {
+            assert_eq!(crate::completion::requested_actions(goal).0, ["update_calendar_event"], "{goal}");
+        }
+        assert!(crate::completion::requested_actions("Bring my laptop to the meeting").0.is_empty());
+    }
+
+    #[test]
+    fn events_move_by_an_amount_or_to_the_same_time_another_day() {
+        let today = calendar_day(
+            "2026-10-29",
+            vec![event("e-2", "Design review", "2026-10-29 15:00", "2026-10-29 15:45")],
+        );
+        let later = one("Push my 3pm back by an hour", "update_calendar_event", &[today.clone()]);
+        assert_eq!((later["start"].as_str(), later["minutes"].as_u64()), (Some("2026-10-29 16:00"), Some(45)));
+        assert_eq!(one("move the design review 30 minutes earlier", "update_calendar_event", &[today.clone()])["start"], "2026-10-29 14:30");
+        // "It" names no title: today's only event is the one, and the sheet shows it.
+        assert_eq!(one("push it by an hour", "update_calendar_event", &[today.clone()])["start"], "2026-10-29 16:00");
+        let tomorrow = calendar_day("2026-10-30", vec![]);
+        assert_eq!(
+            one("move the design review to tomorrow same time", "update_calendar_event", &[today.clone(), tomorrow])["start"],
+            "2026-10-30 15:00"
+        );
+        assert_eq!(plan("move my 3pm by an hour", "update_calendar_event", &[today]).unwrap_err(), WHICH_WAY);
+    }
+
+    #[test]
+    fn a_reminder_gets_a_new_due_date_from_the_read_and_the_users_words() {
+        for (goal, expected) in [
+            ("Move the dentist reminder to Friday", vec!["reschedule_reminder"]),
+            ("push my call mum reminder back a day", vec!["reschedule_reminder"]),
+            ("Change the due date of the rent reminder to Monday at 9", vec!["reschedule_reminder"]),
+            ("Reschedule the dentist reminder for tomorrow at 4pm", vec!["reschedule_reminder"]),
+            ("Move the reminder to my work list", vec![]),
+            ("Mark the dentist reminder done", vec!["complete_reminder"]),
+        ] {
+            assert_eq!(crate::completion::requested_actions(goal).0, expected, "{goal}");
+        }
+        assert_eq!(
+            plan("Move the dentist reminder to Friday", "reschedule_reminder", &[]),
+            Ok(EditPlan::Read { tool: "read_reminders", arguments: json!({}) })
+        );
+        let steps = [reminders(vec![
+            reminder("r-1", "Dentist", "2026-11-03 09:00"),
+            reminder("r-2", "Pay rent", "2026-11-01"),
+            reminder("r-3", "Call mum", ""),
+        ])];
+        // A due time is kept when only the day changes, and changed when the user names one.
+        assert_eq!(
+            one("Move the dentist reminder to Friday", "reschedule_reminder", &steps),
+            json!({"id":"r-1","title":"Dentist","was_due":"2026-11-03 09:00","due":"2026-10-30 09:00"})
+        );
+        assert_eq!(one("move the dentist reminder to Friday at 3", "reschedule_reminder", &steps)["due"], "2026-10-30 15:00");
+        assert_eq!(one("push the dentist reminder back by an hour", "reschedule_reminder", &steps)["due"], "2026-11-03 10:00");
+        // A date without a time stays one, and moves by days only.
+        assert_eq!(one("push the pay rent reminder back a day", "reschedule_reminder", &steps)["due"], "2026-11-02");
+        assert_eq!(one("change the due date of the pay rent reminder to Monday", "reschedule_reminder", &steps)["due"], "2026-11-02");
+        assert!(plan("push the pay rent reminder back an hour", "reschedule_reminder", &steps).unwrap_err().contains("by days"));
+        // An undated reminder gets the date the user names, or a question.
+        assert_eq!(one("move the call mum reminder to tomorrow at 6pm", "reschedule_reminder", &steps)["due"], "2026-10-30 18:00");
+        assert!(plan("push the call mum reminder back a day", "reschedule_reminder", &steps).unwrap_err().contains("no due date"));
+        assert!(plan("move the dentist reminder to soon", "reschedule_reminder", &steps).is_err());
+        // The sheet shows it as it is now; approval checks it is the one read, as read.
+        let goals = vec!["Move the dentist reminder to Friday".to_string()];
+        let args = one(&goals[0], "reschedule_reminder", &steps);
+        let (shown, choices) = sheet_at(&goals, "reschedule_reminder", &args, &steps, now());
+        assert!(shown.unwrap().value.contains("due Tue 3 Nov 09:00") && choices.is_empty());
+        // Which reminder, and its due date as read, don't depend on today; the new due is
+        // the user's to edit.
+        assert!(check(&goals, "reschedule_reminder", &args, &steps, true).is_ok());
+        let mut edited = args.clone();
+        edited["due"] = json!("2026-11-05 08:00");
+        assert!(check(&goals, "reschedule_reminder", &edited, &steps, true).is_ok());
+        let mut stale = args.clone();
+        stale["was_due"] = json!("2026-11-04 09:00");
+        assert!(check(&goals, "reschedule_reminder", &stale, &steps, true).is_err(), "a due date it doesn't have");
+        let mut other = args;
+        other["id"] = json!("r-9");
+        assert!(check(&goals, "reschedule_reminder", &other, &steps, true).is_err(), "an item nobody read");
     }
 }

@@ -1180,3 +1180,125 @@ for line in sys.stdin:
     assert_eq!(saved.contract.provenance[&step.id]["body"].origin, "user_approved_edit");
     state.models.shutdown().await;
 }
+
+/// "Reply to Ana" with her email neither open nor listed: Buntini searches the inbox for
+/// her by name before the model writes the body. Returns the reads it made.
+async fn searched_reply(
+    state: &AppState,
+    settings: &Settings,
+    task: &mut TaskRecord,
+    flow: &mut Workflow,
+    rows: &[[&str; 5]],
+) -> Vec<Value> {
+    let reads = std::sync::Mutex::new(Vec::new());
+    let evidence = crate::apps::mail_fixture("ana", rows, rows.len());
+    continue_workflow_using(
+        state,
+        task,
+        &Channel::new(|_| Ok(())),
+        Arc::new(AtomicBool::new(false)),
+        settings,
+        flow,
+        |tool, args| {
+            reads.lock().unwrap().push(json!({"tool":tool,"arguments":args}));
+            let evidence = evidence.clone();
+            async move { if tool == "read_mail" { Ok(evidence) } else { Err("Unexpected app read".into()) } }
+        },
+    )
+    .await
+    .unwrap();
+    reads.into_inner().unwrap()
+}
+
+fn reply_journey(dir: &std::path::Path, goal: &str) -> (AppState, Settings, TaskRecord, Workflow) {
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    reply=[t for t in req['tools'] if t['name']=='reply_email'][0]
+    assert list(reply['parameters']['properties'])==['body'], reply
+    emit('tool_call',name='reply_email',arguments={'body':'Yes, that works.'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let (state, settings, task, mut flow) = fixture_task_state(dir, goal, worker);
+    let settings = Settings { apps: vec!["mail".into()], ..settings };
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+    flow.offered = offered.iter().map(|tool| tool.to_string()).collect();
+    (state, settings, task, flow)
+}
+
+const ANA: [&str; 5] = ["2026-10-28 09:00", "<lease@x>", "Ana Silva <ana@example.com>", "Lease renewal", "4821"];
+const ANA_AGAIN: [&str; 5] = ["2026-10-27 18:00", "<dinner@x>", "Ana Silva <ana@example.com>", "Dinner on Friday?", "4790"];
+
+#[tokio::test]
+async fn a_reply_to_someone_whose_email_is_not_open_finds_it_in_the_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, settings, mut task, mut flow) = reply_journey(dir.path(), "Reply to Ana saying yes");
+    let reads = searched_reply(&state, &settings, &mut task, &mut flow, &[ANA]).await;
+    assert_eq!(reads, [json!({"tool":"read_mail","arguments":{"query":"ana","limit":8,"unread":false}})]);
+    assert!(task.touched.iter().any(|share| share == "mail"));
+    let action = task.action.clone().unwrap();
+    assert_eq!(action["tool"], "reply_email");
+    assert!(action.get("choices").is_none());
+    let step = flow.steps.last().unwrap().clone();
+    assert_eq!((step.arguments["message"].as_str(), step.arguments["to"].as_str()), (Some("4821"), Some("ana@example.com")));
+    assert_eq!(flow.contract.provenance[&step.id]["message"].origin, "mail_search");
+    // An edited recipient still can't redirect it.
+    let dispatched = std::sync::Mutex::new(None);
+    run_workflow_action_with_reads(
+        &state,
+        &step.id,
+        json!({"to":"eve@example.com","subject":"Re: Lease renewal","body":"Yes."}),
+        &Channel::new(|_| Ok(())),
+        |tool, args, _| {
+            *dispatched.lock().unwrap() = Some(args.clone());
+            async move { fixture_receipt(tool, args) }
+        },
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    let sent = dispatched.into_inner().unwrap().unwrap();
+    assert_eq!((sent["to"].as_str(), sent["message_id"].as_str()), (Some("ana@example.com"), Some("<lease@x>")));
+    state.models.shutdown().await;
+}
+
+#[tokio::test]
+async fn several_emails_from_them_are_picked_in_the_sheet_not_by_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, settings, mut task, mut flow) = reply_journey(dir.path(), "Reply to Ana saying yes");
+    searched_reply(&state, &settings, &mut task, &mut flow, &[ANA, ANA_AGAIN]).await;
+    let action = task.action.clone().unwrap();
+    let choices = action["choices"].as_array().unwrap();
+    assert_eq!(choices.iter().map(|c| c["value"].as_str().unwrap()).collect::<Vec<_>>(), ["4821", "4790"]);
+    assert!(action["fields"].as_array().unwrap().iter().any(|f| f["key"] == "message" && f["kind"] == "hidden"));
+    let step = flow.steps.last().unwrap().clone();
+    assert!(["message", "message_id", "to", "subject"].iter().all(|key| step.arguments.get(*key).is_none()), "nothing is picked for the user");
+    let never = |_: String, _: serde_json::Map<String, Value>, _| async { panic!("nothing may run") };
+    for unpicked in [json!({"body":"Yes"}), json!({"message":"4700","to":"eve@example.com","subject":"Re:","body":"Yes"})] {
+        let refused = run_workflow_action_with_reads(&state, &step.id, unpicked, &Channel::new(|_| Ok(())), never, |_, _, _| async { Err("Unexpected app read".into()) }).await;
+        assert!(refused.unwrap_err().contains("Pick which email"));
+    }
+    let dispatched = std::sync::Mutex::new(None);
+    run_workflow_action_with_reads(
+        &state,
+        &step.id,
+        json!({"message":"4790","message_id":"<lease@x>","to":"eve@example.com","subject":"Re: Dinner on Friday?","body":"Yes."}),
+        &Channel::new(|_| Ok(())),
+        |tool, args, _| {
+            *dispatched.lock().unwrap() = Some(args.clone());
+            async move { fixture_receipt(tool, args) }
+        },
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    let sent = dispatched.into_inner().unwrap().unwrap();
+    assert_eq!(
+        (sent["message"].as_str(), sent["message_id"].as_str(), sent["to"].as_str()),
+        (Some("4790"), Some("<dinner@x>"), Some("ana@example.com"))
+    );
+    state.models.shutdown().await;
+}

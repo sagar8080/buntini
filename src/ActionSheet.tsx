@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CalendarPlus, CalendarClock, Bell, ExternalLink, ListChecks, Mail, NotebookPen, Play, AppWindow, Reply } from 'lucide-react';
+import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, NotebookPen, Play, AppWindow, Reply } from 'lucide-react';
 import ModalSheet from './ModalSheet';
 
 /** `hidden` is sent back without being shown (an item's id); `fixed` is shown but never edited or sent, such as the email a reply answers, its recipient, or what an item is like now. */
@@ -8,7 +8,7 @@ export interface ActionField { key: string; label: string; value: string; kind: 
 export interface ActionChoice { field: string; label: string; value: string; also?: Record<string, string> }
 export interface ActionProposal { id: string; tool: string; title: string; fields: ActionField[]; note: string; choices?: ActionChoice[] }
 
-const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, reply_email: Reply, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink, complete_reminder: ListChecks, update_calendar_event: CalendarClock, append_to_note: NotebookPen };
+const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, reply_email: Reply, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink, complete_reminder: ListChecks, reschedule_reminder: BellRing, update_calendar_event: CalendarClock, append_to_note: NotebookPen };
 // The sheet edits "YYYY-MM-DD HH:MM"; the browser's picker wants "YYYY-MM-DDTHH:MM".
 const toPicker = (value: string) => value.replace(' ', 'T');
 const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
@@ -48,6 +48,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     {choicesFor('to').length ? <small>More than one person in Contacts matches. Pick who this is for.</small> : null}
     {choicesFor('name').length ? <small>More than one of your shortcuts fits. Pick the one to run.</small> : null}
     {choicesFor('id').length ? <small>More than one matches what you said. Pick the one you mean.</small> : null}
+    {choicesFor('message').length ? <small>More than one email could be the one you mean. Pick the one to answer.</small> : null}
     {proposal.note && <small>{proposal.note}</small>}
     {error && <p role="alert">{error}</p>}
     <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>

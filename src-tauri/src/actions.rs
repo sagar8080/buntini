@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 11] = [
+pub const TOOLS: [&str; 12] = [
     "add_reminder",
     "add_calendar_event",
     "create_note",
@@ -26,6 +26,7 @@ pub const TOOLS: [&str; 11] = [
     "open_app",
     "open_link",
     "complete_reminder",
+    "reschedule_reminder",
     "update_calendar_event",
     "append_to_note",
 ];
@@ -33,7 +34,7 @@ pub const TOOLS: [&str; 11] = [
 /// Writes that change an existing item. Its `id` is never the model's: it is bound from
 /// a read in the same task (`source_fields::edit_target`) or picked by the user from
 /// those records in the approval sheet, and the receipt reads the item back.
-pub const EDIT_TOOLS: [&str; 3] = ["complete_reminder", "update_calendar_event", "append_to_note"];
+pub const EDIT_TOOLS: [&str; 4] = ["complete_reminder", "reschedule_reminder", "update_calendar_event", "append_to_note"];
 
 /// A write is successful only when its requested result was read back. An
 /// unknown result may already exist: callers must never replay it automatically.
@@ -276,6 +277,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "run_shortcut" | "open_app" => &["name"],
         "open_link" => &["url"],
         "complete_reminder" => &["id", "title"],
+        "reschedule_reminder" => &["id", "title", "was_due", "due"],
         "update_calendar_event" => &[
             "id",
             "occurrence",
@@ -324,8 +326,15 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("body", text(args, "body", 4000, true)?);
         }
         "reply_email" => {
-            // Which email this answers, and its sender, come from Mail or Buntini's own
-            // list (recipes.rs), never from a model, so they must be exact and complete.
+            // Which email this answers, and its sender, come from Mail, Buntini's own list
+            // or its inbox search (recipes.rs), never from a model, so they must be exact
+            // and complete. Before the user picks one of several found, all are missing
+            // together; `execute` refuses to run then.
+            if ["message", "message_id", "to"].iter().all(|key| args.get(*key).is_none()) {
+                put("subject", text(args, "subject", 200, false)?);
+                put("body", text(args, "body", 4000, true)?);
+                return Ok(out);
+            }
             let message = text(args, "message", 20, true)?.unwrap();
             if !message.chars().all(|c| c.is_ascii_digit()) {
                 return Err("The email to answer must be Mail's own message number.".into());
@@ -350,6 +359,26 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("id", item_id(args)?);
             put("title", text(args, "title", 200, true)?);
         }
+        "reschedule_reminder" => {
+            put("id", item_id(args)?);
+            put("title", text(args, "title", 200, true)?);
+            // As read: a time, a date without one, or nothing. Kept as written so the
+            // helper can check the reminder still has it.
+            let was = text(args, "was_due", 25, false)?.unwrap_or_default();
+            if !was.is_empty() && reminder_due(&was).is_none() {
+                return Err("The reminder's current due date isn’t one Buntini read.".into());
+            }
+            out.insert("was_due".into(), Value::String(was.clone()));
+            let due = text(args, "due", 40, true)?.unwrap();
+            let due = match reminder_due(due.trim()) {
+                Some(day) => day,
+                None => normalize_when(&due)?,
+            };
+            if due == was {
+                return Err("That reminder is already due then.".into());
+            }
+            out.insert("due".into(), Value::String(due));
+        }
         "update_calendar_event" => {
             put("id", item_id(args)?);
             let occurrence = normalize_when(&text(args, "occurrence", 40, true)?.unwrap())?;
@@ -372,6 +401,23 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         ),
     }
     Ok(out)
+}
+
+/// A reminder's due date as Buntini reads and writes it: "2026-11-06 09:00", or
+/// "2026-11-06" for a date without a time.
+fn reminder_due(text: &str) -> Option<String> {
+    let exact = |format: &str| {
+        chrono::NaiveDateTime::parse_from_str(text, format)
+            .map(|at| at.format(format).to_string())
+            .ok()
+    };
+    exact("%Y-%m-%d %H:%M")
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                .map(|day| day.format("%Y-%m-%d").to_string())
+                .ok()
+        })
+        .filter(|normal| normal == text)
 }
 
 /// One plain address ("ana@example.com"), not a list, a display name or a placeholder.
@@ -464,13 +510,20 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
         "reply_email" => (
             "Open this reply in Mail?".into(),
             [
+                // Picked in the sheet when the inbox search found several.
+                field("message", "Which email", "hidden"),
                 field("answers", "Answers", "fixed"),
                 field("to", "To", "fixed"),
                 field("subject", "Subject", "text"),
                 field("body", "Message", "long"),
             ]
             .into_iter()
-            .filter(|field| field.kind != "fixed" || !field.value.is_empty())
+            // Which email shows only as the picker, while there is one to pick.
+            .filter(|field| match field.kind {
+                "fixed" => !field.value.is_empty(),
+                "hidden" => field.value.is_empty(),
+                _ => true,
+            })
             .collect(),
             "Opens in Mail as a reply in the same thread, for you to review. Buntini never sends email.".into(),
         ),
@@ -497,6 +550,17 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 },
             ],
             "Marked as done in Reminders. Nothing else about it changes.".into(),
+        ),
+        "reschedule_reminder" => (
+            "Move this reminder?".into(),
+            vec![
+                field("id", "Which reminder", "hidden"),
+                field("title", "Reminder", "hidden"),
+                field("was_due", "Was due", "hidden"),
+                // A date without a time stays one: the time picker can't show it.
+                field("due", "Due", if get("due").len() == 10 { "text" } else { "when" }),
+            ],
+            "Only its due date changes in Reminders. An alarm at its due time moves with it.".into(),
         ),
         "update_calendar_event" => (
             "Change this event?".into(),
@@ -933,6 +997,13 @@ pub fn helper_arguments(tool: &str, args: &Map<String, Value>) -> Option<Vec<Str
     };
     match tool {
         "complete_reminder" => Some(vec!["--complete-reminder".into(), get("id"), get("title")]),
+        "reschedule_reminder" => Some(vec![
+            "--reschedule-reminder".into(),
+            get("id"),
+            get("title"),
+            get("was_due"),
+            get("due"),
+        ]),
         "update_calendar_event" => Some(vec![
             "--update-event".into(),
             json!({"id":get("id"), "occurrence":get("occurrence"), "wasTitle":get("was_title"),
@@ -1239,7 +1310,7 @@ fn check_evidence(
                 return Err("The reply could not be verified as saved and open for review.".into());
             }
         }
-        "complete_reminder" | "update_calendar_event" => check_change(tool, args, receipt)?,
+        "complete_reminder" | "reschedule_reminder" | "update_calendar_event" => check_change(tool, args, receipt)?,
         "append_to_note" => {
             let before = observed("beforePlaintext").map(normalized_plaintext);
             let after = observed("plaintext").map(normalized_plaintext);
@@ -1295,8 +1366,9 @@ fn answered_ids(headers: &str) -> String {
 }
 
 /// Fields of a reminder or event that a change must leave exactly as they were.
-const KEPT: [(&str, &[&str]); 2] = [
+const KEPT: [(&str, &[&str]); 3] = [
     ("complete_reminder", &["title", "due", "listId", "notes", "priority", "url", "alarms"]),
+    ("reschedule_reminder", &["title", "listId", "notes", "priority", "url", "alarms", "completed"]),
     ("update_calendar_event", &["calendarId", "allDay", "notes", "url", "alarms"]),
 ];
 
@@ -1328,6 +1400,25 @@ fn check_change(
         }
         if after.get("completed") != Some(&json!(true)) {
             return Err("The reminder did not read back as done.".into());
+        }
+        return Ok(());
+    }
+    if tool == "reschedule_reminder" {
+        if text(before, "title").as_deref() != Some(approved("title"))
+            || before.get("completed") != Some(&json!(false))
+            || text(before, "due").as_deref() != Some(approved("was_due"))
+        {
+            return Err("The reminder was not the open one you approved.".into());
+        }
+        if text(after, "due").as_deref() != Some(approved("due")) {
+            return Err("The reminder did not read back with the approved due date.".into());
+        }
+        // An alarm at a set time moves with the due date; one set relative to it
+        // follows on its own. Either way each alarm keeps its place relative to the due.
+        if before.get("alarmOffsets").is_none_or(|offsets| !offsets.is_array())
+            || before.get("alarmOffsets") != after.get("alarmOffsets")
+        {
+            return Err("The reminder's alarms did not move with its due date. Check them in Reminders.".into());
         }
         return Ok(());
     }
@@ -1413,6 +1504,7 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             "create_note" => format!("Verified “{}” in Notes.", get("title")),
             "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
             "complete_reminder" => format!("Marked “{}” as done in Reminders. I checked it’s done and nothing else about it changed.", get("title")),
+            "reschedule_reminder" => format!("Moved “{}” in Reminders: it’s now due {}. I read it back and nothing else about it changed.", get("title"), get("due")),
             "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), get("start"), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
             "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the text that was there is unchanged.", get("title")),
             _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
@@ -1491,6 +1583,9 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
     };
     if EDIT_TOOLS.contains(&tool) && !args.contains_key("id") {
         return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which one to change first.");
+    }
+    if tool == "reply_email" && !args.contains_key("message") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which email to answer first.");
     }
     if let Some(argv) = helper_arguments(tool, &args) {
         if !helper.is_file() {
@@ -2208,6 +2303,51 @@ mod tests {
         // A dictated title can end in a space; Buntini read it trimmed.
         let spaced = change_receipt("complete_reminder", &args, valid_spaced());
         assert_eq!(spaced.outcome, ActionOutcome::Succeeded, "{}", spaced.message);
+    }
+
+    #[test]
+    fn a_moved_reminder_must_read_back_with_the_new_due_and_its_alarms_moved() {
+        let args = validate("reschedule_reminder", &json!({"id":"r-1","title":"Dentist","was_due":"2026-11-03 09:00","due":"2026-11-06 09:00"})).unwrap();
+        assert_eq!(helper_arguments("reschedule_reminder", &args).unwrap(), ["--reschedule-reminder", "r-1", "Dentist", "2026-11-03 09:00", "2026-11-06 09:00"]);
+        // A date without a time stays one; a stray or repeated due date is refused.
+        let day = validate("reschedule_reminder", &json!({"id":"r-1","title":"Rent","was_due":"","due":"2026-11-02"})).unwrap();
+        assert_eq!((day["was_due"].as_str(), day["due"].as_str()), (Some(""), Some("2026-11-02")));
+        assert_eq!(validate("reschedule_reminder", &json!({"id":"r-1","title":"Rent","due":"2026-11-02T10:00"})).unwrap()["due"], "2026-11-02 10:00");
+        for invalid in [
+            json!({"id":"r-1","title":"Dentist","was_due":"Tuesday","due":"2026-11-06 09:00"}),
+            json!({"id":"r-1","title":"Dentist","was_due":"2026-11-03 09:00","due":"2026-11-03 09:00"}),
+            json!({"id":"r-1","title":"Dentist","due":"Friday"}),
+            json!({"id":"r-1","title":"Dentist","due":"2026-11-06 09:00","list":"Work"}),
+        ] {
+            assert!(validate("reschedule_reminder", &invalid).is_err(), "{invalid}");
+        }
+        let (_, fields, _) = describe("reschedule_reminder", &args);
+        assert_eq!(fields.iter().find(|f| f.key == "due").map(|f| f.kind), Some("when"));
+        assert_eq!(describe("reschedule_reminder", &day).1.iter().find(|f| f.key == "due").map(|f| f.kind), Some("text"));
+        let before = json!({"title":"Dentist","due":"2026-11-03 09:00","listId":"list-1","notes":"","priority":0,"url":"","alarms":1,"completed":false,"alarmOffsets":["at:-3600"]});
+        let mut after = before.clone();
+        after["due"] = json!("2026-11-06 09:00");
+        let valid = json!({"destinationId":"list-1","identifierScope":"persistent","title":"Dentist","before":before,"after":after});
+        let receipt = change_receipt("reschedule_reminder", &args, valid.clone());
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+        assert!(receipt.message.contains("now due 2026-11-06 09:00"));
+        for (side, key, value) in [
+            ("after", "due", json!("2026-11-03 09:00")),
+            ("after", "completed", json!(true)),
+            ("after", "notes", json!("changed")),
+            ("after", "alarmOffsets", json!(["at:-262800"])),
+            ("before", "due", json!("2026-11-02 09:00")),
+            ("before", "completed", json!(true)),
+            ("before", "title", json!("Dentist visit")),
+        ] {
+            let mut wrong = valid.clone();
+            wrong[side][key] = value;
+            assert_eq!(change_receipt("reschedule_reminder", &args, wrong).outcome, ActionOutcome::Unknown, "{side}.{key}");
+        }
+        let mut unreported = valid;
+        unreported["before"].as_object_mut().unwrap().remove("alarmOffsets");
+        unreported["after"].as_object_mut().unwrap().remove("alarmOffsets");
+        assert_eq!(change_receipt("reschedule_reminder", &args, unreported).outcome, ActionOutcome::Unknown, "an older helper can't show its alarms moved");
     }
 
     fn valid_spaced() -> Value {

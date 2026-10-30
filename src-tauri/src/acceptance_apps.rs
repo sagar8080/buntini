@@ -94,7 +94,7 @@ pub async fn read_notes_exact(namespace: &str, query: &str) -> Value {
         apps: vec!["notes".into()],
         ..Default::default()
     };
-    match crate::apps::run_evidence("find_notes", &args, std::path::Path::new(""), &settings).await
+    match crate::apps::run_evidence("find_notes", &args, std::path::Path::new(""), &settings, crate::apps::Launch::Allow).await
     {
         Ok(value) => value,
         Err(error) => json!({"error":error}),
