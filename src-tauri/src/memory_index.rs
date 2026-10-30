@@ -659,7 +659,9 @@ async fn read_app_sources(
 }
 
 /// What Buntini itself holds, read from the store as it is now: remembered facts, past
-/// conversations and shared folders' text.
+/// conversations and shared folders' text. A folder's text is what the file index read,
+/// so PDF, Word, RTF and Pages documents count with the text the Apple helper extracted
+/// (`local::read_content`); it is untrusted file content like any other.
 fn store_sources(store: &crate::store::Store) -> Result<Vec<(&'static str, Vec<Record>)>, String> {
     let roots = store.roots()?;
     let files: Vec<Record> = {
@@ -1233,6 +1235,26 @@ mod tests {
         assert!(ids.contains(&"n1"));
         assert!(search(&db, "", None, 3).unwrap().is_empty());
         assert_eq!(search(&db, "milk", None, 3).unwrap()[0].source_id, "n3");
+    }
+
+    #[test]
+    fn shared_documents_are_indexed_by_their_text_only_while_shared() {
+        let store = store_allowing(&[]);
+        store.add_root("/shared").unwrap();
+        let hit = |path: &str| crate::types::FileHit {
+            name: path.rsplit('/').next().unwrap().into(),
+            path: path.into(),
+            size: 1,
+            modified_at: String::new(),
+            excerpt: None,
+        };
+        store.index_file("/shared", &hit("/shared/lease.pdf"), "Deposit returned 1200").unwrap();
+        store.index_file("/revoked", &hit("/revoked/offer.docx"), "Private offer 900").unwrap();
+        let sources = store_sources(&store).unwrap();
+        let files = &sources.iter().find(|(source, _)| *source == "files").unwrap().1;
+        assert_eq!(files.len(), 1);
+        assert_eq!((files[0].title.as_str(), files[0].text.as_str()), ("lease.pdf", "Deposit returned 1200"));
+        assert_eq!(files[0].scope, "/shared");
     }
 
     #[test]
