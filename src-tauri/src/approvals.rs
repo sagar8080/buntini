@@ -36,6 +36,8 @@ pub(crate) async fn plan(
     if plan_id.is_empty() || plan_id.len() > 64 {
         return Err("Invalid request id.".into());
     }
+    // A routine run gives way to what the user asks for now.
+    crate::controller::wait_for_slot(state, std::time::Duration::from_secs(15)).await;
     let cancel = Arc::new(AtomicBool::new(false));
     let settings = {
         let mut active = state.active.lock().unwrap();

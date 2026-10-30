@@ -16,7 +16,13 @@ use crate::{
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc, Weekday};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
-use std::sync::atomic::Ordering;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tauri::{Manager, State};
 
 pub const TOOL: &str = "create_routine";
@@ -698,6 +704,7 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled_for: &str) -> Result<()
     let routine = state.store.lock().unwrap().routine(id)?.ok_or("This routine was deleted.")?;
     let (thread_id, _) = thread(&routine);
     let mut run_id = None;
+    let yielded = Arc::new(AtomicBool::new(false));
     let task = crate::controller::run_task_headless(
         app,
         &routine.task,
@@ -708,10 +715,31 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled_for: &str) -> Result<()
                 run_id = Some(claim(store, id, scheduled_for, &task.id)?);
                 Ok(())
             }),
+            yielded: yielded.clone(),
         },
     )
     .await?;
-    finish(app, &routine, run_id.as_deref(), &task).await
+    finish(app, &routine, run_id.as_deref(), &task).await?;
+    if yielded.load(Ordering::SeqCst) {
+        let store = state.store.lock().unwrap();
+        retry_later(&store, id, scheduled_for, &task.id)?;
+    }
+    Ok(())
+}
+
+/// A run that stopped so the user could use Buntini runs again from the start once the
+/// slot is free, while it is still within the catch-up window of its time.
+fn retry_later(store: &Store, id: &str, scheduled_for: &str, task_id: &str) -> Result<(), String> {
+    let Some(mut routine) = store.routine(id)? else {
+        return Ok(());
+    };
+    if !routine.enabled || routine.last_task_id.as_deref() != Some(task_id) {
+        return Ok(());
+    }
+    routine.next_run_at = scheduled_for.into();
+    routine.last_error = None;
+    store.save_routine(&routine)?;
+    store.audit("routine.yielded", &format!("{id}: stopped so you could use Buntini; it runs again shortly"))
 }
 
 /// Journals the run and tells the user: a proposal asks for their OK; anything else
@@ -745,10 +773,12 @@ async fn finish(app: &tauri::AppHandle, routine: &Routine, run_id: Option<&str>,
     Ok(())
 }
 
-/// Stops a routine's run in progress, if there is one.
-fn stop_running(state: &AppState, routine: &Routine) {
+/// Stops a routine's run in progress, if there is one. Takes the running-task map the
+/// caller already holds: everywhere locks `active` before `store`, so taking it here
+/// while the store is held could deadlock against a run that is just starting.
+fn stop_running(active: &HashMap<String, Arc<AtomicBool>>, routine: &Routine) {
     if let Some(task_id) = &routine.last_task_id {
-        if let Some(cancel) = state.active.lock().unwrap().get(task_id) {
+        if let Some(cancel) = active.get(task_id) {
             cancel.store(true, Ordering::SeqCst);
         }
     }
@@ -764,10 +794,11 @@ pub async fn update_routine(id: String, enabled: bool, state: State<'_, AppState
         crate::controller::save_settings_in(&state, settings).await?;
         return state.store.lock().unwrap().routine(MORNING_BRIEF)?.ok_or("The morning brief is missing.".into());
     }
+    let active = state.active.lock().unwrap();
     let store = state.store.lock().unwrap();
     let mut routine = store.routine(&id)?.ok_or("This routine no longer exists.")?;
     if !enabled {
-        stop_running(&state, &routine);
+        stop_running(&active, &routine);
     }
     if enabled && !routine.enabled {
         routine.next_run_at = next_after(&routine.days, &routine.time, Local::now()).ok_or("That time couldn’t be scheduled.")?.to_rfc3339();
@@ -780,12 +811,13 @@ pub async fn update_routine(id: String, enabled: bool, state: State<'_, AppState
 
 #[tauri::command]
 pub fn delete_routine(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let active = state.active.lock().unwrap();
     let store = state.store.lock().unwrap();
     let routine = store.routine(&id)?.ok_or("This routine no longer exists.")?;
     if routine.built_in {
         return Err("The morning brief can be paused but not deleted.".into());
     }
-    stop_running(&state, &routine);
+    stop_running(&active, &routine);
     store.delete_routine(&id)
 }
 
@@ -928,6 +960,51 @@ mod tests {
     }
 
     #[test]
+    fn a_run_that_gave_way_to_the_user_runs_again_at_the_same_time() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let args = validate(&json!({"task":"Brief me","days":"every_day","time":"08:00"})).unwrap();
+        let id = execute(&store, "intent", &args).object_id.unwrap();
+        let mut routine = store.routine(&id).unwrap().unwrap();
+        let now = Utc::now();
+        routine.next_run_at = (now - chrono::Duration::minutes(5)).to_rfc3339();
+        store.save_routine(&routine).unwrap();
+        claim(&store, &id, &routine.next_run_at, "run-1").unwrap();
+        assert!(due(&store, now).unwrap().is_empty());
+        retry_later(&store, &id, &routine.next_run_at, "run-1").unwrap();
+        assert_eq!(due(&store, now).unwrap(), vec![(id.clone(), routine.next_run_at.clone())]);
+        claim(&store, &id, &routine.next_run_at, "run-2").unwrap();
+        // A paused routine, or one that has run since, stays as it is.
+        retry_later(&store, &id, &routine.next_run_at, "run-1").unwrap();
+        assert!(due(&store, now).unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_routine_runs_give_way_and_pause_takes_locks_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let yielded = Arc::new(AtomicBool::new(false));
+        state.active.lock().unwrap().insert("chat".into(), cancel.clone());
+        assert!(!crate::controller::yield_to_user(&state, &state.active.lock().unwrap()));
+        assert!(!cancel.load(Ordering::SeqCst), "a chat is never stopped for another");
+        state.active.lock().unwrap().clear();
+        state.active.lock().unwrap().insert("routine-run".into(), cancel.clone());
+        state.background.lock().unwrap().insert("routine-run".into(), yielded.clone());
+        assert!(crate::controller::yield_to_user(&state, &state.active.lock().unwrap()));
+        assert!(cancel.load(Ordering::SeqCst) && yielded.load(Ordering::SeqCst));
+        // Pause stops the run while holding the running map, then the store.
+        let args = validate(&json!({"task":"Brief me","days":"every_day","time":"08:00"})).unwrap();
+        let id = execute(&state.store.lock().unwrap(), "intent", &args).object_id.unwrap();
+        let store = state.store.lock().unwrap();
+        let mut routine = store.routine(&id).unwrap().unwrap();
+        routine.last_task_id = Some("routine-run".into());
+        cancel.store(false, Ordering::SeqCst);
+        drop(store);
+        stop_running(&state.active.lock().unwrap(), &routine);
+        assert!(cancel.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn the_morning_brief_setting_becomes_the_built_in_routine() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brief.sqlite");
@@ -1017,6 +1094,7 @@ for line in sys.stdin:
                 thread: &thread_id,
                 events: tauri::ipc::Channel::new(|_| Ok(())),
                 start: Box::new(|store, task| assign_thread(store, &task.id, &thread(&routine))),
+                yielded: Arc::new(AtomicBool::new(false)),
             },
         )
         .await

@@ -30,6 +30,9 @@ pub struct AppState {
     pub erasures: std::sync::atomic::AtomicU64,
     /// Ids stopped before their work had started (a morning brief's Stop can arrive first).
     pub stopped_early: Mutex<std::collections::HashSet<String>>,
+    /// Routine runs holding the slot, by task id, each with the flag it sets when it gave
+    /// way to the user. Locked only while `active` is held.
+    pub background: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 pub struct PendingAction {
     tool: String,
@@ -48,6 +51,39 @@ pub(crate) struct ActionClaim<'a> {
 impl Drop for ActionClaim<'_> {
     fn drop(&mut self) {
         self.state.active.lock().unwrap().remove(&self.id);
+    }
+}
+
+/// When only routine runs hold the slot, asks them to stop so what the user just asked
+/// for can run; the routine runs again once the slot is free. Call with `active` held.
+pub(crate) fn yield_to_user(state: &AppState, active: &HashMap<String, Arc<AtomicBool>>) -> bool {
+    let background = state.background.lock().unwrap();
+    if active.is_empty() || !active.keys().all(|id| background.contains_key(id)) {
+        return false;
+    }
+    for (id, cancel) in active {
+        cancel.store(true, Ordering::SeqCst);
+        background[id].store(true, Ordering::SeqCst);
+    }
+    true
+}
+
+/// Waits up to `wait` for the slot to be free, asking a routine run to give way. A
+/// scheduled search holds it only briefly. The caller still claims the slot itself.
+pub(crate) async fn wait_for_slot(state: &AppState, wait: std::time::Duration) {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        {
+            let active = state.active.lock().unwrap();
+            if active.is_empty() {
+                return;
+            }
+            yield_to_user(state, &active);
+        }
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 }
 
@@ -189,6 +225,7 @@ impl AppState {
             index_cancel: Arc::new(AtomicBool::new(false)),
             erasures: std::sync::atomic::AtomicU64::new(0),
             stopped_early: Mutex::new(std::collections::HashSet::new()),
+            background: Mutex::new(HashMap::new()),
         })
     }
     pub(crate) fn audit(&self, action: &str, detail: &str) {
@@ -666,6 +703,9 @@ fn skill_history(turns: &[TaskRecord], boundary: Option<&str>, current_id: &str)
 pub fn new_topic(state: State<'_, AppState>) -> Result<ConversationPage, String> {
     let active = state.active.lock().unwrap();
     if !active.is_empty() {
+        if yield_to_user(&state, &active) {
+            return Err("Buntini is stopping a routine run. Try again in a moment.".into());
+        }
         return Err("Wait for the current task to finish before changing conversations.".into());
     }
     let page = state.store.lock().unwrap().new_conversation()?;
@@ -684,6 +724,7 @@ pub async fn run_action(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
+    wait_for_slot(&state, std::time::Duration::from_secs(15)).await;
     if state.store.lock().unwrap().workflow(&id)?.is_some() {
         let result = run_workflow_action(&state, &id, args, &on_event).await;
         // Its alert goes once nothing waits for this proposal any more, even when the
@@ -1472,6 +1513,9 @@ pub fn open_conversation(
 ) -> Result<ConversationPage, String> {
     let active = state.active.lock().unwrap();
     if !active.is_empty() {
+        if yield_to_user(&state, &active) {
+            return Err("Buntini is stopping a routine run. Try again in a moment.".into());
+        }
         return Err("Wait for the current task to finish before changing conversations.".into());
     }
     let store = state.store.lock().unwrap();
@@ -2674,9 +2718,7 @@ async fn execute_with_settings(
                     for share in shares {
                         touch(task, share);
                     }
-                    // What "reply to the second one" means next: Mail's own ids for
-                    // exactly the emails this answer numbered.
-                    crate::triage::save_listing(&state.store.lock().unwrap(), &task.id, emails)?;
+                    keep_listing(&state.store.lock().unwrap(), &task.id, emails)?;
                     task.answer = answer;
                     emit(channel, "delta", &task.id, Some(task.answer.clone()));
                 }
@@ -3576,6 +3618,8 @@ pub async fn run_task(
                 active.insert(task.id.clone(), cancel.clone());
                 break;
             }
+            // A routine run gives way to what the user asks now.
+            yield_to_user(&state, &active);
         }
         if std::time::Instant::now() >= deadline {
             return Err("Buntini is still finishing another task. Try again in a moment.".into());
@@ -3690,6 +3734,16 @@ pub(crate) fn headless() -> bool {
     HEADLESS.try_with(|_| ()).is_ok()
 }
 
+/// What "reply to the second one" means next: Mail's own ids for exactly the emails this
+/// answer numbered. A routine's list stays in its own thread, where nobody follows up, so
+/// it never replaces the list the user just got in the window.
+fn keep_listing(store: &Store, task_id: &str, emails: Vec<crate::triage::Listed>) -> Result<(), String> {
+    if headless() {
+        return Ok(());
+    }
+    crate::triage::save_listing(store, task_id, emails)
+}
+
 /// Where a headless run goes and how it starts.
 pub(crate) struct Headless<'a> {
     /// The chat thread the turn is saved in, so it never lands in the conversation open
@@ -3701,6 +3755,8 @@ pub(crate) struct Headless<'a> {
     /// work that must start exactly once (a routine claiming its time) commits with the
     /// task or not at all.
     pub start: Box<dyn FnOnce(&Store, &TaskRecord) -> Result<(), String> + Send + 'a>,
+    /// Set when the run stopped to give way to something the user asked for.
+    pub yielded: Arc<AtomicBool>,
 }
 
 /// Runs a request the way `run_task` does, with the same task contract, privacy rules,
@@ -3750,12 +3806,20 @@ pub(crate) async fn run_headless_in(
         }
         transaction.commit().map_err(|e| e.to_string())?;
         active.insert(task.id.clone(), cancel.clone());
+        state.background.lock().unwrap().insert(task.id.clone(), sink.yielded.clone());
         settings
     };
     let _claim = ActionClaim {
         state,
         id: task.id.clone(),
     };
+    struct Background<'a>(&'a AppState, String);
+    impl Drop for Background<'_> {
+        fn drop(&mut self) {
+            self.0.background.lock().unwrap().remove(&self.1);
+        }
+    }
+    let _background = Background(state, task.id.clone());
     state.audit("task.started", &format!("{} (headless)", task.id));
     let result = HEADLESS
         .scope(
@@ -3817,6 +3881,24 @@ mod apps_live_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_routines_mail_list_never_replaces_the_windows_list() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let email = |number: usize| crate::triage::Listed {
+            number,
+            id: format!("{number}"),
+            message_id: format!("<{number}@example.com>"),
+            sender: "Ana <ana@example.com>".into(),
+            subject: "Lease".into(),
+            received: "2026-10-30T08:00:00Z".into(),
+        };
+        keep_listing(&store, "chat-task", vec![email(1), email(2)]).unwrap();
+        HEADLESS.scope((), async { keep_listing(&store, "routine-task", vec![email(1)]).unwrap() }).await;
+        let saved: crate::triage::Listing = serde_json::from_str(&store.preference(crate::triage::LISTING).unwrap().unwrap()).unwrap();
+        assert_eq!(saved.task_id, "chat-task");
+        assert_eq!(saved.emails.len(), 2);
+    }
 
     async fn calendar_preparation_journey(apple: bool, start: &str, due: &str, title: &str) {
         let dir = tempfile::tempdir().unwrap();

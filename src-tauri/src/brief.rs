@@ -181,6 +181,8 @@ pub async fn morning_brief(
     let id = id
         .filter(|id| uuid::Uuid::parse_str(id).is_ok())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // A routine run gives way to what the user asks for now.
+    crate::controller::wait_for_slot(&state, std::time::Duration::from_secs(15)).await;
     let cancel = Arc::new(AtomicBool::new(false));
     let settings = {
         let mut active = state.active.lock().unwrap();
