@@ -1,10 +1,11 @@
 import type { BackgroundStatus, PendingApprovalSummary, TaskProgress } from './types';
 
-/** Saved proposals from any conversation. Review opens the sheet; nothing is approved from here. */
-export function WaitingForYou({ items, disabled, onReview }: { items: PendingApprovalSummary[]; disabled: boolean; onReview: (approvalId: string) => void }) {
+/** Saved proposals from any conversation. Review opens the sheet; nothing is approved from here.
+    Stop ends one that can't be reviewed any more (say, after switching brains). */
+export function WaitingForYou({ items, disabled, onReview, onStop }: { items: PendingApprovalSummary[]; disabled: boolean; onReview: (approvalId: string) => void; onStop: (taskId: string) => void }) {
   if (!items.length) return null;
   return <section className="waiting-for-you" aria-label="Waiting for you"><div className="section-label">WAITING FOR YOU <span>{items.length}</span></div>
-    {items.map(item => <article key={item.approvalId}><div><strong>{item.goal}</strong><small>{item.description} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="text-button" disabled={disabled} onClick={() => onReview(item.approvalId)}>Review</button></article>)}
+    {items.map(item => <article key={item.approvalId}><div><strong>{item.goal}</strong><small>{item.description} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="text-button" disabled={disabled} onClick={() => onReview(item.approvalId)}>Review</button><button className="text-button" disabled={disabled} aria-label={`Stop: ${item.goal}`} onClick={() => onStop(item.taskId)}>Stop</button></article>)}
   </section>;
 }
 

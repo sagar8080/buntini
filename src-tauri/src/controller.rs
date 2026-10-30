@@ -481,7 +481,14 @@ pub fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
         return Err("Cancel the current task before clearing history.".into());
     }
     state.index_cancel.store(true, Ordering::SeqCst);
-    state.store.lock().unwrap().clear_history()
+    let store = state.store.lock().unwrap();
+    // Their proposals go with the history, so their "Waiting for you" alerts do too.
+    let waiting = store.waiting_approval_ids()?;
+    store.clear_history()?;
+    for id in waiting {
+        crate::notifications::withdraw_approval(&id);
+    }
+    Ok(())
 }
 #[tauri::command]
 pub fn cancel_task(task_id: String, state: State<'_, AppState>) -> Result<(), String> {
@@ -669,8 +676,16 @@ pub async fn run_action(
     app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
     if state.store.lock().unwrap().workflow(&id)?.is_some() {
-        let task = run_workflow_action(&state, &id, args, &on_event).await?;
-        crate::notifications::withdraw_approval(&id);
+        let result = run_workflow_action(&state, &id, args, &on_event).await;
+        // Its alert goes once nothing waits for this proposal any more, even when the
+        // run failed; a proposal still waiting keeps its alert.
+        let still_waiting = state.store.lock().unwrap().workflow(&id)?.is_some_and(|flow| {
+            flow.steps.iter().any(|step| step.id == id && step.state == "waiting")
+        });
+        if !still_waiting {
+            crate::notifications::withdraw_approval(&id);
+        }
+        let task = result?;
         crate::notifications::announce_waiting(&app, &task).await;
         return Ok(task);
     }
@@ -931,8 +946,10 @@ fn cancel_workflow(state: &AppState, id: &str) -> Result<(), String> {
         }
         let mut task = store.task(&flow.id)?.ok_or("That task no longer exists.")?;
         flow.state = "cancelled".into();
+        let mut stopped = None;
         if let Some(step) = flow.steps.last_mut().filter(|s| s.state == "waiting") {
             step.state = "cancelled".into();
+            stopped = Some(step.id.clone());
         }
         task.state = "cancelled".into();
         task.handoff = None;
@@ -940,6 +957,9 @@ fn cancel_workflow(state: &AppState, id: &str) -> Result<(), String> {
         task.answer =
             "Task stopped. Completed steps are preserved; no further steps will run.".into();
         store.checkpoint(&mut flow, &task)?;
+        if let Some(step) = stopped {
+            crate::notifications::withdraw_approval(&step);
+        }
     }
     Ok(())
 }
@@ -1244,6 +1264,7 @@ pub async fn continue_task_online(
             &intent,
             json!({"query":query,"approvedTool":call.tool,"approvedArguments":call.arguments}),
         )?;
+        crate::notifications::withdraw_approval(&intent);
         task.state = "running".into();
         task.handoff = None;
         task.action = None;
@@ -3997,7 +4018,11 @@ for line in sys.stdin:
             .unwrap()
             .checkpoint(&mut cancelled, &task)
             .unwrap();
+        // Stopping it also withdraws its "Waiting for you" alert.
+        let alert = crate::notifications::approval_identifier(&intent);
+        crate::delivery::os().schedule(&alert, 1, "Waiting for you", "Buntini needs your OK.");
         cancel_workflow(&state, &task.id).unwrap();
+        assert!(!crate::delivery::fake::pending().contains_key(&alert));
         let stopped = run_workflow_action_using(
             &state,
             &intent,

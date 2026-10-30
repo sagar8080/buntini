@@ -796,6 +796,27 @@ impl Store {
     /// Proposals waiting for approval, newest first and one per task. They are
     /// journal rows, not memory, so they survive a restart; the in-memory
     /// approval map only ever held the older one-shot sheets.
+    /// The id of every saved proposal still waiting, with no limit, so their alerts can
+    /// be withdrawn when they are cleared.
+    pub fn waiting_approval_ids(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM workflows WHERE state IN ('waiting_action','waiting_online')")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut ids = vec![];
+        for row in rows {
+            let flow: crate::workflows::Workflow =
+                serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            if let Some(step) = flow.steps.last().filter(|step| step.state == "waiting") {
+                ids.push(step.id.clone());
+            }
+        }
+        Ok(ids)
+    }
     pub fn pending_approvals(&self) -> Result<Vec<PendingApprovalSummary>, String> {
         let mut stmt = self
             .db

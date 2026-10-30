@@ -433,6 +433,8 @@ export default function App() {
   }
   async function reviewTask(task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) {
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
+    // One sheet at a time: a second one would stack on the first and break its focus.
+    if (sheetWaiting.current) { setNotice('Answer the request that’s open first.'); return; }
     try {
       await openThread({ taskId: task.id });
       if (task.state === 'waiting_action' && task.action) { setActionError(''); setProposal(task.action); setPetState('approval'); }
@@ -448,6 +450,7 @@ export default function App() {
   async function openApproval(approvalId: string) {
     setPage('home'); void expand(true);
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish the current task first, then review it under Waiting for you.'); return; }
+    if (sheetWaiting.current) { setNotice('Answer the request that’s open first, then review this one under Waiting for you.'); return; }
     try { await reviewTask(await command<TaskRecord>('open_approval', { approvalId })); }
     catch (e) { setError(errorMessage(e)); await refresh().catch(() => {}); }
   }
@@ -455,7 +458,11 @@ export default function App() {
   openApprovalRef.current = openApproval;
   useEffect(() => {
     if (!desktop) return;
-    const subscription = listen<{ approvalId: string }>('approval-open', event => { void openApprovalRef.current(event.payload.approvalId); });
+    // The request is kept until taken, so a Review click that launched Buntini, before
+    // this listener existed, still opens its sheet.
+    const takeRequest = () => command<string | null>('take_review_request').then(id => { if (id) void openApprovalRef.current(id); }).catch(() => {});
+    const subscription = listen<{ approvalId: string }>('approval-open', () => { void takeRequest(); });
+    void subscription.then(() => takeRequest());
     return () => { void subscription.then(unlisten => unlisten()); };
   }, []);
   // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
@@ -668,7 +675,7 @@ export default function App() {
         {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} toast={toastAnchored ? toast : null} />}
         {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
-            <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} />
+            <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} onStop={taskId => void safeAction(async () => { await command('cancel_task', { taskId }); await refresh(); })} />
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>What’s on your mind?</span></h1><div><button onClick={() => shortcut('day')}><Sun size={12} /> My day</button><button onClick={() => shortcut('reply')}><Mail size={12} /> Needs a reply</button><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button></div>
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={pending} title="Start a separate conversation; this one stays in History"><Plus size={11} /> New topic</button></div>

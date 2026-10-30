@@ -298,6 +298,7 @@ pub fn run() {
             approvals::approve_web_approval,
             notifications::request_notification_permission,
             notifications::notification_permission_status,
+            notifications::take_review_request,
             support::list_voices,
             support::preview_voice,
             support::worker_diagnostics,

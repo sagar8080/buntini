@@ -294,12 +294,25 @@ pub(crate) fn approval_identifier(approval_id: &str) -> String {
     format!("approval-{approval_id}")
 }
 
+/// The proposal a Review click asked for, until the panel takes it. A click that
+/// launches a quit Buntini arrives before the panel can hear the event, so the
+/// panel also asks for it once it has loaded.
+static REVIEW_REQUEST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The proposal to review, once: the live event and the panel's own check on
+/// loading both lead here, so the sheet opens a single time.
+#[tauri::command]
+pub fn take_review_request() -> Option<String> {
+    REVIEW_REQUEST.lock().unwrap().take()
+}
+
 /// Review only opens Buntini on the saved proposal; approving still happens in
 /// the sheet. Runs on the main thread without making macOS wait.
 fn review_requested(identifier: &str) {
     let Some(approval_id) = identifier.strip_prefix("approval-") else {
         return;
     };
+    *REVIEW_REQUEST.lock().unwrap() = Some(approval_id.to_string());
     let Some(app) = APP.get().cloned() else {
         return;
     };
