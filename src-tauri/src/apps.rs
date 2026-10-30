@@ -870,6 +870,9 @@ pub struct Event {
     /// leave it out.
     #[serde(default)]
     pub recurring: Option<bool>,
+    /// Who else is invited, by name. Older helpers leave it out.
+    #[serde(default)]
+    pub attendees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

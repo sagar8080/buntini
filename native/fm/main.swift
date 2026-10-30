@@ -982,7 +982,9 @@ enum Agenda {
                 row.merge(["start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate),
                            "startAt": iso.string(from: event.startDate), "endAt": iso.string(from: event.endDate),
                            "allDay": event.isAllDay, "title": event.title ?? "", "location": event.location ?? "", "calendar": event.calendar?.title ?? "",
-                           "recurring": event.hasRecurrenceRules]) { _, new in new }
+                           "recurring": event.hasRecurrenceRules,
+                           // Names only, never addresses: who a heads-up before the event mentions.
+                           "attendees": Array((event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap { $0.name }.prefix(8))]) { _, new in new }
                 emit(row)
             }
             var summary = agendaSummary(total: found.count, limit: limit)
