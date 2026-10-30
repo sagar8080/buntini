@@ -48,6 +48,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     {choicesFor('to').length ? <small>More than one person in Contacts matches. Pick who this is for.</small> : null}
     {choicesFor('name').length ? <small>More than one of your shortcuts fits. Pick the one to run.</small> : null}
     {choicesFor('id').length ? <small>More than one matches what you said. Pick the one you mean.</small> : null}
+    {choicesFor('message').length ? <small>More than one email could be the one you mean. Pick the one to answer.</small> : null}
     {proposal.note && <small>{proposal.note}</small>}
     {error && <p role="alert">{error}</p>}
     <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>

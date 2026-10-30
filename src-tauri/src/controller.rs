@@ -903,8 +903,10 @@ where
             return Err("This task is no longer waiting for an action approval.".into());
         }
         let tool = intent.tool.clone();
-        // Which email a reply answers, and its recipient, are not the sheet's to change.
-        let args = crate::actions::keep_fixed(&tool, &intent.arguments, &args);
+        // Which email a reply answers, and its recipient, are not the sheet's to change;
+        // when the user picked one the search found, they come from that search.
+        let proposed = crate::recipes::picked_reply(&tool, &flow.contract.current_request, &flow.steps, &intent.arguments, &args)?;
+        let args = crate::actions::keep_fixed(&tool, &proposed, &args);
         let normalized = validate_action(&tool, &args)?;
         // A changed item must be one this task read for what the user named.
         crate::edit_targets::check(&flow.contract.edit_goals(&tool), &tool, &Value::Object(normalized.clone()), &flow.steps, true)?;
@@ -2947,19 +2949,26 @@ async fn execute_with_settings(
         }
     }
     // A reply answers one email in its thread. With none on screen or listed there is
-    // nothing to answer, and a recipient the model guessed would be a new email instead.
+    // nothing to answer, and a recipient the model guessed would be a new email instead,
+    // unless the user named whose email it is: then the inbox is searched for it first.
     if flow.contract.unbound_reply() {
         let several = referent
             .as_ref()
             .and_then(|found| found.mail())
             .is_some_and(|mail| mail.selected > 1 && crate::focus::replies_to_this(&task.prompt));
-        return Err(if withheld {
-            "This brain isn’t allowed to see your email. You can allow Your email in Settings → Privacy.".into()
-        } else if several {
-            crate::recipes::SEVERAL_SELECTED.into()
-        } else {
-            crate::recipes::NOTHING_TO_REPLY.into()
-        });
+        let search = flow.contract.reply_lookup(&[]).is_some();
+        if withheld || (search && !privacy::allows(locality, &settings, privacy::Share::Mail)) {
+            return Err("This brain isn’t allowed to see your email. You can allow Your email in Settings → Privacy.".into());
+        }
+        if several {
+            return Err(crate::recipes::SEVERAL_SELECTED.into());
+        }
+        if !search {
+            return Err(crate::recipes::NOTHING_TO_REPLY.into());
+        }
+        if !crate::apps::allowed(&settings, "mail") {
+            return Err("Allow Mail in Settings → Apps so I can find the email to reply to.".into());
+        }
     }
     state.store.lock().unwrap().checkpoint(&mut flow, task)?;
     continue_workflow(state, task, channel, cancel, &settings, &mut flow).await
@@ -2967,6 +2976,7 @@ async fn execute_with_settings(
 
 /// The listed email a reply names ("the second one", "Ana's email"), from the latest
 /// "What needs a reply?" in this conversation. An error says why none or several match.
+/// A sender the list doesn't include is searched for in the inbox instead.
 fn listed_reply(state: &AppState, task: &TaskRecord) -> Result<Option<crate::triage::Listed>, String> {
     let Some(pick) = crate::triage::pick(&task.prompt) else {
         return Ok(None);
@@ -2976,6 +2986,11 @@ fn listed_reply(state: &AppState, task: &TaskRecord) -> Result<Option<crate::tri
     let Some(listing) = crate::triage::recent_listing(&store, &turns) else {
         return Ok(None);
     };
+    if let crate::triage::Pick::Sender(name) = &pick {
+        if !listing.emails.iter().any(|email| crate::triage::from_sender(name, &email.sender)) {
+            return Ok(None);
+        }
+    }
     crate::triage::find(&pick, &listing.emails).cloned().map(Some)
 }
 
@@ -3098,6 +3113,12 @@ where
             return Err("This task reached its step limit.".into());
         }
         flow.refresh_contract();
+        // "Reply to Ana": the one email the inbox search found from her is bound like an
+        // open one; none is a question back to the user.
+        let asked = flow.contract.current_request.clone();
+        if crate::recipes::reply_from_search(&asked, &flow.steps, &mut flow.contract)? {
+            state.audit("recipe.reply_from_search", &task.id);
+        }
         let finished_answer = match flow.contract.completed_action_answer(&flow.steps) {
             Some(answer) => Some(answer),
             None => match flow.contract.terminal_receipt_answer(&flow.steps).or_else(||structured_math_answer(flow)) {
@@ -3163,7 +3184,19 @@ where
                     && (flow.goal.split_once(':').is_some_and(|(_,source)|source.trim().len()>=20)
                         || !task.files.is_empty()
                         || flow.steps.iter().any(|step|step.state=="succeeded" && step.evidence.as_ref().and_then(|evidence|evidence.get("records")).and_then(Value::as_array).is_some_and(|records|!records.is_empty())));
-                request["next_step"] = json!({"kind":next.kind,"tool":next.tool,"description":description,"requiredFields":next.required_fields,"requiredArguments":next.required_arguments,"availableTools":available,"contentBodySourceAvailable":body_source});
+                let mut required = next.required_arguments.clone();
+                // Several emails fit a reply: the sheet sets which one, and its sender,
+                // when the user picks it. The text is still the only thing to write, so
+                // the helper's routing is told those are settled; nothing here is a value.
+                if next.tool.as_deref() == Some("reply_email")
+                    && flow.contract.unbound_reply()
+                    && crate::recipes::reply_choices(&flow.contract.current_request, &flow.steps).is_ok_and(|choices| !choices.is_empty())
+                {
+                    for key in ["message", "to"] {
+                        required[key] = json!("picked in the approval sheet");
+                    }
+                }
+                request["next_step"] = json!({"kind":next.kind,"tool":next.tool,"description":description,"requiredFields":next.required_fields,"requiredArguments":required,"availableTools":available,"contentBodySourceAvailable":body_source});
             }
             request["reference_clock"] = json!({
                 "interpretationDate":flow.contract.interpretation_date,
@@ -3218,6 +3251,14 @@ where
                 tool: "look_up_online",
                 arguments: json!({"query":query}),
                 source: json!({"kind":"user_fields","source":"user_request","query":query}),
+            })
+        } else if let Some(arguments) = flow.contract.reply_lookup(&flow.steps) {
+            // "Reply to Ana" with her email neither open nor listed: search the inbox for
+            // her by the name the user wrote, before any model call.
+            Some(crate::planning::BoundAction {
+                tool: "read_mail",
+                source: json!({"kind":"user_fields","source":"user_request","fields":{"query":arguments["query"]}}),
+                arguments,
             })
         } else if let Some(name) = flow.contract.contact_lookup(&flow.steps).filter(|_| {
             state.models.apple_helper().is_file()
@@ -3328,6 +3369,22 @@ where
             return Err(format!("The tool {name} is not available for the remaining steps of this task. No action ran."));
         }
         flow.contract.fill_resolved_fields(&name, &mut args);
+        // Several emails from the person a reply names: the user picks one in the sheet,
+        // so nothing the model wrote can say which email or who it goes to.
+        let reply_choices = if name == "reply_email" && flow.contract.unbound_reply() {
+            if let Some(fields) = args.as_object_mut() {
+                for key in crate::actions::fixed_fields("reply_email").iter().chain(&["subject"]) {
+                    fields.remove(*key);
+                }
+            }
+            let choices = crate::recipes::reply_choices(&flow.contract.current_request, &flow.steps)?;
+            if choices.is_empty() {
+                return Err(crate::recipes::NOTHING_TO_REPLY.into());
+            }
+            choices
+        } else {
+            vec![]
+        };
         flow.contract.validate_proposal(&name, &args, &flow.steps)?;
         // Looking up the person a draft is for is a convenience, not a read the user
         // asked for: if Contacts can't be read, the draft goes ahead without an address.
@@ -3456,6 +3513,7 @@ where
                                 also: Default::default(),
                             }))
                             .chain(edit_choices)
+                            .chain(reply_choices)
                             .collect(),
                     })
                     .map_err(|e| e.to_string())?,

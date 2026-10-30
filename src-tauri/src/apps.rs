@@ -2057,6 +2057,18 @@ fn mail_evidence(
     ))
 }
 
+/// An inbox search as `read_mail` returns it, for tests of what is bound from one:
+/// (received, Message-ID, sender, subject, Mail id) rows, of `total` that matched.
+#[cfg(test)]
+pub(crate) fn mail_fixture(query: &str, rows: &[[&str; 5]], total: usize) -> Value {
+    let mut output: Vec<String> = rows
+        .iter()
+        .map(|[at, message_id, sender, subject, id]| format!("{at}\t{message_id}\tfalse\t{sender}\t{subject}\t{id}"))
+        .collect();
+    output.push(format!("__buntini_summary__\t{total}\t{}\ttrue", rows.len()));
+    mail_evidence(query, false, 8, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some("")).unwrap()
+}
+
 async fn read_mail(query: &str, unread: bool, limit: usize) -> Result<String, String> {
     Ok(read_mail_evidence(query, unread, limit, Launch::Allow).await?["text"]
         .as_str()

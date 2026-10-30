@@ -1245,16 +1245,25 @@ impl TaskContract {
         };
         for constraint in self.constraints.iter().filter(|c| {
             c.outcome_id.as_deref() == Some(&outcome.id)
-                && ["contact_record", "focus_referent", "mail_listing"].contains(&c.source.as_str())
+                && ["contact_record", "focus_referent", "mail_listing", "mail_search"].contains(&c.source.as_str())
         }) {
             fields
                 .entry(constraint.field.clone())
                 .or_insert_with(|| constraint.value.clone());
         }
     }
+    /// "Reply to Ana" with no email bound yet: the inbox search for the sender the user
+    /// named, until it is in the journal (`recipes::reply_read`).
+    pub fn reply_lookup(&self, steps: &[Step]) -> Option<Value> {
+        if !self.unbound_reply() {
+            return None;
+        }
+        crate::recipes::reply_read(&self.current_request, steps)
+    }
     /// Whether a requested reply has nothing bound for the email it answers. Only the
-    /// email on screen or one Buntini listed can be (recipes.rs); without either there
-    /// is nothing to reply to, so the task says so instead of planning a guess.
+    /// email on screen, one Buntini listed or one its inbox search found by the sender
+    /// the user named can be (recipes.rs); without any there is nothing to reply to, so
+    /// the task says so instead of planning a guess.
     pub fn unbound_reply(&self) -> bool {
         self.outcomes.iter().any(|o| {
             o.kind == "write"
@@ -1357,7 +1366,7 @@ impl TaskContract {
         let mail: Vec<_> = self
             .constraints
             .iter()
-            .filter(|c| c.outcome_id == outcome_id && ["focus_referent", "mail_listing"].contains(&c.source.as_str()))
+            .filter(|c| c.outcome_id == outcome_id && ["focus_referent", "mail_listing", "mail_search"].contains(&c.source.as_str()))
             .cloned()
             .collect();
         let fields = self.provenance.entry(step_id.into()).or_default();
@@ -1541,6 +1550,8 @@ impl TaskContract {
         // So is reading the user's shortcuts before a run, with the words they used.
         let shortcut_read = self.shortcut_lookup(steps);
         let shortcuts = self.shortcut_choices(steps);
+        // And searching the inbox for the sender of an email a reply names.
+        let reply_read = self.reply_lookup(steps);
         let selected = definitions
             .as_array()
             .into_iter()
@@ -1557,6 +1568,7 @@ impl TaskContract {
                 }
                 let relevant_read = (contact_read && name == "find_contact")
                     || (shortcut_read.is_some() && name == "list_shortcuts")
+                    || (reply_read.is_some() && name == "read_mail")
                     || (name == "read_calendar" && searching_calendar(next))
                     || next.is_some_and(|o| {
                     o.accepted_tools.iter().any(|t| t == name)
@@ -1579,6 +1591,10 @@ impl TaskContract {
                 }
                 if let Some(query) = shortcut_read.as_ref().filter(|_| name == "list_shortcuts") {
                     result["parameters"]["properties"]["query"]["enum"] = json!([query]);
+                    result["parameters"]["required"] = json!(["query"]);
+                }
+                if let Some(search) = reply_read.as_ref().filter(|_| name == "read_mail") {
+                    result["parameters"]["properties"]["query"]["enum"] = json!([search["query"]]);
                     result["parameters"]["required"] = json!(["query"]);
                 }
                 if name == "run_shortcut" && write_allowed && !shortcuts.is_empty() {
@@ -1666,6 +1682,17 @@ impl TaskContract {
                 } else {
                     Err("Buntini looks up only the person you asked to write to.".into())
                 };
+            }
+            // Before a reply to someone whose email isn't open or listed, the inbox is
+            // searched for them by the name the user wrote, and for nothing else.
+            if tool == "read_mail" {
+                if let Some(search) = self.reply_lookup(steps) {
+                    return if arguments["query"].as_str().is_some_and(|query| Some(query) == search["query"].as_str()) {
+                        Ok(())
+                    } else {
+                        Err("Buntini searches your email only for the person you’re replying to.".into())
+                    };
+                }
             }
             // Before a shortcut runs, the user's shortcuts are read with their own words.
             if tool == "list_shortcuts" {

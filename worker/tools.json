@@ -750,7 +750,7 @@
   },
   "reply_email": {
     "name": "reply_email",
-    "description": "Write the text of a reply to an email the user is answering: the one open in Mail, or one they picked from the emails Buntini just listed. Buntini opens it as a threaded reply in Mail, addressed to the sender with a Re: subject, saved as a draft for the user to review and send. Never sends email. Write only the reply text, as the user, to the email's sender.",
+    "description": "Write the text of a reply to an email the user is answering: the one open in Mail, one they picked from the emails Buntini just listed, or one Buntini found in the inbox from the person they named. Buntini opens it as a threaded reply in Mail, addressed to the sender with a Re: subject, saved as a draft for the user to review and send. Never sends email. Write only the reply text, as the user, to the email's sender.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -772,13 +772,13 @@
       ],
       "operation": "write",
       "use_when": [
-        "The user asks to reply to an email they have open in Mail or picked from a list Buntini showed."
+        "The user asks to reply to an email they have open in Mail, picked from a list Buntini showed, or named by its sender (\"reply to Ana\")."
       ],
       "avoid_when": [
         "The user wants a new email rather than a reply, or wants the email sent."
       ],
       "prerequisites": [
-        "Buntini has bound the email being answered from Mail or from its own listing, never from text.",
+        "Buntini has bound the email being answered from Mail, from its own listing or from its inbox search for the sender the user named, never from text; when that search finds several, the user picks one in the approval sheet.",
         "User approves the exact reply text, subject and recipient."
       ],
       "output_kind": "action_receipt",

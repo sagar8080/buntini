@@ -326,8 +326,15 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("body", text(args, "body", 4000, true)?);
         }
         "reply_email" => {
-            // Which email this answers, and its sender, come from Mail or Buntini's own
-            // list (recipes.rs), never from a model, so they must be exact and complete.
+            // Which email this answers, and its sender, come from Mail, Buntini's own list
+            // or its inbox search (recipes.rs), never from a model, so they must be exact
+            // and complete. Before the user picks one of several found, all are missing
+            // together; `execute` refuses to run then.
+            if ["message", "message_id", "to"].iter().all(|key| args.get(*key).is_none()) {
+                put("subject", text(args, "subject", 200, false)?);
+                put("body", text(args, "body", 4000, true)?);
+                return Ok(out);
+            }
             let message = text(args, "message", 20, true)?.unwrap();
             if !message.chars().all(|c| c.is_ascii_digit()) {
                 return Err("The email to answer must be Mail's own message number.".into());
@@ -503,13 +510,20 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
         "reply_email" => (
             "Open this reply in Mail?".into(),
             [
+                // Picked in the sheet when the inbox search found several.
+                field("message", "Which email", "hidden"),
                 field("answers", "Answers", "fixed"),
                 field("to", "To", "fixed"),
                 field("subject", "Subject", "text"),
                 field("body", "Message", "long"),
             ]
             .into_iter()
-            .filter(|field| field.kind != "fixed" || !field.value.is_empty())
+            // Which email shows only as the picker, while there is one to pick.
+            .filter(|field| match field.kind {
+                "fixed" => !field.value.is_empty(),
+                "hidden" => field.value.is_empty(),
+                _ => true,
+            })
             .collect(),
             "Opens in Mail as a reply in the same thread, for you to review. Buntini never sends email.".into(),
         ),
@@ -1569,6 +1583,9 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
     };
     if EDIT_TOOLS.contains(&tool) && !args.contains_key("id") {
         return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which one to change first.");
+    }
+    if tool == "reply_email" && !args.contains_key("message") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which email to answer first.");
     }
     if let Some(argv) = helper_arguments(tool, &args) {
         if !helper.is_file() {
