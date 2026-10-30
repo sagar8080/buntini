@@ -314,7 +314,7 @@ func previousToolCalls(_ messages: ArraySlice<[String: Any]>) -> [(name: String,
 }
 
 func repeatsWrite(_ name: String, _ arguments: [String: Any], history: ArraySlice<[String: Any]>) -> Bool {
-    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer"]
+    let writes: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "control_music", "switch_tab", "remember", "set_timer"]
     guard writes.contains(name) else { return false }
     if name == "control_music", arguments["action"] as? String == "now_playing" { return false }
     return previousToolCalls(history).contains { previous in
@@ -344,7 +344,7 @@ func routingPrompt(goal: String, guidance: String, steps: [[String: Any]], nextS
     return "Original user request: \(goal)\nLatest user guidance: \(guidance)\nExecution states (not new requests): \(String(data: data, encoding: .utf8) ?? "[]")\nController's next requested step and verified numeric calculations: \(String(data: facts, encoding: .utf8) ?? "{}")"
 }
 
-let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
+let effectTools: Set<String> = ["add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "control_music", "switch_tab", "remember", "set_timer", "open_app", "open_link"]
 
 func unresolvedJournal(_ steps: [[String: Any]]) -> Bool {
     steps.contains { ["failed", "unknown", "running", "waiting"].contains($0["state"] as? String ?? "unknown") }

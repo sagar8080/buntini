@@ -42,6 +42,7 @@ mod pricing;
 mod privacy;
 mod recipes;
 mod research;
+mod routines;
 mod search_intent;
 #[cfg(test)]
 mod search_intent_tests;
@@ -269,7 +270,7 @@ pub fn run() {
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
             chatgpt::chatgpt_models,
-            controller::morning_brief,
+            brief::morning_brief,
             controller::forget_memory,
             controller::cancel_action,
             data::export_data,
@@ -311,7 +312,9 @@ pub fn run() {
             watches::save_price_watch,
             watches::update_price_watch,
             watches::delete_price_watch,
-            watches::run_price_watch
+            watches::run_price_watch,
+            routines::update_routine,
+            routines::delete_routine
         ])
         .build(app_context())
         .expect("Buntini could not start")

@@ -65,12 +65,19 @@ pub fn recognise(text: &str) -> Option<Command> {
 
 pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, String> {
     let mail_allowed = crate::apps::allowed(context.settings, "mail");
+    // A routine runs with nobody there, so like the automatic brief it leaves a closed
+    // Mail closed.
+    let launch = if crate::controller::headless() {
+        crate::apps::Launch::IfRunning
+    } else {
+        crate::apps::Launch::Allow
+    };
     match command {
         Command::NeedsReply => {
             if !mail_allowed {
                 return Err("Allow Mail in Settings → Apps so I can check what needs a reply.".into());
             }
-            let triage = crate::triage::run(crate::apps::Launch::Allow).await?;
+            let triage = crate::triage::run(launch).await?;
             Ok(Outcome::Listed {
                 answer: crate::triage::compose(&triage),
                 shares: vec![Share::Mail],
@@ -78,7 +85,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             })
         }
         Command::MyDay => {
-            let day = crate::brief::gather(context.helper, context.settings, crate::apps::Launch::Allow).await;
+            let day = crate::brief::gather(context.helper, context.settings, launch).await;
             let battery_low = crate::world::health_now().is_some_and(|health| {
                 !health.charging && health.battery_percent.is_some_and(|level| level <= 20)
             });

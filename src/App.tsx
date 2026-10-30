@@ -10,6 +10,7 @@ import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
+import Routines from './Routines';
 import Conversation from './Conversation';
 import { BackgroundWork, WaitingForYou, stepLabel } from './TaskProgress';
 import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
@@ -456,6 +457,8 @@ export default function App() {
   }
   const openApprovalRef = useRef(openApproval);
   openApprovalRef.current = openApproval;
+  const openThreadRef = useRef(openThread);
+  openThreadRef.current = openThread;
   useEffect(() => {
     if (!desktop) return;
     // The request is kept until taken, so a Review click that launched Buntini, before
@@ -463,7 +466,9 @@ export default function App() {
     const takeRequest = () => command<string | null>('take_review_request').then(id => { if (id) void openApprovalRef.current(id); }).catch(() => {});
     const subscription = listen<{ approvalId: string }>('approval-open', () => { void takeRequest(); });
     void subscription.then(() => takeRequest());
-    return () => { void subscription.then(unlisten => unlisten()); };
+    // A routine's notification opens the conversation that run is in.
+    const routine = listen<{ taskId: string }>('routine-open', event => { void expand(true); void openThreadRef.current({ taskId: event.payload.taskId }).catch(e => setError(errorMessage(e))); });
+    return () => { void subscription.then(unlisten => unlisten()); void routine.then(unlisten => unlisten()); };
   }, []);
   // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
   const submitRef = useRef(submit);
@@ -702,6 +707,7 @@ export default function App() {
 
         {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>History</h2></div>
           <BackgroundWork status={background} onCancel={id => void safeAction(() => command('cancel_timer', { id }))} />
+          <Routines routines={data?.routines || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onOpen={taskId => { void openThread({ taskId }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <SavedSearches searches={data?.savedSearches || []} keyReady={data?.settings.searchProvider === 'tavily' ? !!data?.diagnostics.tavilyConfigured : !!data?.diagnostics.braveConfigured} onAddKey={() => setPage('settings', 'connections')} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">PAST CONVERSATIONS</div>

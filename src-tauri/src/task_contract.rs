@@ -401,6 +401,7 @@ fn verified_write(step: &Step) -> bool {
             "reply_email",
             "create_saved_search",
             "create_price_watch",
+            crate::routines::TOOL,
             "remember",
             "set_timer",
             "control_music",
@@ -542,6 +543,18 @@ impl TaskContract {
     }
     fn bootstrap(&mut self, goal: &str) {
         self.outcomes.clear();
+        // A routine is one write whose request, days and time are the user's own words.
+        // What the routine will later do is its own task each time it runs.
+        if let Some(routine) = crate::routines::parse_request(goal) {
+            let arguments = routine.arguments();
+            self.push_outcome("write", goal, vec![crate::routines::TOOL.into()], arguments.clone(), vec!["task".into(), "days".into(), "time".into()]);
+            let id = self.outcomes[0].id.clone();
+            for (field, value) in arguments.as_object().into_iter().flatten() {
+                self.constraints.push(Constraint { outcome_id: Some(id.clone()), field: field.clone(), value: value.clone(), source: "user_literal".into(), revision: self.revision, record: None });
+            }
+            self.intent_status = "explicit_routine".into();
+            return;
+        }
         let search_segments = crate::search_intent::explicit_clause_spans(goal);
         // Preserve quoted phrases and search operators before the general
         // bootstrap normalizes prose. Only an integrated online result can

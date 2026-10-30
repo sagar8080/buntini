@@ -309,6 +309,9 @@ pub fn take_review_request() -> Option<String> {
 /// Review only opens Buntini on the saved proposal; approving still happens in
 /// the sheet. Runs on the main thread without making macOS wait.
 fn review_requested(identifier: &str) {
+    if let Some(task_id) = identifier.strip_prefix("routine-") {
+        return routine_requested(task_id);
+    }
     let Some(approval_id) = identifier.strip_prefix("approval-") else {
         return;
     };
@@ -331,6 +334,54 @@ fn review_requested(identifier: &str) {
     });
 }
 
+/// A routine's alert was clicked: open Buntini on that run's conversation.
+fn routine_requested(task_id: &str) {
+    let Some(app) = APP.get().cloned() else {
+        return;
+    };
+    let task_id = task_id.to_string();
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        use tauri::{Emitter, Manager};
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = handle.emit("routine-open", serde_json::json!({ "taskId": task_id }));
+    });
+}
+
+/// Says a routine run finished. A proposal it made already asked for the person's OK
+/// (`announce_waiting`), so this covers the rest. Like approvals, the alert names the
+/// kind of result only, never the result, since it can show on the lock screen.
+pub(crate) async fn deliver_routine(
+    app: &tauri::AppHandle,
+    task: &crate::types::TaskRecord,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let body = match task.state.as_str() {
+        "waiting_action" | "waiting_online" => return Ok("approval_requested".into()),
+        "completed" => "A routine finished. Open Buntini to see what it found.",
+        _ => "A routine needs attention. Open Buntini to see what happened.",
+    };
+    let state = app.state::<AppState>();
+    if !state.store.lock().unwrap().settings()?.notifications_enabled {
+        return Ok("in_app_only".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        notification_availability(&native::status().await?)?;
+        let pending = native::enqueue_as(&format!("routine-{}", task.id), None, "Routine", body);
+        finish_delivery(&state, pending).await?;
+        Ok("desktop_accepted".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = body;
+        Err("Desktop notifications in this build require macOS. The result is in Buntini.".into())
+    }
+}
+
 /// Lock-screen safe wording: the kind of work only, never a recipient, title,
 /// time or text from the proposal, because the body shows on the lock screen.
 pub(crate) fn approval_body(tool: &str) -> &'static str {
@@ -349,6 +400,7 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
         "create_saved_search" | "create_price_watch" => {
             "Buntini set up a recurring check and needs your OK."
         }
+        "create_routine" => "Buntini set up a routine and needs your OK.",
         "browse_page" => "Buntini wants to read a web page and needs your OK.",
         "look_up_online" => "Buntini wants to look something up online and needs your OK.",
         _ => "A task is waiting for your OK.",

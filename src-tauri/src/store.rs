@@ -34,6 +34,7 @@ impl Store {
         crate::delivery::initialize(&store.db)?;
         crate::chat_threads::initialize(&store)?;
         crate::memory_index::initialize(&store.db)?;
+        crate::routines::initialize(&store)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -157,7 +158,8 @@ impl Store {
                 [raw],
             )
             .map_err(|e| e.to_string())?;
-        Ok(())
+        // The built-in morning brief routine is on exactly when its setting is.
+        crate::routines::follow_setting(self, settings.morning_brief)
     }
     pub fn roots(&self) -> Result<Vec<String>, String> {
         let mut stmt = self
@@ -469,6 +471,50 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.audit("price_watch.deleted", id)
     }
+    /// The built-in morning brief first, then routines in the order they were made.
+    pub fn routines(&self) -> Result<Vec<Routine>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM routines ORDER BY json_extract(data,'$.builtIn') DESC, created_at, id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.map(|row| {
+            serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        })
+        .collect()
+    }
+    pub fn routine(&self, id: &str) -> Result<Option<Routine>, String> {
+        let data: Option<String> = self
+            .db
+            .query_row("SELECT data FROM routines WHERE id=?1", [id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        data.map(|data| serde_json::from_str(&data).map_err(|e| e.to_string()))
+            .transpose()
+    }
+    pub fn save_routine(&self, routine: &Routine) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO routines(id,data,next_run_at,enabled,created_at) VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    routine.id,
+                    serde_json::to_string(routine).map_err(|e| e.to_string())?,
+                    routine.next_run_at,
+                    routine.enabled,
+                    routine.created_at
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    pub fn delete_routine(&self, id: &str) -> Result<(), String> {
+        self.db
+            .execute("DELETE FROM routines WHERE id=?1", [id])
+            .map_err(|e| e.to_string())?;
+        self.audit("routine.deleted", id)
+    }
     /// Everything Buntini keeps about you, for "Export my data". Keys stay in the Keychain
     /// and are never included.
     pub fn export_snapshot(&self) -> Result<serde_json::Value, String> {
@@ -493,6 +539,7 @@ impl Store {
             "activeConversationId": self.preference("active-conversation")?,
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
+            "routines": rows("SELECT data FROM routines ORDER BY created_at")?,
             "memories": self.memories()?,
             "workflows": self.workflows()?,
             "timers": rows("SELECT data FROM timers")?,
@@ -507,7 +554,7 @@ impl Store {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx
             .execute_batch(
-                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
+                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines;
                  DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
                  DELETE FROM memory_records; DELETE FROM memory_fts;",
@@ -518,6 +565,8 @@ impl Store {
         // the next restart must not be mistaken for an unmigrated legacy turn.
         self.set_preference("conversation-migration-v1", "1")?;
         self.set_onboarded(false)?;
+        // The morning brief comes back as on a fresh install: there, but off.
+        crate::routines::initialize(self)?;
         tx.commit().map_err(|e| e.to_string())?;
         // DELETE alone leaves private text in free pages and older WAL frames.
         // Rebuild the emptied database and truncate the WAL before reporting
@@ -538,7 +587,8 @@ impl Store {
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');").map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
+            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');").map_err(|e| e.to_string())?;
         // Earlier conversations and folder text leave the memory index with them.
         crate::memory_index::purge(&tx, "history", None)?;
         crate::memory_index::purge(&tx, "files", None)?;
@@ -983,6 +1033,21 @@ mod tests {
         let secret = "private-sentinel-erasure-test";
         store.remember(secret).unwrap();
         store
+            .save_routine(&Routine {
+                id: "action-routine".into(),
+                task: format!("Tell me about {secret}-routine"),
+                days: "weekdays".into(),
+                time: "08:00".into(),
+                enabled: true,
+                built_in: false,
+                created_at: now(),
+                next_run_at: now(),
+                last_run_at: Some(now()),
+                last_task_id: Some(format!("{secret}-run")),
+                last_error: Some(format!("{secret}-error")),
+            })
+            .unwrap();
+        store
             .db
             .execute(
                 "INSERT INTO file_index(path,root,name,content) VALUES(?1,?1,?1,?1)",
@@ -1017,10 +1082,40 @@ mod tests {
         assert!(contains(&std::fs::read(&path).unwrap()));
         store.erase_everything().unwrap();
         assert!(!contains(&std::fs::read(&path).unwrap()));
+        // Only the built-in morning brief is left, off, as on a fresh install.
+        let routines = store.routines().unwrap();
+        assert_eq!(routines.len(), 1);
+        assert!(routines[0].built_in && !routines[0].enabled);
         let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
         if wal.exists() {
             assert_eq!(std::fs::metadata(wal).unwrap().len(), 0);
         }
+    }
+    #[test]
+    fn clearing_history_keeps_routines_but_not_their_results() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let routine = Routine {
+            id: "action-brief".into(),
+            task: "Brief me".into(),
+            days: "weekdays".into(),
+            time: "08:00".into(),
+            enabled: true,
+            built_in: false,
+            created_at: now(),
+            next_run_at: now(),
+            last_run_at: Some(now()),
+            last_task_id: Some("run".into()),
+            last_error: Some("The last run didn’t finish.".into()),
+        };
+        s.save_routine(&routine).unwrap();
+        assert_eq!(s.export_snapshot().unwrap()["routines"].as_array().unwrap().len(), 2);
+        s.clear_history().unwrap();
+        let kept = s.routine("action-brief").unwrap().unwrap();
+        assert_eq!(kept.task, "Brief me");
+        assert!(kept.enabled);
+        assert_eq!(kept.last_task_id, None);
+        assert_eq!(kept.last_error, None);
+        assert_eq!(kept.last_run_at, routine.last_run_at);
     }
     #[test]
     fn memory_history_source_reads_up_to_history_turns() {

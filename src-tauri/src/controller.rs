@@ -210,21 +210,18 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             s.update_check()?,
         )
     };
-    let (conversation_start, onboarded, memories, briefed, conversation, conversations) = {
+    let (conversation_start, onboarded, memories, brief_due, routines, conversation, conversations) = {
         let store = state.store.lock().unwrap();
         (
             store.conversation_start()?,
             store.onboarded()?,
             store.memories()?,
-            store.preference(&brief_key())?.is_some(),
+            crate::routines::brief_due(&store, chrono::Local::now())?,
+            store.routines()?,
             store.conversation_page(&store.active_conversation_id()?, None, 100)?,
             store.conversation_list(None, 30)?,
         )
     };
-    let brief_due = settings.morning_brief
-        && onboarded
-        && !briefed
-        && chrono::Timelike::hour(&chrono::Local::now()) >= 5;
     let usage = state
         .store
         .lock()
@@ -254,6 +251,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
         audit,
         saved_searches,
         price_watches,
+        routines,
         os_update_check,
         conversation_start,
         onboarded,
@@ -1419,90 +1417,6 @@ pub fn cancel_action(id: String, state: State<'_, AppState>) -> Result<(), Strin
         cancel_workflow(&state, &flow.id)?;
     }
     Ok(())
-}
-
-fn brief_key() -> String {
-    format!("brief-{}", chrono::Local::now().format("%Y-%m-%d"))
-}
-
-/// Today's brief, written from the calendar and reminders on this Mac. The automatic
-/// once-a-day brief never opens Mail; the "My day" button may. The window passes its own
-/// id so Stop can cancel the brief with `cancel_task` like any other turn.
-#[tauri::command]
-pub async fn morning_brief(
-    automatic: Option<bool>,
-    id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<TaskRecord, String> {
-    let launch = if automatic.unwrap_or(false) {
-        crate::apps::Launch::IfRunning
-    } else {
-        crate::apps::Launch::Allow
-    };
-    let id = id
-        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let cancel = Arc::new(AtomicBool::new(false));
-    let settings = {
-        let mut active = state.active.lock().unwrap();
-        if !active.is_empty() {
-            return Err("Finish the current task before preparing the brief.".into());
-        }
-        // Stop pressed before this brief had started: it doesn't start.
-        if state.stopped_early.lock().unwrap().remove(&id) {
-            return Err("Morning brief cancelled.".into());
-        }
-        let settings = state.store.lock().unwrap().settings()?;
-        active.insert(id.clone(), cancel.clone());
-        settings
-    };
-    let _claim = ActionClaim {
-        state: &state,
-        id: id.clone(),
-    };
-    // Stop ends the reads themselves (their helper processes are killed when dropped),
-    // rather than letting Mail, Calendar and Reminders run on and discarding the result.
-    let stopped = async {
-        while !cancel.load(Ordering::Relaxed) {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    };
-    let day = tokio::select! {
-        day = crate::brief::gather(state.models.apple_helper(), &settings, launch) => day,
-        () = stopped => return Err("Morning brief cancelled.".into()),
-    };
-    if cancel.load(Ordering::Relaxed) {
-        return Err("Morning brief cancelled.".into());
-    }
-    let battery_low = crate::world::health_now().is_some_and(|health| {
-        !health.charging && health.battery_percent.is_some_and(|level| level <= 20)
-    });
-    let task = TaskRecord {
-        id,
-        prompt: String::new(),
-        answer: crate::brief::compose(&settings.user_name, chrono::Local::now(), &day, battery_low),
-        state: "completed".into(),
-        created_at: now(),
-        sources: vec![],
-        files: vec![],
-        system: None,
-        research: vec![],
-        research_report: None,
-        prices: vec![],
-        cards: vec![],
-        backend: "brief".into(),
-        // The brief is indexed like any turn, so it records everything it shows.
-        touched: crate::skills::day::shares(&day, battery_low)
-            .into_iter()
-            .map(|share| share.id().to_string())
-            .collect(),
-        handoff: None,
-        action: None,
-    };
-    let store = state.store.lock().unwrap();
-    store.save_task(&task)?;
-    store.set_preference(&brief_key(), "1")?;
-    Ok(task)
 }
 
 #[tauri::command]
@@ -2682,14 +2596,45 @@ async fn execute_with_settings(
             return Ok(());
         }
     }
+    // "Every weekday at 8, brief me": the request, days and time are the user's own words,
+    // so the routine is proposed exactly as said, without the model. A routine never
+    // makes another routine.
+    if mode == "auto" && approved.is_none() && !headless() {
+        if let Some(request) = crate::routines::parse_request(&task.prompt) {
+            let args = Value::Object(crate::routines::validate(&request.arguments())?);
+            let messages = vec![
+                json!({"role":"system","content":instructions(state, &settings, crate::model::backend(&settings) == crate::model::Backend::Mlx, "")}),
+                json!({"role":"user","content":task.prompt}),
+            ];
+            let mut flow = Workflow::new(task, mode, &settings, messages, None, &[crate::routines::TOOL]);
+            flow.refresh_contract();
+            flow.contract.validate_proposal(crate::routines::TOOL, &args, &flow.steps)?;
+            let id = flow.begin(crate::routines::TOOL, args.clone(), assistant_call("", None, crate::routines::TOOL, &args), true, true)?;
+            flow.contract.record_proposal(&id, &args, None);
+            let (title, fields, note) = crate::routines::describe(args.as_object().unwrap());
+            task.state = flow.state.clone();
+            task.handoff = Some("action".into());
+            task.action = Some(
+                serde_json::to_value(crate::actions::Proposal { id, tool: crate::routines::TOOL.into(), title, fields, note, choices: vec![] })
+                    .map_err(|e| e.to_string())?,
+            );
+            task.answer = "Your routine is ready to set up. Check the details and allow it.".into();
+            state.store.lock().unwrap().checkpoint(&mut flow, task)?;
+            return Ok(());
+        }
+    }
     // Everyday requests (music, the browser, Mac controls) are carried out directly by a
     // skill: quicker and more dependable than a small model, and the reply says what
-    // actually happened. Everything else goes to the model.
+    // actually happened. Everything else goes to the model. With nobody at the window
+    // only the read-only day summaries run this way; anything that changes something is
+    // proposed and waits for approval.
     if mode == "auto" && approved.is_none() {
         // Follow-ups ("summarise that", "yes, play it") mean the last answer only while it
         // is recent; a conversation left yesterday doesn't turn "that" away from the screen.
         let boundary = (chrono::Utc::now() - chrono::Duration::seconds(FOLLOW_UP_SECONDS)).to_rfc3339();
-        let recent: Vec<String> = {
+        let recent: Vec<String> = if headless() {
+            vec![]
+        } else {
             let store = state.store.lock().unwrap();
             skill_history(
                 &store.conversation_history_for_task(&task.id)?,
@@ -2697,12 +2642,14 @@ async fn execute_with_settings(
                 &task.id,
             )
         };
-        if let Some(skill) = crate::skills::recognise(&task.prompt, &recent) {
+        if let Some(skill) = crate::skills::recognise(&task.prompt, &recent)
+            .filter(|skill| !headless() || matches!(skill, crate::skills::Skill::Day(_)))
+        {
             let label = crate::skills::label(&skill);
             phase(channel, &task.id, "working");
             tool_event(channel, &task.id, label);
             state.audit(&format!("skill.{label}"), &task.id);
-            let focus = crate::focus::current().await;
+            let focus = if headless() { None } else { crate::focus::current().await };
             let front_app = focus.as_ref().map(|f| f.app.name.clone()).or_else(|| {
                 crate::world::activity()
                     .ok()
@@ -2840,7 +2787,7 @@ async fn execute_with_settings(
     let mut separate_context = separate_context;
     let mut referent = None;
     let mut withheld = false;
-    let snapshot = if crate::focus::mentions_this(&task.prompt) {
+    let snapshot = if crate::focus::mentions_this(&task.prompt) && !headless() {
         crate::focus::current().await
     } else {
         None
@@ -2916,7 +2863,10 @@ async fn execute_with_settings(
     let mut messages =
         vec![json!({"role":"system","content":instructions(state, &settings, mlx, &context)})];
     // Earlier turns of the ongoing conversation, within this model's budget and privacy.
-    let turns = {
+    // Each routine run stands alone: last week's results aren't this week's.
+    let turns = if headless() {
+        vec![]
+    } else {
         let store = state.store.lock().unwrap();
         store.conversation_history_for_task(&task.id)?
     };
@@ -3726,6 +3676,109 @@ pub async fn run_task(
             .await;
         }
     }
+    Ok(task)
+}
+
+tokio::task_local! {
+    /// Set while a request runs with nobody at the window (a routine).
+    static HEADLESS: ();
+}
+/// Whether this request started on its own rather than from the window: then nothing on
+/// screen is "this", earlier results aren't a conversation to follow up on, and skills
+/// that change things wait for approval like any other action.
+pub(crate) fn headless() -> bool {
+    HEADLESS.try_with(|_| ()).is_ok()
+}
+
+/// Where a headless run goes and how it starts.
+pub(crate) struct Headless<'a> {
+    /// The chat thread the turn is saved in, so it never lands in the conversation open
+    /// in the window. `start` puts the task there.
+    pub thread: &'a str,
+    /// Progress events; nothing needs to listen.
+    pub events: Channel<TaskEvent>,
+    /// Runs under the task slot and in the same transaction as the task's first save, so
+    /// work that must start exactly once (a routine claiming its time) commits with the
+    /// task or not at all.
+    pub start: Box<dyn FnOnce(&Store, &TaskRecord) -> Result<(), String> + Send + 'a>,
+}
+
+/// Runs a request the way `run_task` does, with the same task contract, privacy rules,
+/// approvals and receipts, but with no window. A proposal waits under Waiting for you; it
+/// is never approved here. Fails at once rather than waiting when another task is running.
+pub(crate) async fn run_task_headless(
+    app: &tauri::AppHandle,
+    prompt: &str,
+    sink: Headless<'_>,
+) -> Result<TaskRecord, String> {
+    let task = run_headless_in(&app.state::<AppState>(), prompt, sink).await?;
+    if crate::notifications::announce_waiting(app, &task).await {
+        // However the alert went, the inbox in the window shows the proposal.
+        let _ = tauri::Emitter::emit(app, "background-updated", json!({"taskId": task.id}));
+    }
+    Ok(task)
+}
+
+pub(crate) async fn run_headless_in(
+    state: &AppState,
+    prompt: &str,
+    sink: Headless<'_>,
+) -> Result<TaskRecord, String> {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() || prompt.len() > 8000 {
+        return Err("Enter a question of up to 8,000 characters.".into());
+    }
+    let mut task: TaskRecord = serde_json::from_value(json!({
+        "id": uuid::Uuid::new_v4().to_string(), "prompt": prompt, "answer": "", "state": "running",
+        "createdAt": now(), "sources": [], "files": []
+    }))
+    .map_err(|e| e.to_string())?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let settings = {
+        let mut active = state.active.lock().unwrap();
+        if !active.is_empty() {
+            return Err("Another task is running.".into());
+        }
+        let store = state.store.lock().unwrap();
+        let settings = store.settings()?;
+        task.backend = settings.model_backend.clone();
+        let transaction = store.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        (sink.start)(&store, &task)?;
+        store.save_task(&task)?;
+        if store.task_conversation(&task.id)? != sink.thread {
+            return Err("The run couldn’t be put in its own conversation.".into());
+        }
+        transaction.commit().map_err(|e| e.to_string())?;
+        active.insert(task.id.clone(), cancel.clone());
+        settings
+    };
+    let _claim = ActionClaim {
+        state,
+        id: task.id.clone(),
+    };
+    state.audit("task.started", &format!("{} (headless)", task.id));
+    let result = HEADLESS
+        .scope(
+            (),
+            execute_with_settings(state, &mut task, "auto", &sink.events, cancel.clone(), settings, None),
+        )
+        .await;
+    let persisted = state.store.lock().unwrap().workflow(&task.id)?;
+    if let Some(mut flow) = persisted {
+        finish_workflow(state, &mut flow, &mut task, result, cancel.load(Ordering::Relaxed))?;
+    } else {
+        if cancel.load(Ordering::Relaxed) {
+            task.state = "cancelled".into();
+            task.answer = "Task cancelled.".into();
+        } else if let Err(error) = result {
+            task.state = "error".into();
+            task.answer = error;
+        } else {
+            task.state = "completed".into();
+        }
+        state.store.lock().unwrap().save_task(&task)?;
+    }
+    state.audit("task.finished", &format!("{} ({})", task.id, task.state));
     Ok(task)
 }
 
@@ -4928,6 +4981,40 @@ for line in sys.stdin:
             let accepted = offered && validate_tool(&case["call"], "auto", "x").is_ok();
             assert_eq!(accepted, case["valid"] == true, "{}", case["id"]);
         }
+    }
+
+    #[tokio::test]
+    async fn a_routine_asked_for_in_chat_is_proposed_as_said_and_verified_once_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let prompt = "Every weekday at 8, brief me";
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"routine-chat","prompt":prompt,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        // No brain is set up: the proposal needs none.
+        execute(&state, &mut task, "auto", &channel, Arc::new(AtomicBool::new(false))).await.unwrap();
+        assert_eq!(task.state, "waiting_action", "{}", task.answer);
+        let proposal = task.action.clone().unwrap();
+        assert_eq!(proposal["tool"], "create_routine");
+        assert_eq!(proposal["fields"][1]["value"], "weekdays");
+        assert_eq!(proposal["fields"][2]["value"], "8:00 AM");
+        let intent = proposal["id"].as_str().unwrap().to_string();
+        let approved = json!({"task":"Brief me","days":"weekdays","time":"8:00 AM"});
+        let (journal, id) = (&state, intent.clone());
+        let done = run_workflow_action_using(&state, &intent, approved.clone(), &channel, |tool, args, _| async move {
+            crate::monitor_actions::execute(&journal.store.lock().unwrap(), &id, &tool, &args)
+        })
+        .await
+        .unwrap();
+        assert_eq!(done.state, "completed", "{}", done.answer);
+        assert!(done.answer.starts_with("Set up your routine “Brief me”: weekdays at 8:00 AM."), "{}", done.answer);
+        let routines = state.store.lock().unwrap().routines().unwrap();
+        assert_eq!(routines.len(), 2);
+        assert_eq!((routines[1].days.as_str(), routines[1].time.as_str()), ("weekdays", "08:00"));
+        // Approving again changes nothing.
+        let intent = proposal["id"].as_str().unwrap().to_string();
+        run_workflow_action_using(&state, &intent, approved, &channel, |_, _, _| async { panic!("an approval is used once") }).await.unwrap();
+        assert_eq!(state.store.lock().unwrap().routines().unwrap().len(), 2);
     }
 }
 

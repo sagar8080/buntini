@@ -1,7 +1,12 @@
 //! The morning brief: today's calendar and reminders, read on this Mac and written up
 //! without a model, so it is instant and nothing leaves the machine. Each part appears
 //! only when the user allowed that app in Settings → Apps.
+use crate::{controller::AppState, types::*};
 use std::path::Path;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 #[derive(Default)]
 pub struct Day {
@@ -156,6 +161,87 @@ pub fn compose(
         lines.push("Your battery is low, so it might be time to plug in.".into());
     }
     lines.join(" ")
+}
+
+/// Today's brief, written from the calendar and reminders on this Mac. The automatic
+/// once-a-day brief is the built-in routine (`routines::MORNING_BRIEF`): it never opens
+/// Mail; the "My day" button may. The window passes its own id so Stop can cancel the
+/// brief with `cancel_task` like any other turn.
+#[tauri::command]
+pub async fn morning_brief(
+    automatic: Option<bool>,
+    id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<TaskRecord, String> {
+    let launch = if automatic.unwrap_or(false) {
+        crate::apps::Launch::IfRunning
+    } else {
+        crate::apps::Launch::Allow
+    };
+    let id = id
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let settings = {
+        let mut active = state.active.lock().unwrap();
+        if !active.is_empty() {
+            return Err("Finish the current task before preparing the brief.".into());
+        }
+        // Stop pressed before this brief had started: it doesn't start.
+        if state.stopped_early.lock().unwrap().remove(&id) {
+            return Err("Morning brief cancelled.".into());
+        }
+        let settings = state.store.lock().unwrap().settings()?;
+        active.insert(id.clone(), cancel.clone());
+        settings
+    };
+    let _claim = crate::controller::ActionClaim {
+        state: &state,
+        id: id.clone(),
+    };
+    // Stop ends the reads themselves (their helper processes are killed when dropped),
+    // rather than letting Mail, Calendar and Reminders run on and discarding the result.
+    let stopped = async {
+        while !cancel.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+    let day = tokio::select! {
+        day = crate::brief::gather(state.models.apple_helper(), &settings, launch) => day,
+        () = stopped => return Err("Morning brief cancelled.".into()),
+    };
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Morning brief cancelled.".into());
+    }
+    let battery_low = crate::world::health_now().is_some_and(|health| {
+        !health.charging && health.battery_percent.is_some_and(|level| level <= 20)
+    });
+    let task = TaskRecord {
+        id,
+        prompt: String::new(),
+        answer: crate::brief::compose(&settings.user_name, chrono::Local::now(), &day, battery_low),
+        state: "completed".into(),
+        created_at: now(),
+        sources: vec![],
+        files: vec![],
+        system: None,
+        research: vec![],
+        research_report: None,
+        prices: vec![],
+        cards: vec![],
+        backend: "brief".into(),
+        // The brief is indexed like any turn, so it records everything it shows.
+        touched: crate::skills::day::shares(&day, battery_low)
+            .into_iter()
+            .map(|share| share.id().to_string())
+            .collect(),
+        handoff: None,
+        action: None,
+    };
+    let store = state.store.lock().unwrap();
+    store.save_task(&task)?;
+    crate::routines::record_brief(&store, &task.id)?;
+    Ok(task)
 }
 
 #[cfg(test)]

@@ -337,6 +337,7 @@ pub fn start(app: tauri::AppHandle) {
             for id in price_due {
                 let _ = crate::watches::run(&app, &id, true).await;
             }
+            crate::routines::run_due(&app).await;
             // The sleep's clock stops while the Mac sleeps; a wake cuts it short.
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
@@ -348,7 +349,7 @@ pub fn start(app: tauri::AppHandle) {
 
 static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
-/// Checks for due searches and price watches now instead of at the next tick.
+/// Checks for due searches, price watches and routines now instead of at the next tick.
 /// Timers need no nudge: their claim loop looks every second.
 pub fn tick_now() {
     WAKE.notify_one();
