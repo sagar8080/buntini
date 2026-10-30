@@ -116,14 +116,15 @@ impl Recipe for ReminderAboutThis {
 }
 
 /// "Reply to this saying I'll be there": a Mail draft to the sender of the open email,
-/// with its subject. The model writes only the body, which the approval sheet shows.
+/// with its subject, also when the user selected text inside it. The model writes only
+/// the body, which the approval sheet shows.
 struct ReplyToThis;
 impl Recipe for ReplyToThis {
     fn id(&self) -> &'static str {
         "reply_to_this"
     }
     fn prepare(&self, goal: &str, referent: &Referent, contract: &mut TaskContract) -> bool {
-        let Referent::Mail(mail) = referent else {
+        let Some(mail) = referent.mail() else {
             return false;
         };
         if !crate::focus::replies_to_this(goal) {
@@ -233,6 +234,28 @@ mod tests {
         assert!(contract
             .validate_proposal("draft_email", &json!({"to":"ana@example.com","subject":"Re: Friday","body":"I'll be there."}), &[])
             .is_ok());
+    }
+
+    #[test]
+    fn a_reply_to_text_selected_in_an_email_still_knows_the_sender() {
+        let goal = "reply to her saying yes";
+        let open = mail("Ana Silva <ana@example.com>", "Friday").mail().cloned();
+        let selected = Referent::Selection {
+            app: "Mail".into(),
+            text: "Are you free on Friday?".into(),
+            mail: open,
+        };
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert_eq!(prepare(goal, &selected, &mut contract), ["reply_to_this"]);
+        contract.refresh(goal, &[]);
+        let next = contract.next_outcome().unwrap();
+        assert_eq!(next.required_arguments["to"], "ana@example.com");
+        assert_eq!(next.required_arguments["subject"], "Re: Friday");
+        // A selection elsewhere has no sender to reply to.
+        let elsewhere = Referent::Selection { app: "Notes".into(), text: "Friday?".into(), mail: None };
+        let mut contract = TaskContract::from_request(goal);
+        assert!(prepare(goal, &elsewhere, &mut contract).is_empty());
     }
 
     #[test]

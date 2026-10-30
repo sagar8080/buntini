@@ -25,7 +25,8 @@ class EvaluationGateTests(unittest.TestCase):
         self.assertTrue(score_one(self.case, self.row)["passed"])
         report = score(self.cases, [self.row], "scorer-unit-test")
         self.assertEqual(report["samples"], 1)
-        self.assertEqual(len(report["missing_scenarios"]), 9)
+        journeys = [case for case in self.cases if case["kind"] == "journey"]
+        self.assertEqual(len(report["missing_scenarios"]), len(journeys) - 1)
         self.assertFalse(report["release_gate_passed"])
 
     def test_false_success_unknown_or_absent_receipt_fails(self):

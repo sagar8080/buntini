@@ -102,6 +102,38 @@ pub(crate) fn non_action(clause: &str) -> bool {
             .any(|s| clause.starts_with(s))
 }
 
+/// Words after "reply to this" that make it a question for Buntini to answer in chat
+/// ("respond to this question in one sentence"), not a person or an email.
+pub(crate) const ANSWERED_IN_CHAT: &[&str] = &[
+    "question", "questions", "prompt", "following", "text", "sentence", "statement",
+    "paragraph", "quiz", "riddle", "puzzle", "query", "above", "below", "poem", "joke",
+];
+
+/// Whether "reply …", "respond …" or "write back …" is addressed to a person or an email,
+/// so it needs a Mail draft. "Reply in French", "respond with one word" and "reply to the
+/// following in a friendly tone" are about Buntini's own answer.
+fn addressed_reply(tokens: &[&str]) -> bool {
+    let mut rest = &tokens[1..];
+    if rest.first() == Some(&"back") {
+        rest = &rest[1..];
+    } else if tokens[0] == "write" {
+        return false;
+    }
+    let Some((&"to", object)) = rest.split_first() else {
+        // "write back saying yes" still answers whoever wrote; "reply with an email" too.
+        return tokens.get(1) == Some(&"back")
+            || rest.iter().any(|word| ["email", "mail", "message"].contains(word));
+    };
+    match object {
+        [] => false,
+        [first, ..] if ANSWERED_IN_CHAT.contains(first) => false,
+        ["the" | "this" | "that" | "these" | "those" | "my" | "your", noun, ..] => {
+            !ANSWERED_IN_CHAT.contains(noun)
+        }
+        _ => true,
+    }
+}
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
     let prompt = unquoted(&prompt.replace("Additional details: ", "\n"));
     let mut expected = Vec::new();
@@ -175,13 +207,7 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                     Some("draft_email")
                 }
                 // A reply is drafted for the user to send; Buntini never sends it.
-                // "Reply in French" or "respond with one word" is about the answer itself.
-                "reply" | "respond"
-                    if tokens.get(1) == Some(&"to") || has(&["email", "mail", "message"]) =>
-                {
-                    Some("draft_email")
-                }
-                "write" if tokens.get(1) == Some(&"back") => Some("draft_email"),
+                "reply" | "respond" | "write" if addressed_reply(&tokens) => Some("draft_email"),
                 "open"
                     if has(&["page", "site", "website", "url", "link", "https"])
                         || clause.contains("https://") =>
@@ -1026,6 +1052,30 @@ mod tests {
         let mut unknown = saved("create_note", "Verified Note.");
         unknown.state = "unknown".into();
         assert!(validate_answer("Save a note", "Done", &[unknown]).is_err());
+    }
+
+    #[test]
+    fn only_a_reply_to_a_person_or_an_email_needs_a_draft() {
+        for prompt in [
+            "reply to this saying yes",
+            "write back to her",
+            "reply to Ana's email",
+            "respond to him: no",
+            "reply to the email from my landlord",
+            "write back saying I'll be there",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec!["draft_email"], false), "{prompt}");
+        }
+        for prompt in [
+            "Reply in French",
+            "respond with one word",
+            "respond to this question in one sentence: what is a lease?",
+            "reply to the following in a friendly tone: thanks for the update",
+            "reply",
+            "write a haiku about autumn",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec![], false), "{prompt}");
+        }
     }
 
     #[test]
