@@ -23,6 +23,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Actions proposed by the model and waiting for the user's approval.
     pub pending_actions: Mutex<HashMap<String, PendingAction>>,
+    /// Stops a memory index refresh that is running (Delete everything, Clear history).
+    pub index_cancel: Arc<AtomicBool>,
 }
 pub struct PendingAction {
     tool: String,
@@ -179,6 +181,7 @@ impl AppState {
             config_gate: tokio::sync::Mutex::new(()),
             data_dir: data,
             pending_actions: Mutex::new(HashMap::new()),
+            index_cancel: Arc::new(AtomicBool::new(false)),
         })
     }
     pub(crate) fn audit(&self, action: &str, detail: &str) {
@@ -447,6 +450,7 @@ pub fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     if !active.is_empty() {
         return Err("Cancel the current task before clearing history.".into());
     }
+    state.index_cancel.store(true, Ordering::SeqCst);
     state.store.lock().unwrap().clear_history()
 }
 #[tauri::command]
@@ -1289,9 +1293,18 @@ fn brief_key() -> String {
     format!("brief-{}", chrono::Local::now().format("%Y-%m-%d"))
 }
 
-/// Today's brief, written from the calendar and reminders on this Mac.
+/// Today's brief, written from the calendar and reminders on this Mac. The automatic
+/// once-a-day brief never opens Mail; the "My day" button may.
 #[tauri::command]
-pub async fn morning_brief(state: State<'_, AppState>) -> Result<TaskRecord, String> {
+pub async fn morning_brief(
+    automatic: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<TaskRecord, String> {
+    let launch = if automatic.unwrap_or(false) {
+        crate::apps::Launch::IfRunning
+    } else {
+        crate::apps::Launch::Allow
+    };
     let id = uuid::Uuid::new_v4().to_string();
     let cancel = Arc::new(AtomicBool::new(false));
     let settings = {
@@ -1307,7 +1320,7 @@ pub async fn morning_brief(state: State<'_, AppState>) -> Result<TaskRecord, Str
         state: &state,
         id: id.clone(),
     };
-    let day = crate::brief::gather(state.models.apple_helper(), &settings).await;
+    let day = crate::brief::gather(state.models.apple_helper(), &settings, launch).await;
     if cancel.load(Ordering::Relaxed) {
         return Err("Morning brief cancelled.".into());
     }
@@ -1578,6 +1591,18 @@ pub fn small_talk(prompt: &str, assistant_name: &str) -> bool {
         })
 }
 
+/// Whether a file question gets no tools, only a note on sharing a folder: while no folder
+/// is shared, unless it recalls something ("what did Ana say about the lease document?"),
+/// which the memory index answers.
+fn files_off(prompt: &str, has_folders: bool) -> bool {
+    !has_folders
+        && asks_about_files(prompt)
+        && !crate::task_contract::TaskContract::from_request(prompt)
+            .outcomes
+            .iter()
+            .any(|outcome| outcome.accepted_tools.iter().any(|tool| tool == "search_memory"))
+}
+
 /// Whether a message is about the user's own files ("find my lease pdf", "what's on my
 /// desktop?").
 pub fn asks_about_files(prompt: &str) -> bool {
@@ -1620,26 +1645,24 @@ async fn memory_tool(
     if cancel.load(Ordering::Relaxed) {
         return Err("Task cancelled.".into());
     }
-    // Without the search model the index still answers by keyword.
+    // Without the search model, or while indexing holds it, the index answers by keyword.
     let question = query.to_string();
-    let vector = tauri::async_runtime::spawn_blocking(move || crate::embedding::embed(&[question], true))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .and_then(|mut vectors| vectors.pop().flatten());
+    let vector = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedding::embed_within(&[question], true, std::time::Duration::from_millis(300))
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .and_then(|mut vectors| vectors.pop().flatten());
     let locality = state.models.locality(settings);
-    let (hits, roots) = {
+    // Filtered before the limit, so hits this brain may not see never crowd out ones it may.
+    let visible = {
         let store = state.store.lock().unwrap();
-        (
-            crate::memory_index::search(&store.db, query, vector.as_deref(), 24)?,
-            store.roots()?,
-        )
+        let roots = store.roots()?;
+        crate::memory_index::search_visible(&store.db, query, vector.as_deref(), 8, |hit| {
+            crate::memory_index::visible(hit, locality, settings, &roots)
+        })?
     };
-    let visible: Vec<_> = hits
-        .into_iter()
-        .filter(|hit| crate::memory_index::visible(hit, locality, settings, &roots))
-        .take(8)
-        .collect();
     let mut shares = Vec::new();
     for hit in &visible {
         for share in crate::memory_index::hit_shares(hit) {
@@ -2703,7 +2726,7 @@ async fn execute_with_settings(
     messages.push(json!({"role":"user","content":task.prompt}));
     // Greetings and small talk get a reply, never a tool; so do file questions while no
     // folder is shared (the instructions say how to share one).
-    let files_off = !has_folders && asks_about_files(&task.prompt);
+    let files_off = files_off(&task.prompt, has_folders);
     let no_tools = small_talk(&task.prompt, &settings.assistant_name) || files_off;
     let mut offered = if no_tools {
         Vec::new()
@@ -4294,6 +4317,86 @@ for line in sys.stdin:
         assert_eq!(task.answer, deltas);
         assert!(task.system.is_some());
         assert!(task.touched.iter().any(|share| share == "system"));
+        state.models.reset().await;
+    }
+
+    #[tokio::test]
+    async fn a_recall_that_mentions_a_document_searches_memory_without_shared_folders() {
+        let prompt = "What did Ana say about the lease document?";
+        assert!(asks_about_files(prompt) && !files_off(prompt, false));
+        assert!(files_off("find my lease pdf", false) && !files_off("find my lease pdf", true));
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("recall_fixture.py");
+        std::fs::write(
+            &script,
+            r#"import json, sys
+print(json.dumps({'type': 'ready'}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    def emit(kind, **fields):
+        print(json.dumps(dict(id=request['id'], type=kind, **fields)), flush=True)
+    tools = [tool['name'] for tool in request['tools']]
+    results = [m for m in request['messages'] if m.get('role') == 'tool']
+    if not results:
+        assert 'search_memory' in tools, tools
+        emit('tool_call', name='search_memory', arguments={'query': 'Ana lease document'})
+        emit('done', text='', finish_reason='tool_call')
+    else:
+        assert 'both signatures' in results[-1]['content'], results[-1]['content']
+        emit('done', text='Ana said the lease document needs both signatures by Friday.', finish_reason='stop')
+"#,
+        )
+        .unwrap();
+        let mut state = AppState::new(
+            dir.path().join("data"),
+            dir.path().join("cache"),
+            dir.path().into(),
+        )
+        .unwrap();
+        state.models = ModelHub::new(script, PathBuf::new());
+        let model = dir.path().join("model");
+        std::fs::create_dir(&model).unwrap();
+        std::fs::write(model.join("config.json"), "{}").unwrap();
+        let settings = Settings {
+            model_backend: "mlx".into(),
+            python_path: "python3".into(),
+            model_path: model.to_string_lossy().into_owned(),
+            apps: vec!["notes".into()],
+            ..Settings::default()
+        };
+        {
+            let store = state.store.lock().unwrap();
+            store.save_settings(&settings).unwrap();
+            assert!(store.roots().unwrap().is_empty());
+            crate::memory_index::replace_source(
+                &store.db,
+                "notes",
+                &[crate::memory_index::Record {
+                    source: "notes",
+                    source_id: "n1".into(),
+                    scope: String::new(),
+                    shares: vec![privacy::Share::Notes],
+                    title: "Flat".into(),
+                    text: "Ana: the lease document needs both signatures by Friday".into(),
+                    observed_at: "2026-10-28 09:00".into(),
+                }],
+            )
+            .unwrap();
+        }
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"recall-document","prompt":prompt,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[],"backend":"mlx"})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        execute(
+            &state,
+            &mut task,
+            "auto",
+            &Channel::new(|_| Ok(())),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task.state, "completed", "{}", task.answer);
+        assert!(task.answer.contains("both signatures"), "{}", task.answer);
+        assert!(task.touched.iter().any(|share| share == "notes"));
         state.models.reset().await;
     }
     #[test]

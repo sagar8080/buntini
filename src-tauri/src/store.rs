@@ -1,9 +1,13 @@
 use crate::types::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Store {
     pub db: Connection,
+    /// Moves on whenever indexed data is deleted or revoked, so a memory refresh that
+    /// read before the change can tell and never writes the old data back.
+    index_epoch: AtomicU64,
 }
 impl Store {
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -25,7 +29,7 @@ impl Store {
           CREATE VIRTUAL TABLE IF NOT EXISTS file_index USING fts5(path UNINDEXED, root UNINDEXED, name, content);")
             .map_err(|e| format!("Cannot initialize local database: {e}"))?;
         // A prior interruption is recoverable and never silently shown as still running.
-        let store = Self { db };
+        let store = Self { db, index_epoch: AtomicU64::new(0) };
         crate::workflows::initialize(&store.db)?;
         crate::delivery::initialize(&store.db)?;
         crate::chat_threads::initialize(&store)?;
@@ -133,9 +137,18 @@ impl Store {
         }
         Ok(settings)
     }
+    /// Which deletion or revocation the memory index has seen; see `index_epoch`.
+    pub fn index_epoch(&self) -> u64 {
+        self.index_epoch.load(Ordering::SeqCst)
+    }
+    fn bump_index(&self) {
+        self.index_epoch.fetch_add(1, Ordering::SeqCst);
+    }
     pub fn save_settings(&self, settings: &Settings) -> Result<(), String> {
         // An app switched off in Settings → Apps takes its records out of the memory index.
-        crate::memory_index::purge_disallowed(&self.db, settings)?;
+        if crate::memory_index::purge_disallowed(&self.db, settings)? {
+            self.bump_index();
+        }
         settings.validate()?;
         let raw = serde_json::to_string(settings).map_err(|e| e.to_string())?;
         self.db
@@ -170,6 +183,7 @@ impl Store {
             .execute("DELETE FROM file_index WHERE root=?1", [root])
             .map_err(|e| e.to_string())?;
         crate::memory_index::purge(&self.db, "files", Some(root))?;
+        self.bump_index();
         self.audit("folder.revoked", root)
     }
     /// Remembers a fact; repeating one already known changes nothing. Keeps at most 200.
@@ -225,7 +239,9 @@ impl Store {
         self.db
             .execute("DELETE FROM memories WHERE id=?1", [id])
             .map_err(|e| e.to_string())?;
-        crate::memory_index::purge_record(&self.db, "memory", &id.to_string())
+        crate::memory_index::purge_record(&self.db, "memory", &id.to_string())?;
+        self.bump_index();
+        Ok(())
     }
     pub fn preference(&self, key: &str) -> Result<Option<String>, String> {
         self.db
@@ -250,8 +266,10 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.db
             .execute("DELETE FROM conversation_turns WHERE task_id=?1", [id])
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        crate::memory_index::purge_record(&self.db, "history", id)?;
+        self.bump_index();
+        Ok(())
     }
     pub fn save_task(&self, task: &TaskRecord) -> Result<(), String> {
         self.active_conversation_id()?;
@@ -280,6 +298,29 @@ impl Store {
                 .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
         })
         .collect()
+    }
+    /// The newest finished conversation turns worth remembering (at most `limit`), for
+    /// the memory index. Unlike `tasks`, this isn't capped at the 100 shown in the app.
+    pub fn history_for_index(&self, limit: usize) -> Result<Vec<TaskRecord>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM tasks ORDER BY created_at DESC LIMIT ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([(limit * 2) as i64], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut turns = Vec::new();
+        for row in rows {
+            let task: TaskRecord = serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            if crate::memory_index::remembered_turn(&task) {
+                turns.push(task);
+            }
+            if turns.len() == limit {
+                break;
+            }
+        }
+        Ok(turns)
     }
     pub fn conversation_start(&self) -> Result<Option<String>, String> {
         self.db
@@ -465,6 +506,7 @@ impl Store {
                  DELETE FROM memory_records; DELETE FROM memory_fts;",
             )
             .map_err(|e| e.to_string())?;
+        self.bump_index();
         // The empty database already uses the new thread schema. A task saved before
         // the next restart must not be mistaken for an unmigrated legacy turn.
         self.set_preference("conversation-migration-v1", "1")?;
@@ -493,6 +535,7 @@ impl Store {
         // Earlier conversations and folder text leave the memory index with them.
         crate::memory_index::purge(&tx, "history", None)?;
         crate::memory_index::purge(&tx, "files", None)?;
+        self.bump_index();
         self.active_conversation_id()?;
         self.audit("history.cleared", "Task history and file index cleared")?;
         tx.commit().map_err(|e| e.to_string())
@@ -845,6 +888,42 @@ mod tests {
         if wal.exists() {
             assert_eq!(std::fs::metadata(wal).unwrap().len(), 0);
         }
+    }
+    #[test]
+    fn memory_history_source_reads_up_to_history_turns() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        for n in 0..150 {
+            let task: TaskRecord = serde_json::from_value(serde_json::json!({
+                "id":format!("t{n}"),"prompt":format!("Question {n}"),"answer":format!("Answer {n}"),
+                "state":"completed","createdAt":format!("2026-10-01T09:{:02}:{:02}Z", n / 60, n % 60),
+                "backend":"apple","sources":[],"files":[]
+            }))
+            .unwrap();
+            s.save_task(&task).unwrap();
+        }
+        assert_eq!(s.tasks().unwrap().len(), 100, "the app shows the newest 100");
+        let turns = s.history_for_index(crate::memory_index::HISTORY_TURNS).unwrap();
+        assert_eq!(turns.len(), 150);
+        assert_eq!(turns[0].id, "t149", "newest first");
+        assert_eq!(s.history_for_index(10).unwrap().len(), 10);
+        let history = |s: &Store| {
+            crate::memory_index::counts(&s.db)
+                .unwrap()
+                .into_iter()
+                .find(|(source, _)| source == "history")
+                .map_or(0, |(_, n)| n)
+        };
+        crate::memory_index::apply(&s, s.index_epoch(), vec![]).unwrap();
+        assert_eq!(history(&s), 150);
+        for (id, _) in crate::memory_index::unembedded(&s.db, 200).unwrap() {
+            crate::memory_index::set_vector(&s.db, id, Some(&[1, 2, 3])).unwrap();
+        }
+        crate::memory_index::apply(&s, s.index_epoch(), vec![]).unwrap();
+        assert_eq!(history(&s), 150, "older turns aren't dropped on the next refresh");
+        assert!(
+            crate::memory_index::unembedded(&s.db, 200).unwrap().is_empty(),
+            "and keep their vectors"
+        );
     }
     #[test]
     fn memories_are_kept_once_and_can_be_forgotten() {

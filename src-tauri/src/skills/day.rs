@@ -70,14 +70,14 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             if !mail_allowed {
                 return Err("Allow Mail in Settings → Apps so I can check what needs a reply.".into());
             }
-            let triage = crate::triage::run().await?;
+            let triage = crate::triage::run(crate::apps::Launch::Allow).await?;
             Ok(Outcome::Done {
                 answer: crate::triage::compose(&triage),
                 share: Some(Share::Mail),
             })
         }
         Command::MyDay => {
-            let day = crate::brief::gather(context.helper, context.settings).await;
+            let day = crate::brief::gather(context.helper, context.settings, crate::apps::Launch::Allow).await;
             let battery_low = crate::world::health_now().is_some_and(|health| {
                 !health.charging && health.battery_percent.is_some_and(|level| level <= 20)
             });

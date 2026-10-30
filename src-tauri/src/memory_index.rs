@@ -7,14 +7,18 @@
 //! from the bundled model in `embedding`), merged by reciprocal rank. Before a result reaches a brain, its categories are checked against
 //! that brain's privacy permissions and its app's current access. Indexing runs on the Mac
 //! in the background, only for sources the user allowed, and never uses the network.
+//! Background reads never open a closed Mail or Notes, and indexing waits while a chat is
+//! running or the Mac is on battery.
 //! Revoking a source, forgetting a fact, clearing history and Delete everything remove the
-//! matching records.
+//! matching records, and a refresh already under way can't put them back: it reads the
+//! apps first, then writes under the store lock only if nothing was deleted meanwhile.
 use crate::{
     privacy::{self, Locality, Share},
     types::Settings,
 };
 use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The most records kept, across every source.
 pub const MAX_RECORDS: usize = 20_000;
@@ -143,12 +147,21 @@ pub fn looks_secret(text: &str) -> bool {
 /// Replaces everything indexed from `source` with `records` (a complete read of that
 /// source's window). Unchanged records keep their vectors; changed ones are re-embedded.
 /// Records that look like secrets are left out, and dropped if indexed before.
-pub fn replace_source(db: &mut Connection, source: &str, records: &[Record]) -> Result<usize, String> {
-    let records: Vec<&Record> = records
+pub fn replace_source(db: &Connection, source: &str, records: &[Record]) -> Result<usize, String> {
+    write_source(db, source, records, true)
+}
+
+/// Like `replace_source`, but for a read that covered only part of the source: records
+/// not in `records` stay as they were.
+fn update_source(db: &Connection, source: &str, records: &[Record]) -> Result<usize, String> {
+    write_source(db, source, records, false)
+}
+
+fn write_source(db: &Connection, source: &str, records: &[Record], complete: bool) -> Result<usize, String> {
+    let (records, secret): (Vec<&Record>, Vec<&Record>) = records
         .iter()
-        .filter(|record| !looks_secret(&record.title) && !looks_secret(&record.text))
-        .collect();
-    let tx = db.transaction().map_err(|e| e.to_string())?;
+        .partition(|record| !looks_secret(&record.title) && !looks_secret(&record.text));
+    let tx = db.unchecked_transaction().map_err(|e| e.to_string())?;
     let existing: HashMap<String, (i64, String, String)> = {
         let mut statement = tx
             .prepare("SELECT source_id, id, title, text FROM memory_records WHERE source=?1")
@@ -159,8 +172,10 @@ pub fn replace_source(db: &mut Connection, source: &str, records: &[Record]) -> 
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
     };
     let kept: HashSet<&str> = records.iter().map(|r| r.source_id.as_str()).collect();
+    let dropped: HashSet<&str> = secret.iter().map(|r| r.source_id.as_str()).collect();
     for (source_id, (id, _, _)) in &existing {
-        if !kept.contains(source_id.as_str()) {
+        let gone = if complete { !kept.contains(source_id.as_str()) } else { dropped.contains(source_id.as_str()) };
+        if gone {
             tx.execute("DELETE FROM memory_records WHERE id=?1", [id]).map_err(|e| e.to_string())?;
             tx.execute("DELETE FROM memory_fts WHERE rowid=?1", [id]).map_err(|e| e.to_string())?;
         }
@@ -213,8 +228,9 @@ pub fn replace_source(db: &mut Connection, source: &str, records: &[Record]) -> 
     Ok(changed)
 }
 
-/// Removes everything from one source, or one scope of it (a shared folder).
-pub fn purge(db: &Connection, source: &str, scope: Option<&str>) -> Result<(), String> {
+/// Removes everything from one source, or one scope of it (a shared folder), and says
+/// how many records went.
+pub fn purge(db: &Connection, source: &str, scope: Option<&str>) -> Result<usize, String> {
     // An empty scope means the whole source.
     let filter = "source=?1 AND (?2 = '' OR scope=?2)";
     let scope = scope.unwrap_or("");
@@ -224,8 +240,7 @@ pub fn purge(db: &Connection, source: &str, scope: Option<&str>) -> Result<(), S
     )
     .map_err(|e| e.to_string())?;
     db.execute(&format!("DELETE FROM memory_records WHERE {filter}"), params![source, scope])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// Removes one record, such as a forgotten fact.
@@ -240,14 +255,40 @@ pub fn purge_record(db: &Connection, source: &str, source_id: &str) -> Result<()
     Ok(())
 }
 
-/// Removes sources the user no longer allows (an app switched off in Settings → Apps).
-pub fn purge_disallowed(db: &Connection, settings: &Settings) -> Result<(), String> {
-    for (source, app) in [("mail", "mail"), ("notes", "notes"), ("calendar", "calendar"), ("reminders", "reminders")] {
-        if !crate::apps::allowed(settings, app) {
-            purge(db, source, None)?;
+/// The indexed sources that come from an app, each named like the app.
+const APP_SOURCES: [&str; 4] = ["notes", "mail", "calendar", "reminders"];
+
+/// Removes sources the user no longer allows (an app switched off in Settings → Apps),
+/// and says whether any record went. Turning the app back on reads it again in full.
+pub fn purge_disallowed(db: &Connection, settings: &Settings) -> Result<bool, String> {
+    let mut removed = 0;
+    for source in APP_SOURCES {
+        if !crate::apps::allowed(settings, source) {
+            removed += purge(db, source, None)?;
+            db.execute("DELETE FROM preferences WHERE key=?1", [refreshed_key(source)])
+                .map_err(|e| e.to_string())?;
         }
     }
-    Ok(())
+    Ok(removed > 0)
+}
+
+fn refreshed_key(source: &str) -> String {
+    format!("memory-refreshed-{source}")
+}
+
+/// The app sources read in full within `within`, which a refresh need not read again
+/// (each launch would otherwise re-read 90 days of inbox).
+fn recently_refreshed(db: &Connection, within: chrono::Duration) -> HashSet<&'static str> {
+    let now = chrono::Local::now();
+    APP_SOURCES
+        .into_iter()
+        .filter(|source| {
+            db.query_row("SELECT value FROM preferences WHERE key=?1", [refreshed_key(source)], |row| row.get::<_, String>(0))
+                .ok()
+                .and_then(|at| chrono::DateTime::parse_from_rfc3339(&at).ok())
+                .is_some_and(|at| at <= now && now.signed_duration_since(at) < within)
+        })
+        .collect()
 }
 
 /// Records still waiting for a vector, oldest first.
@@ -308,14 +349,45 @@ fn dot(a: &[i8], b: &[i8]) -> i32 {
 }
 
 /// The best records for a query: keyword ranks and (with `vector`) meaning ranks, fused.
+/// Brains search through `search_visible`; this unfiltered form is for tests.
+#[cfg(test)]
 pub fn search(db: &Connection, query: &str, vector: Option<&[i8]>, limit: usize) -> Result<Vec<Hit>, String> {
+    let best = fused(db, query, vector, CANDIDATES)?;
+    best.into_iter().take(limit).map(|(id, score)| hit(db, id, score)).collect()
+}
+
+/// The best `limit` records for a query that `keep` accepts (what a brain may see).
+/// Records are filtered before the limit, from a wider pool of candidates, so hidden ones
+/// never take the places of visible ones and hide a match.
+pub fn search_visible(
+    db: &Connection,
+    query: &str,
+    vector: Option<&[i8]>,
+    limit: usize,
+    keep: impl Fn(&Hit) -> bool,
+) -> Result<Vec<Hit>, String> {
+    let mut hits = Vec::new();
+    for (id, score) in fused(db, query, vector, CANDIDATES * 4)? {
+        let found = hit(db, id, score)?;
+        if keep(&found) {
+            hits.push(found);
+            if hits.len() == limit {
+                break;
+            }
+        }
+    }
+    Ok(hits)
+}
+
+/// Record ids with their fused score, best first, from the top `pool` of each ranking.
+fn fused(db: &Connection, query: &str, vector: Option<&[i8]>, pool: usize) -> Result<Vec<(i64, f64)>, String> {
     let mut score: HashMap<i64, f64> = HashMap::new();
     if let Some(expression) = fts_query(query) {
         let mut statement = db
             .prepare("SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?1 ORDER BY bm25(memory_fts, 2.0, 1.0) LIMIT ?2")
             .map_err(|e| e.to_string())?;
         let ids = statement
-            .query_map(params![expression, CANDIDATES as i64], |row| row.get::<_, i64>(0))
+            .query_map(params![expression, pool as i64], |row| row.get::<_, i64>(0))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -337,40 +409,37 @@ pub fn search(db: &Connection, query: &str, vector: Option<&[i8]>, limit: usize)
             })
             .collect();
         ranked.sort_unstable_by(|a, b| b.cmp(a));
-        for (rank, (_, id)) in ranked.into_iter().take(CANDIDATES).enumerate() {
+        for (rank, (_, id)) in ranked.into_iter().take(pool).enumerate() {
             *score.entry(id).or_default() += 1.0 / (RRF + rank as f64 + 1.0);
         }
     }
     let mut best: Vec<(i64, f64)> = score.into_iter().collect();
     best.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    best.truncate(limit);
-    let mut hits = Vec::new();
-    for (id, score) in best {
-        let hit = db
-            .query_row(
-                "SELECT source, source_id, title, text, observed_at, shares FROM memory_records WHERE id=?1",
-                [id],
-                |row| {
-                    Ok(Hit {
-                        source: row.get(0)?,
-                        source_id: row.get(1)?,
-                        title: row.get(2)?,
-                        excerpt: clip(&row.get::<_, String>(3)?, 400),
-                        observed_at: row.get(4)?,
-                        shares: row
-                            .get::<_, String>(5)?
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect(),
-                        score,
-                    })
-                },
-            )
-            .map_err(|e| e.to_string())?;
-        hits.push(hit);
-    }
-    Ok(hits)
+    Ok(best)
+}
+
+fn hit(db: &Connection, id: i64, score: f64) -> Result<Hit, String> {
+    db.query_row(
+        "SELECT source, source_id, title, text, observed_at, shares FROM memory_records WHERE id=?1",
+        [id],
+        |row| {
+            Ok(Hit {
+                source: row.get(0)?,
+                source_id: row.get(1)?,
+                title: row.get(2)?,
+                excerpt: clip(&row.get::<_, String>(3)?, 400),
+                observed_at: row.get(4)?,
+                shares: row
+                    .get::<_, String>(5)?
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                score,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// The data categories a hit needs, as `Share`s.
@@ -410,15 +479,29 @@ const MAIL_DAYS: u32 = 90;
 const MAIL_MESSAGES: usize = 200;
 const CALENDAR_PAST: i64 = 30;
 const CALENDAR_AHEAD: i64 = 60;
-const HISTORY_TURNS: usize = 1_000;
+pub(crate) const HISTORY_TURNS: usize = 1_000;
 /// Records embedded per refresh, so one run stays a short background job.
 const EMBED_PER_RUN: usize = 2_000;
+/// Records embedded at a time: a short hold on the model, so a question asked meanwhile
+/// waits little, and a quick check for deletions between batches.
+const EMBED_BATCH: usize = 8;
+/// An app source read in full this recently isn't read again (on launch, say).
+const FRESH_HOURS: i64 = 3;
+/// How often the index is brought up to date.
+const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
+/// Whether a finished turn is worth remembering: the brief is regenerated, not remembered.
+pub(crate) fn remembered_turn(task: &crate::types::TaskRecord) -> bool {
+    task.state == "completed"
+        && task.backend != "brief"
+        && !task.prompt.trim().is_empty()
+        && !task.answer.trim().is_empty()
+}
 
 fn history_records(tasks: &[crate::types::TaskRecord]) -> Vec<Record> {
     tasks
         .iter()
-        .filter(|task| task.state == "completed" && task.backend != "brief")
-        .filter(|task| !task.prompt.trim().is_empty() && !task.answer.trim().is_empty())
+        .filter(|task| remembered_turn(task))
         .take(HISTORY_TURNS)
         .map(|task| {
             let mut shares = vec![Share::History];
@@ -478,108 +561,216 @@ async fn calendar_records(helper: &std::path::Path) -> Result<Vec<Record>, Strin
     Ok(records)
 }
 
-/// Reads every source the user allows and brings the index up to date, then embeds what
-/// changed. A source that can't be read keeps what was indexed before.
-pub async fn refresh(
-    store: &std::sync::Arc<std::sync::Mutex<crate::store::Store>>,
-    models: &crate::model::ModelHub,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> Result<Refresh, String> {
-    use std::sync::atomic::Ordering;
-    let (settings, memories, tasks, files) = {
-        let store = store.lock().unwrap();
-        let roots = store.roots()?;
-        let files: Vec<Record> = {
-            let mut statement = store
-                .db
-                .prepare("SELECT path, root, name, substr(content, 1, 1500) FROM file_index LIMIT 5000")
-                .map_err(|e| e.to_string())?;
-            let rows = statement
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
-                .map_err(|e| e.to_string())?;
-            rows.filter_map(Result::ok)
-                .filter(|(_, root, _, _)| roots.contains(root))
-                .map(|(path, root, name, content)| Record {
-                    source: "files",
-                    source_id: path,
-                    scope: root,
-                    shares: vec![Share::Files],
-                    title: name,
-                    text: content,
-                    observed_at: String::new(),
-                })
-                .collect()
-        };
-        (store.settings()?, store.memories()?, store.tasks()?, files)
-    };
-    let mut sources: Vec<(&'static str, Result<Vec<Record>, String>)> = vec![
-        (
-            "memory",
-            Ok(memories
-                .into_iter()
-                .map(|memory| Record {
-                    source: "memory",
-                    source_id: memory.id.to_string(),
-                    scope: String::new(),
-                    shares: vec![Share::Memory],
-                    title: "Something you asked me to remember".into(),
-                    text: memory.fact,
-                    observed_at: memory.created_at,
-                })
-                .collect()),
-        ),
-        ("history", Ok(history_records(&tasks))),
-        ("files", Ok(files)),
-    ];
-    let helper = models.apple_helper();
-    if crate::apps::allowed(&settings, "notes") {
-        sources.push(("notes", crate::apps::recent_notes(NOTES_DAYS).await.map(|rows| recent_records("notes", Share::Notes, rows))));
-    }
-    if crate::apps::allowed(&settings, "mail") {
-        sources.push(("mail", crate::apps::recent_mail(MAIL_DAYS, MAIL_MESSAGES).await.map(|rows| recent_records("mail", Share::Mail, rows))));
-    }
-    if crate::apps::allowed(&settings, "calendar") {
-        sources.push(("calendar", calendar_records(helper).await));
-    }
-    if crate::apps::allowed(&settings, "reminders") {
-        let reminders = crate::apps::reminders(helper).await.map(|read| {
-            read.items
-                .into_iter()
-                .map(|reminder| Record {
-                    source: "reminders",
-                    source_id: reminder.id.clone().unwrap_or_else(|| reminder.title.clone()),
-                    scope: String::new(),
-                    shares: vec![Share::Calendar],
-                    title: reminder.title.clone(),
-                    text: if reminder.due.is_empty() {
-                        format!("Open reminder “{}”", reminder.title)
-                    } else {
-                        format!("Open reminder “{}”, due {}", reminder.title, reminder.due)
-                    },
-                    observed_at: reminder.due,
-                })
-                .collect()
-        });
-        sources.push(("reminders", reminders));
-    }
-    let mut result = Refresh::default();
-    for (source, records) in sources {
-        if cancel.load(Ordering::Relaxed) {
-            return Ok(result);
+/// What reading one app gave.
+#[derive(Debug)]
+pub(crate) enum SourceRead {
+    /// A complete read of the source's window.
+    Records(Vec<Record>),
+    /// Part of the source, with what stopped the rest; records not read are kept.
+    Partial(Vec<Record>, String),
+    /// Not read: the app was closed, isn't allowed, was read recently, or the refresh
+    /// was cancelled. What was indexed before stays.
+    Skipped,
+    /// The read failed; what was indexed before stays.
+    Failed(String),
+}
+
+impl SourceRead {
+    fn from(read: Result<(Vec<Record>, Option<String>), String>) -> Self {
+        match read {
+            Ok((records, None)) => Self::Records(records),
+            Ok((records, Some(error))) => Self::Partial(records, error),
+            // Left closed rather than opened for a background job.
+            Err(error) if crate::apps::is_not_running(&error) => Self::Skipped,
+            Err(error) => Self::Failed(error),
         }
-        match records {
-            Ok(records) => match replace_source(&mut store.lock().unwrap().db, source, &records) {
-                Ok(changed) => result.changed += changed,
-                Err(error) => result.failed.push(format!("{source}: {error}")),
-            },
+    }
+}
+
+/// Waits while the user is busy with a chat or an action, so indexing steps aside.
+async fn step_aside(busy: &(dyn Fn() -> bool + Sync), cancel: &AtomicBool) {
+    while busy() && !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+/// Reads the apps the user allows (Notes, Mail, Calendar, Reminders), without opening a
+/// closed Mail or Notes. This is the slow part of a refresh and runs without the store.
+async fn read_app_sources(
+    settings: &Settings,
+    models: &crate::model::ModelHub,
+    cancel: &AtomicBool,
+    fresh: &HashSet<&'static str>,
+    busy: &(dyn Fn() -> bool + Sync),
+) -> Vec<(&'static str, SourceRead)> {
+    use crate::apps::Launch;
+    let helper = models.apple_helper();
+    let mut reads = Vec::new();
+    for source in APP_SOURCES {
+        step_aside(busy, cancel).await;
+        if cancel.load(Ordering::Relaxed) || !crate::apps::allowed(settings, source) || fresh.contains(source) {
+            reads.push((source, SourceRead::Skipped));
+            continue;
+        }
+        let read = match source {
+            "notes" => crate::apps::recent_notes(NOTES_DAYS, Launch::IfRunning)
+                .await
+                .map(|rows| (recent_records("notes", Share::Notes, rows), None)),
+            "mail" => crate::apps::recent_mail(MAIL_DAYS, MAIL_MESSAGES, Launch::IfRunning)
+                .await
+                .map(|(rows, failed)| (recent_records("mail", Share::Mail, rows), failed)),
+            "calendar" => calendar_records(helper).await.map(|records| (records, None)),
+            _ => crate::apps::reminders(helper).await.map(|read| {
+                let records = read
+                    .items
+                    .into_iter()
+                    .map(|reminder| Record {
+                        source: "reminders",
+                        source_id: reminder.id.clone().unwrap_or_else(|| reminder.title.clone()),
+                        scope: String::new(),
+                        shares: vec![Share::Calendar],
+                        title: reminder.title.clone(),
+                        text: if reminder.due.is_empty() {
+                            format!("Open reminder “{}”", reminder.title)
+                        } else {
+                            format!("Open reminder “{}”, due {}", reminder.title, reminder.due)
+                        },
+                        observed_at: reminder.due,
+                    })
+                    .collect();
+                (records, None)
+            }),
+        };
+        reads.push((source, SourceRead::from(read)));
+    }
+    reads
+}
+
+/// What Buntini itself holds, read from the store as it is now: remembered facts, past
+/// conversations and shared folders' text.
+fn store_sources(store: &crate::store::Store) -> Result<Vec<(&'static str, Vec<Record>)>, String> {
+    let roots = store.roots()?;
+    let files: Vec<Record> = {
+        let mut statement = store
+            .db
+            .prepare("SELECT path, root, name, substr(content, 1, 1500) FROM file_index LIMIT 5000")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(Result::ok)
+            .filter(|(_, root, _, _)| roots.contains(root))
+            .map(|(path, root, name, content)| Record {
+                source: "files",
+                source_id: path,
+                scope: root,
+                shares: vec![Share::Files],
+                title: name,
+                text: content,
+                observed_at: String::new(),
+            })
+            .collect()
+    };
+    let memories = store
+        .memories()?
+        .into_iter()
+        .map(|memory| Record {
+            source: "memory",
+            source_id: memory.id.to_string(),
+            scope: String::new(),
+            shares: vec![Share::Memory],
+            title: "Something you asked me to remember".into(),
+            text: memory.fact,
+            observed_at: memory.created_at,
+        })
+        .collect();
+    Ok(vec![
+        ("memory", memories),
+        ("history", history_records(&store.history_for_index(HISTORY_TURNS)?)),
+        ("files", files),
+    ])
+}
+
+/// Writes a refresh, all under the store lock. Buntini's own sources are rebuilt from the
+/// store as it is now, so they are never stale. An app read is written only when nothing
+/// was deleted or revoked since `epoch_at_start` and the app is still allowed; otherwise,
+/// and when it was skipped or failed, what was indexed before stays.
+pub(crate) fn apply(
+    store: &crate::store::Store,
+    epoch_at_start: u64,
+    app_sources: Vec<(&'static str, SourceRead)>,
+) -> Result<Refresh, String> {
+    let settings = store.settings()?;
+    let mut result = Refresh::default();
+    for (source, records) in store_sources(store)? {
+        match replace_source(&store.db, source, &records) {
+            Ok(changed) => result.changed += changed,
             Err(error) => result.failed.push(format!("{source}: {error}")),
         }
     }
-    while result.embedded < EMBED_PER_RUN && !cancel.load(Ordering::Relaxed) {
-        let batch = unembedded(&store.lock().unwrap().db, 32)?;
+    // Something was deleted or revoked while the apps were read: their reads may hold it.
+    let revoked = store.index_epoch() != epoch_at_start;
+    for (source, read) in app_sources {
+        if revoked || !crate::apps::allowed(&settings, source) {
+            continue;
+        }
+        let written = match read {
+            SourceRead::Skipped => continue,
+            SourceRead::Failed(error) => {
+                result.failed.push(format!("{source}: {error}"));
+                continue;
+            }
+            SourceRead::Records(records) => replace_source(&store.db, source, &records).and_then(|changed| {
+                store.set_preference(&refreshed_key(source), &chrono::Local::now().to_rfc3339())?;
+                Ok(changed)
+            }),
+            SourceRead::Partial(records, error) => {
+                result.failed.push(format!("{source} (partly read): {error}"));
+                update_source(&store.db, source, &records)
+            }
+        };
+        match written {
+            Ok(changed) => result.changed += changed,
+            Err(error) => result.failed.push(format!("{source}: {error}")),
+        }
+    }
+    purge_disallowed(&store.db, &settings)?;
+    Ok(result)
+}
+
+/// Reads every source the user allows and brings the index up to date, then embeds what
+/// changed. A source that can't be read keeps what was indexed before. `cancel` (set by
+/// Delete everything and Clear history) stops the run; `busy` says the user is in a chat.
+pub async fn refresh(
+    store: &std::sync::Arc<std::sync::Mutex<crate::store::Store>>,
+    models: &crate::model::ModelHub,
+    cancel: &AtomicBool,
+    busy: &(dyn Fn() -> bool + Sync),
+) -> Result<Refresh, String> {
+    cancel.store(false, Ordering::SeqCst);
+    let (settings, epoch, fresh) = {
+        let store = store.lock().unwrap();
+        (store.settings()?, store.index_epoch(), recently_refreshed(&store.db, chrono::Duration::hours(FRESH_HOURS)))
+    };
+    let app_sources = read_app_sources(&settings, models, cancel, &fresh, busy).await;
+    if cancel.load(Ordering::SeqCst) {
+        return Ok(Refresh::default());
+    }
+    let mut result = apply(&store.lock().unwrap(), epoch, app_sources)?;
+    let mut attempted = 0;
+    while attempted < EMBED_PER_RUN {
+        step_aside(busy, cancel).await;
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        let (epoch, batch) = {
+            let store = store.lock().unwrap();
+            (store.index_epoch(), unembedded(&store.db, EMBED_BATCH)?)
+        };
         if batch.is_empty() {
             break;
         }
+        attempted += batch.len();
         let texts: Vec<String> = batch.iter().map(|(_, text)| text.clone()).collect();
         let embedded = tauri::async_runtime::spawn_blocking(move || crate::embedding::embed(&texts, false))
             .await
@@ -594,6 +785,10 @@ pub async fn refresh(
             }
         };
         let store = store.lock().unwrap();
+        // Records deleted while this batch was embedding; their ids may be reused.
+        if cancel.load(Ordering::SeqCst) || store.index_epoch() != epoch {
+            continue;
+        }
         for ((id, _), vector) in batch.iter().zip(&vectors) {
             set_vector(&store.db, *id, vector.as_deref())?;
         }
@@ -602,22 +797,36 @@ pub async fn refresh(
     Ok(result)
 }
 
+/// Whether this Mac is running on its battery; desktops never are.
+fn on_battery() -> bool {
+    std::process::Command::new("/usr/bin/pmset")
+        .args(["-g", "batt"])
+        .output()
+        .ok()
+        .and_then(|output| crate::world::parse_battery(&String::from_utf8_lossy(&output.stdout)))
+        .is_some_and(|(_, charging)| !charging)
+}
+
 /// Keeps the index current: a first pass shortly after launch, then every six hours.
+/// Each pass waits while a chat is running or the Mac is on battery.
 pub fn start(app: tauri::AppHandle) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(90)).await;
         loop {
             let state = app.state::<crate::controller::AppState>();
-            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            match refresh(&state.store, &state.models, cancel).await {
+            let busy = || !state.active.lock().unwrap().is_empty();
+            while busy() || on_battery() {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+            match refresh(&state.store, &state.models, &state.index_cancel, &busy).await {
                 Ok(done) => state.audit(
                     "memory.indexed",
                     &format!("{} changed, {} embedded{}", done.changed, done.embedded, if done.failed.is_empty() { String::new() } else { format!("; unavailable: {}", done.failed.join("; ")) }),
                 ),
                 Err(error) => state.audit("memory.index_failed", &error),
             }
-            tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+            tokio::time::sleep(REFRESH_EVERY).await;
         }
     });
 }
@@ -645,6 +854,50 @@ mod tests {
         }
     }
 
+    /// Indexes `notes` with the bundled model and counts, for each (question, title label),
+    /// whether the labelled note is in the top three by keyword, by meaning and combined.
+    fn recall(notes: &[Record], cases: &[(String, String)]) -> [usize; 3] {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        let db = db();
+        replace_source(&db, "notes", notes).unwrap();
+        loop {
+            let batch = unembedded(&db, 32).unwrap();
+            if batch.is_empty() { break; }
+            let vectors = crate::embedding::embed(&batch.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(), false).unwrap();
+            for ((id, _), vector) in batch.iter().zip(&vectors) { set_vector(&db, *id, vector.as_deref()).unwrap(); }
+        }
+        let mut totals = [0; 3];
+        for (query, label) in cases {
+            let vector = crate::embedding::embed(std::slice::from_ref(query), true).unwrap().remove(0).unwrap();
+            let hit = |hits: &[Hit]| hits.iter().take(3).any(|h| h.title.contains(label.as_str()));
+            let keyword = hit(&search(&db, query, None, 3).unwrap());
+            let fused = hit(&search(&db, query, Some(&vector), 3).unwrap());
+            let mut ranked: Vec<(i32, String)> = db
+                .prepare("SELECT title, vector FROM memory_records").unwrap()
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))).unwrap()
+                .map(Result::unwrap)
+                .map(|(title, bytes)| (bytes.iter().zip(&vector).map(|(b, q)| i32::from(*b as i8) * i32::from(*q)).sum(), title))
+                .collect();
+            ranked.sort_by(|a, b| b.0.cmp(&a.0));
+            let meaning = ranked.iter().take(3).any(|(_, title)| title.contains(label.as_str()));
+            for (total, found) in totals.iter_mut().zip([keyword, meaning, fused]) { *total += usize::from(found); }
+            println!("{query:<45} {label:<18} keyword {keyword:<5} meaning {meaning:<5} combined {fused}");
+        }
+        println!("found in top 3 of {}: keyword {}, meaning {}, combined {} ({} notes)", cases.len(), totals[0], totals[1], totals[2], notes.len());
+        totals
+    }
+
+    /// The ten reworded questions, for a copy of a real index and for the fixture.
+    fn recall_cases() -> Vec<(String, String)> {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../evals/memory-recall.json")).unwrap();
+        fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|case| (case["query"].as_str().unwrap().to_string(), case["label"].as_str().unwrap().to_string()))
+            .collect()
+    }
+
     /// Recall on the synthetic QA notes in a copy of a real index, with questions that
     /// avoid each note's own words. BUNTINI_EVAL_DB=/path/to/copy cargo test -- --ignored
     #[test]
@@ -659,45 +912,202 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
+        recall(&notes, &recall_cases());
+    }
+
+    /// Of the ten fixture questions, how many find their note in the top three. Measured
+    /// with bge-small-en-v1.5: keyword 2, meaning 9, combined 9 (the handoff note is missed).
+    const MEANING_FLOOR: usize = 9;
+    const FUSED_FLOOR: usize = 9;
+
+    /// The same ten questions over the committed synthetic notes in
+    /// evals/memory-recall.json (8 targets among 40), with the bundled model. The floors
+    /// are what this model and ranking measured; a change that lowers them is a regression.
+    #[test]
+    fn fused_recall_on_the_synthetic_fixture_meets_the_documented_floor() {
+        if !std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5/model.safetensors").is_file() {
+            eprintln!("skipped: run scripts/fetch-models.sh to test the bundled model");
+            return;
+        }
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../evals/memory-recall.json")).unwrap();
+        let notes: Vec<Record> = fixture["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|note| Record {
+                source: "notes",
+                source_id: note["id"].as_str().unwrap().into(),
+                scope: String::new(),
+                shares: vec![Share::Notes],
+                title: note["title"].as_str().unwrap().into(),
+                text: note["text"].as_str().unwrap().into(),
+                observed_at: String::new(),
+            })
+            .collect();
+        assert_eq!(notes.len(), 40);
+        assert!(notes.iter().all(|note| !looks_secret(&note.text)), "every fixture note is indexed");
+        let [keyword, meaning, fused] = recall(&notes, &recall_cases());
+        assert!(meaning >= MEANING_FLOOR, "meaning found {meaning} of 10");
+        assert!(fused >= FUSED_FLOOR, "combined found {fused} of 10");
+        assert!(keyword <= fused, "combining never loses to keywords alone here");
+    }
+
+    fn store_allowing(apps: &[&str]) -> crate::store::Store {
+        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        store
+            .save_settings(&Settings { apps: apps.iter().map(|app| app.to_string()).collect(), ..Settings::default() })
+            .unwrap();
+        store
+    }
+
+    fn turn(id: &str, prompt: &str, answer: &str) -> crate::types::TaskRecord {
+        serde_json::from_value(serde_json::json!({
+            "id":id,"prompt":prompt,"answer":answer,"state":"completed","createdAt":"2026-10-29T09:00:00Z",
+            "backend":"apple","touched":[],"sources":[],"files":[],"research":[],"prices":[],"cards":[]
+        }))
+        .unwrap()
+    }
+
+    /// What the slow phase of a refresh read from Notes before the user acted.
+    fn notes_read() -> Vec<(&'static str, SourceRead)> {
+        vec![("notes", SourceRead::Records(vec![record("notes", "n1", "Dinner", "Sam is vegetarian, so no fish", vec![Share::Notes])]))]
+    }
+
+    fn count(store: &crate::store::Store, source: &str) -> usize {
+        counts(&store.db).unwrap().into_iter().find(|(name, _)| name == source).map_or(0, |(_, n)| n)
+    }
+
+    #[test]
+    fn erase_during_refresh_is_not_undone() {
+        let store = store_allowing(&["notes"]);
+        store.remember("I'm vegetarian").unwrap();
+        store.save_task(&turn("t1", "What do I eat?", "You're vegetarian.")).unwrap();
+        apply(&store, store.index_epoch(), vec![]).unwrap();
+        assert_eq!(count(&store, "memory") + count(&store, "history"), 2);
+        let epoch = store.index_epoch();
+        let read = notes_read();
+        store.erase_everything().unwrap();
+        apply(&store, epoch, read).unwrap();
+        assert!(counts(&store.db).unwrap().is_empty());
+        assert!(search(&store.db, "vegetarian", None, 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn forget_during_refresh_is_not_undone() {
+        let store = store_allowing(&["notes"]);
+        store.remember("I'm vegetarian").unwrap();
+        apply(&store, store.index_epoch(), vec![]).unwrap();
+        let epoch = store.index_epoch();
+        let read = notes_read();
+        store.forget(store.memories().unwrap()[0].id).unwrap();
+        apply(&store, epoch, read).unwrap();
+        assert!(search(&store.db, "vegetarian", None, 5).unwrap().is_empty(), "neither the fact nor a read from before it went");
+        // The next run, which reads after the change, indexes Notes as usual.
+        apply(&store, store.index_epoch(), notes_read()).unwrap();
+        assert_eq!(count(&store, "notes"), 1);
+        assert_eq!(count(&store, "memory"), 0);
+    }
+
+    #[test]
+    fn clear_history_during_refresh_is_not_undone() {
+        let store = store_allowing(&[]);
+        store.save_task(&turn("t1", "What do I eat?", "You're vegetarian.")).unwrap();
+        apply(&store, store.index_epoch(), vec![]).unwrap();
+        assert_eq!(count(&store, "history"), 1);
+        let epoch = store.index_epoch();
+        store.clear_history().unwrap();
+        apply(&store, epoch, vec![]).unwrap();
+        assert_eq!(count(&store, "history"), 0);
+        assert!(search(&store.db, "vegetarian", None, 5).unwrap().is_empty());
+        // Deleting one turn takes it out as well.
+        store.save_task(&turn("t2", "Lease?", "Due Friday.")).unwrap();
+        apply(&store, store.index_epoch(), vec![]).unwrap();
+        store.delete_task("t2").unwrap();
+        assert_eq!(count(&store, "history"), 0);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_stops_when_cancelled_and_otherwise_indexes_buntinis_own_data() {
+        let store = std::sync::Arc::new(std::sync::Mutex::new(store_allowing(&[])));
+        store.lock().unwrap().remember("I'm vegetarian").unwrap();
+        let models = crate::model::ModelHub::new(std::path::PathBuf::new(), std::path::PathBuf::new());
+        let cancel = AtomicBool::new(false);
+        // Delete everything arrives while the refresh waits for a chat to finish.
+        let erased = || {
+            cancel.store(true, Ordering::SeqCst);
+            true
+        };
+        let done = refresh(&store, &models, &cancel, &erased).await.unwrap();
+        assert_eq!((done.changed, done.embedded), (0, 0));
+        assert!(counts(&store.lock().unwrap().db).unwrap().is_empty());
+        // The next run clears the flag and goes ahead.
+        let done = refresh(&store, &models, &cancel, &|| false).await.unwrap();
+        assert!(!cancel.load(Ordering::SeqCst));
+        assert_eq!(done.changed, 1);
+        assert_eq!(count(&store.lock().unwrap(), "memory"), 1);
+    }
+
+    #[test]
+    fn an_app_turned_off_before_apply_is_not_written() {
+        let store = store_allowing(&["mail"]);
+        let epoch = store.index_epoch();
+        let read = vec![("mail", SourceRead::Records(vec![record("mail", "m1", "Lease", "Ana on the lease", vec![Share::Mail])]))];
+        // Mail had no rows yet, so nothing was purged; the check at write time still holds.
+        store.save_settings(&Settings::default()).unwrap();
+        apply(&store, epoch, read).unwrap();
+        assert_eq!(count(&store, "mail"), 0);
+    }
+
+    #[test]
+    fn a_skipped_source_keeps_its_rows() {
+        let store = store_allowing(&["mail"]);
+        let mail = |id: &str, text: &str| record("mail", id, "Lease", text, vec![Share::Mail]);
+        apply(&store, store.index_epoch(), vec![("mail", SourceRead::Records(vec![mail("m1", "Ana on the lease")]))]).unwrap();
+        assert_eq!(count(&store, "mail"), 1);
+        // Mail closed (left closed), or the read failed: what was indexed stays.
+        apply(&store, store.index_epoch(), vec![("mail", SourceRead::Skipped)]).unwrap();
+        let failed = apply(&store, store.index_epoch(), vec![("mail", SourceRead::Failed("Mail timed out.".into()))]).unwrap();
+        assert_eq!(count(&store, "mail"), 1);
+        assert_eq!(failed.failed, ["mail: Mail timed out."]);
+        // A read that covered part of the inbox adds to it without dropping the rest.
+        let partial = apply(&store, store.index_epoch(), vec![("mail", SourceRead::Partial(vec![mail("m2", "Sam on the deposit")], "Mail timed out.".into()))]).unwrap();
+        assert_eq!(count(&store, "mail"), 2);
+        assert!(partial.failed[0].contains("partly read"));
+        apply(&store, store.index_epoch(), vec![("mail", SourceRead::Records(vec![mail("m2", "Sam on the deposit")]))]).unwrap();
+        assert_eq!(count(&store, "mail"), 1, "a complete read replaces the window");
+    }
+
+    #[test]
+    fn a_source_read_in_full_is_not_read_again_soon() {
+        let store = store_allowing(&["mail", "notes"]);
+        let recent = |store: &crate::store::Store| recently_refreshed(&store.db, chrono::Duration::hours(FRESH_HOURS));
+        apply(&store, store.index_epoch(), vec![("mail", SourceRead::Partial(vec![], "Mail timed out.".into()))]).unwrap();
+        assert!(recent(&store).is_empty(), "a partial read is tried again");
+        apply(&store, store.index_epoch(), vec![("mail", SourceRead::Records(vec![])), ("notes", SourceRead::Skipped)]).unwrap();
+        assert_eq!(recent(&store), HashSet::from(["mail"]));
+        assert!(recently_refreshed(&store.db, chrono::Duration::zero()).is_empty());
+        // Turning Mail off and on again reads it in full next time.
+        store.save_settings(&Settings { apps: vec!["notes".into()], ..Settings::default() }).unwrap();
+        assert!(recent(&store).is_empty());
+    }
+
+    #[test]
+    fn hidden_hits_do_not_crowd_out_visible_ones() {
         let mut db = db();
-        replace_source(&mut db, "notes", &notes).unwrap();
-        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
-        loop {
-            let batch = unembedded(&db, 32).unwrap();
-            if batch.is_empty() { break; }
-            let vectors = crate::embedding::embed(&batch.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(), false).unwrap();
-            for ((id, _), vector) in batch.iter().zip(&vectors) { set_vector(&db, *id, vector.as_deref()).unwrap(); }
-        }
-        let cases = [
-            ("my trip itinerary", "Travel"),
-            ("what do I need to buy at the supermarket", "Groceries"),
-            ("vendor price estimates", "Quotes"),
-            ("logistics for the training session", "Workshop"),
-            ("what should happen next on the work", "Project next step"),
-            ("passing my work over to a colleague", "Handoff"),
-            ("things to finish before we ship", "Launch checklist"),
-            ("action items from the call", "Meeting follow-up"),
-            ("travel", "Travel"),
-            ("groceries", "Groceries"),
-        ];
-        let mut totals = [0; 3];
-        for (query, label) in cases {
-            let vector = crate::embedding::embed(&[query.to_string()], true).unwrap().remove(0).unwrap();
-            let hit = |hits: &[Hit]| hits.iter().take(3).any(|h| h.title.contains(label));
-            let keyword = hit(&search(&db, query, None, 3).unwrap());
-            let fused = hit(&search(&db, query, Some(&vector), 3).unwrap());
-            let mut ranked: Vec<(i32, String)> = db
-                .prepare("SELECT title, vector FROM memory_records").unwrap()
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))).unwrap()
-                .map(Result::unwrap)
-                .map(|(title, bytes)| (bytes.iter().zip(&vector).map(|(b, q)| i32::from(*b as i8) * i32::from(*q)).sum(), title))
-                .collect();
-            ranked.sort_by(|a, b| b.0.cmp(&a.0));
-            let meaning = ranked.iter().take(3).any(|(_, title)| title.contains(label));
-            for (total, found) in totals.iter_mut().zip([keyword, meaning, fused]) { *total += usize::from(found); }
-            println!("{query:<45} {label:<18} keyword {keyword:<5} meaning {meaning:<5} combined {fused}");
-        }
-        println!("found in top 3 of {}: keyword {}, meaning {}, combined {} ({} notes)", cases.len(), totals[0], totals[1], totals[2], notes.len());
+        let mail: Vec<Record> = (0..30)
+            .map(|n| record("mail", &format!("m{n}"), "Lease", "Lease renewal: the lease, the lease terms and the lease deposit", vec![Share::Mail]))
+            .collect();
+        replace_source(&mut db, "mail", &mail).unwrap();
+        replace_source(&mut db, "notes", &[record("notes", "n1", "Flat", "Ana thinks the lease is fine", vec![Share::Notes])]).unwrap();
+        let settings = Settings {
+            apps: vec!["mail".into(), "notes".into()],
+            external_shares: vec!["notes".into()],
+            ..Settings::default()
+        };
+        let hits = search_visible(&db, "lease", None, 8, |hit| visible(hit, Locality::External, &settings, &[])).unwrap();
+        assert_eq!(hits.iter().map(|h| h.source_id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        let on_device = search_visible(&db, "lease", None, 8, |hit| visible(hit, Locality::OnDevice, &settings, &[])).unwrap();
+        assert_eq!(on_device.len(), 8, "an on-device brain sees everything local");
     }
 
     #[test]

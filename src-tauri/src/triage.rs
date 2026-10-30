@@ -24,6 +24,9 @@ pub struct Triage {
     pub automated: usize,
     /// (checked, total) when Mail had more unreplied messages than were checked.
     pub partial: Option<(usize, usize)>,
+    /// Messages people sent the user directly whose opening wasn't read (past the
+    /// first `READ_AT_MOST`, or Mail didn't return it), so a question in them was missed.
+    pub unopened: usize,
 }
 
 const AUTOMATED: &[&str] = &[
@@ -102,6 +105,10 @@ pub fn sort(headers: Vec<MailHeader>, total: usize, openings: &HashMap<String, S
         };
         match reason {
             Some(reason) => triage.reply.push(Item { header, reason }),
+            None if direct(&header) && opening.is_none() => {
+                triage.unopened += 1;
+                triage.look.push(Item { header, reason: "sent to you, not opened" });
+            }
             None => triage.look.push(Item {
                 reason: if direct(&header) { "sent to you" } else { "you’re one of several recipients" },
                 header,
@@ -129,7 +136,15 @@ fn line(item: &Item) -> String {
 /// The answer as Buntini says it.
 pub fn compose(triage: &Triage) -> String {
     let mut lines = Vec::new();
+    let unopened = match triage.unopened {
+        1 => "1 email sent to you that I didn’t open".to_string(),
+        n => format!("{n} emails sent to you that I didn’t open"),
+    };
     match triage.reply.len() {
+        // "Nothing" would claim more than was read.
+        0 if triage.unopened > 0 => lines.push(format!(
+            "None of the emails I opened looks like it needs a reply, but I only open the newest {READ_AT_MOST} sent to you, so check the {unopened}."
+        )),
         0 => lines.push(format!("Nothing in your inbox from the last {DAYS} days looks like it needs a reply.")),
         1 => lines.push("One email looks like it needs a reply:".into()),
         n => lines.push(format!("{n} emails look like they need a reply:")),
@@ -151,6 +166,9 @@ pub fn compose(triage: &Triage) -> String {
             triage.automated,
             if triage.automated == 1 { "message" } else { "messages" }
         ));
+    }
+    if !triage.reply.is_empty() && triage.unopened > 0 {
+        lines.push(format!("I only open the newest {READ_AT_MOST} emails sent to you, so the {unopened} may need a reply too."));
     }
     if let Some((checked, total)) = triage.partial {
         lines.push(format!("I checked the newest {checked} of {total} unreplied messages, so older ones may be missing."));
@@ -181,10 +199,12 @@ pub fn brief_line(triage: &Triage) -> Option<String> {
     ))
 }
 
-/// Reads Mail and sorts it. Mail must be allowed in Settings → Apps.
-pub async fn run() -> Result<Triage, String> {
-    let (headers, total) = crate::apps::unreplied_mail(DAYS).await?;
-    let openings = crate::apps::mail_openings(&candidates(&headers)).await?;
+/// Reads Mail and sorts it. Mail must be allowed in Settings → Apps. With
+/// `Launch::IfRunning` a closed Mail stays closed and the read fails with
+/// `apps::NOT_RUNNING`.
+pub async fn run(launch: crate::apps::Launch) -> Result<Triage, String> {
+    let (headers, total) = crate::apps::unreplied_mail(DAYS, launch).await?;
+    let openings = crate::apps::mail_openings(&candidates(&headers), launch).await?;
     Ok(sort(headers, total, &openings))
 }
 
@@ -249,6 +269,33 @@ mod tests {
             brief_line(&triage).as_deref(),
             Some("2 emails look like they need a reply, from Ana, Lee.")
         );
+    }
+
+    #[test]
+    fn emails_past_the_reading_limit_are_never_called_nothing() {
+        // Thirteen people wrote directly; only the oldest, which is past the limit, asks.
+        let headers: Vec<MailHeader> = (1..=13)
+            .map(|n| MailHeader {
+                received: format!("2026-10-22 {:02}:00", 23 - n),
+                ..header(&n.to_string(), &format!("P{n} <p{n}@x.com>"), Some(true), 1, false)
+            })
+            .collect();
+        let read = candidates(&headers);
+        assert_eq!(read.len(), READ_AT_MOST);
+        assert!(!read.contains(&"13".to_string()));
+        let openings: HashMap<String, String> = read.iter().map(|id| (id.clone(), "Photos from the trip.".to_string())).collect();
+        let triage = sort(headers, 13, &openings);
+        assert!(triage.reply.is_empty());
+        assert_eq!(triage.unopened, 1);
+        assert_eq!(triage.partial, None, "Mail returned every unreplied message");
+        let text = compose(&triage);
+        assert!(!text.starts_with("Nothing"), "{text}");
+        assert!(text.contains("newest 12") && text.contains("1 email sent to you that I didn’t open"), "{text}");
+        assert_eq!(triage.look.last().unwrap().reason, "sent to you, not opened");
+        // With a reply found as well, the limit is still stated.
+        let mut both = triage.clone();
+        both.reply.push(both.look.remove(0));
+        assert!(compose(&both).contains("may need a reply too"));
     }
 
     #[test]

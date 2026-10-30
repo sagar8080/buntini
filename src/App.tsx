@@ -466,15 +466,15 @@ export default function App() {
     await refresh(); react('happy');
   }
   const briefing = useRef(false);
-  async function brief() {
+  async function brief(automatic = false) {
     if (briefing.current || switchingThreadRef.current) return;
     briefing.current = true;
-    try { const turn = await command<TaskRecord>('morning_brief'); setTurns(previous => mergeTurns(previous, [turn])); react('happy'); if (data?.settings.speakResponses) void speak(turn.answer); void refresh().catch(error => setError(errorMessage(error))); }
+    try { const turn = await command<TaskRecord>('morning_brief', { automatic });setTurns(previous => mergeTurns(previous, [turn])); react('happy'); if (data?.settings.speakResponses) void speak(turn.answer); void refresh().catch(error => setError(errorMessage(error))); }
     catch (e) { setError(errorMessage(e)); }
     finally { briefing.current = false; }
   }
-  // Once a day, the first time the bubble opens.
-  useEffect(() => { if (expanded && data?.briefDue && !busy) void brief(); }, [expanded, data?.briefDue]);
+  // Once a day, the first time the bubble opens. This one leaves a closed Mail closed.
+  useEffect(() => { if (expanded && data?.briefDue && !busy) void brief(true); }, [expanded, data?.briefDue]);
   async function newTopic() {
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
     switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;

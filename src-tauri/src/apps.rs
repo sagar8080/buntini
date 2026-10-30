@@ -724,6 +724,55 @@ const FINDER_SELECTED: &str = r#"on run argv
 end run
 "#;
 
+/// Whether a read may open its app. Background work (the memory index, the automatic
+/// morning brief) uses `IfRunning`, so Mail and Notes never open or start syncing unless
+/// the user asked for something that needs them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Launch {
+    IfRunning,
+    Allow,
+}
+
+/// What a guarded script returns when its app is closed.
+const NOT_RUNNING_SENTINEL: &str = "__buntini_not_running__";
+/// The end of the error a guarded read gives when its app is closed.
+pub const NOT_RUNNING: &str = "isn’t open, so I left it closed.";
+
+/// Whether a read failed only because its app was closed and was left that way.
+pub fn is_not_running(error: &str) -> bool {
+    error.ends_with(NOT_RUNNING)
+}
+
+/// The script as `launch` allows: `IfRunning` returns the sentinel before any `tell`
+/// could open a closed app.
+fn guarded(source: &'static str, app: &str, launch: Launch) -> std::borrow::Cow<'static, str> {
+    match launch {
+        Launch::Allow => source.into(),
+        Launch::IfRunning => source
+            .replacen(
+                "on run argv\n",
+                &format!("on run argv\n  if application \"{app}\" is not running then return \"{NOT_RUNNING_SENTINEL}\"\n"),
+                1,
+            )
+            .into(),
+    }
+}
+
+/// Runs a script that `guarded` may stop early, as an `Err` naming the closed app.
+async fn osascript_if(
+    source: &'static str,
+    app: &str,
+    launch: Launch,
+    argv: &[String],
+    seconds: u64,
+) -> Result<String, String> {
+    let output = osascript(&guarded(source, app, launch), argv, seconds).await?;
+    if output.trim() == NOT_RUNNING_SENTINEL {
+        return Err(format!("{app} {NOT_RUNNING}"));
+    }
+    Ok(output)
+}
+
 async fn osascript(source: &str, argv: &[String], seconds: u64) -> Result<String, String> {
     let mut command =
         crate::actions::osascript_command("AppleScript", &format!("{HELPERS}{source}"));
@@ -2133,8 +2182,8 @@ pub struct MailHeader {
 }
 
 /// Unreplied inbox messages from the last `days` days (at most 60), and how many there were.
-pub(crate) async fn unreplied_mail(days: u32) -> Result<(Vec<MailHeader>, usize), String> {
-    parse_unreplied(&osascript(MAIL_TRIAGE, &[days.to_string()], 60).await?)
+pub(crate) async fn unreplied_mail(days: u32, launch: Launch) -> Result<(Vec<MailHeader>, usize), String> {
+    parse_unreplied(&osascript_if(MAIL_TRIAGE, "Mail", launch, &[days.to_string()], 60).await?)
 }
 
 fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
@@ -2164,11 +2213,12 @@ fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
 /// The opening (up to 500 characters) of each message by Mail-local ID.
 pub(crate) async fn mail_openings(
     ids: &[String],
+    launch: Launch,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     if ids.is_empty() {
         return Ok(Default::default());
     }
-    Ok(rows(&osascript(MAIL_TEXT, ids, 40).await?)
+    Ok(rows(&osascript_if(MAIL_TEXT, "Mail", launch, ids, 40).await?)
         .into_iter()
         .filter(|row| row.len() >= 2)
         .map(|row| (row[0].clone(), row[1].clone()))
@@ -2179,8 +2229,9 @@ pub(crate) async fn mail_openings(
 pub type Recent = (String, String, String, String);
 
 /// Notes changed in the last `days` days (at most 300). Notes must be allowed.
-pub(crate) async fn recent_notes(days: u32) -> Result<Vec<Recent>, String> {
-    let found = counted_rows(&osascript(NOTES_RECENT, &[days.to_string()], 120).await?, 4, "Notes")?;
+pub(crate) async fn recent_notes(days: u32, launch: Launch) -> Result<Vec<Recent>, String> {
+    let output = osascript_if(NOTES_RECENT, "Notes", launch, &[days.to_string()], 120).await?;
+    let found = counted_rows(&output, 4, "Notes")?;
     Ok(found
         .rows
         .into_iter()
@@ -2190,24 +2241,43 @@ pub(crate) async fn recent_notes(days: u32) -> Result<Vec<Recent>, String> {
 
 /// Inbox messages from the last `days` days, newest `limit` with their openings, as
 /// (received, Mail ID, "subject — from sender", opening). Mail must be allowed.
-pub(crate) async fn recent_mail(days: u32, limit: usize) -> Result<Vec<Recent>, String> {
-    let output = osascript(MAIL_LIST, &["".into(), "0".into(), days.to_string()], 120).await?;
+///
+/// Openings are read 40 at a time. When a batch fails (Mail timed out), its messages are
+/// left out and the error comes back beside the rest, so the index keeps what it had for
+/// them instead of losing the whole inbox.
+pub(crate) async fn recent_mail(
+    days: u32,
+    limit: usize,
+    launch: Launch,
+) -> Result<(Vec<Recent>, Option<String>), String> {
+    let output = osascript_if(MAIL_LIST, "Mail", launch, &["".into(), "0".into(), days.to_string()], 120).await?;
     let mut rows = counted_rows(&output, 6, "Mail")?.rows;
     rows.sort_by(|a, b| b[0].cmp(&a[0]));
     rows.truncate(limit);
     let ids: Vec<String> = rows.iter().filter_map(|row| nonempty(&row[5]).map(str::to_string)).collect();
     let mut openings = std::collections::HashMap::new();
+    let mut missed = std::collections::HashSet::new();
+    let mut failed = None;
     for batch in ids.chunks(40) {
-        openings.extend(mail_openings(batch).await?);
+        match mail_openings(batch, launch).await {
+            Ok(found) => openings.extend(found),
+            // Mail was quit part-way through; reading on would open it again.
+            Err(error) if is_not_running(&error) => return Err(error),
+            Err(error) => {
+                missed.extend(batch.iter().cloned());
+                failed = Some(error);
+            }
+        }
     }
-    Ok(rows
+    let read = rows
         .into_iter()
-        .filter(|row| !row[5].is_empty())
+        .filter(|row| !row[5].is_empty() && !missed.contains(&row[5]))
         .map(|row| {
             let opening = openings.get(&row[5]).cloned().unwrap_or_default();
             (row[0].clone(), row[5].clone(), format!("{} — from {}", row[4], row[3]), opening)
         })
-        .collect())
+        .collect();
+    Ok((read, failed))
 }
 
 /// The paths selected in Finder, for "this". macOS asks once before Buntini may see them.
@@ -3103,6 +3173,22 @@ mod tests {
             window_privacy_script(app("safari").unwrap()).is_none(),
             "Safari does not expose private mode"
         );
+    }
+
+    #[test]
+    fn background_scripts_check_the_app_is_running() {
+        for (source, app) in [(NOTES_RECENT, "Notes"), (MAIL_LIST, "Mail"), (MAIL_TEXT, "Mail"), (MAIL_TRIAGE, "Mail")] {
+            let background = guarded(source, app, Launch::IfRunning);
+            let check = format!("on run argv\n  if application \"{app}\" is not running then return \"{NOT_RUNNING_SENTINEL}\"\n");
+            assert!(background.starts_with(&check), "{app}: the check comes before any tell");
+            assert_eq!(background.matches("is not running").count(), 1);
+            assert!(background.ends_with(source.split_once('\n').unwrap().1));
+            // An explicit request may open the app.
+            assert_eq!(guarded(source, app, Launch::Allow), source);
+            assert!(!source.contains("is not running"));
+        }
+        assert!(is_not_running(&format!("Mail {NOT_RUNNING}")));
+        assert!(!is_not_running("Mail returned incomplete data. Please try again."));
     }
 
     #[test]

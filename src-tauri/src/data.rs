@@ -255,6 +255,10 @@ where
     if let Err(error) = clear_profiles().await {
         failures.push(error);
     }
+    // A memory refresh under way stops; its writes would be refused anyway.
+    state
+        .index_cancel
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }
