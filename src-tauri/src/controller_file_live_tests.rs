@@ -3,12 +3,11 @@
 //! an injected model answer or synthetic destination receipt.
 use super::apple_live_tests::{live_state, run_live_prompt, LiveTurn};
 use super::*;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 fn source(path: &Path) -> Value {
     let bytes = std::fs::read(path).unwrap();
-    json!({"path":path,"sha256":format!("{:x}",Sha256::digest(&bytes)),"text":String::from_utf8(bytes).unwrap()})
+    json!({"path":path,"sha256":crate::security::sha256_hex(&bytes),"text":String::from_utf8(bytes).unwrap()})
 }
 
 fn file(state: &AppState, name: &str, text: &str) -> PathBuf {

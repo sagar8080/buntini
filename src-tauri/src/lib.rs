@@ -23,6 +23,7 @@ mod controller;
 mod conversation;
 mod data;
 mod delivery;
+mod embedding;
 mod explicit_fields;
 mod focus;
 mod indexer;

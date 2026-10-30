@@ -307,47 +307,6 @@ impl ModelHub {
         request.map(|turn| turn.text)
     }
 
-    /// On-device sentence vectors from the Apple helper, whatever brain is chosen: one
-    /// unit-length vector per text as signed bytes, or None for an empty text.
-    pub async fn embed(
-        &self,
-        texts: &[String],
-        cancel: Arc<AtomicBool>,
-    ) -> Result<Vec<Option<Vec<i8>>>, String> {
-        use base64::Engine;
-        let turn = self
-            .apple
-            .request(
-                &self.apple_launch()?,
-                serde_json::json!({"type":"embed","texts":texts}),
-                cancel,
-                |_| {},
-            )
-            .await?;
-        let reply: Value = serde_json::from_str(&turn.text)
-            .map_err(|_| "The Apple helper returned invalid vectors.".to_string())?;
-        let vectors = reply["vectors"]
-            .as_array()
-            .filter(|vectors| vectors.len() == texts.len())
-            .ok_or("The Apple helper returned the wrong number of vectors.")?;
-        let dimension = reply["dimension"].as_u64().unwrap_or(0) as usize;
-        vectors
-            .iter()
-            .map(|vector| match vector.as_str() {
-                None => Ok(None),
-                Some(encoded) => {
-                    let bytes = base64::engine::general_purpose::STANDARD
-                        .decode(encoded)
-                        .map_err(|_| "The Apple helper returned invalid vectors.".to_string())?;
-                    if bytes.len() != dimension || dimension == 0 {
-                        return Err("The Apple helper returned vectors of the wrong size.".into());
-                    }
-                    Ok(Some(bytes.into_iter().map(|b| b as i8).collect()))
-                }
-            })
-            .collect()
-    }
-
     /// Generates with the chosen backend. Callers send the generic payload
     /// (`messages`, `tools`, `max_tokens`); backend-specific fields are added here.
     pub async fn generate<F>(

@@ -2,7 +2,6 @@
 //! production Notes/Reminders/Calendar writes. No personal note query is allowed.
 use super::apple_live_tests::{live_state, record_live_case, LiveTurn};
 use super::*;
-use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 fn owner_task_deadline(answer: &str, owner: &str, task: &str, deadline: &str) -> bool {
@@ -462,7 +461,7 @@ pub(super) async fn app_workflows() -> Vec<Value> {
             && clean;
         let helper_hash = std::fs::read(state.models.apple_helper())
             .ok()
-            .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+            .map(|bytes| crate::security::sha256_hex(bytes));
         let row = json!({"id":case["id"],"kind":"real_app_workflow","passed":passed,"apple_calls":apple_calls,"namespace":namespace,"request":case["prompt"],"checks":{"seedsVerifiedInRealApp":seed_ok,"completed":completed,"namespacedReadRequired":read_required,"actualNamespacedNoteRead":actual_read,"actualRequiredWrite":actual_write,"answerFacts":facts,"exactRecordCleanup":clean},"initial":first,"approvedContinuation":final_turn,"realSeeds":seeds,"cleanup":cleanup,"helper_sha256":helper_hash,"source_kind":"real Notes records read through production app integration when requested; namespaced writes through production executor","notes_cleanup":"Removed only from original active folder; Notes may retain Recently Deleted copies; no trash purge."});
         results.push(record_live_case(row));
         state.models.shutdown().await;

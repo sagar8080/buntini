@@ -44,7 +44,11 @@
       "../worker/main.py": "worker/main.py",
       "../worker/protocol.py": "worker/protocol.py",
       "../worker/voice.py": "worker/voice.py",
-      "../worker/tools.json": "worker/tools.json"
+      "../worker/tools.json": "worker/tools.json",
+      "../models/bge-small-en-v1.5/config.json": "models/bge-small-en-v1.5/config.json",
+      "../models/bge-small-en-v1.5/tokenizer.json": "models/bge-small-en-v1.5/tokenizer.json",
+      "../models/bge-small-en-v1.5/model.safetensors": "models/bge-small-en-v1.5/model.safetensors",
+      "../models/bge-small-en-v1.5/NOTICE": "models/bge-small-en-v1.5/NOTICE"
     },
     "externalBin": ["../native/buntini-audio", "../native/buntini-fm"],
     "macOS": {

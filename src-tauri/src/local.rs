@@ -361,9 +361,10 @@ pub(crate) fn search_group(
     Ok(prefer_literal(result, fallback))
 }
 
-pub fn snapshot() -> SystemSnapshot {
+pub fn snapshot() -> Result<SystemSnapshot, String> {
     use sysinfo::{Disks, ProcessesToUpdate, System};
-    let mut sys = System::new_all();
+    let unreadable = |_| "macOS didn't report this Mac's system information. Try again.".to_string();
+    let mut sys = System::new_all().map_err(unreadable)?;
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     sys.refresh_cpu_usage();
     sys.refresh_memory();
@@ -380,7 +381,7 @@ pub fn snapshot() -> SystemSnapshot {
     processes.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
     processes.truncate(8);
     let disks = Disks::new_with_refreshed_list()
-        .list()
+        .map_err(unreadable)?
         .iter()
         .map(|d| DiskInfo {
             name: d.name().to_string_lossy().into_owned(),
@@ -388,11 +389,11 @@ pub fn snapshot() -> SystemSnapshot {
             available_bytes: d.available_space(),
         })
         .collect();
-    SystemSnapshot {
+    Ok(SystemSnapshot {
         cpu_percent: sys.global_cpu_usage(),
         memory_used: sys.used_memory(),
         memory_total: sys.total_memory(),
-        uptime_seconds: System::uptime(),
+        uptime_seconds: System::uptime().map_err(unreadable)?,
         os: format!(
             "{} {}",
             System::name().unwrap_or_default(),
@@ -402,7 +403,7 @@ pub fn snapshot() -> SystemSnapshot {
         processes,
         captured_at: now(),
         security: security_snapshot(),
-    }
+    })
 }
 fn fixed_status(program: &str, args: &[&str]) -> String {
     use std::{
@@ -639,7 +640,7 @@ mod tests {
     #[ignore = "Run explicitly on the target Mac to record current tool latency"]
     fn measure_system_snapshot_latency() {
         let started = std::time::Instant::now();
-        let snapshot = snapshot();
+        let snapshot = snapshot().unwrap();
         println!(
             "system_snapshot_ms={} memory_total={} includes_cpu_sample_ms={}",
             started.elapsed().as_millis(),

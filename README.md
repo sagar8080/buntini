@@ -59,10 +59,11 @@ Read the full [privacy policy](PRIVACY.md).
 
 ## Development
 
-You’ll need Node.js 24, Rust 1.90 or later, Python 3.11 or later for the checks, and Xcode Command Line Tools. The Apple Intelligence helper builds with the macOS 26 SDK.
+You’ll need Node.js 24, Rust 1.95 or later (CI uses 1.99.1), Python 3.11 or later for the checks, and Xcode Command Line Tools. The Apple Intelligence helper builds with the macOS 26 SDK.
 
 ```bash
 npm ci
+./scripts/fetch-models.sh   # once: the bundled memory search model
 npm run desktop      # run the app with live reload
 ./scripts/check.sh   # build and run every test
 ```

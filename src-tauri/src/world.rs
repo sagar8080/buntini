@@ -511,18 +511,18 @@ fn sample(window: &tauri::WebviewWindow) -> Option<World> {
     })
 }
 
-fn health() -> Health {
+/// None when macOS doesn't report system information.
+fn health() -> Option<Health> {
     use sysinfo::{Disks, System};
-    let mut system = System::new();
+    let mut system = System::new().ok()?;
     system.refresh_cpu_usage();
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     system.refresh_cpu_usage();
-    let disks = Disks::new_with_refreshed_list();
+    let disks = Disks::new_with_refreshed_list().ok()?;
     let root = disks
-        .list()
         .iter()
         .find(|disk| disk.mount_point() == std::path::Path::new("/"))
-        .or_else(|| disks.list().first());
+        .or_else(|| disks.first());
     let disk_free_percent = root
         .filter(|disk| disk.total_space() > 0)
         .map(|disk| disk.available_space() as f32 / disk.total_space() as f32 * 100.0)
@@ -532,12 +532,12 @@ fn health() -> Health {
         .output()
         .ok()
         .and_then(|output| parse_battery(&String::from_utf8_lossy(&output.stdout)));
-    Health {
+    Some(Health {
         battery_percent: battery.map(|(percent, _)| percent),
         charging: battery.is_none_or(|(_, charging)| charging),
         cpu_percent: system.global_cpu_usage(),
         disk_free_percent,
-    }
+    })
 }
 
 /// Samples the world once a second while roaming or awareness is on, glues the pet to
@@ -561,7 +561,7 @@ pub fn start(app: tauri::AppHandle) {
                 follow_perch(&glue, &window);
             }
             if aware && (ticks == 1 || ticks % 600 == 0) {
-                tauri::async_runtime::spawn_blocking(|| *HEALTH.lock().unwrap() = Some(health()));
+                tauri::async_runtime::spawn_blocking(|| *HEALTH.lock().unwrap() = health());
             }
             if ticks % 10 == 0 {
                 if let Some(world) = sample(&window) {

@@ -3,8 +3,8 @@
 //! folders), so "what did Ana say about the lease?" finds the note, email or chat it was in.
 //!
 //! Each record keeps the data categories it came from. Results are ranked by keyword match
-//! (SQLite FTS5) and by meaning (on-device sentence vectors from the Apple helper), merged
-//! by reciprocal rank. Before a result reaches a brain, its categories are checked against
+//! (SQLite FTS5 with stemming, so "plans" finds "plan") and by meaning (sentence vectors
+//! from the bundled model in `embedding`), merged by reciprocal rank. Before a result reaches a brain, its categories are checked against
 //! that brain's privacy permissions and its app's current access. Indexing runs on the Mac
 //! in the background, only for sources the user allowed, and never uses the network.
 //! Revoking a source, forgetting a fact, clearing history and Delete everything remove the
@@ -21,7 +21,13 @@ pub const MAX_RECORDS: usize = 20_000;
 const MAX_TEXT: usize = 1_500;
 /// Reciprocal-rank fusion constant: dampens the advantage of the very top ranks.
 const RRF: f64 = 60.0;
+/// Keyword ranks count half as much as meaning ranks: on real notes, meaning found the
+/// right note far more often, and exact words then break ties between close candidates.
+const KEYWORD_WEIGHT: f64 = 0.5;
 const CANDIDATES: usize = 50;
+
+const FTS_SCHEMA: &str = "CREATE VIRTUAL TABLE memory_fts USING fts5(title, text, tokenize='porter unicode61 remove_diacritics 2')";
+const MODEL_KEY: &str = "memory-embedding-model";
 
 pub fn initialize(db: &Connection) -> Result<(), String> {
     db.execute_batch(
@@ -36,10 +42,33 @@ pub fn initialize(db: &Connection) -> Result<(), String> {
            observed_at TEXT NOT NULL,
            indexed_at TEXT NOT NULL,
            vector BLOB,
-           UNIQUE(source, source_id));
-         CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(title, text);",
+           UNIQUE(source, source_id));",
     )
-    .map_err(|e| format!("Cannot initialize the memory index: {e}"))
+    .map_err(|e| format!("Cannot initialize the memory index: {e}"))?;
+    // The keyword index stems words; an older unstemmed one is rebuilt from the records.
+    let fts: Option<String> = db
+        .query_row("SELECT sql FROM sqlite_master WHERE name='memory_fts'", [], |row| row.get(0))
+        .ok();
+    if fts.as_deref() != Some(FTS_SCHEMA) {
+        db.execute_batch(&format!(
+            "DROP TABLE IF EXISTS memory_fts; {FTS_SCHEMA}; INSERT INTO memory_fts(rowid, title, text) SELECT id, title, text FROM memory_records;"
+        ))
+        .map_err(|e| format!("Cannot initialize the memory index: {e}"))?;
+    }
+    // Vectors from another model don't compare with this one's, so they are made again.
+    let model: Option<String> = db
+        .query_row("SELECT value FROM preferences WHERE key=?1", [MODEL_KEY], |row| row.get(0))
+        .ok();
+    if model.as_deref() != Some(crate::embedding::MODEL_ID) {
+        db.execute_batch("UPDATE memory_records SET vector=NULL WHERE vector IS NOT NULL")
+            .map_err(|e| format!("Cannot initialize the memory index: {e}"))?;
+        db.execute(
+            "INSERT INTO preferences(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [MODEL_KEY, crate::embedding::MODEL_ID],
+        )
+        .map_err(|e| format!("Cannot initialize the memory index: {e}"))?;
+    }
+    Ok(())
 }
 
 /// One thing to remember, from one source.
@@ -84,9 +113,41 @@ fn shares_text(shares: &[Share]) -> String {
     ids.join(",")
 }
 
+/// Whether text looks like it holds a secret: an API key or token, a private key, or a
+/// note about passwords or credentials. Such records are never indexed, so search can't
+/// surface them, even though the source app still has them.
+pub fn looks_secret(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if lower.contains("-----begin") {
+        return true;
+    }
+    let words = [
+        "password", "passwords", "passcode", "passwd", "creds", "credentials", "api key", "apikey",
+        "secret key", "access key", "recovery code", "recovery codes", "2fa code", "seed phrase",
+        "private key", "pin code", "social security",
+    ];
+    let padded = format!(" {} ", lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "));
+    if words.iter().any(|word| padded.contains(&format!(" {word} "))) {
+        return true;
+    }
+    let token = |prefix: &str, minimum: usize| {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).any(|part| {
+            part.starts_with(prefix) && part.len() >= prefix.len() + minimum
+        })
+    };
+    [("sk-", 20), ("sk_live_", 16), ("sk_test_", 16), ("rk_live_", 16), ("ghp_", 30), ("gho_", 30), ("github_pat_", 30), ("glpat-", 20), ("xoxb-", 20), ("xoxp-", 20), ("AKIA", 16), ("ASIA", 16), ("AIza", 30), ("hf_", 30)]
+        .iter()
+        .any(|(prefix, minimum)| token(prefix, *minimum))
+}
+
 /// Replaces everything indexed from `source` with `records` (a complete read of that
 /// source's window). Unchanged records keep their vectors; changed ones are re-embedded.
+/// Records that look like secrets are left out, and dropped if indexed before.
 pub fn replace_source(db: &mut Connection, source: &str, records: &[Record]) -> Result<usize, String> {
+    let records: Vec<&Record> = records
+        .iter()
+        .filter(|record| !looks_secret(&record.title) && !looks_secret(&record.text))
+        .collect();
     let tx = db.transaction().map_err(|e| e.to_string())?;
     let existing: HashMap<String, (i64, String, String)> = {
         let mut statement = tx
@@ -106,7 +167,7 @@ pub fn replace_source(db: &mut Connection, source: &str, records: &[Record]) -> 
     }
     let now = chrono::Local::now().to_rfc3339();
     let mut changed = 0;
-    for record in records {
+    for record in &records {
         let title = clip(&record.title, 200);
         let text = clip(&record.text, MAX_TEXT);
         match existing.get(&record.source_id) {
@@ -221,11 +282,21 @@ pub fn counts(db: &Connection) -> Result<Vec<(String, usize)>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 
-/// The query as an FTS5 expression: each word quoted, any may match.
+/// Words too common to say what a question is about; matching them only adds noise.
+const STOPWORDS: &[&str] = &[
+    "a", "about", "after", "all", "am", "an", "and", "any", "are", "as", "at", "be", "before", "but",
+    "by", "can", "did", "do", "does", "for", "from", "had", "has", "have", "he", "her", "him", "his",
+    "how", "i", "if", "in", "into", "is", "it", "its", "me", "my", "need", "next", "of", "on", "or",
+    "our", "over", "said", "say", "she", "should", "so", "that", "the", "their", "them", "there",
+    "they", "this", "to", "up", "us", "was", "we", "were", "what", "when", "where", "which", "who",
+    "why", "will", "with", "would", "you", "your",
+];
+
+/// The query as an FTS5 expression: each meaningful word quoted, any may match.
 fn fts_query(query: &str) -> Option<String> {
     let words: Vec<String> = query
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| word.chars().count() >= 2)
+        .filter(|word| word.chars().count() >= 2 && !STOPWORDS.contains(&word.to_lowercase().as_str()))
         .take(16)
         .map(|word| format!("\"{}\"", word.to_lowercase()))
         .collect();
@@ -249,7 +320,7 @@ pub fn search(db: &Connection, query: &str, vector: Option<&[i8]>, limit: usize)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
         for (rank, id) in ids.into_iter().enumerate() {
-            *score.entry(id).or_default() += 1.0 / (RRF + rank as f64 + 1.0);
+            *score.entry(id).or_default() += KEYWORD_WEIGHT / (RRF + rank as f64 + 1.0);
         }
     }
     if let Some(vector) = vector.filter(|v| !v.is_empty()) {
@@ -340,7 +411,7 @@ const MAIL_MESSAGES: usize = 200;
 const CALENDAR_PAST: i64 = 30;
 const CALENDAR_AHEAD: i64 = 60;
 const HISTORY_TURNS: usize = 1_000;
-/// Records embedded per refresh, so one run never holds the Apple helper for long.
+/// Records embedded per refresh, so one run stays a short background job.
 const EMBED_PER_RUN: usize = 2_000;
 
 fn history_records(tasks: &[crate::types::TaskRecord]) -> Vec<Record> {
@@ -510,7 +581,11 @@ pub async fn refresh(
             break;
         }
         let texts: Vec<String> = batch.iter().map(|(_, text)| text.clone()).collect();
-        let vectors = match models.embed(&texts, cancel.clone()).await {
+        let embedded = tauri::async_runtime::spawn_blocking(move || crate::embedding::embed(&texts, false))
+            .await
+            .map_err(|_| "Memory search stopped unexpectedly.".to_string())
+            .and_then(|result| result);
+        let vectors = match embedded {
             Ok(vectors) => vectors,
             // Without on-device vectors the index still answers by keyword.
             Err(error) => {
@@ -553,6 +628,7 @@ mod tests {
 
     fn db() -> Connection {
         let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)").unwrap();
         initialize(&db).unwrap();
         db
     }
@@ -567,6 +643,102 @@ mod tests {
             text: text.into(),
             observed_at: "2026-10-29 09:00".into(),
         }
+    }
+
+    /// Recall on the synthetic QA notes in a copy of a real index, with questions that
+    /// avoid each note's own words. BUNTINI_EVAL_DB=/path/to/copy cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn recall_on_a_copy_of_real_notes() {
+        let path = std::env::var("BUNTINI_EVAL_DB").expect("set BUNTINI_EVAL_DB to a copy of buntini.sqlite3");
+        let copy = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let notes: Vec<Record> = copy
+            .prepare("SELECT source_id, title, text FROM memory_records WHERE source='notes' AND title LIKE 'BuntiniQA-%'")
+            .unwrap()
+            .query_map([], |row| Ok(Record { source: "notes", source_id: row.get(0)?, scope: String::new(), shares: vec![Share::Notes], title: row.get(1)?, text: row.get(2)?, observed_at: String::new() }))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let mut db = db();
+        replace_source(&mut db, "notes", &notes).unwrap();
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        loop {
+            let batch = unembedded(&db, 32).unwrap();
+            if batch.is_empty() { break; }
+            let vectors = crate::embedding::embed(&batch.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(), false).unwrap();
+            for ((id, _), vector) in batch.iter().zip(&vectors) { set_vector(&db, *id, vector.as_deref()).unwrap(); }
+        }
+        let cases = [
+            ("my trip itinerary", "Travel"),
+            ("what do I need to buy at the supermarket", "Groceries"),
+            ("vendor price estimates", "Quotes"),
+            ("logistics for the training session", "Workshop"),
+            ("what should happen next on the work", "Project next step"),
+            ("passing my work over to a colleague", "Handoff"),
+            ("things to finish before we ship", "Launch checklist"),
+            ("action items from the call", "Meeting follow-up"),
+            ("travel", "Travel"),
+            ("groceries", "Groceries"),
+        ];
+        let mut totals = [0; 3];
+        for (query, label) in cases {
+            let vector = crate::embedding::embed(&[query.to_string()], true).unwrap().remove(0).unwrap();
+            let hit = |hits: &[Hit]| hits.iter().take(3).any(|h| h.title.contains(label));
+            let keyword = hit(&search(&db, query, None, 3).unwrap());
+            let fused = hit(&search(&db, query, Some(&vector), 3).unwrap());
+            let mut ranked: Vec<(i32, String)> = db
+                .prepare("SELECT title, vector FROM memory_records").unwrap()
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))).unwrap()
+                .map(Result::unwrap)
+                .map(|(title, bytes)| (bytes.iter().zip(&vector).map(|(b, q)| i32::from(*b as i8) * i32::from(*q)).sum(), title))
+                .collect();
+            ranked.sort_by(|a, b| b.0.cmp(&a.0));
+            let meaning = ranked.iter().take(3).any(|(_, title)| title.contains(label));
+            for (total, found) in totals.iter_mut().zip([keyword, meaning, fused]) { *total += usize::from(found); }
+            println!("{query:<45} {label:<18} keyword {keyword:<5} meaning {meaning:<5} combined {fused}");
+        }
+        println!("found in top 3 of {}: keyword {}, meaning {}, combined {} ({} notes)", cases.len(), totals[0], totals[1], totals[2], notes.len());
+    }
+
+    #[test]
+    fn secrets_are_never_indexed_and_leave_if_they_were() {
+        for text in [
+            "OpenAI sk-proj-abcdefghijklmnopqrstuvwxyz0123",
+            "Bank creds: user ana",
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "My Wi-Fi password is hunter2",
+            "AWS AKIAABCDEFGHIJKLMNOP",
+            "Recovery codes for GitHub",
+        ] {
+            assert!(looks_secret(text), "{text}");
+        }
+        for text in ["Pick up the passport on Friday", "Ask Ana about the desk-pin", "sketch of the sk-8 park", "Lease renewal due Friday"] {
+            assert!(!looks_secret(text), "{text}");
+        }
+        let mut db = db();
+        replace_source(&mut db, "notes", &[record("notes", "n1", "Bank", "creds for the bank", vec![Share::Notes])]).unwrap();
+        assert!(counts(&db).unwrap().is_empty());
+        replace_source(&mut db, "notes", &[record("notes", "n1", "Bank", "visit the bank", vec![Share::Notes])]).unwrap();
+        replace_source(&mut db, "notes", &[record("notes", "n1", "Bank", "visit the bank, creds below", vec![Share::Notes])]).unwrap();
+        assert!(search(&db, "bank", None, 3).unwrap().is_empty(), "a note that gains a secret leaves the index");
+    }
+
+    #[test]
+    fn stemming_matches_word_forms_and_a_new_model_redoes_vectors() {
+        let mut db = db();
+        replace_source(&mut db, "notes", &[record("notes", "n1", "Trip", "Planning the trips to Lisbon", vec![Share::Notes])]).unwrap();
+        assert_eq!(search(&db, "plan trip", None, 3).unwrap().len(), 1, "plan finds planning, trip finds trips");
+        let (id, _) = unembedded(&db, 1).unwrap()[0].clone();
+        set_vector(&db, id, Some(&[1, 2, 3])).unwrap();
+        initialize(&db).unwrap();
+        assert!(unembedded(&db, 1).unwrap().is_empty(), "the same model keeps its vectors");
+        db.execute("UPDATE preferences SET value='older-model' WHERE key=?1", [MODEL_KEY]).unwrap();
+        initialize(&db).unwrap();
+        assert_eq!(unembedded(&db, 1).unwrap().len(), 1, "another model's vectors are made again");
+        // An index made before stemming is rebuilt with every record.
+        db.execute_batch("DROP TABLE memory_fts; CREATE VIRTUAL TABLE memory_fts USING fts5(title, text);").unwrap();
+        initialize(&db).unwrap();
+        assert_eq!(search(&db, "plan", None, 3).unwrap().len(), 1);
     }
 
     #[test]

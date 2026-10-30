@@ -11,6 +11,13 @@ pub(crate) fn ui_navigation_allowed(url: &reqwest::Url, development: bool) -> bo
     }
 }
 
+/// A SHA-256 digest as lowercase hex, for recording exact evidence in tests.
+#[cfg(test)]
+pub(crate) fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

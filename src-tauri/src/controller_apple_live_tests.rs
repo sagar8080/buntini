@@ -1,7 +1,6 @@
 //! Opt-in, real Apple Intelligence workflows over disposable state and sources.
 //! A case cannot pass without an actual Foundation Models SDK invocation.
 use super::*;
-use sha2::{Digest, Sha256};
 use std::{io::Write, path::Path, time::Instant};
 
 #[path = "controller_writing_checks.rs"]
@@ -224,15 +223,12 @@ async fn live_apple_day_to_day_workflows() {
     .map(|path| {
         (
             path,
-            format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(root.join(path)).unwrap())
-            ),
+            crate::security::sha256_hex(std::fs::read(root.join(path)).unwrap()),
         )
     })
     .collect::<std::collections::BTreeMap<_, _>>();
     let test_binary = std::env::current_exe().unwrap();
-    let test_binary_sha256 = format!("{:x}", Sha256::digest(std::fs::read(&test_binary).unwrap()));
+    let test_binary_sha256 = crate::security::sha256_hex(std::fs::read(&test_binary).unwrap());
     writeln!(out,"{}",json!({"kind":"run","startedAt":now(),"fingerprints":fingerprints,"test_binary_sha256":test_binary_sha256,"profile":"debug opt-in acceptance; not a signed release bundle","entry":"production controller backend; UI not exercised","cloud":false})).unwrap();
     out.flush().unwrap();
     let mut all = Vec::new();

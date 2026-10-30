@@ -12,9 +12,10 @@ Usage: ./scripts/check.sh
 Runs the frontend production build, speech-queue and pet-behavior tests, model-free Python
 worker tests, locked offline Rust tests, and synthetic native audio checks.
 
-Prerequisites: existing node_modules, cached Cargo dependencies, npm, cargo,
-Python 3.11+, macOS with Xcode Command Line Tools. The checks do not install packages,
-download models, open a microphone, contact search providers, or mutate a venv.
+Prerequisites: existing node_modules, cached Cargo dependencies, the bundled memory
+search model (./scripts/fetch-models.sh, once), npm, cargo, Python 3.11+, macOS with
+Xcode Command Line Tools. The checks do not install packages, download models, open a
+microphone, contact search providers, or mutate a venv.
 
 Set BUNTINI_CHECK_PYTHON to an existing Python interpreter for worker tests.
 Real Qwen/Whisper inference and interactive macOS acceptance are separate checks
@@ -35,6 +36,10 @@ for BUNTINI_CHECK_TOOL in npm cargo "$BUNTINI_CHECK_PYTHON" python3 xcrun; do
 done
 if ! "$BUNTINI_CHECK_PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
   echo "The check suite requires Python 3.11 or later." >&2
+  exit 1
+fi
+if [ ! -f "$BUNTINI_CHECK_ROOT/models/bge-small-en-v1.5/model.safetensors" ]; then
+  echo "The memory search model is missing. Run ./scripts/fetch-models.sh once, then check again." >&2
   exit 1
 fi
 if [ "$(uname -s)" != "Darwin" ]; then

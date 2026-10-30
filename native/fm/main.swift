@@ -2,7 +2,6 @@
 //
 // Speaks the same JSONL contract as the Python worker (worker/PROTOCOL.md): `ready`,
 // `ping`→`pong`, `generate`→`token`…`done` or one `tool_call`, `transcribe`→`done`,
-// `embed`→`vectors`,
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`.
@@ -10,7 +9,6 @@ import AVFoundation
 import CoreFoundation
 import EventKit
 import Foundation
-import NaturalLanguage
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -1247,12 +1245,6 @@ func contractSelfTest() async -> Int32 {
         var unknownDate = sourceNote; unknownDate["availableTools"] = ["add_calendar_event"]; unknownDate["requiredFields"] = ["title","start"]
         try require(requiredNextTool(unknownDate,offered:["add_calendar_event"]) == nil, "Creative note-body metadata cannot invent dates or relax unrelated writes")
 
-        try require((try? embedTexts(["texts": [String]()])) == nil && (try? embedTexts(["texts": Array(repeating: "a", count: embedLimit + 1)])) == nil, "Embedding batches must be bounded")
-        try require((try? embedTexts(["texts": [String(repeating: "x", count: 5_000)]]))?.first?.count == embedTextLimit, "Embedded texts must be bounded")
-        try require(quantized([0, 0, 0]) == nil && quantized([Double.nan]) == nil, "Empty or invalid vectors must not be stored")
-        let unit = quantized([3, -4])!
-        try require(unit.count == 2 && Int8(bitPattern: unit[0]) == 76 && Int8(bitPattern: unit[1]) == -102, "Vectors must be unit length and signed")
-
         let registry = TaskRegistry()
         let completed = await registry.insert("done", Task {})
         await completed.value
@@ -1271,59 +1263,6 @@ func contractSelfTest() async -> Int32 {
     } catch {
         emit(["check": "contracts", "ok": false, "message": (error as? Failure)?.message ?? "Contract test failed"])
         return 1
-    }
-}
-
-// On-device sentence vectors for Buntini's memory index (NaturalLanguage, macOS 14+).
-// Each text's token vectors are averaged and scaled to unit length, then stored as one
-// signed byte per dimension (value × 127), base64-encoded. Nothing leaves the Mac.
-let embedLimit = 32
-let embedTextLimit = 2_000
-
-func embedTexts(_ request: [String: Any]) throws -> [String] {
-    guard let texts = request["texts"] as? [String], !texts.isEmpty, texts.count <= embedLimit else {
-        throw Failure(code: "invalid_request", message: "Send between 1 and \(embedLimit) texts to embed.")
-    }
-    return texts.map { String($0.prefix(embedTextLimit)) }
-}
-
-func quantized(_ vector: [Double]) -> Data? {
-    let length = vector.reduce(0) { $0 + $1 * $1 }.squareRoot()
-    guard length > 0, length.isFinite else { return nil }
-    return Data(vector.map { UInt8(bitPattern: Int8(max(-127, min(127, ($0 / length * 127).rounded())))) })
-}
-
-func embed(_ id: String, _ request: [String: Any]) async {
-    let texts: [String]
-    do { texts = try embedTexts(request) } catch { return fail(id, error as? Failure ?? Failure(code: "invalid_request", message: "Invalid embedding request.")) }
-    guard #available(macOS 14.0, *), let model = NLContextualEmbedding(script: .latin) else {
-        return fail(id, Failure(code: "unsupported", message: "On-device embeddings need macOS 14."))
-    }
-    do {
-        if !model.hasAvailableAssets {
-            guard try await model.requestAssets() == .available else {
-                return fail(id, Failure(code: "assets_unavailable", message: "macOS hasn’t downloaded its on-device language model yet. Try again later."))
-            }
-        }
-        try model.load()
-        var vectors: [Any] = []
-        for text in texts {
-            if Task.isCancelled { return emit(["id": id, "type": "done", "text": "", "finish_reason": "cancelled"]) }
-            var sum = [Double](repeating: 0, count: model.dimension)
-            var count = 0.0
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let result = try model.embeddingResult(for: text, language: nil)
-                result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vector, _ in
-                    for index in 0..<min(vector.count, sum.count) { sum[index] += vector[index] }
-                    count += 1
-                    return true
-                }
-            }
-            vectors.append(count > 0 ? (quantized(sum)?.base64EncodedString() ?? NSNull()) : NSNull())
-        }
-        emit(["id": id, "type": "vectors", "dimension": model.dimension, "vectors": vectors])
-    } catch {
-        fail(id, Failure(code: "embedding_failed", message: "macOS couldn’t embed this text on device."))
     }
 }
 
@@ -1370,8 +1309,6 @@ struct Helper {
                     fail(id, Failure(code: "model_not_configured", message: "Apple Intelligence isn’t available on this Mac."))
                 case "transcribe":
                     await running.insert(id, Task { await transcribe(id, request) })
-                case "embed":
-                    await running.insert(id, Task { await embed(id, request) })
                 case "cancel":
                     let target = request["target_id"] as? String ?? ""
                     let cancelled = await running.cancel(target)

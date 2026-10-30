@@ -142,6 +142,7 @@ impl AppState {
             }
             bundled
         };
+        crate::embedding::set_model_dir(resource("models/bge-small-en-v1.5"));
         // Native helpers are bundled as sidecars in Contents/MacOS so Tauri
         // signs each executable before signing and notarizing the outer app.
         // Release builds must never fall back to a writable source checkout.
@@ -1616,11 +1617,15 @@ async fn memory_tool(
     query: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<(Value, Vec<privacy::Share>), String> {
-    let vector = state
-        .models
-        .embed(&[query.to_string()], cancel)
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Task cancelled.".into());
+    }
+    // Without the search model the index still answers by keyword.
+    let question = query.to_string();
+    let vector = tauri::async_runtime::spawn_blocking(move || crate::embedding::embed(&[question], true))
         .await
         .ok()
+        .and_then(Result::ok)
         .and_then(|mut vectors| vectors.pop().flatten());
     let locality = state.models.locality(settings);
     let (hits, roots) = {
@@ -2586,7 +2591,7 @@ async fn execute_with_settings(
         state.audit("tool.system_info", &task.id);
         let snapshot = tauri::async_runtime::spawn_blocking(local::snapshot)
             .await
-            .map_err(|_| "System information could not be collected.".to_string())?;
+            .map_err(|_| "System information could not be collected.".to_string())??;
         let snapshot = annotate_updates(state, snapshot);
         task.answer = local::system_answer(&snapshot);
         task.system = Some(snapshot);
@@ -3189,7 +3194,7 @@ where
                 "system_info" => {
                     touch(task, privacy::Share::System);
                     match tauri::async_runtime::spawn_blocking(local::snapshot).await {
-                        Ok(snapshot) => {
+                        Ok(Ok(snapshot)) => {
                             task.system = Some(annotate_updates(state, snapshot));
                             Ok(if compact {
                                 json!(task.system.as_ref().map(local::system_answer))
@@ -3197,6 +3202,7 @@ where
                                 json!(task.system)
                             })
                         }
+                        Ok(Err(error)) => Err(error),
                         Err(_) => Err("System snapshot failed.".into()),
                     }
                 }

@@ -43,7 +43,9 @@ A local production-mode arm64 app bundle built successfully. Strict deep code-si
 
 ## Dependency audit evidence
 
-The October 29 review found no advisories in the full npm dependency tree. RustSec identified [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html) in Tokio 1.54.0; the manifest floor and lockfile now require the patched 1.54.1. The subsequent Cargo audit reports zero vulnerabilities.
+The October 29 review found no advisories in the full npm dependency tree. RustSec identified [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html) in Tokio 1.54.0; the manifest floor and lockfile now require the patched 1.54.1. That audit reported zero vulnerabilities; the exception below was added later the same day.
+
+**Accepted exception (October 29):** the bundled memory-search model runs through candle-core 0.11, which requires `zip` 8.6. RustSec reports [RUSTSEC-2026-0367](https://rustsec.org/advisories/RUSTSEC-2026-0367.html), [-0368](https://rustsec.org/advisories/RUSTSEC-2026-0368.html) and [-0369](https://rustsec.org/advisories/RUSTSEC-2026-0369.html) in zip's archive extraction to disk, fixed in zip 9. candle uses zip only to read `.npz` tensors; Buntini loads safetensors and never extracts archives, so the affected functions are unreachable. CI ignores exactly these three IDs, with the reason in the workflow. Neither candle's latest release nor its development branch uses zip 9 yet; remove the exception when it does.
 
 Two Cargo warnings remain: the older `glib` branch has an unsoundness advisory in a Linux-only Tauri transitive dependency, and `proc-macro-error` is unmaintained. The shipping target is Apple silicon macOS; the warning-bearing crates are not linked into that target. Keep these warnings visible and track upstream removal. They must be reassessed before adding Linux support. Passing an audit describes its advisory database at that time, not a guarantee against undisclosed issues.
 

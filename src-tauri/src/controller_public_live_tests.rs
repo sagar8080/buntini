@@ -2,7 +2,6 @@
 //! the production approved integration controller boundary (not through UI).
 use super::apple_live_tests::{live_state, record_live_case, LiveTurn};
 use super::*;
-use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 async fn approved_turn(state: &AppState, prompt: &str, call: integrations::Call) -> LiveTurn {
@@ -203,7 +202,7 @@ pub(super) async fn public_workflows() -> Vec<Value> {
             && facts.iter().all(|(_, passed)| *passed);
         let helper_hash = std::fs::read(state.models.apple_helper())
             .ok()
-            .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+            .map(|bytes| crate::security::sha256_hex(bytes));
         rows.push(record_live_case(json!({"id":id,"kind":"real_public_integration_workflow","passed":passed,"apple_calls":turn.apple_calls,"request":prompt,"approvedRequest":approved,"checks":checks,"observation":turn,"helper_sha256":helper_hash,"entry":"production execute_with_settings(web, approvedCall) and integration_task; direct approved controller boundary, UI not exercised","source_kind":"actual fixed public free-provider response cards; no synthetic records or saved keys","personal_location_used":false,"external_messages_sent":false})));
         state.models.shutdown().await;
     }

@@ -33,11 +33,13 @@ jobs:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
       - run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
       - run: ./scripts/check.sh
         env:
@@ -56,13 +58,18 @@ jobs:
           node-version: 24
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.1'
       - name: Audit npm, including the build toolchain
         run: npm audit --audit-level=high
       - name: Audit Rust crates
+        # RUSTSEC-2026-0367, -0368 and -0369 affect zip's archive extraction to disk.
+        # zip 8 comes only from candle-core (memory search), which uses it to read
+        # .npz tensors; Buntini loads safetensors and never extracts archives.
+        # Remove these exceptions once candle moves to zip 9.
         run: |
           cargo install cargo-audit --version 0.22.1 --locked
-          cargo audit --file src-tauri/Cargo.lock
+          cargo audit --file src-tauri/Cargo.lock \
+            --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
 
   python-audit:
     name: Optional MLX and voice dependency audit
@@ -95,11 +102,13 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
       - name: Build an ad-hoc development app
         run: npm run tauri -- build --ci --bundles app -- --locked
         env:
@@ -134,11 +143,13 @@ jobs:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
       - name: Require matching versions, Developer ID and notarization
         env:
           RELEASE_TAG: ${{ github.ref_name }}
