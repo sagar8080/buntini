@@ -884,6 +884,10 @@ impl<T> Agenda<T> {
 }
 
 async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Agenda<T>, String> {
+    parse_helper_rows(&helper_output(helper, args).await?)
+}
+
+async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
     if !helper.is_file() {
         return Err(
             "Reading Calendar and Reminders needs Buntini’s Apple helper, which isn’t on this Mac."
@@ -900,10 +904,19 @@ async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Age
             error
         }
     })?;
-    parse_helper_rows(&output)
+    Ok(output)
 }
 
 fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, String> {
+    parse_helper_range(output, None)
+}
+
+/// Rows and their summary. A ranged read's summary echoes its first and last day, so an
+/// older helper that read only the first day is refused rather than taken as the range.
+fn parse_helper_range<T: DeserializeOwned>(
+    output: &str,
+    range: Option<(&str, &str)>,
+) -> Result<Agenda<T>, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Summary {
@@ -912,6 +925,10 @@ fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, Str
         total: usize,
         returned: usize,
         complete: bool,
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        to: Option<String>,
     }
     let invalid = || {
         "Calendar or Reminders returned incomplete data. Please try again with the current Apple helper.".to_string()
@@ -929,6 +946,7 @@ fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, Str
                 || counts.returned != items.len()
                 || counts.total < counts.returned
                 || counts.complete != (counts.total == counts.returned)
+                || (counts.from.as_deref(), counts.to.as_deref()) != range.unzip()
             {
                 return Err(invalid());
             }
@@ -947,6 +965,12 @@ fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, Str
 /// The day's events (YYYY-MM-DD), repeating ones included, in start order.
 pub async fn events(helper_path: &Path, day: &str) -> Result<Agenda<Event>, String> {
     helper(helper_path, &["--events", day]).await
+}
+
+/// Every event from the start of `from` to the end of `to` (YYYY-MM-DD, at most 400 days
+/// apart), repeating ones included, in start order, read with one helper call.
+pub async fn events_between(helper_path: &Path, from: &str, to: &str) -> Result<Agenda<Event>, String> {
+    parse_helper_range(&helper_output(helper_path, &["--events", from, to]).await?, Some((from, to)))
 }
 
 /// Open reminders, soonest due first; undated ones last.
@@ -3526,6 +3550,27 @@ mod tests {
             "Open reminders:\n- Bins (due Thu 22 Oct 19:00) [Home]"
         );
         assert_eq!(percent("lo-fi beats"), "lo%2Dfi%20beats");
+    }
+
+    #[tokio::test]
+    async fn a_calendar_range_is_one_helper_call_that_must_echo_its_days() {
+        let row = json!({"start":"2026-10-22 09:00", "end":"2026-10-22 10:00", "allDay":false, "title":"Standup", "location":""});
+        let ranged = format!("{row}\n{}", json!({"type":"agenda_summary","returned":1,"total":1,"complete":true,"from":"2026-10-01","to":"2026-12-29"}));
+        let events: Agenda<Event> = parse_helper_range(&ranged, Some(("2026-10-01", "2026-12-29"))).unwrap();
+        assert_eq!(events.items[0].title, "Standup");
+        // An older helper answers a range with the first day alone, and no echo.
+        let one_day = format!("{row}\n{}", json!({"type":"agenda_summary","returned":1,"total":1,"complete":true}));
+        assert!(parse_helper_range::<Event>(&one_day, Some(("2026-10-01", "2026-12-29"))).is_err());
+        assert!(parse_helper_range::<Event>(&ranged, Some(("2026-10-02", "2026-12-29"))).is_err());
+        assert!(parse_helper_rows::<Event>(&ranged).is_err(), "a day read never takes a ranged answer");
+        // The helper is started once, with both days as its last arguments.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("buntini-fm");
+        std::fs::write(&fake, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\necho '{row}'\necho '{{\"type\":\"agenda_summary\",\"returned\":1,\"total\":1,\"complete\":true,\"from\":\"'$2'\",\"to\":\"'$3'\"}}'\n", dir.path().join("calls").display())).unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let read = events_between(&fake, "2026-10-01", "2026-12-29").await.unwrap();
+        assert_eq!(read.total, 1);
+        assert_eq!(std::fs::read_to_string(dir.path().join("calls")).unwrap(), "--events 2026-10-01 2026-12-29\n");
     }
 
     #[test]
