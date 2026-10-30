@@ -802,17 +802,22 @@ const REPLY: &str = r#"    tell application "Mail"
 const NOTE_APPEND: &str = r#"    tell application "Notes"
       set stored to note id (item 1 of argv)
       considering case
-        if name of stored is not item 2 of argv then error "The note’s title has changed since Buntini read it. Ask again so it reads the note afresh."
+        if my trimmed(name of stored) is not my trimmed(item 2 of argv) then error "The note’s title has changed since Buntini read it. Ask again so it reads the note afresh."
       end considering
       if password protected of stored then error "That note is locked, so Buntini can’t add to it."
       if (count of attachments of stored) > 0 then error "That note has attachments, which Notes could drop when Buntini adds text. Add the text in Notes yourself."
       set targetFolder to container of stored
       set destinationName to name of targetFolder
+      if destinationName is "Recently Deleted" then error "That note is in Recently Deleted, so Buntini won’t add to it."
+      -- Setting a body through scripting rewrites it whole, and Notes' checklists (with
+      -- what's ticked) and tables don't survive that; plain text does.
+      set storedBody to body of stored
+      if storedBody contains "<ul" or storedBody contains "<ol" or storedBody contains "<table" then error "That note has a list, checklist or table, which Notes could change when Buntini adds text. Add the text in Notes yourself."
       my putField(observed, "destinationId", id of targetFolder)
       my putField(observed, "beforeTitle", name of stored)
       my putField(observed, "beforePlaintext", plaintext of stored)
       set mutationStarted to true
-      set body of stored to (body of stored) & item 3 of argv
+      set body of stored to storedBody & item 3 of argv
       set resultID to id of stored
       set stored to note id resultID
       my putField(observed, "title", name of stored)
@@ -821,6 +826,21 @@ const NOTE_APPEND: &str = r#"    tell application "Notes"
       my putField(observed, "attachmentCount", count of attachments of stored)
       my putField(observed, "identifierScope", "persistent")
     end tell
+"#;
+
+/// Text without spaces, tabs or line breaks around it, as Buntini reads titles.
+const TRIM_HELPER: &str = r#"on trimmed(s)
+  set blanks to {space, tab, return, linefeed, character id 160}
+  repeat while s is not "" and blanks contains (character 1 of s)
+    if length of s is 1 then return ""
+    set s to text 2 thru -1 of s
+  end repeat
+  repeat while s is not "" and blanks contains (character -1 of s)
+    if length of s is 1 then return ""
+    set s to text 1 thru -2 of s
+  end repeat
+  return s
+end trimmed
 "#;
 
 fn verified_script(body: &str) -> String {
@@ -894,7 +914,7 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
             ],
         )),
         "append_to_note" => Some((
-            verified_script(NOTE_APPEND),
+            format!("{RECEIPT_HELPER}{TRIM_HELPER}{DATE_HELPER}{RECEIPT_START}{NOTE_APPEND}{RECEIPT_END}"),
             vec![get("id"), get("title"), html(&get("text"))],
         )),
         _ => None,
@@ -1068,7 +1088,14 @@ fn check_evidence(
                 "The app did not return persistent object and destination identifiers.".into(),
             );
         }
-        matches("title", approved("title"))?;
+        // An existing item keeps its own title, which Buntini read trimmed.
+        if EDIT_TOOLS.contains(&tool) {
+            if observed("title").map(str::trim) != Some(approved("title")) {
+                return Err("The saved title did not match the approved details.".into());
+            }
+        } else {
+            matches("title", approved("title"))?;
+        }
     }
     match tool {
         "add_reminder" => {
@@ -1227,7 +1254,9 @@ fn check_evidence(
             if !appended {
                 return Err("The note did not read back as the approved text added to the end of what was there.".into());
             }
-            matches("beforeTitle", approved("title"))?;
+            if observed("beforeTitle").map(str::trim) != Some(approved("title")) {
+                return Err("The saved beforeTitle did not match the approved details.".into());
+            }
             if observed("folderId") != observed("destinationId")
                 || receipt.evidence.get("attachmentCount").and_then(Value::as_u64) != Some(0)
             {
@@ -1283,7 +1312,8 @@ fn check_change(
     let (Some(before), Some(after)) = (side("before"), side("after")) else {
         return Err("The app did not report the item before and after the change.".into());
     };
-    let text = |fields: &Map<String, Value>, key: &str| fields.get(key).and_then(Value::as_str).map(str::to_owned);
+    // Buntini trims what it reads and what the sheet sends, so the app's side is trimmed too.
+    let text = |fields: &Map<String, Value>, key: &str| fields.get(key).and_then(Value::as_str).map(|value| value.trim().to_owned());
     let kept = KEPT.iter().find(|(name, _)| *name == tool).map(|(_, keys)| *keys).unwrap_or(&[]);
     for key in kept {
         if before.get(*key).is_none() || before.get(*key) != after.get(*key) {
@@ -1384,7 +1414,7 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
             "complete_reminder" => format!("Marked “{}” as done in Reminders. I checked it’s done and nothing else about it changed.", get("title")),
             "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), get("start"), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
-            "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the rest is unchanged.", get("title")),
+            "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the text that was there is unchanged.", get("title")),
             _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
         };
         ActionReceipt {
@@ -2175,6 +2205,26 @@ mod tests {
         missing["before"].as_object_mut().unwrap().remove("listId");
         missing["after"].as_object_mut().unwrap().remove("listId");
         assert_eq!(change_receipt("complete_reminder", &args, missing).outcome, ActionOutcome::Unknown, "an unreported field is not proof it was kept");
+        // A dictated title can end in a space; Buntini read it trimmed.
+        let spaced = change_receipt("complete_reminder", &args, valid_spaced());
+        assert_eq!(spaced.outcome, ActionOutcome::Succeeded, "{}", spaced.message);
+    }
+
+    fn valid_spaced() -> Value {
+        let before = json!({"title":"Buy milk ","due":"","listId":"list-1","notes":"","priority":0,"url":"","alarms":0,"completed":false});
+        let mut after = before.clone();
+        after["completed"] = json!(true);
+        json!({"destinationId":"list-1","identifierScope":"persistent","title":"Buy milk ","before":before,"after":after})
+    }
+
+    #[test]
+    fn a_note_append_refuses_what_a_rewrite_could_lose() {
+        let (source, argv) = script("append_to_note", &validate("append_to_note", &json!({"id":"n-1","title":"Shopping ","text":"milk"})).unwrap()).unwrap();
+        assert_eq!(argv[1], "Shopping");
+        for guard in ["Recently Deleted", "contains \"<ul\"", "contains \"<table\"", "my trimmed(name of stored)"] {
+            assert!(source.contains(guard), "{guard}");
+        }
+        assert!(source.find("use framework").unwrap() < source.find("on trimmed").unwrap(), "use statements come first");
     }
 
     #[test]

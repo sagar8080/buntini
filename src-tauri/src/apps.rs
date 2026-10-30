@@ -372,12 +372,17 @@ const NOTES_FIND: &str = r#"on run argv
   set q to item 1 of argv
   set out to {}
   tell application "Notes"
-    set found to (notes whose name contains q or plaintext contains q)
+    -- Notes titled with the words first, then notes that only mention them.
+    set found to (notes whose name contains q) & (notes whose name does not contain q and plaintext contains q)
     repeat with n in found
-      set t to plaintext of n
-      set originalLength to length of t
-      if originalLength > 400 then set t to text 1 thru 400 of t
-      set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t) & tab & (originalLength as text)
+      -- A deleted note is not one to read or add to. It still counts as found, so the
+      -- result says it is partial rather than that nothing else matched.
+      if not my deleted(n) then
+        set t to plaintext of n
+        set originalLength to length of t
+        if originalLength > 400 then set t to text 1 thru 400 of t
+        set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t) & tab & (originalLength as text)
+      end if
       if (count of out) ≥ 6 then exit repeat
     end repeat
   end tell
@@ -385,6 +390,15 @@ const NOTES_FIND: &str = r#"on run argv
   set AppleScript's text item delimiters to linefeed
   return out as text
 end run
+on deleted(n)
+  tell application "Notes"
+    try
+      return (name of (container of n)) is "Recently Deleted"
+    on error
+      return false
+    end try
+  end tell
+end deleted
 "#;
 // Notes changed in the last N days, for the memory index: modified time, ID, title and
 // the first 1,500 characters of plain text (at most 300 notes).

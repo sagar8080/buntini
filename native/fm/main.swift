@@ -1442,6 +1442,12 @@ enum Edits {
         return receipt("failed", error: "Buntini’s Apple helper didn’t understand that change.")
     }
 
+    /// Whether a stored title is the one Buntini read: Buntini trims what it reads, and a
+    /// dictated title can end in a space.
+    static func sameTitle(_ stored: String?, _ read: String) -> Bool {
+        (stored ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == read.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func completeReminder(id: String, title: String) async -> Int32 {
         let store = EKEventStore()
         guard await access(.reminder, store) else {
@@ -1452,7 +1458,7 @@ enum Edits {
             return receipt("failed", error: "That reminder isn’t in Reminders any more.")
         }
         let before = reminderSnapshot(reminder, stamp: stamp)
-        guard reminder.title == title, !reminder.isCompleted else {
+        guard sameTitle(reminder.title, title), !reminder.isCompleted else {
             return receipt("failed", error: "That reminder changed since Buntini read it. Ask again so it reads your reminders afresh.")
         }
         guard reminder.calendar?.allowsContentModifications == true else {
@@ -1501,7 +1507,7 @@ enum Edits {
               let newStart = stamp.date(from: change.start) else {
             return receipt("failed", error: "That event isn’t at the time Buntini read any more. Ask again so it reads your calendar afresh.")
         }
-        guard event.title == change.wasTitle else {
+        guard sameTitle(event.title, change.wasTitle) else {
             return receipt("failed", error: "That event changed since Buntini read it. Ask again so it reads your calendar afresh.")
         }
         guard !event.isAllDay else {
@@ -1515,8 +1521,8 @@ enum Edits {
         let item = event.calendarItemIdentifier
         let calendar = event.calendar
         let nextBefore = recurring ? nextOccurrence(store, id: change.id, calendar: calendar, after: originalStart, skipping: change.start, stamp: stamp) : ""
-        if (event.title ?? "") != change.title { event.title = change.title }
-        if (event.location ?? "") != change.location { event.location = change.location.isEmpty ? nil : change.location }
+        if !sameTitle(event.title, change.title) { event.title = change.title }
+        if !sameTitle(event.location, change.location) { event.location = change.location.isEmpty ? nil : change.location }
         event.startDate = newStart
         event.endDate = newStart.addingTimeInterval(TimeInterval(change.minutes * 60))
         // `.thisEvent` changes only this occurrence of a repeating event.
