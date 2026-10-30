@@ -383,7 +383,7 @@ impl ModelHub {
             .get()
             .ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
         let key = crate::web::credential(provider.id)?;
-        let (input_price, output_price) = (settings.cloud_input_price, settings.cloud_output_price);
+        let (input_price, output_price) = settings.cloud_prices();
         let estimate = cloud::price(cloud::estimate(&payload), input_price, output_price);
         let account = cloud::ledger_key(provider.id);
         let reservation = ledger
