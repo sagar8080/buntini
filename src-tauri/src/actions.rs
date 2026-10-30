@@ -441,6 +441,10 @@ pub fn fixed_fields(tool: &str) -> &'static [&'static str] {
 /// The approved details with every fixed field taken from the proposal, whatever the
 /// sheet sent back. A field the proposal didn't have stays absent.
 pub fn keep_fixed(tool: &str, proposed: &Value, approved: &Value) -> Value {
+    // A call to a tool the user added runs exactly as shown; its sheet edits nothing.
+    if crate::mcp::is_tool(tool) {
+        return proposed.clone();
+    }
     let mut kept = approved.clone();
     if let Some(fields) = kept.as_object_mut() {
         for key in fixed_fields(tool) {

@@ -19,7 +19,7 @@ const steps: Record<string, string> = {
   open_link: 'Open a link', open_app: 'Open an app', run_shortcut: 'Run a shortcut', create_saved_search: 'Save a search', create_price_watch: 'Watch a price', create_routine: 'Set up a routine',
   complete_reminder: 'Mark a reminder done', reschedule_reminder: 'Move a reminder', update_calendar_event: 'Change a calendar event', append_to_note: 'Add to a note', list_shortcuts: 'Look through your shortcuts',
 };
-export const stepLabel = (tool: string) => steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));
+export const stepLabel = (tool: string) => tool.startsWith('mcp_') ? 'Use a tool you added' : steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));
 
 export function ProgressDetails({ progress }: { progress?: TaskProgress }) {
   if (!progress || (!progress.steps.length && !progress.contract?.outcomes.length)) return null;

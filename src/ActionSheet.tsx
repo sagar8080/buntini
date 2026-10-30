@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, NotebookPen, Play, AppWindow, Reply } from 'lucide-react';
+import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, NotebookPen, Play, Plug, AppWindow, Reply } from 'lucide-react';
 import ModalSheet from './ModalSheet';
 
 /** `hidden` is sent back without being shown (an item's id); `fixed` is shown but never edited or sent, such as the email a reply answers, its recipient, or what an item is like now. */
@@ -16,7 +16,7 @@ const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
 /** Shows exactly what an action will do, lets the user fix any detail, and runs only on Allow. */
 export default function ActionSheet({ proposal, running, error, onCancel, onAllow }: { proposal: ActionProposal; running: boolean; error?: string; onCancel: () => void; onAllow: (args: Record<string, string | number>) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(proposal.fields.map(field => [field.key, field.value])));
-  const Icon = icons[proposal.tool] || Play;
+  const Icon = icons[proposal.tool] || (proposal.tool.startsWith('mcp_') ? Plug : Play);
   const sent = new Set(proposal.fields.filter(field => field.kind !== 'fixed').map(field => field.key));
   const allow = () => onAllow(Object.fromEntries(Object.entries(values).filter(([key, value]) => sent.has(key) && value.trim() !== '').map(([key, value]) => [key, key === 'minutes' ? Number(value) : value])));
   const set = (key: string, value: string) => setValues(previous => ({ ...previous, [key]: value }));

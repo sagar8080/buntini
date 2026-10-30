@@ -25,6 +25,9 @@ pub struct TaskContract {
     pub constraints: Vec<Constraint>,
     pub provenance: BTreeMap<String, BTreeMap<String, FieldProvenance>>,
     pub revisions: Vec<RequestRevision>,
+    /// The tools a request that named a tool the user added may use (`mcp::route`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub connector_tools: Vec<String>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -491,6 +494,25 @@ fn verified_read(step: &Step) -> bool {
     }
 }
 
+/// The answer to a request sent to a tool the user added: what is known from its receipt
+/// first (it replied; Buntini can't check what it changed), then the model's words about
+/// the reply. English parsing of built-in actions doesn't apply to the tool's request.
+fn connector_answer(text: &str, steps: &[Step]) -> Result<String, String> {
+    let step = steps
+        .iter()
+        .rev()
+        .find(|step| crate::mcp::is_tool(&step.tool) && step.state == "succeeded" && verified_write(step))
+        .ok_or("The tool you added hasn’t confirmed a reply. This task is unfinished.")?;
+    let receipt: ActionReceipt = step
+        .evidence
+        .as_ref()
+        .and_then(|evidence| evidence.get("receipt"))
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .ok_or("The tool you added hasn’t confirmed a reply. This task is unfinished.")?;
+    Ok(format!("{}\n\n{}", receipt.message, text.trim()))
+}
+
 impl TaskContract {
     pub fn from_request(goal: &str) -> Self {
         Self::from_request_at(goal, chrono::Local::now().date_naive())
@@ -542,8 +564,26 @@ impl TaskContract {
             source_revision: self.revision,
         });
     }
+    /// "Use GitHub to …": the request goes to the tools the user added under that name
+    /// alone, as one call (shown for approval unless marked safe to read) and an answer.
+    pub fn use_connector(&mut self, tools: Vec<String>) {
+        self.connector_tools = tools;
+        self.constraints.clear();
+        let goal = self.current_request.clone();
+        self.bootstrap(&goal);
+    }
+    fn connector_request(&self) -> bool {
+        !self.connector_tools.is_empty()
+    }
     fn bootstrap(&mut self, goal: &str) {
         self.outcomes.clear();
+        if self.connector_request() {
+            let tools = self.connector_tools.clone();
+            self.push_outcome("write", goal, tools, json!({}), vec![]);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "connector_request".into();
+            return;
+        }
         // A routine is one write whose request, days and time are the user's own words.
         // What the routine will later do is its own task each time it runs.
         if let Some(routine) = crate::routines::parse_request(goal) {
@@ -953,7 +993,10 @@ impl TaskContract {
                     && outcome.accepted_tools.contains(&step.tool)
                     && matches_arguments(&outcome.required_arguments, &step.arguments)
                     && if outcome.kind == "write" {
-                        (step.effect || step.tool == "browse_page") && verified_write(step)
+                        // A safe-to-read call to an added tool is not an effect, but it
+                        // still completes the call the request asked for.
+                        (step.effect || step.tool == "browse_page" || crate::mcp::is_tool(&step.tool))
+                            && verified_write(step)
                     } else {
                         verified_read(step)
                     }
@@ -1558,9 +1601,11 @@ impl TaskContract {
             .flatten()
             .filter_map(|definition| {
                 let name = definition["name"].as_str()?;
+                // Calls to tools the user added are only ever the requested call.
                 let effect = crate::actions::TOOLS.contains(&name)
                     || crate::monitor_actions::TOOLS.contains(&name)
-                    || crate::control_actions::TOOLS.contains(&name);
+                    || crate::control_actions::TOOLS.contains(&name)
+                    || crate::mcp::is_tool(name);
                 let write_allowed = !unresolved
                     && next_write.is_some_and(|o| o.accepted_tools.iter().any(|t| t == name));
                 if effect && !write_allowed && name != "control_music" {
@@ -1600,7 +1645,7 @@ impl TaskContract {
                 if name == "run_shortcut" && write_allowed && !shortcuts.is_empty() {
                     result["parameters"]["properties"]["name"]["enum"] = json!(shortcuts);
                 }
-                if write_allowed {
+                if write_allowed && !crate::mcp::is_tool(name) {
                     if let Some(outcome) = next_write {
                         result["parameters"]["required"] = json!(outcome.required_fields);
                         for (field,value) in outcome.required_arguments.as_object().into_iter().flatten() {
@@ -1642,6 +1687,7 @@ impl TaskContract {
     ) -> Result<(), String> {
         let effect = crate::actions::TOOLS.contains(&tool)
             || crate::monitor_actions::TOOLS.contains(&tool)
+            || crate::mcp::is_tool(tool)
             || (crate::control_actions::TOOLS.contains(&tool)
                 && !(tool == "control_music" && arguments["action"] == "now_playing"));
         if steps.iter().any(|s| {
@@ -1781,6 +1827,9 @@ impl TaskContract {
         if self.outcomes.iter().any(|o| o.kind == "answer") && text.trim().is_empty() {
             return Err("The requested answer is still missing.".into());
         }
+        if self.connector_request() {
+            return connector_answer(text, steps);
+        }
         completion::validate_answer(&self.current_request, text, steps)
     }
     pub fn completed_action_answer(&self, steps: &[Step]) -> Option<String> {
@@ -1794,7 +1843,8 @@ impl TaskContract {
         completion::completed_action_answer(&self.current_request, steps)
     }
     pub fn terminal_receipt_answer(&self, steps: &[Step]) -> Option<String> {
-        if !self.outcomes.iter().any(|outcome|outcome.kind=="write")
+        // What an added tool replied is answered from, never summarised by its receipt.
+        if self.connector_request() || !self.outcomes.iter().any(|outcome|outcome.kind=="write")
             || self.outcomes.iter().any(|outcome|outcome.kind!="answer" && outcome.status!="complete") {
             return None;
         }

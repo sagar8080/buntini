@@ -75,7 +75,14 @@
           "delete_price_watch",
           "run_price_watch",
           "update_routine",
-          "delete_routine"
+          "delete_routine",
+          "added_tools",
+          "add_tool_server",
+          "pick_tool_config",
+          "add_tool_server_from_config",
+          "remove_tool_server",
+          "reconnect_tool_server",
+          "set_tool_safe"
         ]
       }
     }

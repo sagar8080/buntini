@@ -103,6 +103,9 @@ fn validate_action(name: &str, args: &Value) -> Result<serde_json::Map<String, V
         crate::control_actions::validate(name, args)
     } else if crate::browser_workspace::TOOLS.contains(&name) {
         crate::browser_workspace::validate(name, args)
+    } else if crate::mcp::is_tool(name) {
+        // Checked against the tool's schema where the servers are at hand.
+        args.as_object().cloned().ok_or_else(|| "The tool’s details must be named values.".into())
     } else {
         crate::actions::validate(name, args)
     }
@@ -110,6 +113,7 @@ fn validate_action(name: &str, args: &Value) -> Result<serde_json::Map<String, V
 fn action_allowed(settings: &Settings, name: &str, args: &serde_json::Map<String, Value>) -> bool {
     crate::monitor_actions::TOOLS.contains(&name)
         || ["remember", "set_timer", "browse_page"].contains(&name)
+        || crate::mcp::is_tool(name)
         || crate::apps::permits(settings, name, args)
 }
 
@@ -635,6 +639,7 @@ pub fn validate_tool(
         "search_memory" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_memory only accepts a query.".into());}let q=args["query"].as_str().ok_or("Memory query must be text.")?;if q.trim().is_empty()||q.chars().count()>300{return Err("Invalid memory query.".into());}},
         "search_files" if mode!="web"=>{if args.len()!=1 || !args.contains_key("query"){return Err("search_files only accepts a query.".into());}let q=args["query"].as_str().ok_or("File query must be text.")?;if q.trim().is_empty()||q.chars().count()>512{return Err("Invalid file query.".into());}},
         tool if mode=="auto" && (action_tool(tool) || crate::apps::READ_TOOLS.contains(&tool))=>{},
+        tool if mode=="auto" && crate::mcp::is_tool(tool)=>{},
         "remember" if mode=="auto"=>{if args.len()!=1{return Err("remember only accepts a fact.".into());}let fact=args.get("fact").and_then(Value::as_str).ok_or("The fact must be text.")?;if fact.trim().chars().count()<3||fact.chars().count()>600{return Err("Invalid memory.".into());}},
         "look_up_online" if mode=="auto"=>{if args.len()!=1{return Err("look_up_online only accepts a query.".into());}let q=args.get("query").and_then(Value::as_str).ok_or("Lookup query must be text.")?;if q.trim().is_empty()||q.chars().count()>2000{return Err("Invalid lookup query.".into());}},
         "web_search" if mode=="web"=>{if args.len()!=1 || args.get("query").and_then(Value::as_str)!=Some(user_query){return Err("Web searches must use the user's exact explicit query. Local file contents cannot be sent to search providers.".into());}},
@@ -831,6 +836,9 @@ async fn run_workflow_action(
             crate::control_actions::execute(state, id, &tool, &args, cancel).await
         } else if tool == "browse_page" {
             crate::browser_workspace::execute(id, &args, cancel).await
+        } else if crate::mcp::is_tool(&tool) {
+            let servers = state.store.lock().unwrap().mcp_servers().unwrap_or_default();
+            crate::mcp::execute(&servers, &tool, &args, cancel).await
         } else {
             crate::actions::execute_with(&tool, &args, state.models.apple_helper()).await
         }
@@ -907,7 +915,12 @@ where
         // when the user picked one the search found, they come from that search.
         let proposed = crate::recipes::picked_reply(&tool, &flow.contract.current_request, &flow.steps, &intent.arguments, &args)?;
         let args = crate::actions::keep_fixed(&tool, &proposed, &args);
-        let normalized = validate_action(&tool, &args)?;
+        let mut normalized = validate_action(&tool, &args)?;
+        if crate::mcp::is_tool(&tool) {
+            // The tool may have been removed or changed since it was proposed.
+            normalized = crate::mcp::validate(&store.mcp_servers()?, &tool, &Value::Object(normalized))?;
+            touch(&mut task, privacy::Share::Connectors);
+        }
         // A changed item must be one this task read for what the user named.
         crate::edit_targets::check(&flow.contract.edit_goals(&tool), &tool, &Value::Object(normalized.clone()), &flow.steps, true)?;
         let settings = store.settings()?;
@@ -2936,6 +2949,12 @@ async fn execute_with_settings(
         offered.clear();
     }
     let mut flow = Workflow::new(task, mode, &settings, messages, separate_context, &offered);
+    // "Use GitHub to list my issues": a request that names a tool the user added goes to
+    // that tool alone; its call waits for approval unless the user marked it safe to read.
+    if mode == "auto" && !no_tools {
+        let servers = state.store.lock().unwrap().mcp_servers()?;
+        crate::mcp::route(&mut flow.contract, &servers, &task.prompt, locality, &settings)?;
+    }
     // "Remind me about this", "reply to this": recipes fix what the thing on screen
     // decides (a reminder's title, a reply's recipient), so the model fills only the rest.
     if let Some(found) = &referent {
@@ -3103,8 +3122,16 @@ where
         .map(String::as_str)
         .collect();
     let offered: Vec<String> = offered.iter().map(|s| s.to_string()).collect();
-    let available_definitions =
+    let mut available_definitions =
         tools::offer(&offered.iter().map(String::as_str).collect::<Vec<_>>());
+    // Tools the user added, only for a request that named them and a brain that may see
+    // what they return.
+    let servers = state.store.lock().unwrap().mcp_servers()?;
+    if privacy::allows(locality, settings, privacy::Share::Connectors) {
+        if let Some(list) = available_definitions.as_array_mut() {
+            list.extend(crate::mcp::definitions(&servers, &flow.contract.connector_tools));
+        }
+    }
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err("Task cancelled.".into());
@@ -3412,6 +3439,17 @@ where
                 touch(task, share);
             }
         }
+        // A call to a tool the user added is checked against its schema and is a write
+        // that waits for approval, unless the user (never the server) marked it safe.
+        let connector = crate::mcp::is_tool(&name);
+        if connector {
+            if !privacy::allows(locality, settings, privacy::Share::Connectors) {
+                return Err(crate::mcp::WITHHELD.into());
+            }
+            args = Value::Object(crate::mcp::validate(&servers, &name, &args)?);
+            touch(task, privacy::Share::Connectors);
+        }
+        let connector_write = connector && !crate::mcp::is_safe(&servers, &name);
         let is_action = action_call(&name, &args);
         if is_action {
             args = Value::Object(validate_action(&name, &args)?);
@@ -3448,8 +3486,8 @@ where
                 fields.remove("id");
             }
         }
-        let approval = is_action || name == "look_up_online";
-        let effect = is_action && name != "browse_page";
+        let approval = is_action || name == "look_up_online" || connector_write;
+        let effect = (is_action && name != "browse_page") || connector_write;
         let assistant = assistant_call(&turn.text, turn.raw, &name, if literal_inputs.is_some() {original_call.get("arguments").unwrap_or(&args)} else {&args});
         let id = flow.begin(&name, args.clone(), assistant, effect, approval)?;
         if let Some(fields)=literal_inputs {
@@ -3462,9 +3500,11 @@ where
         }
         if approval {
             task.state = flow.state.clone();
-            if is_action {
+            if is_action || connector_write {
                 let (title, fields, note) =
-                    if crate::monitor_actions::TOOLS.contains(&name.as_str()) {
+                    if connector {
+                        crate::mcp::describe(&servers, &name, args.as_object().unwrap())
+                    } else if crate::monitor_actions::TOOLS.contains(&name.as_str()) {
                         crate::monitor_actions::describe(&name, args.as_object().unwrap())
                     } else if crate::control_actions::TOOLS.contains(&name.as_str()) {
                         crate::control_actions::describe(&name, args.as_object().unwrap())
@@ -3553,6 +3593,8 @@ where
         } else {
             match name.as_str() {
                 tool if crate::structured_math::TOOLS.contains(&tool) => crate::structured_math::run(tool,&args),
+                // Marked safe to read by the user: runs now, its reply is untrusted evidence.
+                tool if connector => crate::mcp::read(&servers, tool, args.as_object().unwrap(), cancel.clone()).await,
                 "calculate" => crate::calculation::run(&args),
                 "search_files" => {
                     touch(task, privacy::Share::Files);
@@ -5183,3 +5225,7 @@ mod controller_search_resume_tests;
 #[cfg(test)]
 #[path = "controller_shortcut_tests.rs"]
 mod controller_shortcut_tests;
+
+#[cfg(test)]
+#[path = "controller_mcp_tests.rs"]
+mod controller_mcp_tests;
