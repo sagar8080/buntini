@@ -5286,6 +5286,8 @@ for line in sys.stdin:
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
         let prompt = "Follow up with Ana until she replies";
+        // Waiting for her reply needs Mail.
+        state.store.lock().unwrap().save_settings(&Settings { apps: vec!["mail".into()], ..Settings::default() }).unwrap();
         let mut task: TaskRecord = serde_json::from_value(json!({"id":"goal-chat","prompt":prompt,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
         state.store.lock().unwrap().save_task(&task).unwrap();
         let channel = Channel::new(|_| Ok(()));

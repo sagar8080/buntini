@@ -2673,13 +2673,14 @@ pub(crate) async fn mail_openings(
 }
 
 /// Who sent inbox messages from the last `days` days whose sender or subject contains
-/// `query`, newest first, as (received, sender). Headers only, never message text: a
-/// goal waiting on someone's reply only needs to know one arrived.
-pub(crate) async fn inbox_senders(query: &str, days: u32, launch: Launch) -> Result<Vec<(String, String)>, String> {
+/// `query`, newest first, as (received, sender, subject). Headers only, never message
+/// text: a goal waiting on someone's reply only needs to know one arrived, and that it
+/// isn't an automatic one.
+pub(crate) async fn inbox_senders(query: &str, days: u32, launch: Launch) -> Result<Vec<(String, String, String)>, String> {
     let output = osascript_if(MAIL_LIST, "Mail", launch, &[query.into(), "0".into(), days.to_string()], 60).await?;
     let mut rows = counted_rows(&output, 6, "Mail")?.rows;
     rows.sort_by(|a, b| b[0].cmp(&a[0]));
-    Ok(rows.into_iter().map(|row| (row[0].clone(), row[3].clone())).collect())
+    Ok(rows.into_iter().map(|row| (row[0].clone(), row[3].clone(), row[4].clone())).collect())
 }
 
 /// A record for the memory index: (time, ID, title, text).

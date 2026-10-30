@@ -415,13 +415,34 @@ pub fn find<'a>(pick: &Pick, emails: &'a [Listed]) -> Result<&'a Listed, String>
 /// Whether `sender` ("Ana Silva <ana@example.com>") is who the user named ("ana", "ana
 /// silva").
 pub fn from_sender(name: &str, sender: &str) -> bool {
-    let wanted: Vec<&str> = name.split(' ').collect();
-    let lower = sender.to_lowercase();
-    let display: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'').filter(|w| !w.is_empty()).collect();
+    let wanted: Vec<&str> = name.split_whitespace().collect();
+    if wanted.is_empty() {
+        return false;
+    }
+    let words = |text: &str| -> Vec<String> {
+        text.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'')
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    // Only the name a sender shows counts, never their address's domain ("bob@ana.pt" is
+    // not Ana), and a name relayed by a service ("Ana (via Google Docs)") is the service.
+    let display = match sender.rsplit_once('<') {
+        Some((name, _)) => words(name.trim().trim_matches('"')),
+        None if crate::focus::sender_address(sender).is_some() => vec![],
+        None => words(sender),
+    };
+    if display.iter().any(|word| word == "via") {
+        return false;
+    }
     let local = crate::focus::sender_address(sender)
         .and_then(|address| address.split('@').next().map(str::to_string))
         .unwrap_or_default();
-    wanted.iter().all(|word| display.contains(word)) || (wanted.len() == 1 && local == wanted[0])
+    let local_words: Vec<String> = local.split(['.', '_', '-', '+']).filter(|w| !w.is_empty()).map(str::to_string).collect();
+    wanted.iter().all(|word| display.iter().any(|shown| shown == word))
+        || (display.is_empty() && wanted.iter().all(|word| local_words.iter().any(|part| part == word)))
+        || (wanted.len() == 1 && local == wanted[0])
 }
 
 /// The count for the morning brief, e.g. "2 emails look like they need a reply: Ana, Sam."
@@ -530,6 +551,19 @@ mod tests {
             subject: format!("Subject {id}"),
             message_id: format!("m-{id}@x.com"),
         }
+    }
+
+    #[test]
+    fn a_name_matches_what_a_sender_shows_never_their_domain_or_a_relay() {
+        assert!(from_sender("ana", "Ana Silva <ana@example.com>"));
+        assert!(from_sender("ana silva", "\"Ana Silva\" <a@example.com>"));
+        assert!(from_sender("ana", "ana@example.com"));
+        assert!(from_sender("ana silva", "ana.silva@example.com"));
+        assert!(!from_sender("ana", "Pedro <pedro@ana.pt>"));
+        assert!(!from_sender("mark", "Deals <offers@mark.shop>"));
+        assert!(!from_sender("ana", "pedro@ana.pt"));
+        assert!(!from_sender("ana", "Ana Silva (via Google Docs) <drive-shares-dm-noreply@google.com>"));
+        assert!(!from_sender("ana", "Ana Silva via LinkedIn <invitations@linkedin.com>"));
     }
 
     #[test]

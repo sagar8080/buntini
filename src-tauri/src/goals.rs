@@ -280,23 +280,33 @@ fn parse_end(lower: &str, original: &str, today: NaiveDate) -> Option<End> {
     parse_day(&words, today).map(End::Day)
 }
 
-/// The person an aim is about, for "until she replies": the first capitalised name after
-/// the verb ("follow up with Ana", "remind me to call Mum"), or the word after "with".
+/// The person an aim is about, for "until she replies": the name right after a word that
+/// says who ("follow up with Ana", "remind me to call Mum", "email Sam"), else the only
+/// capitalised name in it. A place or project ("the Paris trip") is never taken for the
+/// person when someone is named after "with"; with two names and no such word, none is.
 fn person_in(aim: &str) -> Option<String> {
+    const CUES: [&str; 14] = ["with", "to", "from", "chase", "nudge", "email", "call", "ask", "text", "message", "ping", "phone", "remind", "tell"];
     let words: Vec<&str> = aim.split_whitespace().collect();
     let bare = |word: &str| word.trim_end_matches([',', '.', ';', ':', '!', '?']).to_string();
-    let start = words.iter().enumerate().skip(1).find(|(_, word)| {
+    let capital = |word: &str| {
         let word = bare(word);
         word != "I" && word.chars().next().is_some_and(char::is_uppercase) && word.chars().all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
-    });
-    if let Some((index, _)) = start {
-        let name: Vec<String> = words[index..]
-            .iter()
-            .take(3)
-            .take_while(|word| bare(word).chars().next().is_some_and(char::is_uppercase))
-            .map(|word| bare(word))
-            .collect();
-        let name = name.join(" ");
+    };
+    let name_at = |index: usize| -> String {
+        words[index..].iter().take(3).take_while(|word| capital(word)).map(|word| bare(word)).collect::<Vec<_>>().join(" ")
+    };
+    // Who the aim is addressed to, by the word before the name.
+    if let Some(index) = (1..words.len()).find(|index| CUES.contains(&bare(words[index - 1]).to_lowercase().as_str()) && capital(words[*index])) {
+        let name = name_at(index);
+        return person_ok(&name).then_some(name);
+    }
+    // Otherwise only an unambiguous name: one run of capitalised words after the verb.
+    let mut starts = (1..words.len()).filter(|index| capital(words[*index]) && !capital(words[index - 1]) || (*index == 1 && capital(words[1])));
+    if let Some(index) = starts.next() {
+        if starts.next().is_some() {
+            return None;
+        }
+        let name = name_at(index);
         return person_ok(&name).then_some(name);
     }
     let after = words.iter().position(|word| word.eq_ignore_ascii_case("with"))?;
@@ -555,6 +565,12 @@ pub fn execute(store: &Store, intent_id: &str, raw: &Map<String, Value>) -> Acti
     {
         return failure("This goal has no valid approval to go with it.".into(), ActionOutcome::Failed);
     }
+    // A goal that waits for a reply needs Mail to see it; without Mail every check-in
+    // would only be passed.
+    if text(&args, "done_when") == Some("reply") && !store.settings().is_ok_and(|settings| crate::apps::allowed(&settings, "mail")) {
+        let person = text(&args, "person").unwrap_or("them");
+        return failure(format!("Allow Mail in Settings → Apps so this goal can see when {person} replies, then ask again. Nothing was set up."), ActionOutcome::Failed);
+    }
     let id = format!("goal-{intent_id}");
     let transaction = match store.db.unchecked_transaction() {
         Ok(transaction) => transaction,
@@ -678,22 +694,38 @@ fn turn(answer: String, touched: &[&str]) -> Result<TaskRecord, String> {
     .map_err(|e| e.to_string())
 }
 
-/// An email from `person` that arrived after `since` ("YYYY-MM-DD HH:MM", local), as
-/// (received, sender). An automated sender never counts.
-fn reply_in(found: &[(String, String)], person: &str, since: &str) -> Option<(String, String)> {
+/// An email from `person` that arrived after `since` ("YYYY-MM-DD HH:MM", local), from
+/// (received, sender, subject), as (received, sender). An automated sender, or an
+/// automatic reply such as an out-of-office, never counts.
+fn reply_in(found: &[(String, String, String)], person: &str, since: &str) -> Option<(String, String)> {
     let person = person.trim();
     found
         .iter()
-        .find(|(received, sender)| {
+        .find(|(received, sender, subject)| {
             received.as_str() > since
                 && !crate::triage::automated(sender)
+                && !automatic_reply(subject)
                 && if crate::apps::plain_address(person) {
                     crate::focus::sender_address(sender).as_deref() == Some(person.to_lowercase().as_str())
                 } else {
                     crate::triage::from_sender(&person.to_lowercase(), sender)
                 }
         })
-        .cloned()
+        .map(|(received, sender, _)| (received.clone(), sender.clone()))
+}
+
+/// Subjects that out-of-office and other automatic replies use, in the languages Mail
+/// most often shows them in.
+fn automatic_reply(subject: &str) -> bool {
+    let subject = subject.trim().to_lowercase();
+    let subject = subject.trim_start_matches("re:").trim_start_matches("aw:").trim();
+    [
+        "automatic reply", "auto reply", "auto-reply", "autoreply", "auto:", "automated reply", "out of office", "out of the office",
+        "abwesenheit", "automatische antwort", "réponse automatique", "respuesta automática", "fuera de la oficina",
+        "risposta automatica", "resposta automática", "automatisch antwoord",
+    ]
+    .iter()
+    .any(|start| subject.starts_with(start))
 }
 
 /// Looks in Mail, without opening it, for an email from the person since the goal began.
@@ -753,18 +785,10 @@ where
     if past(&goal, today) {
         return Ok(Next::End { status: "ended", outcome: last_day_outcome(&goal), touched: vec![] });
     }
-    {
-        let store = state.store.lock().unwrap();
-        // A proposal from the last check-in is still waiting: don't pile up another.
-        let waiting = routine.last_task_id.as_deref().is_some_and(|task_id| {
-            store.pending_approvals().is_ok_and(|pending| pending.iter().any(|item| item.task_id == task_id))
-        });
-        if waiting {
-            skip(&store, routine, goal_id, scheduled_for, "The last check-in is still waiting for your OK under Waiting for you, so I skipped this one.".into())?;
-            return Ok(Next::Skipped);
-        }
-    }
+    // The reply is looked for first, even while the last check-in's draft waits: once it
+    // has come, the goal is over and that draft is withdrawn.
     let mut touched = Vec::new();
+    let mut unchecked = None;
     if goal.done_when == "reply" {
         let person = goal.person.clone().unwrap_or_default();
         let allowed = crate::apps::allowed(&state.store.lock().unwrap().settings()?, "mail");
@@ -787,20 +811,41 @@ where
                 } else {
                     format!("I couldn’t check Mail for a reply from {person}: {error}")
                 };
-                skip(&state.store.lock().unwrap(), routine, goal_id, scheduled_for, note)?;
-                return Ok(Next::Skipped);
+                // A reminder needs no Mail: it still comes, saying the reply wasn't checked.
+                if goal.style == "remind" {
+                    unchecked = Some(note);
+                } else {
+                    skip(&state.store.lock().unwrap(), routine, goal_id, scheduled_for, note)?;
+                    return Ok(Next::Skipped);
+                }
             }
+        }
+    }
+    {
+        let store = state.store.lock().unwrap();
+        // A proposal from the last check-in is still waiting: don't pile up another.
+        let waiting = routine.last_task_id.as_deref().is_some_and(|task_id| {
+            store.pending_approvals().is_ok_and(|pending| pending.iter().any(|item| item.task_id == task_id))
+        });
+        if waiting {
+            skip(&store, routine, goal_id, scheduled_for, "The last check-in is still waiting for your OK under Waiting for you, so I skipped this one.".into())?;
+            return Ok(Next::Skipped);
         }
     }
     if goal.style != "remind" {
         return Ok(Next::Run { touched });
     }
-    let task = turn(format!("Time to {}. When it’s done, mark this goal Done in History → Goals.", lowered(goal.check_in.trim_end_matches('.'))), &touched)?;
+    let mut text = format!("Time to {}. When it’s done, mark this goal Done in History → Goals.", lowered(goal.check_in.trim_end_matches('.')));
+    if let Some(note) = &unchecked {
+        text.push(' ');
+        text.push_str(note);
+    }
+    let task = turn(text, &touched)?;
     let store = state.store.lock().unwrap();
     let transaction = store.db.unchecked_transaction().map_err(|e| e.to_string())?;
     let run_id = routines::claim(&store, &routine.id, scheduled_for, &task.id)?;
     store.save_task(&task)?;
-    set_note(&store, goal_id, None, Some(&task.id))?;
+    set_note(&store, goal_id, unchecked, Some(&task.id))?;
     transaction.commit().map_err(|e| e.to_string())?;
     Ok(Next::Reminded { task, run_id })
 }
@@ -857,6 +902,9 @@ fn close(state: &AppState, goal_id: &str, status: &str, outcome: String, touched
     if !open(&goal) {
         return Ok(None);
     }
+    // Withdrawn first, each in its own commit: a proposal for a goal being ended goes
+    // even if ending it fails.
+    let withdrawn = withdraw_waiting(&store, goal_id)?;
     let transaction = store.db.unchecked_transaction().map_err(|e| e.to_string())?;
     if let Some(routine) = store.routine(&check_in_id(goal_id))? {
         routines::stop_running(&active, &routine);
@@ -878,7 +926,43 @@ fn close(state: &AppState, goal_id: &str, status: &str, outcome: String, touched
     save(&store, &goal)?;
     store.audit("goal.ended", &format!("{goal_id}: {status}"))?;
     transaction.commit().map_err(|e| e.to_string())?;
+    for id in withdrawn {
+        crate::notifications::withdraw_approval(&id);
+    }
     Ok(task)
+}
+
+/// Withdraws what the goal's check-ins left waiting under Waiting for you: once the goal
+/// is over, a follow-up drafted for it can't be approved by mistake. Returns the
+/// withdrawn approvals, whose alerts go too.
+fn withdraw_waiting(store: &Store, goal_id: &str) -> Result<Vec<String>, String> {
+    let tasks: Vec<String> = {
+        let mut statement = store
+            .db
+            .prepare("SELECT task_id FROM conversation_turns WHERE conversation_id=?1")
+            .map_err(|e| e.to_string())?;
+        let rows = statement.query_map([format!("goal:{goal_id}")], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
+    };
+    let mut withdrawn = Vec::new();
+    for id in tasks {
+        let Some(mut flow) = store.workflow(&id)? else { continue };
+        if !["waiting_action", "waiting_online"].contains(&flow.state.as_str()) {
+            continue;
+        }
+        let Some(mut task) = store.task(&flow.id)? else { continue };
+        flow.state = "cancelled".into();
+        if let Some(step) = flow.steps.last_mut().filter(|step| step.state == "waiting") {
+            step.state = "cancelled".into();
+            withdrawn.push(step.id.clone());
+        }
+        task.state = "cancelled".into();
+        task.handoff = None;
+        task.action = None;
+        task.answer = "This goal is over, so what this check-in proposed was withdrawn. Nothing ran.".into();
+        store.checkpoint(&mut flow, &task)?;
+    }
+    Ok(withdrawn)
 }
 
 async fn end(app: &tauri::AppHandle, goal_id: &str, status: &str, outcome: String, touched: &[&str], tell: bool) -> Result<(), String> {
@@ -950,6 +1034,7 @@ fn delete_in(state: &AppState, id: &str) -> Result<(), String> {
     let active = state.active.lock().unwrap();
     let store = state.store.lock().unwrap();
     get(&store, id)?.ok_or("This goal no longer exists.")?;
+    let withdrawn = withdraw_waiting(&store, id)?;
     let transaction = store.db.unchecked_transaction().map_err(|e| e.to_string())?;
     if let Some(routine) = store.routine(&check_in_id(id))? {
         routines::stop_running(&active, &routine);
@@ -957,7 +1042,11 @@ fn delete_in(state: &AppState, id: &str) -> Result<(), String> {
     }
     store.db.execute("DELETE FROM goals WHERE id=?1", [id]).map_err(|e| e.to_string())?;
     store.audit("goal.deleted", id)?;
-    transaction.commit().map_err(|e| e.to_string())
+    transaction.commit().map_err(|e| e.to_string())?;
+    for id in withdrawn {
+        crate::notifications::withdraw_approval(&id);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1097,6 +1186,15 @@ mod tests {
 
     fn approved(store: &Store, prompt: &str, intent: &str) -> ActionReceipt {
         let request = parse_request(prompt).unwrap();
+        let mut settings = store.settings().unwrap();
+        if request.done_when == "reply" && !crate::apps::allowed(&settings, "mail") {
+            // Without Mail a reply goal isn't set up at all.
+            let refused = execute(store, intent, &validate(&request.arguments()).unwrap());
+            assert_eq!(refused.outcome, ActionOutcome::Failed);
+            assert!(refused.message.starts_with("Allow Mail in Settings → Apps"), "{}", refused.message);
+            settings.apps.push("mail".into());
+            store.save_settings(&settings).unwrap();
+        }
         execute(store, intent, &validate(&request.arguments()).unwrap())
     }
 
@@ -1124,14 +1222,21 @@ mod tests {
     fn a_goal_ends_on_evidence_not_on_say_so() {
         // A reply counts only from the person, after the goal began, and never from a robot.
         let since = "2026-10-30 09:00";
+        let mail = |received: &str, sender: &str, subject: &str| (received.to_string(), sender.to_string(), subject.to_string());
         let inbox = vec![
-            ("2026-10-31 08:00".to_string(), "Banana Republic <offers@banana.example>".to_string()),
-            ("2026-10-31 07:00".to_string(), "Ana Silva <noreply@ana.example>".to_string()),
-            ("2026-10-29 10:00".to_string(), "Ana Silva <ana@example.com>".to_string()),
+            mail("2026-10-31 08:00", "Banana Republic <offers@banana.example>", "Sale"),
+            mail("2026-10-31 07:00", "Ana Silva <noreply@ana.example>", "Receipt"),
+            mail("2026-10-29 10:00", "Ana Silva <ana@example.com>", "Re: Lease"),
+            // Not her: a domain word, a relay naming her, and her out-of-office.
+            mail("2026-10-31 09:00", "Pedro <pedro@ana.pt>", "Hello"),
+            mail("2026-10-31 10:00", "Ana Silva (via Google Docs) <drive-shares-dm-noreply@google.com>", "Document shared with you"),
+            mail("2026-10-31 11:00", "Ana Silva <ana@example.com>", "Automatic reply: Re: Lease"),
+            mail("2026-10-31 11:05", "Ana Silva <ana@example.com>", "Out of Office until the 20th"),
         ];
         assert_eq!(reply_in(&inbox, "Ana", since), None);
+        assert_eq!(reply_in(&inbox, "ana@example.com", since), None);
         let mut arrived = inbox.clone();
-        arrived.push(("2026-10-30 12:30".into(), "Ana Silva <ana@example.com>".into()));
+        arrived.push(mail("2026-10-30 12:30", "Ana Silva <ana@example.com>", "Re: Lease"));
         assert_eq!(reply_in(&arrived, "Ana", since).unwrap().0, "2026-10-30 12:30");
         assert_eq!(reply_in(&arrived, "ana@example.com", since).unwrap().0, "2026-10-30 12:30");
         assert_eq!(reply_in(&arrived, "sam@example.com", since), None);
@@ -1206,6 +1311,70 @@ mod tests {
         delete_in(&state, &other).unwrap();
         assert!(get(&state.store.lock().unwrap(), &other).unwrap().is_none() && routine(&state).is_none());
         assert_eq!(state.store.lock().unwrap().routines().unwrap().len(), 1, "only the morning brief is left");
+    }
+
+    #[tokio::test]
+    async fn a_reply_ends_a_goal_while_its_draft_waits_and_the_draft_is_withdrawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let ana = approved(&state.store.lock().unwrap(), "Follow up with Ana until she replies", "wait").object_id.unwrap();
+        // Monday's check-in drafted a follow-up, still under Waiting for you.
+        let routine = {
+            let store = state.store.lock().unwrap();
+            let task: TaskRecord = serde_json::from_value(json!({"id":"draft-task","prompt":"Draft a short follow-up email to Ana","answer":"","state":"waiting_action","createdAt":now(),"sources":[],"files":[],"backend":"mlx"})).unwrap();
+            routines::assign_thread(&store, &task.id, &thread(&store, &ana).unwrap()).unwrap();
+            store.save_task(&task).unwrap();
+            let mut flow = crate::workflows::Workflow::new(&task, "auto", &store.settings().unwrap(), vec![], None, &[]);
+            flow.begin("draft_email", json!({"to":"ana@example.com","subject":"Following up","body":"Hi Ana"}), json!({}), true, true).unwrap();
+            flow.state = "waiting_action".into();
+            store.checkpoint(&mut flow, &task).unwrap();
+            let mut routine = store.routine(&check_in_id(&ana)).unwrap().unwrap();
+            routine.last_task_id = Some(task.id.clone());
+            routine.next_run_at = (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
+            store.save_routine(&routine).unwrap();
+            assert_eq!(store.pending_approvals().unwrap().len(), 1);
+            routine
+        };
+        let replied = |_: Goal| async { Ok(Some(("2026-11-02 09:14".to_string(), "Ana Silva <ana@example.com>".to_string()))) };
+        let next = decide(&state, &routine, &ana, &routine.next_run_at, Local::now().date_naive(), replied).await.unwrap();
+        let Next::End { status, outcome, touched } = next else { panic!("her reply is seen even while the draft waits") };
+        assert_eq!(status, "done");
+        close(&state, &ana, status, outcome, &touched, true).unwrap();
+        let store = state.store.lock().unwrap();
+        assert!(store.pending_approvals().unwrap().is_empty(), "the follow-up can't be approved once she replied");
+        assert_eq!(store.workflow("draft-task").unwrap().unwrap().state, "cancelled");
+        assert!(store.task("draft-task").unwrap().unwrap().answer.contains("Nothing ran"));
+    }
+
+    #[tokio::test]
+    async fn a_reminder_still_comes_when_mail_cant_be_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let mum = approved(&state.store.lock().unwrap(), "Remind me to call Mum every Sunday at 6pm until she answers", "mum").object_id.unwrap();
+        let routine = {
+            let store = state.store.lock().unwrap();
+            let mut routine = store.routine(&check_in_id(&mum)).unwrap().unwrap();
+            routine.next_run_at = (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
+            store.save_routine(&routine).unwrap();
+            routine
+        };
+        let closed = |_: Goal| async { Err(format!("Mail {}", crate::apps::NOT_RUNNING)) };
+        let Next::Reminded { task, .. } = decide(&state, &routine, &mum, &routine.next_run_at, Local::now().date_naive(), closed).await.unwrap() else {
+            panic!("the reminder comes anyway")
+        };
+        assert!(task.answer.starts_with("Time to call Mum."), "{}", task.answer);
+        assert!(task.answer.contains("Mail wasn’t open"), "{}", task.answer);
+    }
+
+    #[test]
+    fn the_person_a_goal_waits_on_is_who_the_aim_addresses() {
+        assert_eq!(person_in("Help me plan the Paris trip with Ana").as_deref(), Some("Ana"));
+        assert_eq!(person_in("Follow up about the Lisbon trip with Ana Silva").as_deref(), Some("Ana Silva"));
+        assert_eq!(person_in("Remind me to call Mum").as_deref(), Some("Mum"));
+        assert_eq!(person_in("Chase Sam about the invoice").as_deref(), Some("Sam"));
+        assert_eq!(person_in("Sort out Lisbon and Porto bookings"), None, "two names and nothing saying who");
+        let request = parse_at("Help me plan the Paris trip with Ana until she replies", today()).unwrap();
+        assert_eq!(request.person.as_deref(), Some("Ana"));
     }
 
     #[tokio::test]
