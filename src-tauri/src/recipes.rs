@@ -228,7 +228,8 @@ impl Recipe for EditItem {
         if next.kind == "write" && !plan.offers(tool) {
             return Ok(None);
         }
-        Ok(match crate::edit_targets::edit_plan(plan.goal, tool, plan.steps)? {
+        let goal = crate::edit_targets::outcome_goal(&next.description, plan.goal, tool);
+        Ok(match crate::edit_targets::edit_plan(goal, tool, plan.steps)? {
             EditPlan::Read { tool: read, arguments } => {
                 if !plan.offers(read) {
                     return Err("I can’t read that app for this request. Check it’s allowed in Settings → Apps.".into());

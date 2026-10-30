@@ -383,9 +383,25 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
         .find(' ')
         .ok_or("Say which event to change and how.")?;
     let verb = &lower[..verb_end];
-    let split = lower
-        .rfind(" to ")
-        .map(|at| (at, 4))
+    // A new title or place may itself say "to" ("rename my 3pm to Talk to Sam"): it starts
+    // at a quote after "to", or else at the first "to" after the event. A new time is
+    // after the last one ("move my trip to Paris to 4").
+    let first_to = lower[verb_end..].find(" to ").map(|at| at + verb_end);
+    let names_field = first_to.is_some_and(|at| {
+        words(&lower[verb_end..at]).iter().any(|w| {
+            ["title", "name", "location", "place", "venue", "where"].contains(&w.as_str())
+        })
+    });
+    let quoted = [" to \"", " to “", " to '", " to ‘"]
+        .iter()
+        .filter_map(|opening| lower.find(opening))
+        .min();
+    let split = if verb == "rename" || (verb == "change" && names_field) {
+        quoted.or(first_to)
+    } else {
+        lower.rfind(" to ")
+    }
+    .map(|at| (at, 4))
         .or_else(|| {
             ["reschedule", "postpone"]
                 .contains(&verb)
@@ -596,12 +612,24 @@ fn narrowed(matches: Vec<Candidate>, records: &[Value], phrase: &[String]) -> Ve
     }
 }
 
-fn decide(matches: Vec<Candidate>) -> EditPlan {
-    if matches.len() == 1 {
-        EditPlan::One(matches.into_iter().next().unwrap())
+/// One match is bound only when the read saw every item it looked for. From a partial
+/// read (Notes returns 6 matches, Reminders 50, Calendar 40 a day) another match may be
+/// one Buntini didn't see, so the one it found waits for the user to pick it.
+fn decide(mut matches: Vec<Candidate>, complete: bool) -> EditPlan {
+    if matches.len() == 1 && complete {
+        EditPlan::One(matches.remove(0))
     } else {
+        if !complete {
+            for candidate in &mut matches {
+                candidate.label += " · others may match";
+            }
+        }
         EditPlan::Several(matches.into_iter().take(CHOICES).collect())
     }
+}
+
+fn read_complete(step: &Step) -> bool {
+    step.evidence.as_ref().is_some_and(|e| e["complete"] == true)
 }
 
 fn pick<'a>(
@@ -618,6 +646,20 @@ fn pick<'a>(
             NaiveDateTime::parse_from_str(field(record, "startLocal"), "%Y-%m-%d %H:%M")
                 .is_ok_and(|at| at > now)
         }),
+    }
+}
+
+/// The words one change is for: the clause its outcome was made from (`description`,
+/// with or without the read's prefix) when that clause asks for `tool`, so the second of
+/// two edits of the same kind binds its own item; otherwise the whole request.
+pub fn outcome_goal<'a>(description: &'a str, goal: &'a str, tool: &str) -> &'a str {
+    let own = description
+        .strip_prefix(crate::task_contract::EDIT_READ)
+        .unwrap_or(description);
+    if clause(own, tool).is_some() {
+        own
+    } else {
+        goal
     }
 }
 
@@ -695,7 +737,9 @@ fn reminder_plan(target: &Target, steps: &[Step], now: NaiveDateTime) -> Result<
             format!("I couldn’t find an open reminder matching {named} among the ones I read. Say its name as it is in Reminders.")
         });
     }
-    Ok(decide(narrowed(candidates, &all, &target.words)))
+    // "The first one" is the first of what was read, however many there are.
+    let ordered = target.ordinal.is_some() && target.words.is_empty();
+    Ok(decide(narrowed(candidates, &all, &target.words), complete || ordered))
 }
 
 fn event_plan(
@@ -763,7 +807,7 @@ fn event_plan(
         for record in chosen {
             candidates.push(event_candidate(step, record, change)?);
         }
-        let plan = decide(narrowed(candidates, &timed, &target.words));
+        let plan = decide(narrowed(candidates, &timed, &target.words), complete || target.ordinal.is_some());
         if let EditPlan::One(candidate) = &plan {
             let args = &candidate.arguments;
             if args["start"] == args["occurrence"]
@@ -892,7 +936,7 @@ fn note_plan(note: &str, text: Option<String>, steps: &[Step]) -> Result<EditPla
             "I couldn’t find a note called “{note}”. Say its title as it is in Notes."
         ));
     }
-    Ok(decide(narrowed(candidates, &all, &wanted)))
+    Ok(decide(narrowed(candidates, &all, &wanted), read_complete(step)))
 }
 
 /// The change's arguments when the user still has to pick: the first match's, without
@@ -907,14 +951,16 @@ pub fn unpicked(candidates: &[Candidate]) -> Value {
 
 /// What the sheet adds for a change: what the item is like now, and the matches to pick
 /// from when there are several.
+/// `goals` are the words of each change of this kind the request asks for
+/// (`TaskContract::edit_goals`); the sheet is for the one these arguments came from.
 pub fn sheet(
-    goal: &str,
+    goals: &[String],
     tool: &str,
     arguments: &Value,
     steps: &[Step],
 ) -> (Option<Field>, Vec<crate::actions::Choice>) {
     sheet_at(
-        goal,
+        goals,
         tool,
         arguments,
         steps,
@@ -923,7 +969,7 @@ pub fn sheet(
 }
 
 fn sheet_at(
-    goal: &str,
+    goals: &[String],
     tool: &str,
     arguments: &Value,
     steps: &[Step],
@@ -938,11 +984,31 @@ fn sheet_at(
         value,
         kind: "fixed",
     };
-    match edit_plan_at(goal, tool, steps, at) {
-        Ok(EditPlan::One(candidate)) if candidate.arguments["id"] == arguments["id"] => {
-            (Some(now(candidate.now)), vec![])
+    let mut unpicked_arguments = arguments.clone();
+    if let Some(fields) = unpicked_arguments.as_object_mut() {
+        fields.remove("id");
+    }
+    let plan = goals.iter().find_map(|goal| match edit_plan_at(goal, tool, steps, at) {
+        Ok(EditPlan::One(candidate)) if candidate.arguments["id"] == arguments["id"] => Some(EditPlan::One(candidate)),
+        Ok(EditPlan::Several(candidates))
+            if candidates.iter().any(|candidate| candidate.arguments["id"] == arguments["id"])
+                || unpicked(&candidates) == unpicked_arguments =>
+        {
+            Some(EditPlan::Several(candidates))
         }
-        Ok(EditPlan::Several(candidates)) => {
+        _ => None,
+    });
+    match plan {
+        Some(EditPlan::One(candidate)) => (Some(now(candidate.now)), vec![]),
+        Some(EditPlan::Several(candidates)) => {
+            // Every pick sets every field any match has, blank when its item has none, so
+            // the first match's location never stays on another event.
+            let keys: std::collections::BTreeSet<String> = candidates
+                .iter()
+                .flat_map(|candidate| candidate.arguments.as_object().into_iter().flatten())
+                .map(|(key, _)| key.clone())
+                .filter(|key| key != "id")
+                .collect();
             let choices = candidates
                 .into_iter()
                 .map(|candidate| {
@@ -962,6 +1028,9 @@ fn sheet_at(
                             )
                         })
                         .collect();
+                    for key in &keys {
+                        also.entry(key.clone()).or_default();
+                    }
                     also.insert("now".into(), candidate.now);
                     crate::actions::Choice {
                         field: "id".into(),
@@ -990,7 +1059,7 @@ fn identity(tool: &str) -> &'static [&'static str] {
 /// user named. Before approval the id may still be missing while the user picks one;
 /// `approving` requires it.
 pub fn check(
-    goal: &str,
+    goals: &[String],
     tool: &str,
     arguments: &Value,
     steps: &[Step],
@@ -999,15 +1068,33 @@ pub fn check(
     if !crate::actions::EDIT_TOOLS.contains(&tool) {
         return Ok(());
     }
-    let candidates = match edit_plan(goal, tool, steps)? {
-        EditPlan::Read { .. } => {
-            return Err("Buntini hasn’t read that item in this task yet.".into())
+    // Each change of this kind the user asked for has its own item; a change may be for
+    // any of them, and only for an item read for one of them.
+    let mut candidates = Vec::new();
+    let mut several = false;
+    let mut first_error = None;
+    let mut unread = false;
+    for goal in goals {
+        match edit_plan(goal, tool, steps) {
+            Ok(EditPlan::Read { .. }) => unread = true,
+            Ok(EditPlan::One(candidate)) => candidates.push(candidate),
+            Ok(EditPlan::Several(found)) => {
+                several = true;
+                candidates.extend(found);
+            }
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
         }
-        EditPlan::One(candidate) => vec![candidate],
-        EditPlan::Several(candidates) => candidates,
-    };
+    }
+    if candidates.is_empty() {
+        return Err(match first_error {
+            Some(error) if !unread => error,
+            _ => "Buntini hasn’t read that item in this task yet.".into(),
+        });
+    }
     if arguments.get("id").is_none() {
-        return if approving || candidates.len() < 2 {
+        return if approving || !several {
             Err("Pick which one to change first.".into())
         } else {
             Ok(())
@@ -1472,7 +1559,7 @@ mod tests {
         ];
         let goal = "Tick off milk";
         let check =
-            |args: Value, approving| check(goal, "complete_reminder", &args, &steps, approving);
+            |args: Value, approving| check(&[goal.into()], "complete_reminder", &args, &steps, approving);
         assert!(
             check(json!({"title":"Buy milk"}), false).is_ok(),
             "the user still picks one"
@@ -1492,7 +1579,7 @@ mod tests {
         assert!(check(json!({"id":"r-1","title":"Buy milk"}), true).is_ok());
         assert!(
             super::check(
-                "Mark buy milk done",
+                &["Mark buy milk done".into()],
                 "complete_reminder",
                 &json!({"id":"r-1","title":"Buy milk"}),
                 &[],
@@ -1501,7 +1588,7 @@ mod tests {
             .is_err(),
             "nothing read yet"
         );
-        assert!(super::check(goal, "create_note", &json!({}), &[], true).is_ok());
+        assert!(super::check(&[goal.into()], "create_note", &json!({}), &[], true).is_ok());
     }
 
     #[test]
@@ -1533,7 +1620,7 @@ mod tests {
         let unpicked = unpicked(&candidates);
         assert!(unpicked.get("id").is_none());
         let (now, choices) = sheet_at(
-            "Move my 3pm to 4",
+            &["Move my 3pm to 4".into()],
             "update_calendar_event",
             &unpicked,
             &[today],
@@ -1545,6 +1632,76 @@ mod tests {
         assert_eq!(choices[1].also["was_title"], "Call with Sam");
         assert_eq!(choices[1].also["minutes"], "60");
         assert!(choices[1].also["now"].contains("15:00–16:00"));
+    }
+
+    #[test]
+    fn two_changes_of_the_same_kind_each_bind_their_own_item() {
+        let goal = "Add milk to my shopping note and add eggs to my grocery note";
+        let contract = crate::task_contract::TaskContract::from_request(goal);
+        let goals = contract.edit_goals("append_to_note");
+        assert_eq!(goals.len(), 2, "{goals:?}");
+        let steps = [
+            notes("shopping", &[("n-1", "Shopping", "Shopping Bread")]),
+            notes("grocery", &[("n-2", "Grocery", "Grocery Rice")]),
+        ];
+        let second = one(&goals[1], "append_to_note", &steps);
+        assert_eq!((second["id"].as_str(), second["text"].as_str()), (Some("n-2"), Some("eggs")));
+        let first = one(&goals[0], "append_to_note", &steps);
+        assert_eq!((first["id"].as_str(), first["text"].as_str()), (Some("n-1"), Some("milk")));
+        // Either may be approved; an item read for neither may not.
+        assert!(check(&goals, "append_to_note", &second, &steps, true).is_ok());
+        assert!(check(&goals, "append_to_note", &json!({"id":"n-9","title":"Other","text":"eggs"}), &steps, true).is_err());
+        // The read for the second change is the read for its own note.
+        let read = contract
+            .outcomes
+            .iter()
+            .filter(|o| o.description.starts_with(crate::task_contract::EDIT_READ))
+            .map(|o| outcome_goal(&o.description, goal, "append_to_note"))
+            .collect::<Vec<_>>();
+        assert_eq!(read, [goals[0].as_str(), goals[1].as_str()]);
+    }
+
+    #[test]
+    fn a_new_title_may_say_to() {
+        let steps = [calendar_day(
+            "2026-10-29",
+            vec![event("e-1", "Planning", "2026-10-29 15:00", "2026-10-29 16:00")],
+        )];
+        let renamed = one("Rename my 3pm to Talk to Sam", "update_calendar_event", &steps);
+        assert_eq!(renamed["title"], "Talk to Sam");
+        let quoted = one("rename my 3pm to “Back to back”", "update_calendar_event", &steps);
+        assert_eq!(quoted["title"], "Back to back");
+        let moved = one("move my 3pm to 4", "update_calendar_event", &steps);
+        assert_eq!(moved["start"], "2026-10-29 16:00");
+    }
+
+    #[test]
+    fn a_lone_match_from_a_partial_read_waits_for_a_pick() {
+        // Notes found 9 matching notes and returned 1.
+        let output = "2026-10-22 12:30\tn-1\tShopping trip ideas\tShopping trip ideas Rome\t24\n__buntini_summary__\t9\t1\ttrue";
+        let step = read("notes", "find_notes", json!({"query":"shopping"}), crate::apps::notes_evidence("shopping", output).unwrap());
+        let planned = plan("Add milk to my shopping note", "append_to_note", &[step]);
+        let Ok(EditPlan::Several(found)) = planned else {
+            panic!("a partial read never binds on its own: {planned:?}")
+        };
+        assert_eq!(found.len(), 1);
+        assert!(found[0].label.contains("others may match"));
+    }
+
+    #[test]
+    fn picking_an_event_clears_what_another_match_had() {
+        let mut first = event("e-1", "Standup", "2026-10-29 09:00", "2026-10-29 09:15");
+        first.location = "Room 1".into();
+        let today = calendar_day(
+            "2026-10-29",
+            vec![first, event("e-2", "Standup", "2026-10-29 15:00", "2026-10-29 15:15")],
+        );
+        let Ok(EditPlan::Several(candidates)) = plan("push the standup to 4", "update_calendar_event", &[today.clone()]) else {
+            panic!()
+        };
+        let (_, choices) = sheet_at(&["push the standup to 4".into()], "update_calendar_event", &unpicked(&candidates), &[today], now());
+        assert_eq!(choices[0].also["location"], "Room 1");
+        assert_eq!(choices[1].also["location"], "", "a pick blanks the first match's place");
     }
 
     #[test]

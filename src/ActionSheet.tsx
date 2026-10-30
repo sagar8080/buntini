@@ -20,7 +20,12 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
   const sent = new Set(proposal.fields.filter(field => field.kind !== 'fixed').map(field => field.key));
   const allow = () => onAllow(Object.fromEntries(Object.entries(values).filter(([key, value]) => sent.has(key) && value.trim() !== '').map(([key, value]) => [key, key === 'minutes' ? Number(value) : value])));
   const set = (key: string, value: string) => setValues(previous => ({ ...previous, [key]: value }));
-  const pick = (choice: ActionChoice) => setValues(previous => ({ ...previous, ...choice.also, [choice.field]: choice.value }));
+  // A pick replaces everything another pick of the same field set, so nothing from the
+  // first match (such as its location) stays on the one picked.
+  const pick = (choice: ActionChoice) => setValues(previous => {
+    const cleared = Object.fromEntries((proposal.choices ?? []).filter(other => other.field === choice.field).flatMap(other => Object.keys(other.also ?? {})).map(key => [key, '']));
+    return { ...previous, ...cleared, ...choice.also, [choice.field]: choice.value };
+  });
   const choicesFor = (key: string) => proposal.choices?.filter(choice => choice.field === key) ?? [];
   const picker = (label: string, choices: ActionChoice[], key: string) => <span className="field-choices" role="group" aria-label={`Matching ${label}`}>
     {choices.map(choice => <button key={choice.value} type="button" className="secondary-button" disabled={running} aria-pressed={values[key] === choice.value} onClick={() => pick(choice)}>{choice.label}</button>)}
@@ -31,7 +36,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
       {proposal.fields.map(field => {
         const choices = choicesFor(field.key);
         if (field.kind === 'hidden') return choices.length > 0 ? <div key={field.key} className="action-pick"><span>{field.label}</span>{picker(field.label, choices, field.key)}</div> : null;
-        if (field.kind === 'fixed') return <div key={field.key} className="action-fixed"><span>{field.label}</span><output>{field.value}</output></div>;
+        if (field.kind === 'fixed') return <div key={field.key} className="action-fixed"><span>{field.label}</span><output>{values[field.key] || field.value}</output></div>;
         return <label key={field.key}><span>{field.label}</span>
           {field.kind === 'long' ? <textarea disabled={running} rows={4} value={values[field.key]} onChange={event => set(field.key, event.target.value)} />
             : field.kind === 'when' ? <input disabled={running} type="datetime-local" value={toPicker(values[field.key])} onChange={event => set(field.key, fromPicker(event.target.value))} />

@@ -1644,7 +1644,8 @@ impl TaskContract {
             // Moving an event the user named without a day: only the next day the
             // search for it needs, never another day or source.
             if tool == "read_calendar" && searching_calendar(Some(outcome)) {
-                return match crate::edit_targets::edit_plan(&self.current_request, "update_calendar_event", steps) {
+                let goal = crate::edit_targets::outcome_goal(&outcome.description, &self.current_request, "update_calendar_event");
+                return match crate::edit_targets::edit_plan(goal, "update_calendar_event", steps) {
                     Ok(crate::edit_targets::EditPlan::Read { tool: "read_calendar", arguments: wanted })
                         if wanted["day"] == arguments["day"] => Ok(()),
                     _ => Err("This source read is not relevant to the next unfinished task outcome.".into()),
@@ -1712,7 +1713,24 @@ impl TaskContract {
                 ));
             }
         }
-        crate::edit_targets::check(&self.current_request, tool, arguments, steps, false)
+        crate::edit_targets::check(&self.edit_goals(tool), tool, arguments, steps, false)
+    }
+    /// The words of each change to an existing item of this kind the request asks for,
+    /// one per outcome, so two edits of the same kind each keep their own item.
+    pub fn edit_goals(&self, tool: &str) -> Vec<String> {
+        let mut goals: Vec<String> = Vec::new();
+        for outcome in &self.outcomes {
+            if outcome.kind == "write" && outcome.tool.as_deref() == Some(tool) {
+                let goal = crate::edit_targets::outcome_goal(&outcome.description, &self.current_request, tool).to_string();
+                if !goals.contains(&goal) {
+                    goals.push(goal);
+                }
+            }
+        }
+        if goals.is_empty() {
+            goals.push(self.current_request.clone());
+        }
+        goals
     }
     pub fn validate_answer(&self, text: &str, steps: &[Step]) -> Result<String, String> {
         if steps

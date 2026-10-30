@@ -907,7 +907,7 @@ where
         let args = crate::actions::keep_fixed(&tool, &intent.arguments, &args);
         let normalized = validate_action(&tool, &args)?;
         // A changed item must be one this task read for what the user named.
-        crate::edit_targets::check(&flow.contract.current_request, &tool, &Value::Object(normalized.clone()), &flow.steps, true)?;
+        crate::edit_targets::check(&flow.contract.edit_goals(&tool), &tool, &Value::Object(normalized.clone()), &flow.steps, true)?;
         let settings = store.settings()?;
         flow.check_resume(&task, &settings)?;
         if !action_allowed(&settings, &tool, &normalized) {
@@ -3400,7 +3400,7 @@ where
         };
         // A change to an existing item shows what it is like now; when several items
         // match what the user named they pick one, so no id is chosen for them.
-        let (now, edit_choices) = crate::edit_targets::sheet(&flow.contract.current_request, &name, &args, &flow.steps);
+        let (now, edit_choices) = crate::edit_targets::sheet(&flow.contract.edit_goals(&name), &name, &args, &flow.steps);
         if !edit_choices.is_empty() {
             if let Some(fields) = args.as_object_mut() {
                 fields.remove("id");
