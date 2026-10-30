@@ -28,6 +28,9 @@ struct Recording {
     /// Set when this session listened while Buntini was talking, so its own words are
     /// removed from what was heard.
     echo_since: Option<Instant>,
+    /// How many words at the start of what was heard came while Buntini was still
+    /// talking; only those can be its echo. None until the first live words arrive.
+    echo_words: Arc<std::sync::Mutex<Option<usize>>>,
 }
 
 /// How a listening session starts. `barge_in` keeps Buntini's reply playing so the
@@ -97,16 +100,171 @@ impl SpokenLog {
             entry.ended.get_or_insert_with(Instant::now);
         }
     }
-    /// Words spoken while a session listened. Room echo and the audio pipeline lag the
-    /// speaker by a moment, so speech that ended just before the session still counts.
+    /// Words spoken while a session listened, with the ways a recognizer may write them
+    /// ("3:30" as "three thirty", "Dr." as "doctor"). Room echo and the audio pipeline
+    /// lag the speaker by a moment, so speech that ended just before the session counts.
     fn words_since(&self, since: Instant) -> HashSet<String> {
-        let window = since.checked_sub(Duration::from_secs(2)).unwrap_or(since);
+        let window = since.checked_sub(ECHO_LAG).unwrap_or(since);
         self.entries
             .iter()
             .filter(|entry| entry.ended.is_none_or(|ended| ended >= window))
-            .flat_map(|entry| words(&entry.text))
+            .flat_map(|entry| spoken_forms(&entry.text))
             .collect()
     }
+    /// Whether Buntini is talking, or stopped so recently that its echo may still arrive.
+    fn speaking(&self, now: Instant) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.ended.is_none_or(|ended| now.duration_since(ended) < ECHO_LAG))
+    }
+}
+
+/// How long after Buntini stops talking its echo may still reach the recognizer.
+const ECHO_LAG: Duration = Duration::from_secs(2);
+
+/// The words of a reply as said aloud and as a recognizer may write them back: numbers
+/// and times in words, currency, percentages and common abbreviations spelled out.
+fn spoken_forms(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in text.split_whitespace() {
+        out.extend(words(token));
+        let lower = token.to_lowercase();
+        let bare = lower.trim_matches(|c: char| !c.is_alphanumeric() && !matches!(c, '$' | '%' | '&' | '+' | '€' | '£'));
+        let expanded: &[&str] = match bare.trim_end_matches('.') {
+            "dr" => &["doctor", "drive"],
+            "st" => &["street", "saint"],
+            "mr" => &["mister"],
+            "mrs" => &["missus", "misses"],
+            "ms" => &["miss", "mizz"],
+            "jr" => &["junior"],
+            "ave" => &["avenue"],
+            "rd" => &["road"],
+            "&" => &["and"],
+            "+" => &["plus"],
+            "vs" => &["versus"],
+            "etc" => &["etcetera"],
+            "am" | "a.m" => &["a", "m", "am"],
+            "pm" | "p.m" => &["p", "m", "pm"],
+            _ => &[],
+        };
+        out.extend(expanded.iter().map(|word| word.to_string()));
+        if bare.starts_with('$') || bare.contains("dollar") {
+            out.extend(["dollars".into(), "dollar".into()]);
+        }
+        if bare.starts_with('€') {
+            out.extend(["euros".into(), "euro".into()]);
+        }
+        if bare.starts_with('£') {
+            out.extend(["pounds".into(), "pound".into()]);
+        }
+        if bare.ends_with('%') {
+            out.push("percent".into());
+        }
+        // "3:30pm" → three thirty p m; "1,200" → one thousand two hundred.
+        let digits: String = bare.chars().filter(|c| c.is_ascii_digit() || *c == ':' || *c == '.').collect();
+        for (index, part) in digits.split([':', '.']).filter(|part| !part.is_empty()).enumerate() {
+            let Ok(number) = part.parse::<u64>() else { continue };
+            if index > 0 && part.len() == 2 && part.starts_with('0') {
+                out.extend(["oh".to_string(), "o'clock".to_string(), "hundred".to_string()]);
+            }
+            out.extend(number_words(number));
+        }
+        if bare.contains(',') {
+            if let Ok(number) = bare.chars().filter(char::is_ascii_digit).collect::<String>().parse::<u64>() {
+                out.extend(number_words(number));
+            }
+        }
+        if bare.ends_with("pm") || bare.ends_with("am") {
+            out.extend(["a".into(), "p".into(), "m".into()]);
+        }
+    }
+    out
+}
+
+/// A number in English words, as a recognizer writes a spoken one ("21" → twenty one).
+fn number_words(number: u64) -> Vec<String> {
+    const ONES: [&str; 20] = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+        "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+    ];
+    const TENS: [&str; 10] = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+    fn below_thousand(n: u64, out: &mut Vec<String>) {
+        if n >= 100 {
+            out.push(ONES[(n / 100) as usize].into());
+            out.push("hundred".into());
+            if n % 100 == 0 {
+                return;
+            }
+        }
+        let rest = n % 100;
+        if rest < 20 {
+            if rest > 0 || n < 100 {
+                out.push(ONES[rest as usize].into());
+            }
+        } else {
+            out.push(TENS[(rest / 10) as usize].into());
+            if rest % 10 > 0 {
+                out.push(ONES[(rest % 10) as usize].into());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if number >= 1_000_000 {
+        return out;
+    }
+    if number >= 1000 {
+        below_thousand(number / 1000, &mut out);
+        out.push("thousand".into());
+        if number % 1000 > 0 {
+            below_thousand(number % 1000, &mut out);
+        }
+    } else {
+        below_thousand(number, &mut out);
+    }
+    // "1200" is also said "twelve hundred", "2026" "twenty twenty six".
+    if (1100..10_000).contains(&number) {
+        below_thousand(number / 100, &mut out);
+        out.push("hundred".into());
+        if number % 100 > 0 {
+            below_thousand(number % 100, &mut out);
+        }
+    }
+    out
+}
+
+/// Whether a heard word is one Buntini said, allowing one wrong letter in a longer word
+/// ("calender", a name the recognizer spells differently).
+fn is_echo(word: &str, spoken: &HashSet<String>) -> bool {
+    if spoken.contains(word) {
+        return true;
+    }
+    let length = word.chars().count();
+    length >= 4
+        && spoken
+            .iter()
+            .any(|said| said.chars().count().abs_diff(length) <= 1 && said.chars().count() >= 4 && within_one_edit(word, said))
+}
+
+fn within_one_edit(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let (short, long) = if a.len() <= b.len() { (&a, &b) } else { (&b, &a) };
+    let (mut i, mut j, mut edits) = (0, 0, 0);
+    while i < short.len() && j < long.len() {
+        if short[i] == long[j] {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        edits += 1;
+        if edits > 1 {
+            return false;
+        }
+        if short.len() == long.len() {
+            i += 1;
+        }
+        j += 1;
+    }
+    edits + (long.len() - j) + (short.len() - i) <= 1
 }
 
 fn words(text: &str) -> Vec<String> {
@@ -127,22 +285,30 @@ fn words(text: &str) -> Vec<String> {
 /// is cut where the fewest words disagree: non-echo words before the cut plus echo words
 /// after it. Ties keep more of the user's words.
 fn strip_echo(heard: &str, spoken: &HashSet<String>) -> String {
-    if spoken.is_empty() {
+    strip_echo_within(heard, spoken, usize::MAX)
+}
+
+/// Like `strip_echo`, but only the first `limit` words, those heard while Buntini was
+/// still talking, can be echo: what the user says once it has gone quiet is all theirs,
+/// even an answer made of the reply's own words ("Should I send it?" → "yes send it").
+fn strip_echo_within(heard: &str, spoken: &HashSet<String>, limit: usize) -> String {
+    if spoken.is_empty() || limit == 0 {
         return heard.trim().to_string();
     }
     let raw: Vec<&str> = heard.split_whitespace().collect();
-    let echo: Vec<bool> = raw
+    let limit = limit.min(raw.len());
+    let echo: Vec<bool> = raw[..limit]
         .iter()
         .map(|word| {
             words(word)
                 .first()
-                .is_some_and(|word| spoken.contains(word))
+                .is_some_and(|word| is_echo(word, spoken))
         })
         .collect();
     let mut best = (usize::MAX, 0);
     let mut misses_before = 0;
     let mut hits_after = echo.iter().filter(|hit| **hit).count();
-    for cut in 0..=raw.len() {
+    for cut in 0..=limit {
         let cost = misses_before + hits_after;
         if cost < best.0 {
             best = (cost, cut);
@@ -165,6 +331,7 @@ fn spawn_reader(
     session: u64,
     spoken: Arc<std::sync::Mutex<SpokenLog>>,
     echo_since: Option<Instant>,
+    echo_words: Arc<std::sync::Mutex<Option<usize>>>,
 ) {
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
@@ -184,7 +351,9 @@ fn spawn_reader(
                         .unwrap_or_default();
                     let text = match echo_since {
                         Some(since) => {
-                            strip_echo(heard, &spoken.lock().unwrap().words_since(since))
+                            let log = spoken.lock().unwrap();
+                            let limit = heard_while_speaking(&log, &echo_words, heard);
+                            strip_echo_within(heard, &log.words_since(since), limit)
                         }
                         None => heard.trim().to_string(),
                     };
@@ -207,6 +376,16 @@ fn spawn_reader(
             }
         }
     });
+}
+
+/// Updates and returns how many words of `heard` came while Buntini was talking: all of
+/// them while it still is, and no more once it has gone quiet.
+fn heard_while_speaking(log: &SpokenLog, echo_words: &std::sync::Mutex<Option<usize>>, heard: &str) -> usize {
+    let mut counted = echo_words.lock().unwrap();
+    let count = heard.split_whitespace().count();
+    let limit = if log.speaking(Instant::now()) { count.max(counted.unwrap_or(0)) } else { counted.unwrap_or(0) };
+    *counted = Some(limit);
+    limit
 }
 
 /// A microphone that delivers only silence (muted, the wrong input, or blocked) peaks far
@@ -247,6 +426,35 @@ mod tests {
         );
         // Outside a barge-in there is nothing to remove.
         assert_eq!(strip_echo(" hello there ", &HashSet::new()), "hello there");
+    }
+
+    #[test]
+    fn an_answer_made_of_the_replys_words_is_kept_once_buntini_is_quiet() {
+        let reply = spoken("Should I send it?");
+        // Heard after the reply ended: nothing of it is echo.
+        assert_eq!(strip_echo_within("yes send it", &reply, 0), "yes send it");
+        assert_eq!(strip_echo_within("Alex", &spoken("Alex or Sam?"), 0), "Alex");
+        // Echo heard while it talked, then the user's answer afterwards.
+        assert_eq!(strip_echo_within("should I send it yes send it", &reply, 4), "yes send it");
+        let mut log = SpokenLog::default();
+        let id = log.begin("Should I send it?");
+        let counted = std::sync::Mutex::new(None);
+        assert_eq!(heard_while_speaking(&log, &counted, "should I send"), 3);
+        log.end(id);
+        log.entries[0].ended = Instant::now().checked_sub(Duration::from_secs(5));
+        assert_eq!(heard_while_speaking(&log, &counted, "should I send it yes send it"), 3, "words after it went quiet are the user's");
+    }
+
+    #[test]
+    fn echo_the_recognizer_writes_differently_is_still_echo() {
+        let reply: HashSet<String> = spoken_forms("Your meeting is at 3:30 with Dr. Smith, and it costs $5 or 20%.").into_iter().collect();
+        assert_eq!(strip_echo("your meeting is at three thirty", &reply), "");
+        assert_eq!(strip_echo("your meeting is at three thirty with doctor smith", &reply), "");
+        assert_eq!(strip_echo("it costs five dollars or twenty percent", &reply), "");
+        assert_eq!(strip_echo("your meeting is at three thirty with doctor smyth", &reply), "", "one wrong letter in a name");
+        assert_eq!(strip_echo("your meeting is at three thirty cancel it please", &reply), "cancel it please");
+        assert_eq!(number_words(1200), ["one", "thousand", "two", "hundred", "twelve", "hundred"]);
+        assert_eq!(number_words(21), ["twenty", "one"]);
     }
 
     #[test]
@@ -455,6 +663,7 @@ for line in sys.stdin:
             path: path.clone(),
             cancel,
             echo_since: None,
+            echo_words: Default::default(),
         });
         let stopping_voice = voice.clone();
         let stopping = tokio::spawn(async move {
@@ -706,6 +915,7 @@ impl Voice {
             TURN_SECONDS
         };
         let echo_since = listen.barge_in.then(Instant::now);
+        let echo_words = Arc::new(std::sync::Mutex::new(None));
         let mut child = Command::new(&self.helper)
             .arg("--transcribe")
             .arg("--output")
@@ -749,6 +959,7 @@ impl Voice {
             generation,
             self.spoken.clone(),
             echo_since,
+            echo_words.clone(),
         );
         *slot = Some(Recording {
             child,
@@ -757,6 +968,7 @@ impl Voice {
             path,
             cancel,
             echo_since,
+            echo_words,
         });
         Ok(Listening {
             session: generation,
@@ -887,7 +1099,13 @@ impl Voice {
             return Err("Recording cancelled.".into());
         }
         result.map(|text| match rec.echo_since {
-            Some(since) => strip_echo(&text, &self.spoken.lock().unwrap().words_since(since)),
+            Some(since) => {
+                let log = self.spoken.lock().unwrap();
+                // The live words said which came while Buntini talked. Without them there
+                // is no telling, so any may be echo.
+                let limit = rec.echo_words.lock().unwrap().unwrap_or(usize::MAX);
+                strip_echo_within(&text, &log.words_since(since), limit)
+            }
             None => text,
         })
     }

@@ -121,6 +121,10 @@ export default function App() {
   const voiceSession = useRef(0);
   const liveWords = useRef(false);
   const [heard, setHeard] = useState('');
+  /** What the current turn has heard so far, for handlers that run outside a render. */
+  const heardNow = useRef('');
+  /** The microphone is open (it may first wait for Apple's speech model to download). */
+  const [micOpen, setMicOpen] = useState(false);
   const voiceHooks = useRef({ finish: () => {}, timeout: () => {}, event: (_name: string, _payload: VoicePayload) => {}, afterAnswer: (_aloud: boolean) => {} });
   const voiceVersion = useRef(0);
   const voiceStoppingRef = useRef(false);
@@ -531,15 +535,17 @@ export default function App() {
       void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)));
     }
     const version = ++voiceVersion.current;
-    recordHeld.current = true; setError(''); setHeard('');
+    recordHeld.current = true; setError(''); setHeard(''); heardNow.current = ''; setMicOpen(false);
     const turn = new Endpointer();
     turn.setSpeaking(speechActive.current, Date.now());
     endpointer.current = turn;
     setRecording(true); setPetState(speechActive.current ? 'speaking' : 'listening');
     recordPromise.current = (async () => {
       try {
-        const started = await command<Listening | undefined>('start_recording', { bargeIn: followUp });
+        // Only a reply still playing needs its echo told apart from the user's words.
+        const started = await command<Listening | undefined>('start_recording', { bargeIn: followUp && speechActive.current });
         if (version !== voiceVersion.current) { await command('cancel_recording'); return; }
+        setMicOpen(true);
         voiceSession.current = started?.session ?? 0;
         liveWords.current = !!started?.live;
         turn.begin(liveWords.current, Date.now());
@@ -548,20 +554,26 @@ export default function App() {
     })();
     try { await recordPromise.current; } catch { /* Error is shown above. */ }
   }
-  async function finishVoice() {
+  // `ended`: the microphone closed on its own (its time limit), not because the user finished.
+  async function finishVoice(ended = false) {
     if (!recordHeld.current) return;
     const version = voiceVersion.current;
+    // A long reply outlasted the microphone while the user said nothing: keep the reply
+    // playing and listen again, rather than cutting it off and ending the conversation.
+    const outlasted = ended && followUpTurn.current && speechActive.current && !heardNow.current.trim();
     recordHeld.current = false; setHandsFreeMode(false); endpointer.current = null;
     try { await recordPromise.current; } catch { return; }
     if (version !== voiceVersion.current) return;
-    setRecording(false); setTranscribing(true); setPetState('thinking');
+    setRecording(false); setTranscribing(!outlasted); setPetState(outlasted ? 'speaking' : 'thinking');
     // Whatever is left of a reply the user talked over stops: it is their turn now.
-    if (speechActive.current) void speechQueue.current?.cancel().catch(() => {});
+    if (speechActive.current && !outlasted) void speechQueue.current?.cancel().catch(() => {});
     let heard = '';
     try {
-      const text = await command<string>('stop_recording');
+      const text = await command<string>('stop_recording').catch(error => { if (outlasted) return ''; throw error; });
       if (version !== voiceVersion.current) return;
       heard = text.trim();
+      if (outlasted && !heard) { recordPromise.current = null; if (conversation.current) void startVoice(true); return; }
+      if (outlasted && speechActive.current) void speechQueue.current?.cancel().catch(() => {});
       setPage('home');
       // Saying nothing after an answer just ends the conversation.
       if (!heard && !followUpTurn.current) setNotice('I didn’t catch any words. Try again a little closer to the mic.');
@@ -601,13 +613,13 @@ export default function App() {
       const now = Date.now();
       if (name === 'voice-partial') {
         const text = payload.text ?? '';
-        setHeard(text);
+        setHeard(text); heardNow.current = text;
         endpointer.current?.text(text, now);
         // Talking over the reply stops it; Buntini's own echo never gets here.
         if (speechActive.current && shouldBargeIn(text)) { void speechQueue.current?.cancel().catch(() => {}); setPetState('listening'); }
       } else if (name === 'voice-level') endpointer.current?.level(payload.level ?? 0, now);
       // The microphone closed on its own (time limit or a problem): collect what it has.
-      else if (name === 'voice-ended') void finishVoice();
+      else if (name === 'voice-ended') void finishVoice(true);
     },
     afterAnswer: aloud => {
       // Only keep listening while you are still here with the panel in front of you.
@@ -801,10 +813,10 @@ export default function App() {
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
-              <textarea ref={inputRef} rows={2} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'Listening…' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
+              <textarea ref={inputRef} rows={2} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? 'Listening…' : 'Getting the microphone ready…') : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
               <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
                 {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label="Cancel voice input" title="Cancel (Esc)" onClick={() => void cancelVoice()}><X size={15} /></button>}
-                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree ? (speaking ? 'Tap to interrupt' : 'Tap to send now') : 'Let go to send') : 'Tap or hold to talk'} aria-label={recording ? 'Send what you said' : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
+                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree ? (speaking ? 'Tap to interrupt' : 'Tap to send now') : 'Let go to send') : 'Tap or hold to talk'} aria-label={recording ? (handsFree && speaking ? 'Interrupt' : handsFree ? 'Send what you said now' : 'Let go to send') : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>

@@ -586,10 +586,15 @@ pub async fn start_recording(
     state: State<'_, AppState>,
     barge_in: Option<bool>,
 ) -> Result<crate::voice::Listening, String> {
-    // Keep startup inside the erasure/settings gate so it cannot reopen the
-    // microphone while Delete everything is cancelling and clearing audio.
-    let _gate = state.config_gate.lock().await;
-    let settings = state.store.lock().unwrap().settings()?;
+    // The erasure/settings gate is held only to read settings, never while the
+    // microphone opens (which can wait minutes for Apple's speech model): a reply's
+    // next sentence, a settings save or Delete everything must not wait behind it.
+    // An erase meanwhile cancels the start (it bumps the recording generation) or, if
+    // the microphone opened first, closes it below.
+    let (settings, erasures) = {
+        let _gate = state.config_gate.lock().await;
+        (state.store.lock().unwrap().settings()?, state.erasures.load(Ordering::SeqCst))
+    };
     state.models.voice_ready(&settings)?;
     let barge_in = barge_in.unwrap_or(false);
     state.audit(
@@ -600,10 +605,16 @@ pub async fn start_recording(
             "User started push to talk"
         },
     );
-    state
+    let listening = state
         .voice
         .start(crate::voice::Listen { barge_in }, crate::voice::events(app))
-        .await
+        .await?;
+    let _gate = state.config_gate.lock().await;
+    if state.erasures.load(Ordering::SeqCst) != erasures {
+        let _ = state.voice.cancel().await;
+        return Err("Your data was erased meanwhile, so the microphone was closed.".into());
+    }
+    Ok(listening)
 }
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
