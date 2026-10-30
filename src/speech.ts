@@ -27,6 +27,7 @@ export class SpeechQueue {
   private active = false;
   private stopBarrier: Promise<void> = Promise.resolve();
   private completions = new Map<number, Completion>();
+  private quietWaiters: (() => void)[] = [];
 
   constructor(dependencies: SpeechQueueDependencies) {
     const limit = dependencies.maxChunkLength ?? 800;
@@ -103,6 +104,13 @@ export class SpeechQueue {
     this.append(text, token);
     this.finish(token);
     return completion;
+  }
+
+  /** Resolves once everything queued so far has played or been cancelled, so the
+   * microphone can open without hearing Buntini (where it cannot filter its own voice). */
+  settled(): Promise<void> {
+    if (!this.pumping && this.pending.length === 0) return Promise.resolve();
+    return new Promise(resolve => this.quietWaiters.push(resolve));
   }
 
   private invalidate(): Promise<void> {
@@ -183,6 +191,7 @@ export class SpeechQueue {
       this.completeIfIdle();
       // A new session may have queued text while an old play promise settled.
       if (this.pending.length > 0) this.kick();
+      if (!this.pumping) for (const resolve of this.quietWaiters.splice(0)) resolve();
     }
   }
 
