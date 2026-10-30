@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AudioLines, ChevronRight, LoaderCircle, Moon, Laptop, Shuffle, Sparkles, Sun } from 'lucide-react';
 import Pet from './Pet';
 import Toggle from './Toggle';
 import { command, desktop, errorMessage } from './bridge';
 import { accessories, characters, coats, eyeColors, eyes, lookFrom, motions } from './petOptions';
 import { accentChoices, accentHex, idleStatus, isHex, presets } from './themes.ts';
-import type { Settings, Voice } from './types';
+import type { BackgroundStatus, LoginStatus, Settings, Voice } from './types';
 
 const pick = <T,>(items: { id: T }[]) => items[Math.floor(Math.random() * items.length)].id;
 const personalities = [
@@ -19,6 +19,8 @@ type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value
 export default function Customization({ draft, update, onError, onPreviewVoice, onRestartSetup }: Props) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [notificationStatus, setNotificationStatus] = useState('unknown');
+  const [loginStatus, setLoginStatus] = useState<LoginStatus | null>(desktop ? null : 'unavailable');
+  const firstLoginCheck = useRef(true);
   const [previewing, setPreviewing] = useState(false);
   useEffect(() => {
     if (!desktop) return;
@@ -27,6 +29,15 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
     void command<string>('notification_permission_status').then(value => { if (active) setNotificationStatus(value); }).catch(() => {});
     return () => { active = false; };
   }, []);
+  // Re-read what macOS says once the debounced save has applied the switch.
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    if (!firstLoginCheck.current) setLoginStatus(null);
+    const id = window.setTimeout(() => { void command<BackgroundStatus>('background_status').then(value => { if (active && value.openAtLogin) setLoginStatus(value.openAtLogin); }).catch(() => {}); }, firstLoginCheck.current ? 0 : 1500);
+    firstLoginCheck.current = false;
+    return () => { active = false; window.clearTimeout(id); };
+  }, [draft.openAtLogin]);
   const look = lookFrom(draft);
   // A labelled row of choices for one setting.
   const chips = <K extends keyof Settings>(label: string, key: K, options: [Settings[K], string][]) => <>
@@ -104,6 +115,7 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
       <Toggle label="Offer a hand now and then" detail={draft.petAwareness ? undefined : 'Needs “Notice what I’m doing” in Privacy'} disabled={!draft.petAwareness} checked={draft.petNudges && draft.petAwareness} onChange={value => update('petNudges', value)} />
       <Toggle label="Morning brief" detail="Today’s calendar and reminders when you first open me" checked={draft.morningBrief} onChange={value => update('morningBrief', value)} />
       <Toggle label="Desktop notifications" detail={notificationStatus === 'denied' ? 'Turned off in System Settings' : notificationStatus === 'unavailable' ? 'Works in the installed app' : undefined} checked={draft.notificationsEnabled} onChange={value => void notifications(value)} />
+      <Toggle label="Open at login" detail={loginStatus === 'unavailable' ? 'Works in the installed app' : loginStatus === 'requiresApproval' ? 'Allow me in System Settings → General → Login Items' : draft.openAtLogin && loginStatus && loginStatus !== 'enabled' ? 'Turned off in System Settings' : undefined} disabled={loginStatus === 'unavailable' && !draft.openAtLogin} checked={draft.openAtLogin} onChange={value => update('openAtLogin', value)} />
     </section>
     <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={14} /><span>Run setup again</span><ChevronRight size={14} /></button>
   </>;

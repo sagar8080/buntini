@@ -29,6 +29,7 @@ mod focus;
 mod indexer;
 mod integrations;
 mod local;
+mod login;
 mod memory_index;
 mod migration;
 mod model;
@@ -177,6 +178,9 @@ pub fn run() {
             world::start(app.handle().clone());
             focus::start();
             memory_index::start(app.handle().clone());
+            // Before any timer or approval alert can be answered.
+            notifications::install(app.handle());
+            scheduler::observe_wake();
             scheduler::start(app.handle().clone());
             if let Err(error) = app
                 .global_shortcut()
@@ -247,6 +251,8 @@ pub fn run() {
             controller::run_action,
             controller::resume_task,
             controller::task_progress,
+            controller::pending_approvals,
+            controller::open_approval,
             controller::plan_task_online,
             controller::continue_task_online,
             delivery::background_status,

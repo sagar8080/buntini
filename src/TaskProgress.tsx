@@ -1,4 +1,12 @@
-import type { BackgroundStatus, TaskProgress } from './types';
+import type { BackgroundStatus, PendingApprovalSummary, TaskProgress } from './types';
+
+/** Saved proposals from any conversation. Review opens the sheet; nothing is approved from here. */
+export function WaitingForYou({ items, disabled, onReview }: { items: PendingApprovalSummary[]; disabled: boolean; onReview: (approvalId: string) => void }) {
+  if (!items.length) return null;
+  return <section className="waiting-for-you" aria-label="Waiting for you"><div className="section-label">WAITING FOR YOU <span>{items.length}</span></div>
+    {items.map(item => <article key={item.approvalId}><div><strong>{item.goal}</strong><small>{item.description} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="text-button" disabled={disabled} onClick={() => onReview(item.approvalId)}>Review</button></article>)}
+  </section>;
+}
 
 const labels: Record<string, string> = { complete: 'Complete', ready: 'Next', pending: 'Still to do', blocked: 'Needs attention', waiting: 'Waiting for approval', running: 'In progress', succeeded: 'Verified', failed: 'Failed', superseded: 'Resolved by a later read', unknown: 'Outcome unknown', cancelled: 'Cancelled' };
 

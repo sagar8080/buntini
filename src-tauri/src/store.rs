@@ -778,6 +778,111 @@ impl Store {
     }
 }
 
+/// One proposal waiting for the person, as the approval inbox lists it. The
+/// description names the kind of work only, never the proposal's field values.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApprovalSummary {
+    pub task_id: String,
+    pub approval_id: String,
+    pub tool: String,
+    pub description: String,
+    /// The person's own request, shown in Buntini only.
+    pub goal: String,
+    pub created_at: String,
+}
+
+impl Store {
+    /// Proposals waiting for approval, newest first and one per task. They are
+    /// journal rows, not memory, so they survive a restart; the in-memory
+    /// approval map only ever held the older one-shot sheets.
+    pub fn pending_approvals(&self) -> Result<Vec<PendingApprovalSummary>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM workflows WHERE state IN ('waiting_action','waiting_online') ORDER BY rowid DESC LIMIT 20")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut pending = vec![];
+        for row in rows {
+            let flow: crate::workflows::Workflow =
+                serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            // Only the last step can be waiting; anything else is already used.
+            let Some(step) = flow.steps.last().filter(|step| step.state == "waiting") else {
+                continue;
+            };
+            pending.push(PendingApprovalSummary {
+                task_id: flow.id.clone(),
+                approval_id: step.id.clone(),
+                tool: step.tool.clone(),
+                description: crate::notifications::approval_body(&step.tool).into(),
+                goal: flow.goal.clone(),
+                created_at: step.proposed_at.clone(),
+            });
+        }
+        Ok(pending)
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pending_approvals_lists_paused_proposals_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("test.db")).unwrap();
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"inbox","prompt":"Email Ana the plan","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        let mut flow = crate::workflows::Workflow::new(
+            &task,
+            "auto",
+            &Settings::default(),
+            vec![json!({"role":"user","content":task.prompt})],
+            None,
+            &["draft_email"],
+        );
+        let args = json!({"to":"ana@example.com","subject":"Plan","body":"Secret details"});
+        let id = flow
+            .begin(
+                "draft_email",
+                args.clone(),
+                json!({"role":"assistant"}),
+                true,
+                true,
+            )
+            .unwrap();
+        task.state = "waiting_action".into();
+        // Saved twice, as a proposal is when the turn and journal both commit.
+        store.checkpoint(&mut flow, &task).unwrap();
+        store.checkpoint(&mut flow, &task).unwrap();
+        drop(store);
+        let store = Store::open(&dir.path().join("test.db")).unwrap();
+        let pending = store.pending_approvals().unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "one entry per waiting task, after a restart"
+        );
+        assert_eq!(pending[0].approval_id, id);
+        assert_eq!(pending[0].task_id, "inbox");
+        assert_eq!(pending[0].tool, "draft_email");
+        for value in ["ana@example.com", "Plan", "Secret details"] {
+            assert!(!pending[0].description.contains(value));
+        }
+        let mut flow = store.workflow(&id).unwrap().unwrap();
+        flow.approve(&id, args).unwrap();
+        task.state = "running".into();
+        store.checkpoint(&mut flow, &task).unwrap();
+        assert!(
+            store.pending_approvals().unwrap().is_empty(),
+            "a used approval leaves the inbox"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

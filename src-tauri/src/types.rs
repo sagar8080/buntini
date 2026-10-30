@@ -51,6 +51,9 @@ pub struct Settings {
     pub notifications_enabled: bool,
     /// A short brief from today's calendar and reminders when you first open Buntini each day.
     pub morning_brief: bool,
+    /// Open Buntini when you log in, through macOS login items. Saved only as
+    /// what macOS confirmed.
+    pub open_at_login: bool,
     pub monthly_budget_usd: f64,
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
@@ -112,6 +115,7 @@ impl Default for Settings {
             voice_rate: 180,
             notifications_enabled: false,
             morning_brief: false,
+            open_at_login: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),

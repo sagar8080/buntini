@@ -1,11 +1,16 @@
 #[cfg(target_os = "macos")]
+// Tests swap the OS notifier for a fake, leaving the scheduling calls unused there.
+#[cfg_attr(test, allow(dead_code))]
 mod native {
     use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::{NSError, NSString};
+    use objc2::{define_class, msg_send, rc::Retained, runtime::Bool, AnyThread};
+    use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSSet, NSString};
     use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
-        UNNotificationSettings, UNUserNotificationCenter,
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
+        UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
+        UNNotificationDefaultActionIdentifier, UNNotificationRequest, UNNotificationResponse,
+        UNNotificationSettings, UNTimeIntervalNotificationTrigger, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
     };
     use std::{ptr::NonNull, sync::Mutex};
 
@@ -69,7 +74,30 @@ mod native {
             .map_err(|_| "Notification status check timed out.".to_string())?
             .map_err(|_| "Notification status response was lost.".into())
     }
+    fn content(
+        title: &str,
+        body: &str,
+        category: Option<&str>,
+    ) -> Retained<UNMutableNotificationContent> {
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(title));
+        content.setBody(&NSString::from_str(body));
+        if let Some(category) = category {
+            content.setCategoryIdentifier(&NSString::from_str(category));
+        }
+        content
+    }
     pub fn enqueue(title: &str, body: &str) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
+        enqueue_as(&uuid::Uuid::new_v4().to_string(), None, title, body)
+    }
+    /// A request with a known identifier replaces an earlier one with the same
+    /// identifier, so one timer or approval never stacks two alerts.
+    pub fn enqueue_as(
+        identifier: &str,
+        category: Option<&str>,
+        title: &str,
+        body: &str,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if !bundled() {
             let _ = tx.send(Err(UNBUNDLED.into()));
@@ -77,12 +105,9 @@ mod native {
         }
         let tx = Mutex::new(Some(tx));
         {
-            let content = UNMutableNotificationContent::new();
-            content.setTitle(&NSString::from_str(title));
-            content.setBody(&NSString::from_str(body));
             let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-                &NSString::from_str(&uuid::Uuid::new_v4().to_string()),
-                &content,
+                &NSString::from_str(identifier),
+                &content(title, body, category),
                 None,
             );
             let block = RcBlock::new(move |error: *mut NSError| {
@@ -95,6 +120,320 @@ mod native {
         }
         rx
     }
+    /// Hands macOS an alert to show after `seconds`, even if Buntini has quit by
+    /// then. The timer row stays the record; this copy is best effort.
+    pub fn schedule(identifier: &str, seconds: u64, title: &str, body: &str) {
+        if !bundled() {
+            return;
+        }
+        let trigger = UNTimeIntervalNotificationTrigger::triggerWithTimeInterval_repeats(
+            seconds.max(1) as f64,
+            false,
+        );
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &NSString::from_str(identifier),
+            &content(title, body, None),
+            Some(&trigger),
+        );
+        UNUserNotificationCenter::currentNotificationCenter()
+            .addNotificationRequest_withCompletionHandler(&request, None);
+    }
+    fn identifiers(ids: &[String]) -> Retained<NSArray<NSString>> {
+        let ids: Vec<_> = ids.iter().map(|id| NSString::from_str(id)).collect();
+        NSArray::from_retained_slice(&ids)
+    }
+    pub fn remove_pending(ids: &[String]) {
+        if bundled() && !ids.is_empty() {
+            UNUserNotificationCenter::currentNotificationCenter()
+                .removePendingNotificationRequestsWithIdentifiers(&identifiers(ids));
+        }
+    }
+    pub fn remove(ids: &[String]) {
+        if bundled() && !ids.is_empty() {
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+            let ids = identifiers(ids);
+            center.removePendingNotificationRequestsWithIdentifiers(&ids);
+            center.removeDeliveredNotificationsWithIdentifiers(&ids);
+        }
+    }
+    pub fn remove_all() {
+        if bundled() {
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+            center.removeAllPendingNotificationRequests();
+            center.removeAllDeliveredNotifications();
+        }
+    }
+    /// Identifiers of the alerts still listed in Notification Center.
+    pub async fn delivered() -> Result<Vec<String>, String> {
+        if !bundled() {
+            return Ok(vec![]);
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Mutex::new(Some(tx));
+        {
+            let block = RcBlock::new(move |list: NonNull<NSArray<UNNotification>>| {
+                let ids = unsafe { list.as_ref() }
+                    .iter()
+                    .map(|notification| notification.request().identifier().to_string())
+                    .collect();
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(ids);
+                }
+            });
+            UNUserNotificationCenter::currentNotificationCenter()
+                .getDeliveredNotificationsWithCompletionHandler(&block);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            .await
+            .map_err(|_| "Reading delivered notifications timed out.".to_string())?
+            .map_err(|_| "The delivered notification list was lost.".into())
+    }
+
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements and this class has no Drop.
+        #[unsafe(super(NSObject))]
+        #[name = "BuntiniNotificationDelegate"]
+        struct Delegate;
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Delegate {
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                completion: &block2::DynBlock<dyn Fn()>,
+            ) {
+                let action = response.actionIdentifier();
+                // Clicking the banner itself counts as Review. Later and dismiss do nothing.
+                let review = action.to_string() == super::REVIEW
+                    || &*action == unsafe { UNNotificationDefaultActionIdentifier };
+                if review {
+                    super::review_requested(
+                        &response.notification().request().identifier().to_string(),
+                    );
+                }
+                completion.call(());
+            }
+        }
+    );
+
+    /// Registers the approval category and the delegate that turns Review into an
+    /// in-app event. Neither action approves anything.
+    pub fn install() {
+        if !bundled() {
+            return;
+        }
+        let review = UNNotificationAction::actionWithIdentifier_title_options(
+            &NSString::from_str(super::REVIEW),
+            &NSString::from_str("Review"),
+            UNNotificationActionOptions::Foreground,
+        );
+        let later = UNNotificationAction::actionWithIdentifier_title_options(
+            &NSString::from_str("later"),
+            &NSString::from_str("Later"),
+            UNNotificationActionOptions::empty(),
+        );
+        let category =
+            UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
+                &NSString::from_str(super::APPROVAL_CATEGORY),
+                &NSArray::from_retained_slice(&[review, later]),
+                &NSArray::from_retained_slice(&[]),
+                UNNotificationCategoryOptions::empty(),
+            );
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        center.setNotificationCategories(&NSSet::from_retained_slice(&[category]));
+        let delegate: Retained<Delegate> =
+            unsafe { msg_send![super(Delegate::alloc().set_ivars(())), init] };
+        center.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
+        // The center keeps only a weak reference; the delegate lives as long as the app.
+        std::mem::forget(delegate);
+    }
+}
+
+pub(crate) const APPROVAL_CATEGORY: &str = "buntini.approval";
+const REVIEW: &str = "review";
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Call once at startup, before macOS can deliver a notification response.
+pub fn install(app: &tauri::AppHandle) {
+    let _ = APP.set(app.clone());
+    #[cfg(target_os = "macos")]
+    native::install();
+}
+
+/// The identifier of an approval's notification. Only the approval id travels
+/// with it, so the app looks the proposal up again before showing anything.
+pub(crate) fn approval_identifier(approval_id: &str) -> String {
+    format!("approval-{approval_id}")
+}
+
+/// Review only opens Buntini on the saved proposal; approving still happens in
+/// the sheet. Runs on the main thread without making macOS wait.
+fn review_requested(identifier: &str) {
+    let Some(approval_id) = identifier.strip_prefix("approval-") else {
+        return;
+    };
+    let Some(app) = APP.get().cloned() else {
+        return;
+    };
+    let approval_id = approval_id.to_string();
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        use tauri::{Emitter, Manager};
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = handle.emit(
+            "approval-open",
+            serde_json::json!({ "approvalId": approval_id }),
+        );
+    });
+}
+
+/// Lock-screen safe wording: the kind of work only, never a recipient, title,
+/// time or text from the proposal, because the body shows on the lock screen.
+pub(crate) fn approval_body(tool: &str) -> &'static str {
+    match tool {
+        "draft_email" => "Buntini drafted an email and needs your OK.",
+        "add_reminder" => "Buntini prepared a reminder and needs your OK.",
+        "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
+        "create_note" => "Buntini wrote a note and needs your OK.",
+        "run_shortcut" => "Buntini wants to run a shortcut and needs your OK.",
+        "open_app" | "open_link" => "Buntini wants to open something for you and needs your OK.",
+        "control_music" => "Buntini wants to change your music and needs your OK.",
+        "switch_tab" => "Buntini wants to switch a browser tab and needs your OK.",
+        "remember" => "Buntini wants to remember something and needs your OK.",
+        "set_timer" => "Buntini wants to set a timer and needs your OK.",
+        "create_saved_search" | "create_price_watch" => {
+            "Buntini set up a recurring check and needs your OK."
+        }
+        "browse_page" => "Buntini wants to read a web page and needs your OK.",
+        "look_up_online" => "Buntini wants to look something up online and needs your OK.",
+        _ => "A task is waiting for your OK.",
+    }
+}
+
+/// When a task stops at a proposal while Buntini is hidden or tucked away, say
+/// so right away. Returns whether the task is waiting, so callers skip the
+/// generic "Task finished" alert.
+pub(crate) async fn announce_waiting(
+    app: &tauri::AppHandle,
+    task: &crate::types::TaskRecord,
+) -> bool {
+    use tauri::Manager;
+    if !["waiting_action", "waiting_online"].contains(&task.state.as_str()) {
+        return false;
+    }
+    let unobtrusive = app
+        .get_webview_window("main")
+        .map(|window| !window.is_visible().unwrap_or(true) || !crate::overlay::is_expanded())
+        .unwrap_or(true);
+    if !unobtrusive {
+        return true;
+    }
+    let state = app.state::<AppState>();
+    let step = state
+        .store
+        .lock()
+        .unwrap()
+        .workflow(&task.id)
+        .ok()
+        .flatten()
+        .and_then(|flow| {
+            flow.steps
+                .last()
+                .filter(|step| step.state == "waiting")
+                .cloned()
+        });
+    if let Some(step) = step {
+        if let Err(error) = deliver_approval(app, &step.id, &step.tool).await {
+            state.audit("notification.failed", &error);
+        }
+    }
+    true
+}
+
+async fn deliver_approval(
+    app: &tauri::AppHandle,
+    approval_id: &str,
+    tool: &str,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    if !state
+        .store
+        .lock()
+        .unwrap()
+        .settings()?
+        .notifications_enabled
+    {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        notification_availability(&native::status().await?)?;
+        let pending = native::enqueue_as(
+            &approval_identifier(approval_id),
+            Some(APPROVAL_CATEGORY),
+            "Waiting for you",
+            approval_body(tool),
+        );
+        finish_delivery(&state, pending).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (approval_id, tool);
+        Err("Desktop notifications in this build require macOS.".into())
+    }
+}
+
+/// Clears an approval's alert once the proposal is approved or cancelled, so a
+/// stale banner does not linger in Notification Center.
+pub(crate) fn withdraw_approval(approval_id: &str) {
+    crate::delivery::os().remove(&[approval_identifier(approval_id)]);
+}
+
+/// macOS's own notification center, used in the app. Tests use a fake.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) struct SystemNotifier;
+impl crate::delivery::OsNotifier for SystemNotifier {
+    fn schedule(&self, identifier: &str, seconds: u64, title: &str, body: &str) {
+        #[cfg(target_os = "macos")]
+        native::schedule(identifier, seconds, title, body);
+        #[cfg(not(target_os = "macos"))]
+        let _ = (identifier, seconds, title, body);
+    }
+    fn remove_pending(&self, identifiers: &[String]) {
+        #[cfg(target_os = "macos")]
+        native::remove_pending(identifiers);
+        #[cfg(not(target_os = "macos"))]
+        let _ = identifiers;
+    }
+    fn remove(&self, identifiers: &[String]) {
+        #[cfg(target_os = "macos")]
+        native::remove(identifiers);
+        #[cfg(not(target_os = "macos"))]
+        let _ = identifiers;
+    }
+    fn remove_all(&self) {
+        #[cfg(target_os = "macos")]
+        native::remove_all();
+    }
+}
+
+/// Identifiers still in Notification Center. Empty when unknown, which can only
+/// lead to a repeated alert, never a missed one.
+pub(crate) async fn delivered_identifiers() -> std::collections::HashSet<String> {
+    #[cfg(target_os = "macos")]
+    return native::delivered()
+        .await
+        .map(|ids| ids.into_iter().collect())
+        .unwrap_or_default();
+    #[cfg(not(target_os = "macos"))]
+    std::collections::HashSet::new()
 }
 
 use crate::{controller::AppState, store::Store};
@@ -351,7 +690,14 @@ async fn deliver_with_timer_gate(
                     );
                 }
             }
-            native::enqueue(
+            // A timer's alert reuses its scheduled identifier, replacing rather
+            // than stacking on a copy macOS may have shown.
+            let identifier = timer_id
+                .map(crate::delivery::os_identifier)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            native::enqueue_as(
+                &identifier,
+                None,
                 &title.chars().take(100).collect::<String>(),
                 &body.chars().take(400).collect::<String>(),
             )
@@ -391,6 +737,37 @@ mod tests {
             last_result_task_id: None,
             last_error: None,
         }
+    }
+
+    #[test]
+    fn approval_body_has_no_field_values() {
+        let args = serde_json::json!({"to":"ana@example.com","subject":"Divorce papers","body":"The PIN is 4417","title":"Call the clinic","due":"2026-11-02 09:00","url":"https://bank.example/reset"});
+        let args = args.as_object().unwrap();
+        for tool in crate::actions::TOOLS
+            .iter()
+            .chain(&crate::control_actions::TOOLS)
+            .chain(&crate::monitor_actions::TOOLS)
+            .chain(&crate::browser_workspace::TOOLS)
+            .chain(&["look_up_online", "unknown_tool"])
+        {
+            let body = approval_body(tool);
+            assert!(body.ends_with("your OK."), "{tool}: {body}");
+            for value in args.values().filter_map(|value| value.as_str()) {
+                assert!(!body.contains(value), "{tool} leaked {value}");
+            }
+            if crate::actions::TOOLS.contains(tool) {
+                // The sheet shows these values; the lock screen must not.
+                let (_, fields, _) = crate::actions::describe(tool, args);
+                for field in fields.iter().filter(|field| !field.value.is_empty()) {
+                    assert!(
+                        !body.contains(&field.value),
+                        "{tool} leaked {}",
+                        field.value
+                    );
+                }
+            }
+        }
+        assert_eq!(approval_identifier("abc"), "approval-abc");
     }
 
     #[test]
