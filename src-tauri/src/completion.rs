@@ -967,6 +967,22 @@ mod tests {
     }
 
     #[test]
+    fn requests_mixing_this_iterations_writes_each_get_their_own() {
+        // Replies, changes to existing items, shortcut runs and routines share one grammar:
+        // each clause keeps its own write, and a schedule makes the whole request a routine.
+        for (prompt, expected) in [
+            ("Mark buy milk as done and reply to the second one", vec!["complete_reminder", "reply_email"]),
+            ("Turn on the living room lights and move my 3pm to 4", vec!["run_shortcut", "update_calendar_event"]),
+            ("Add milk to my shopping note and lock the front door", vec!["append_to_note", "run_shortcut"]),
+            ("Every weekday at 8, mark buy milk as done", vec!["create_routine"]),
+            ("Every day at 7pm, turn off the living room lights", vec!["create_routine"]),
+            ("Reply to Ana's email", vec!["reply_email"]),
+        ] {
+            assert_eq!(requested_actions(prompt), (expected, false), "{prompt}");
+        }
+    }
+
+    #[test]
     fn home_device_requests_run_one_of_the_users_shortcuts() {
         for prompt in [
             "Turn on the living room lights",
