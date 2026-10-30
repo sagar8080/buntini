@@ -32,9 +32,9 @@ pub struct App {
 
 pub const APPS: [App; 13] = [
     App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
-    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar), note: None },
-    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
-    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
+    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve", "Move or rename events you approve"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
+    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve", "Mark reminders done when you approve"], tools: &["read_reminders", "add_reminder", "complete_reminder"], share: Some(Share::Calendar), note: None },
+    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve", "Add to the end of a note when you approve"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
     App { id: "contacts", name: "Contacts", can: &["Find the people you name, with their email addresses and phone numbers"], tools: &["find_contact"], share: Some(Share::Contacts), note: Some("A draft is addressed from Contacts only when exactly one person and one address match. Otherwise you pick the address when you approve it.") },
     App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
@@ -852,6 +852,10 @@ pub struct Event {
     pub all_day: bool,
     pub title: String,
     pub location: String,
+    /// Whether it repeats, so a change can say it touches one occurrence. Older helpers
+    /// leave it out.
+    #[serde(default)]
+    pub recurring: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -1360,7 +1364,9 @@ pub fn calendar_evidence(day: &str, events: &Agenda<Event>) -> Value {
         "modifiedAt":event.modified_at.as_deref().and_then(|at| source_timestamp(Some(at), "")),
         "start":source_timestamp(event.start_at.as_deref(), &event.start),
         "end":source_timestamp(event.end_at.as_deref(), &event.end), "all_day":event.all_day,
-        "title":event.title, "location":event.location
+        // The wall-clock times as read, which is how a change names its occurrence.
+        "startLocal":nonempty(&event.start), "endLocal":nonempty(&event.end),
+        "recurring":event.recurring, "title":event.title, "location":event.location
     })).collect();
     let mut result = evidence(
         "calendar",
@@ -2068,7 +2074,7 @@ fn notes_fallback_evidence(query: &str, effective: &str, output: &str) -> Result
     Ok(result)
 }
 
-fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
+pub(crate) fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
     let found = counted_rows(output, 5, "Notes")?;
     let mut records = Vec::new();
     let mut lines = Vec::new();

@@ -793,7 +793,7 @@ async fn run_workflow_action(
         } else if tool == "browse_page" {
             crate::browser_workspace::execute(id, &args, cancel).await
         } else {
-            crate::actions::execute(&tool, &args).await
+            crate::actions::execute_with(&tool, &args, state.models.apple_helper()).await
         }
     })
     .await
@@ -867,6 +867,8 @@ where
         // Which email a reply answers, and its recipient, are not the sheet's to change.
         let args = crate::actions::keep_fixed(&tool, &intent.arguments, &args);
         let normalized = validate_action(&tool, &args)?;
+        // A changed item must be one this task read for what the user named.
+        crate::edit_targets::check(&flow.contract.current_request, &tool, &Value::Object(normalized.clone()), &flow.steps, true)?;
         let settings = store.settings()?;
         flow.check_resume(&task, &settings)?;
         if !action_allowed(&settings, &tool, &normalized) {
@@ -3396,6 +3398,14 @@ where
             }
             _ => vec![],
         };
+        // A change to an existing item shows what it is like now; when several items
+        // match what the user named they pick one, so no id is chosen for them.
+        let (now, edit_choices) = crate::edit_targets::sheet(&flow.contract.current_request, &name, &args, &flow.steps);
+        if !edit_choices.is_empty() {
+            if let Some(fields) = args.as_object_mut() {
+                fields.remove("id");
+            }
+        }
         let approval = is_action || name == "look_up_online";
         let effect = is_action && name != "browse_page";
         let assistant = assistant_call(&turn.text, turn.raw, &name, if literal_inputs.is_some() {original_call.get("arguments").unwrap_or(&args)} else {&args});
@@ -3421,6 +3431,7 @@ where
                     } else {
                         crate::actions::describe(&name, args.as_object().unwrap())
                     };
+                let fields: Vec<_> = now.into_iter().chain(fields).collect();
                 task.handoff = Some("action".into());
                 task.action = Some(
                     serde_json::to_value(crate::actions::Proposal {
@@ -3439,12 +3450,15 @@ where
                                     format!("{} · {}", choice.name, choice.address)
                                 },
                                 value: choice.address,
+                                also: Default::default(),
                             })
                             .chain(shortcut_choices.into_iter().map(|name| crate::actions::Choice {
                                 field: "name".into(),
                                 label: name.clone(),
                                 value: name,
+                                also: Default::default(),
                             }))
+                            .chain(edit_choices)
                             .collect(),
                     })
                     .map_err(|e| e.to_string())?,
@@ -3718,6 +3732,10 @@ pub async fn run_task(
 #[cfg(test)]
 #[path = "controller_planning_tests.rs"]
 mod planning_tests;
+
+#[cfg(test)]
+#[path = "controller_edit_tests.rs"]
+mod edit_tests;
 
 #[cfg(test)]
 #[path = "controller_apple_live_tests.rs"]

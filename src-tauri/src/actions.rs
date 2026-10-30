@@ -1,17 +1,22 @@
 //! Things Buntini can do on this Mac, each only after the user approves the exact
 //! details: add a reminder or calendar event, write a note, open a Mail draft (never
 //! sent) or a threaded reply to an email (never sent), run one of the user's Shortcuts,
-//! open an app or an https link.
+//! open an app or an https link, and change an item the user already has: mark a
+//! reminder done, move or rename an event, or add text to the end of a note.
 //!
 //! The model proposes; Rust validates and normalises the arguments, the app shows them
 //! in an editable sheet, and only an approved, re-validated request runs. AppleScript
 //! receives every value as a separate argument, never as script text.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 8] = [
+pub const TOOLS: [&str; 11] = [
     "add_reminder",
     "add_calendar_event",
     "create_note",
@@ -20,7 +25,15 @@ pub const TOOLS: [&str; 8] = [
     "run_shortcut",
     "open_app",
     "open_link",
+    "complete_reminder",
+    "update_calendar_event",
+    "append_to_note",
 ];
+
+/// Writes that change an existing item. Its `id` is never the model's: it is bound from
+/// a read in the same task (`source_fields::edit_target`) or picked by the user from
+/// those records in the approval sheet, and the receipt reads the item back.
+pub const EDIT_TOOLS: [&str; 3] = ["complete_reminder", "update_calendar_event", "append_to_note"];
 
 /// A write is successful only when its requested result was read back. An
 /// unknown result may already exist: callers must never replay it automatically.
@@ -70,7 +83,9 @@ pub struct Field {
     pub key: String,
     pub label: String,
     pub value: String,
-    /// text, long or when (YYYY-MM-DD HH:MM), so the sheet can offer the right input.
+    /// text, long or when (YYYY-MM-DD HH:MM), so the sheet can offer the right input;
+    /// hidden for a value the sheet sends back without showing (an item's id), and fixed
+    /// for one it shows but never sends (what an item is like now).
     pub kind: &'static str,
 }
 
@@ -94,6 +109,10 @@ pub struct Choice {
     pub field: String,
     pub label: String,
     pub value: String,
+    /// Other fields the pick sets with it: picking one of two matching events also sets
+    /// that event's own title, time and what it is like now.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub also: std::collections::BTreeMap<String, String>,
 }
 
 fn text(
@@ -220,6 +239,31 @@ fn https(value: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
+/// An event's length in minutes, 60 unless given.
+fn minutes(args: &Map<String, Value>) -> Result<u64, String> {
+    match args.get("minutes") {
+        None | Some(Value::Null) => Ok(60),
+        Some(value) => Ok(value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+            .filter(|m| (5..=1440).contains(m))
+            .ok_or("Length must be 5–1440 minutes.")?),
+    }
+}
+
+/// The app's own identifier for an existing item. Missing only while the user still has
+/// to pick one of several matches in the sheet; `execute` refuses to run without it.
+fn item_id(args: &Map<String, Value>) -> Result<Option<String>, String> {
+    let id = text(args, "id", 300, false)?;
+    if id
+        .as_deref()
+        .is_some_and(|id| id.starts_with('-') || id.contains(char::is_whitespace))
+    {
+        return Err("That isn’t an item Buntini read.".into());
+    }
+    Ok(id)
+}
+
 /// Checks and normalises a proposed action. Unknown keys are refused.
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     let args = args.as_object().ok_or("Arguments must be an object.")?;
@@ -231,6 +275,17 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "reply_email" => &["message", "message_id", "to", "subject", "body", "answers"],
         "run_shortcut" | "open_app" => &["name"],
         "open_link" => &["url"],
+        "complete_reminder" => &["id", "title"],
+        "update_calendar_event" => &[
+            "id",
+            "occurrence",
+            "was_title",
+            "title",
+            "start",
+            "minutes",
+            "location",
+        ],
+        "append_to_note" => &["id", "title", "text"],
         _ => return Err(format!("“{tool}” isn’t something Buntini can do.")),
     };
     if let Some(extra) = args.keys().find(|key| !allowed.contains(&key.as_str())) {
@@ -255,15 +310,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             let start = normalize_when(&text(args, "start", 40, true)?.unwrap())?;
             put("start", Some(start));
             put("location", text(args, "location", 200, false)?);
-            let minutes = match args.get("minutes") {
-                None | Some(Value::Null) => 60,
-                Some(value) => value
-                    .as_u64()
-                    .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
-                    .filter(|m| (5..=1440).contains(m))
-                    .ok_or("Length must be 5–1440 minutes.")?,
-            };
-            out.insert("minutes".into(), json!(minutes));
+            out.insert("minutes".into(), json!(minutes(args)?));
         }
         "create_note" => {
             put("title", text(args, "title", 200, true)?);
@@ -299,6 +346,26 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("answers", text(args, "answers", 300, false)?);
         }
         "run_shortcut" | "open_app" => put("name", text(args, "name", 100, true)?),
+        "complete_reminder" => {
+            put("id", item_id(args)?);
+            put("title", text(args, "title", 200, true)?);
+        }
+        "update_calendar_event" => {
+            put("id", item_id(args)?);
+            let occurrence = normalize_when(&text(args, "occurrence", 40, true)?.unwrap())?;
+            put("occurrence", Some(occurrence));
+            put("was_title", text(args, "was_title", 200, true)?);
+            put("title", text(args, "title", 200, true)?);
+            let start = normalize_when(&text(args, "start", 40, true)?.unwrap())?;
+            put("start", Some(start));
+            put("location", text(args, "location", 200, false)?);
+            out.insert("minutes".into(), json!(minutes(args)?));
+        }
+        "append_to_note" => {
+            put("id", item_id(args)?);
+            put("title", text(args, "title", 200, true)?);
+            put("text", text(args, "text", 2000, true)?);
+        }
         _ => put(
             "url",
             Some(https(&text(args, "url", 2000, true)?.unwrap())?),
@@ -416,6 +483,43 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
             "Open this app?".into(),
             vec![field("name", "App", "text")],
             String::new(),
+        ),
+        "complete_reminder" => (
+            "Mark this reminder done?".into(),
+            vec![
+                field("id", "Which reminder", "hidden"),
+                field("title", "Reminder", "hidden"),
+                Field {
+                    key: "after".into(),
+                    label: "After".into(),
+                    value: "Done".into(),
+                    kind: "fixed",
+                },
+            ],
+            "Marked as done in Reminders. Nothing else about it changes.".into(),
+        ),
+        "update_calendar_event" => (
+            "Change this event?".into(),
+            vec![
+                field("id", "Which event", "hidden"),
+                field("occurrence", "Occurrence", "hidden"),
+                field("was_title", "Event", "hidden"),
+                field("title", "Event", "text"),
+                field("start", "Starts", "when"),
+                field("minutes", "Minutes", "text"),
+                field("location", "Where", "text"),
+            ],
+            "Only this event changes. For a repeating event, only this one occurrence changes."
+                .into(),
+        ),
+        "append_to_note" => (
+            "Add this to your note?".into(),
+            vec![
+                field("id", "Which note", "hidden"),
+                field("title", "Note", "hidden"),
+                field("text", "Add", "long"),
+            ],
+            "Added to the end of the note in Notes. The rest of the note stays as it is.".into(),
         ),
         _ => (
             "Open this page?".into(),
@@ -692,6 +796,33 @@ const REPLY: &str = r#"    tell application "Mail"
     end tell
 "#;
 
+// argv: note id, its title as read, the HTML to add. The title is compared with case
+// considered, and a locked note or one with attachments is refused before anything is
+// written: setting a body through scripting can drop attachments.
+const NOTE_APPEND: &str = r#"    tell application "Notes"
+      set stored to note id (item 1 of argv)
+      considering case
+        if name of stored is not item 2 of argv then error "The note’s title has changed since Buntini read it. Ask again so it reads the note afresh."
+      end considering
+      if password protected of stored then error "That note is locked, so Buntini can’t add to it."
+      if (count of attachments of stored) > 0 then error "That note has attachments, which Notes could drop when Buntini adds text. Add the text in Notes yourself."
+      set targetFolder to container of stored
+      set destinationName to name of targetFolder
+      my putField(observed, "destinationId", id of targetFolder)
+      my putField(observed, "beforeTitle", name of stored)
+      my putField(observed, "beforePlaintext", plaintext of stored)
+      set mutationStarted to true
+      set body of stored to (body of stored) & item 3 of argv
+      set resultID to id of stored
+      set stored to note id resultID
+      my putField(observed, "title", name of stored)
+      my putField(observed, "plaintext", plaintext of stored)
+      my putField(observed, "folderId", id of (container of stored))
+      my putField(observed, "attachmentCount", count of attachments of stored)
+      my putField(observed, "identifierScope", "persistent")
+    end tell
+"#;
+
 fn verified_script(body: &str) -> String {
     format!("{RECEIPT_HELPER}{DATE_HELPER}{RECEIPT_START}{body}{RECEIPT_END}")
 }
@@ -762,6 +893,33 @@ pub fn script(tool: &str, args: &Map<String, Value>) -> Option<(String, Vec<Stri
                 get("body"),
             ],
         )),
+        "append_to_note" => Some((
+            verified_script(NOTE_APPEND),
+            vec![get("id"), get("title"), html(&get("text"))],
+        )),
+        _ => None,
+    }
+}
+
+/// The Apple helper's arguments for a Reminders or Calendar change (EventKit, which
+/// owns the identifiers `read_reminders` and `read_calendar` return). The helper checks
+/// the item still is what was read before writing, and reads it back afterwards.
+pub fn helper_arguments(tool: &str, args: &Map<String, Value>) -> Option<Vec<String>> {
+    let get = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    match tool {
+        "complete_reminder" => Some(vec!["--complete-reminder".into(), get("id"), get("title")]),
+        "update_calendar_event" => Some(vec![
+            "--update-event".into(),
+            json!({"id":get("id"), "occurrence":get("occurrence"), "wasTitle":get("was_title"),
+                "title":get("title"), "start":get("start"), "location":get("location"),
+                "minutes":args.get("minutes").and_then(Value::as_u64).unwrap_or(60)})
+            .to_string(),
+        ]),
         _ => None,
     }
 }
@@ -1054,6 +1212,28 @@ fn check_evidence(
                 return Err("The reply could not be verified as saved and open for review.".into());
             }
         }
+        "complete_reminder" | "update_calendar_event" => check_change(tool, args, receipt)?,
+        "append_to_note" => {
+            let before = observed("beforePlaintext").map(normalized_plaintext);
+            let after = observed("plaintext").map(normalized_plaintext);
+            let added = normalized_plaintext(approved("text"));
+            // Everything that was there stays first, unchanged; the new text follows on
+            // its own line and is the only addition.
+            let appended = before.as_deref().zip(after.as_deref()).is_some_and(|(before, after)| {
+                after.strip_prefix(before).is_some_and(|rest| {
+                    rest.starts_with('\n') && rest.trim_start_matches('\n') == added
+                })
+            });
+            if !appended {
+                return Err("The note did not read back as the approved text added to the end of what was there.".into());
+            }
+            matches("beforeTitle", approved("title"))?;
+            if observed("folderId") != observed("destinationId")
+                || receipt.evidence.get("attachmentCount").and_then(Value::as_u64) != Some(0)
+            {
+                return Err("The note read back in a different folder or with different attachments.".into());
+            }
+        }
         _ => return Err("This action does not have an app-record verifier.".into()),
     }
     Ok(())
@@ -1083,6 +1263,76 @@ fn answered_ids(headers: &str) -> String {
         .flat_map(|(_, value)| value.split_whitespace())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Fields of a reminder or event that a change must leave exactly as they were.
+const KEPT: [(&str, &[&str]); 2] = [
+    ("complete_reminder", &["title", "due", "listId", "notes", "priority", "url", "alarms"]),
+    ("update_calendar_event", &["calendarId", "allDay", "notes", "url", "alarms"]),
+];
+
+/// The helper reports the item as read just before the change and again afterwards.
+/// Only the approved change may differ, and the item must have been what was approved.
+fn check_change(
+    tool: &str,
+    args: &Map<String, Value>,
+    receipt: &HelperReceipt,
+) -> Result<(), String> {
+    let approved = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
+    let side = |name: &str| receipt.evidence.get(name).and_then(Value::as_object);
+    let (Some(before), Some(after)) = (side("before"), side("after")) else {
+        return Err("The app did not report the item before and after the change.".into());
+    };
+    let text = |fields: &Map<String, Value>, key: &str| fields.get(key).and_then(Value::as_str).map(str::to_owned);
+    let kept = KEPT.iter().find(|(name, _)| *name == tool).map(|(_, keys)| *keys).unwrap_or(&[]);
+    for key in kept {
+        if before.get(*key).is_none() || before.get(*key) != after.get(*key) {
+            return Err(format!("Something else about it changed too ({key}). Check it in the app."));
+        }
+    }
+    if tool == "complete_reminder" {
+        if text(before, "title").as_deref() != Some(approved("title"))
+            || before.get("completed") != Some(&json!(false))
+        {
+            return Err("The reminder was not the open one you approved.".into());
+        }
+        if after.get("completed") != Some(&json!(true)) {
+            return Err("The reminder did not read back as done.".into());
+        }
+        return Ok(());
+    }
+    if text(before, "title").as_deref() != Some(approved("was_title"))
+        || text(before, "start").as_deref() != Some(approved("occurrence"))
+        || before.get("allDay") != Some(&json!(false))
+    {
+        return Err("The event was not the one you approved.".into());
+    }
+    let minutes = args.get("minutes").and_then(Value::as_u64).unwrap_or(0);
+    if text(after, "title").as_deref() != Some(approved("title"))
+        || text(after, "start").as_deref() != Some(approved("start"))
+        || after.get("startSecond") != Some(&json!(0))
+        || after.get("durationSeconds").and_then(Value::as_u64) != minutes.checked_mul(60)
+        || text(after, "location").as_deref() != Some(approved("location"))
+    {
+        return Err("The event did not read back with the approved title, time, length and place.".into());
+    }
+    if text(after, "calendarId").as_deref() != receipt.evidence.get("destinationId").and_then(Value::as_str) {
+        return Err("The event read back in a different calendar.".into());
+    }
+    if approved("start") != approved("occurrence")
+        && receipt.evidence.get("oldSlotVacated") != Some(&json!(true))
+    {
+        return Err("The event still shows at its old time as well.".into());
+    }
+    // A repeating event changes one occurrence only: the next one keeps its time.
+    if before.get("recurring") == Some(&json!(true))
+        && (receipt.evidence.get("span").and_then(Value::as_str) != Some("this_occurrence")
+            || receipt.evidence.get("nextBefore").is_none_or(|next| !next.is_string())
+            || receipt.evidence.get("nextBefore") != receipt.evidence.get("nextAfter"))
+    {
+        return Err("Other occurrences of this repeating event may have changed. Check them in Calendar.".into());
+    }
+    Ok(())
 }
 
 fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> ActionReceipt {
@@ -1132,6 +1382,9 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             "add_calendar_event" => format!("Verified “{}” in {} at {}.", get("title"), helper.destination, get("start")),
             "create_note" => format!("Verified “{}” in Notes.", get("title")),
             "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
+            "complete_reminder" => format!("Marked “{}” as done in Reminders. I checked it’s done and nothing else about it changed.", get("title")),
+            "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), get("start"), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
+            "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the rest is unchanged.", get("title")),
             _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
         };
         ActionReceipt {
@@ -1146,8 +1399,23 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
     };
     receipt.object_id = (!helper.object_id.is_empty()).then_some(helper.object_id);
     receipt.destination = (!helper.destination.is_empty()).then_some(helper.destination);
-    receipt.evidence = Value::Object(helper.evidence);
+    receipt.evidence = Value::Object(kept_evidence(tool, helper.evidence));
     receipt
+}
+
+/// A note's whole text is needed to check an append, not to keep: the journal keeps its
+/// lengths and what follows the old text, so a long note isn't copied into every task.
+fn kept_evidence(tool: &str, mut evidence: Map<String, Value>) -> Map<String, Value> {
+    if tool == "append_to_note" {
+        let text = |value: Option<Value>| value.and_then(|v| v.as_str().map(normalized_plaintext)).unwrap_or_default();
+        let before = text(evidence.remove("beforePlaintext"));
+        let after = text(evidence.remove("plaintext"));
+        let added = after.strip_prefix(before.as_str()).map(str::to_owned);
+        evidence.insert("beforeCharacters".into(), json!(before.chars().count()));
+        evidence.insert("afterCharacters".into(), json!(after.chars().count()));
+        evidence.insert("addedAtEnd".into(), json!(added));
+    }
+    evidence
 }
 
 async fn dispatched_receipt(
@@ -1182,10 +1450,34 @@ async fn dispatched_receipt(
 /// Execute exactly one approved intent. The caller journals its idempotency key
 /// before calling this, and must preserve Unknown receipts across restarts.
 pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
+    execute_with(tool, args, Path::new("")).await
+}
+
+/// `execute`, with the Apple helper that changes Reminders and Calendar items.
+pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) -> ActionReceipt {
     let args = match validate(tool, &Value::Object(args.clone())) {
         Ok(args) => args,
         Err(error) => return ActionReceipt::failure(tool, ActionOutcome::Failed, error),
     };
+    if EDIT_TOOLS.contains(&tool) && !args.contains_key("id") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which one to change first.");
+    }
+    if let Some(argv) = helper_arguments(tool, &args) {
+        if !helper.is_file() {
+            return ActionReceipt::failure(tool, ActionOutcome::Failed, "Changing Reminders and Calendar needs Buntini’s Apple helper, which isn’t on this Mac.");
+        }
+        let mut command = Command::new(helper);
+        command.args(argv);
+        // The first use may wait for the macOS permission prompt.
+        return match command_output(command, 90).await {
+            Ok(response) => parse_receipt(tool, &args, &response),
+            Err(failure) => ActionReceipt::failure(
+                tool,
+                if failure.started { ActionOutcome::Unknown } else { ActionOutcome::Failed },
+                failure.message,
+            ),
+        };
+    }
     let get = |key: &str| {
         args.get(key)
             .and_then(Value::as_str)
@@ -1827,5 +2119,110 @@ mod tests {
             .await
             .unwrap_err()
             .contains("invalid text"));
+    }
+
+    #[test]
+    fn changes_to_existing_items_are_checked_and_passed_as_arguments() {
+        let done = validate("complete_reminder", &json!({"id":"r-1","title":" Buy milk "})).unwrap();
+        assert_eq!(done["title"], "Buy milk");
+        assert!(validate("complete_reminder", &json!({"title":"Buy milk"})).unwrap().get("id").is_none(), "still to be picked");
+        for invalid in [json!({"id":"-x","title":"a"}), json!({"id":"a b","title":"a"}), json!({"id":"r-1"}), json!({"id":"r-1","title":"a","list":"Work"})] {
+            assert!(validate("complete_reminder", &invalid).is_err(), "{invalid}");
+        }
+        let moved = validate("update_calendar_event", &json!({"id":"e-1","occurrence":"2026-11-03T15:00","was_title":"Review","title":"Review","start":"2026-11-03 16:00","minutes":"45"})).unwrap();
+        assert_eq!((moved["occurrence"].as_str(), moved["minutes"].as_u64()), (Some("2026-11-03 15:00"), Some(45)));
+        assert!(validate("update_calendar_event", &json!({"id":"e-1","occurrence":"2026-11-03 15:00","was_title":"Review","title":"Review","start":"Friday","minutes":45})).is_err());
+        let (_, argv) = script("append_to_note", &validate("append_to_note", &json!({"id":"n-1","title":"Shopping","text":"<b>milk</b>\neggs"})).unwrap()).unwrap();
+        assert_eq!(argv[..2], ["n-1", "Shopping"]);
+        assert!(argv[2].contains("&lt;b&gt;milk") && argv[2].contains("<div>eggs</div>"), "note text is shown as written, never as markup");
+        assert_eq!(helper_arguments("complete_reminder", &done).unwrap(), ["--complete-reminder", "r-1", "Buy milk"]);
+        let change: Value = serde_json::from_str(&helper_arguments("update_calendar_event", &moved).unwrap()[1]).unwrap();
+        assert_eq!(change, json!({"id":"e-1","occurrence":"2026-11-03 15:00","wasTitle":"Review","title":"Review","start":"2026-11-03 16:00","minutes":45,"location":""}));
+        let (title, fields, _) = describe("update_calendar_event", &moved);
+        assert_eq!(title, "Change this event?");
+        assert!(fields.iter().filter(|f| ["id", "occurrence", "was_title"].contains(&f.key.as_str())).all(|f| f.kind == "hidden"));
+    }
+
+    #[tokio::test]
+    async fn a_change_without_its_item_never_starts() {
+        let receipt = execute_with("complete_reminder", json!({"title":"Buy milk"}).as_object().unwrap(), Path::new("/definitely/not/a/helper")).await;
+        assert_eq!((receipt.outcome, receipt.message.as_str()), (ActionOutcome::Failed, "Pick which one to change first."));
+        let receipt = execute_with("complete_reminder", json!({"id":"r-1","title":"Buy milk"}).as_object().unwrap(), Path::new("/definitely/not/a/helper")).await;
+        assert_eq!(receipt.outcome, ActionOutcome::Failed);
+    }
+
+    fn change_receipt(tool: &str, args: &Map<String, Value>, evidence: Value) -> ActionReceipt {
+        parse_receipt(tool, args, &helper_receipt(evidence).to_string())
+    }
+
+    #[test]
+    fn a_completed_reminder_must_read_back_done_and_otherwise_unchanged() {
+        let args = validate("complete_reminder", &json!({"id":"r-1","title":"Buy milk"})).unwrap();
+        let before = json!({"title":"Buy milk","due":"2026-11-03 09:00","listId":"list-1","notes":"","priority":0,"url":"","alarms":1,"completed":false});
+        let mut after = before.clone();
+        after["completed"] = json!(true);
+        let valid = json!({"destinationId":"list-1","identifierScope":"persistent","title":"Buy milk","before":before,"after":after});
+        let receipt = change_receipt("complete_reminder", &args, valid.clone());
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+        assert!(receipt.message.contains("Marked “Buy milk” as done"));
+        for (side, key, value) in [("after", "completed", json!(false)), ("after", "due", json!("2026-11-04 09:00")), ("after", "notes", json!("changed")),
+            ("before", "completed", json!(true)), ("before", "title", json!("Buy milk powder")), ("after", "alarms", json!(0))] {
+            let mut wrong = valid.clone();
+            wrong[side][key] = value;
+            assert_eq!(change_receipt("complete_reminder", &args, wrong).outcome, ActionOutcome::Unknown, "{side}.{key}");
+        }
+        let mut missing = valid;
+        missing["before"].as_object_mut().unwrap().remove("listId");
+        missing["after"].as_object_mut().unwrap().remove("listId");
+        assert_eq!(change_receipt("complete_reminder", &args, missing).outcome, ActionOutcome::Unknown, "an unreported field is not proof it was kept");
+    }
+
+    #[test]
+    fn a_moved_event_must_read_back_exactly_as_approved() {
+        let args = validate("update_calendar_event", &json!({"id":"e-1","occurrence":"2026-11-03 15:00","was_title":"Review","title":"Review","start":"2026-11-03 16:00","minutes":45,"location":"Room 4"})).unwrap();
+        let before = json!({"title":"Review","start":"2026-11-03 15:00","end":"2026-11-03 15:45","startSecond":0,"durationSeconds":2700,"location":"Room 4","allDay":false,"calendarId":"cal-1","notes":"Agenda","url":"","alarms":1,"recurring":false});
+        let mut after = before.clone();
+        after["start"] = json!("2026-11-03 16:00");
+        after["end"] = json!("2026-11-03 16:45");
+        let valid = json!({"destinationId":"cal-1","identifierScope":"persistent","title":"Review","before":before,"after":after,"oldSlotVacated":true,"span":"this_event"});
+        let receipt = change_receipt("update_calendar_event", &args, valid.clone());
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+        for (path, value) in [("/after/start", json!("2026-11-03 15:00")), ("/after/durationSeconds", json!(3600)), ("/after/location", json!("")),
+            ("/after/notes", json!("")), ("/after/calendarId", json!("cal-2")), ("/before/title", json!("Standup")), ("/oldSlotVacated", json!(false)),
+            ("/after/startSecond", json!(30))] {
+            let mut wrong = valid.clone();
+            *wrong.pointer_mut(path).unwrap() = value;
+            assert_eq!(change_receipt("update_calendar_event", &args, wrong).outcome, ActionOutcome::Unknown, "{path}");
+        }
+        // A repeating event: only this occurrence, and the next one keeps its time.
+        let mut repeating = valid;
+        repeating["before"]["recurring"] = json!(true);
+        repeating["after"]["recurring"] = json!(true);
+        repeating["span"] = json!("this_occurrence");
+        repeating["nextBefore"] = json!("2026-11-10 15:00|Review");
+        repeating["nextAfter"] = json!("2026-11-10 15:00|Review");
+        assert_eq!(change_receipt("update_calendar_event", &args, repeating.clone()).outcome, ActionOutcome::Succeeded);
+        for (key, value) in [("nextAfter", json!("2026-11-10 16:00|Review")), ("span", json!("this_event"))] {
+            let mut wrong = repeating.clone();
+            wrong[key] = value;
+            assert_eq!(change_receipt("update_calendar_event", &args, wrong).outcome, ActionOutcome::Unknown, "{key}");
+        }
+        repeating.as_object_mut().unwrap().remove("nextBefore");
+        assert_eq!(change_receipt("update_calendar_event", &args, repeating).outcome, ActionOutcome::Unknown);
+    }
+
+    #[test]
+    fn text_added_to_a_note_must_follow_everything_that_was_there() {
+        let args = validate("append_to_note", &json!({"id":"n-1","title":"Shopping","text":"milk\neggs"})).unwrap();
+        let valid = json!({"destinationId":"folder-1","identifierScope":"persistent","beforeTitle":"Shopping","beforePlaintext":"Shopping\nBread\n",
+            "title":"Shopping","plaintext":"Shopping\nBread\nmilk\neggs\n","folderId":"folder-1","attachmentCount":0});
+        let receipt = change_receipt("append_to_note", &args, valid.clone());
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+        for (key, value) in [("plaintext", json!("Shopping\nmilk\neggs")), ("plaintext", json!("Shopping\nBread\nmilk\neggs\nextra")), ("plaintext", json!("Shopping\nBreadmilk\neggs")),
+            ("beforeTitle", json!("Shopping list")), ("folderId", json!("folder-2")), ("attachmentCount", json!(1))] {
+            let mut wrong = valid.clone();
+            wrong[key] = value;
+            assert_eq!(change_receipt("append_to_note", &args, wrong).outcome, ActionOutcome::Unknown, "{key}");
+        }
     }
 }

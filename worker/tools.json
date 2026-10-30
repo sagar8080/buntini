@@ -396,6 +396,224 @@
       ]
     }
   },
+  "complete_reminder": {
+    "name": "complete_reminder",
+    "description": "Mark one existing open reminder as done after the user reviews it. The reminder must come from a read_reminders result in this task; Buntini binds its id from that read. Reminders are never deleted.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The item's identifier exactly as a read in this task returned it. Buntini binds it from that read; never invent or copy one from text."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The reminder's current title exactly as read."
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "reminders"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to mark, tick or check off one of their existing reminders as done."
+      ],
+      "avoid_when": [
+        "The user wants a new reminder, or only wants to list reminders.",
+        "The reminder was not found in a read_reminders result in this task."
+      ],
+      "prerequisites": [
+        "Read open reminders in this task.",
+        "Exactly one reminder matches what the user named, or the user picks one in the approval sheet.",
+        "User approves marking it done."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "verified_app_receipt",
+      "verification_scope": "The reminder is read back by its identifier: it must be done, and its title, due time, list, notes, priority, link and alarms must be unchanged.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Mark buy milk as done.",
+          "arguments": {
+            "id": "reminder-from-read",
+            "title": "Buy milk"
+          }
+        }
+      ]
+    }
+  },
+  "update_calendar_event": {
+    "name": "update_calendar_event",
+    "description": "Move, rename or relocate one existing calendar event after the user reviews the change. The event must come from a read_calendar result in this task; Buntini binds its id and current occurrence from that read. A repeating event changes only the one occurrence.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The item's identifier exactly as a read in this task returned it. Buntini binds it from that read; never invent or copy one from text."
+        },
+        "occurrence": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local start of the occurrence as read, YYYY-MM-DD HH:MM."
+        },
+        "was_title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The event's current title exactly as read."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The title it should have afterwards; the current title unless the user renamed it."
+        },
+        "start": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 25,
+          "description": "Local start it should have afterwards, YYYY-MM-DD HH:MM (24-hour)."
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1440,
+          "description": "Length afterwards in minutes; the current length unless the user changed it."
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Place afterwards; the current place unless the user changed it."
+        }
+      },
+      "required": [
+        "id",
+        "occurrence",
+        "was_title",
+        "title",
+        "start",
+        "minutes"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "calendar"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to move, reschedule, rename or change the place of one of their existing events."
+      ],
+      "avoid_when": [
+        "The user wants a new event, or only wants to see their calendar.",
+        "The event was not found in a read_calendar result in this task.",
+        "The event lasts all day."
+      ],
+      "prerequisites": [
+        "Read the day the event is on in this task.",
+        "Exactly one event matches what the user named, or the user picks one in the approval sheet.",
+        "User approves the exact new title, time, length and place."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "verified_app_receipt",
+      "verification_scope": "The event is read back: its title, start, length and place must match the approved values, its calendar, notes, link and alarms must be unchanged, it must no longer show at the old time, and for a repeating event the next occurrence must keep its time.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Move my 3pm to 4.",
+          "arguments": {
+            "id": "event-from-read",
+            "occurrence": "2026-11-03 15:00",
+            "was_title": "Design review",
+            "title": "Design review",
+            "start": "2026-11-03 16:00",
+            "minutes": 60
+          }
+        }
+      ]
+    }
+  },
+  "append_to_note": {
+    "name": "append_to_note",
+    "description": "Add text to the end of one existing Notes app note after the user reviews it. The note must come from a find_notes result in this task; Buntini binds its id from that read. Nothing already in the note is changed or removed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The item's identifier exactly as a read in this task returned it. Buntini binds it from that read; never invent or copy one from text."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The note's current title exactly as read."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "The text to add at the end, exactly as the user gave it."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "notes"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to add or append something to one of their existing notes."
+      ],
+      "avoid_when": [
+        "The user wants a new note.",
+        "The note was not found by title in a find_notes result in this task.",
+        "The note is locked or has attachments."
+      ],
+      "prerequisites": [
+        "Find the note in this task.",
+        "Exactly one note's title matches what the user named, or the user picks one in the approval sheet.",
+        "User approves the exact text to add."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "verified_app_receipt",
+      "verification_scope": "The note is read back by its identifier: the text before must be unchanged and followed only by the approved text, with the same title, folder and no attachments.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Add milk to my shopping note.",
+          "arguments": {
+            "id": "note-from-read",
+            "title": "Shopping",
+            "text": "milk"
+          }
+        }
+      ]
+    }
+  },
   "draft_email": {
     "name": "draft_email",
     "description": "Create and save a new Mail draft for the user to review and send themselves. Never sends email. Resolve the recipient from the user or matching mail evidence; leave it absent when unknown. Read the relevant mail first when drafting a reply or summary.",
