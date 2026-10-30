@@ -1706,6 +1706,20 @@ mod tests {
         }
     }
     #[test]
+    fn answering_a_question_in_chat_is_not_a_reply_email() {
+        for goal in [
+            "Respond to this question in one sentence: why do leases renew?",
+            "Reply to the following in a friendly tone: thanks for the update",
+        ] {
+            let contract = TaskContract::from_request(goal);
+            assert!(contract.outcomes.iter().all(|outcome| outcome.kind == "answer"), "{goal}");
+            assert!(contract.validate_proposal("draft_email", &json!({"subject":"Re:","body":"Hi"}), &[]).is_err());
+        }
+        let reply = TaskContract::from_request("Reply to Ana's email saying yes");
+        assert!(reply.outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("draft_email")));
+    }
+
+    #[test]
     fn drafting_a_reply_in_chat_does_not_require_a_mail_write() {
         let goal = "Draft a friendly reply to this invitation. Accept Saturday November 7 at 2pm, mention a vegetarian dish, and ask whether there is parking. Do not send anything.";
         let contract = TaskContract::from_request(goal);
