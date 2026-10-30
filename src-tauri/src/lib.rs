@@ -36,6 +36,7 @@ mod migration;
 mod model;
 mod monitor_actions;
 mod notifications;
+mod nudges;
 mod overlay;
 mod planning;
 mod pricing;
@@ -313,7 +314,11 @@ pub fn run() {
             watches::delete_price_watch,
             watches::run_price_watch,
             routines::update_routine,
-            routines::delete_routine
+            routines::delete_routine,
+            nudges::heads_ups,
+            nudges::open_heads_up,
+            nudges::dismiss_heads_up,
+            notifications::take_heads_up_request
         ])
         .build(app_context())
         .expect("Buntini could not start")

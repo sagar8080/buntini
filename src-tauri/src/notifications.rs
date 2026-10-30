@@ -312,6 +312,9 @@ fn review_requested(identifier: &str) {
     if let Some(task_id) = identifier.strip_prefix("routine-") {
         return routine_requested(task_id);
     }
+    if let Some(nudge_id) = identifier.strip_prefix("nudge-") {
+        return nudge_requested(nudge_id);
+    }
     let Some(approval_id) = identifier.strip_prefix("approval-") else {
         return;
     };
@@ -349,6 +352,54 @@ fn routine_requested(task_id: &str) {
         }
         let _ = handle.emit("routine-open", serde_json::json!({ "taskId": task_id }));
     });
+}
+
+/// The heads-up a click asked for, until the panel takes it, for the same reason as
+/// `REVIEW_REQUEST`: a click can launch Buntini before the panel listens.
+static NUDGE_REQUEST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+pub fn take_heads_up_request() -> Option<String> {
+    NUDGE_REQUEST.lock().unwrap().take()
+}
+
+/// A heads-up was clicked: open Buntini on it. Only its id travels with the alert.
+fn nudge_requested(nudge_id: &str) {
+    *NUDGE_REQUEST.lock().unwrap() = Some(nudge_id.to_string());
+    let Some(app) = APP.get().cloned() else {
+        return;
+    };
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        use tauri::{Emitter, Manager};
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = handle.emit("heads-up-open", ());
+    });
+}
+
+/// Shows a heads-up. `body` comes from `nudges::body`, which names the kind only, since
+/// the alert can show on the lock screen. Off notifications leave it in the window.
+pub(crate) async fn deliver_nudge(app: &tauri::AppHandle, nudge_id: &str, body: &str) -> Result<String, String> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    if !state.store.lock().unwrap().settings()?.notifications_enabled {
+        return Ok("in_app_only".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        notification_availability(&native::status().await?)?;
+        let pending = native::enqueue_as(&crate::nudges::identifier(nudge_id), None, "Heads-up", body);
+        finish_delivery(&state, pending).await?;
+        Ok("desktop_accepted".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (nudge_id, body);
+        Err("Desktop notifications in this build require macOS. The heads-up is in Buntini.".into())
+    }
 }
 
 /// Says a routine run finished. A proposal it made already asked for the person's OK

@@ -36,6 +36,7 @@ export interface Settings {
   voiceRate: number;
   notificationsEnabled: boolean;
   morningBrief: boolean;
+  headsUps: boolean;
   openAtLogin: boolean;
   monthlyBudgetUsd: number;
   costPerSearchUsd: number;
@@ -128,5 +129,7 @@ export interface TaskProgress { id: string; goal: string; state: string; updated
 /** What macOS reports for Open at login. */
 export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'notFound' | 'unavailable';
 /** A saved proposal waiting for the person; `description` never holds field values. */
+/** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
+export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
 export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }

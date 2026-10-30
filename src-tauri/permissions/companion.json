@@ -78,7 +78,11 @@
           "delete_price_watch",
           "run_price_watch",
           "update_routine",
-          "delete_routine"
+          "delete_routine",
+          "heads_ups",
+          "open_heads_up",
+          "dismiss_heads_up",
+          "take_heads_up_request"
         ]
       }
     }
