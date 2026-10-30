@@ -139,8 +139,90 @@ fn addressed_reply(tokens: &[&str]) -> bool {
     !object.is_empty() && !answered_in_chat(object)
 }
 
+/// Event words that make "move", "rename" or "change" about the calendar.
+const EVENT_WORDS: &[&str] = &[
+    "event", "events", "meeting", "meetings", "appointment", "appointments", "calendar",
+];
+
+/// A day or time of day, as in "to Friday", "to 4", "to 4:30pm", "to tomorrow".
+fn temporal(word: &str) -> bool {
+    let digits = word.trim_end_matches("pm").trim_end_matches("am");
+    [
+        "today", "tonight", "tomorrow", "noon", "midday", "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday", "am", "pm",
+    ]
+    .contains(&word)
+        || (!digits.is_empty() && digits.len() <= 4 && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// "move my 3pm to 4", "push the dentist to Friday", "rename my 10:30 to Planning":
+/// changing an existing event. Other things can be moved too (tabs, files, money), so
+/// "move" needs an event word or a day or time to move it to.
+fn edits_event(verb: &str, tokens: &[&str]) -> bool {
+    let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
+    let destination = tokens
+        .iter()
+        .rposition(|word| *word == "to" || *word == "for")
+        .map(|at| &tokens[at + 1..])
+        .unwrap_or(&[]);
+    if has(&["tab", "tabs", "file", "files", "folder", "folders", "money", "email", "emails", "mail", "reminder", "reminders", "note", "notes"]) {
+        return false;
+    }
+    match verb {
+        "reschedule" | "postpone" => true,
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" => {
+            tokens.contains(&"to") && (has(EVENT_WORDS) || destination.iter().any(|word| temporal(word)))
+        }
+        "rename" => tokens.contains(&"to") && (has(EVENT_WORDS) || tokens.get(1).is_some_and(|word| ["my", "the"].contains(word))),
+        "change" => tokens.contains(&"to") && (has(EVENT_WORDS) || has(&["location", "venue"])),
+        _ => false,
+    }
+}
+
+/// "add milk to my shopping note": adding to an existing note, not writing a new one.
+fn appends_to_note(tokens: &[&str]) -> bool {
+    let Some(to) = tokens.iter().rposition(|word| *word == "to") else {
+        return false;
+    };
+    let name: Vec<&&str> = tokens[to + 1..]
+        .iter()
+        .skip_while(|word| ["my", "the", "our"].contains(*word))
+        .collect();
+    // What is added may be quoted, and so already removed from these words.
+    to >= 1
+        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
+        && (2..=5).contains(&name.len())
+        && !(["a", "an", "new"].contains(&tokens[1]) && tokens.get(2) == Some(&"note"))
+}
+
+/// "add milk, eggs and bread to my shopping note" is one request: join its list so the
+/// clause splitting at "and" and commas below keeps it together. Lowercase text only.
+pub(crate) fn joined_edit_lists(text: &str) -> String {
+    let mut result = String::new();
+    for sentence in text.split_inclusive([';', '\n', '.', '!', '?']) {
+        let spans: Vec<(usize, &str)> = sentence
+            .split_whitespace()
+            .map(|word| (word.as_ptr() as usize - sentence.as_ptr() as usize, word.trim_matches(|c: char| !c.is_alphanumeric())))
+            .collect();
+        let head = spans.iter().position(|(_, word)| ["note", "notes"].contains(word)).and_then(|end| {
+            let to = (0..end).rev().take(6).find(|&index| spans[index].1 == "to")?;
+            let verb = (0..to).rev().find(|&index| ["add", "append", "put", "jot"].contains(&spans[index].1))?;
+            Some((spans[verb].0, spans[to].0))
+        });
+        match head {
+            Some((start, end)) => {
+                result.push_str(&sentence[..start]);
+                result.push_str(&sentence[start..end].replace(" and ", " & ").replace(',', " &"));
+                result.push_str(&sentence[end..]);
+            }
+            None => result.push_str(sentence),
+        }
+    }
+    result
+}
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
-    let prompt = unquoted(&prompt.replace("Additional details: ", "\n"));
+    let prompt = joined_edit_lists(&unquoted(&prompt.replace("Additional details: ", "\n")));
     let mut expected = Vec::new();
     let mut unsupported = false;
     // An explanation or negation scopes over its coordinated clauses. Splitting
@@ -167,6 +249,22 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
             let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
             let tool = match verb {
                 "remember" => Some("remember"),
+                // Changing an item the user already has: its id comes from a read.
+                "mark" if has(&["done", "complete", "completed", "finished"]) => {
+                    Some("complete_reminder")
+                }
+                "tick" | "check" | "cross"
+                    if tokens.get(1) == Some(&"off") || tokens.last() == Some(&"off") =>
+                {
+                    Some("complete_reminder")
+                }
+                "complete" | "finish" if has(&["reminder", "reminders", "task", "todo"]) => {
+                    Some("complete_reminder")
+                }
+                verb if edits_event(verb, &tokens) => Some("update_calendar_event"),
+                "add" | "append" | "put" | "jot" if appends_to_note(&tokens) => {
+                    Some("append_to_note")
+                }
                 "set" | "start" | "create" | "add" if has(&["timer", "timers", "countdown"]) => {
                     Some("set_timer")
                 }
@@ -380,7 +478,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     {
         return Ok(());
     }
-    let text = unquoted(goal)
+    let text = joined_edit_lists(&unquoted(goal))
         .replace("additional details: ", "\n")
         .replace(" and then ", ";")
         .replace(" then ", ";")
@@ -529,7 +627,7 @@ fn receipt_summary(messages: &[String]) -> String {
 /// Any other continuation keeps the answer phase, including verbs we have never
 /// classified (a blacklist would silently drop new kinds of requested work).
 pub(crate) fn receipt_only_goal(goal: &str) -> bool {
-    let plain = unquoted(&goal.replace("Additional details: ", "\n"))
+    let plain = joined_edit_lists(&unquoted(&goal.replace("Additional details: ", "\n")))
         .replace(" and then ", ";")
         .replace(" then ", ";")
         .replace(" also ", ";");
@@ -703,6 +801,9 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "control_music",
             "switch_tab",
             "browse_page",
+            "complete_reminder",
+            "update_calendar_event",
+            "append_to_note",
         ]
         .contains(&step.tool.as_str())
             && receipt.object_id.as_deref().is_none_or(str::is_empty)

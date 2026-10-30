@@ -514,6 +514,29 @@ mod tests {
     }
 
     #[test]
+    fn changes_to_existing_items_are_verified_writes_to_one_app() {
+        for (name, resource, read) in [
+            ("complete_reminder", "reminders", "read_reminders"),
+            ("update_calendar_event", "calendar", "read_calendar"),
+            ("append_to_note", "notes", "find_notes"),
+        ] {
+            let tool = definition(name).unwrap();
+            let contract = contract(name).unwrap();
+            assert_eq!(contract.operation, ToolOperation::Write);
+            assert_eq!(contract.resources, vec![resource]);
+            assert_eq!(contract.success_verifier, SuccessVerifier::VerifiedAppReceipt);
+            assert_eq!(contract.retry_policy, RetryPolicy::ReconcileBeforeRetry);
+            // The item comes from that app's read, which the description names.
+            assert!(tool["description"].as_str().unwrap().contains(read), "{name}");
+            assert_eq!(tool["parameters"]["properties"]["id"]["maxLength"], 300);
+            assert!(crate::actions::EDIT_TOOLS.contains(&name));
+            for example in &contract.examples {
+                assert!(crate::actions::validate(name, &example.arguments).is_ok(), "{name}");
+            }
+        }
+    }
+
+    #[test]
     fn contracts_keep_reads_mixed_operations_and_weak_receipts_distinct() {
         assert_eq!(
             contract("read_calendar").unwrap().operation,

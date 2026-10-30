@@ -13,6 +13,7 @@ mod calculation;
 mod structured_math;
 mod writing_context;
 mod source_fields;
+mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;

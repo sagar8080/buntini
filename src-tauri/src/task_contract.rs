@@ -86,6 +86,15 @@ pub struct FieldProvenance {
     pub previous: Option<Box<FieldProvenance>>,
 }
 
+/// How the read before a change to an existing item is described, so a recipe can bind it.
+pub(crate) const EDIT_READ: &str = "Read the item to change for: ";
+
+/// Whether the next write is moving or renaming an event, which may read the coming
+/// days one by one to find the event the user named.
+fn searching_calendar(outcome: Option<&Outcome>) -> bool {
+    outcome.is_some_and(|o| o.kind == "write" && o.tool.as_deref() == Some("update_calendar_event"))
+}
+
 fn tokens(text: &str) -> Vec<&str> {
     text.split(|c: char| !c.is_alphanumeric() && c != '-')
         .filter(|s| !s.is_empty())
@@ -120,7 +129,9 @@ fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> {
 }
 
 fn clauses(goal: &str) -> Vec<String> {
-    let text = completion::unquoted(&goal.replace("Additional details: ", "\n"));
+    let text = completion::joined_edit_lists(&completion::unquoted(
+        &goal.replace("Additional details: ", "\n"),
+    ));
     let mut result = Vec::new();
     for sentence in text.split([';', '\n', '.', '!', '?']) {
         let sentence = completion::request_clause(sentence);
@@ -380,6 +391,9 @@ fn verified_write(step: &Step) -> bool {
             "control_music",
             "switch_tab",
             "browse_page",
+            "complete_reminder",
+            "update_calendar_event",
+            "append_to_note",
         ]
         .contains(&step.tool.as_str())
             || receipt
@@ -656,6 +670,27 @@ impl TaskContract {
                     .iter()
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect();
+                // A change to an existing item first reads where that item lives. Its
+                // id is bound from that read or picked in the sheet, never required of
+                // a proposal (`edit_targets::check` enforces where it came from).
+                if let Some((read, arguments)) =
+                    crate::edit_targets::source(tool, &clause, reference_date)
+                {
+                    required.retain(|field| field != "id");
+                    if !self.outcomes.iter().any(|o| {
+                        o.kind == "read"
+                            && o.accepted_tools.iter().any(|t| t == read)
+                            && o.required_arguments == arguments
+                    }) {
+                        self.push_outcome(
+                            "read",
+                            &format!("{EDIT_READ}{clause}"),
+                            vec![read.into()],
+                            arguments,
+                            vec![],
+                        );
+                    }
+                }
                 if tool == "add_reminder"
                     && (tokens(&clause).iter().any(|w| {
                         [
@@ -1208,6 +1243,13 @@ impl TaskContract {
                 {
                     provenance.origin = "runtime_default".into();
                     provenance.field_ref = None;
+                } else if source.get("kind").and_then(Value::as_str) == Some("source_record") {
+                    // A change to an item read in this task: which read and record it is.
+                    let user = source.pointer("/userFields").and_then(|f| f.get(field)) == Some(value);
+                    provenance.origin = if user { "user_literal" } else { "source_record" }.into();
+                    provenance.source_step_id = source["stepId"].as_str().map(str::to_owned);
+                    provenance.record_id = source["recordId"].as_str().map(str::to_owned);
+                    provenance.field_ref = Some(field.clone());
                 } else if source.get("kind").and_then(Value::as_str) == Some("calendar_reminder") {
                     provenance.origin = "deterministic_calculation".into();
                     provenance.source_step_id = source
@@ -1327,7 +1369,9 @@ impl TaskContract {
                 if effect && !write_allowed && name != "control_music" {
                     return None;
                 }
-                let relevant_read = (contact_read && name == "find_contact") || next.is_some_and(|o| {
+                let relevant_read = (contact_read && name == "find_contact")
+                    || (name == "read_calendar" && searching_calendar(next))
+                    || next.is_some_and(|o| {
                     o.accepted_tools.iter().any(|t| t == name)
                         || (o.kind == "answer" && (name == "calculate" || crate::structured_math::TOOLS.contains(&name)))
                         || (o.kind == "answer"
@@ -1408,6 +1452,15 @@ impl TaskContract {
                 }
                 return Ok(());
             }
+            // Moving an event the user named without a day: only the next day the
+            // search for it needs, never another day or source.
+            if tool == "read_calendar" && searching_calendar(Some(outcome)) {
+                return match crate::edit_targets::edit_plan(&self.current_request, "update_calendar_event", steps) {
+                    Ok(crate::edit_targets::EditPlan::Read { tool: "read_calendar", arguments: wanted })
+                        if wanted["day"] == arguments["day"] => Ok(()),
+                    _ => Err("This source read is not relevant to the next unfinished task outcome.".into()),
+                };
+            }
             // Before a draft, Contacts may be read only for the one recipient the user
             // named, never for anyone else the request or a source mentions.
             if tool == "find_contact" && self.awaiting_recipient().is_some() {
@@ -1451,7 +1504,7 @@ impl TaskContract {
                 ));
             }
         }
-        Ok(())
+        crate::edit_targets::check(&self.current_request, tool, arguments, steps, false)
     }
     pub fn validate_answer(&self, text: &str, steps: &[Step]) -> Result<String, String> {
         if steps

@@ -8,12 +8,13 @@
 //! before a broader one. Each hook returns `Ok(None)` (or `false`) when it doesn't apply;
 //! an error means the request matched but cannot be completed safely.
 use crate::{
+    edit_targets::EditPlan,
     focus::Referent,
     planning::BoundAction,
     task_contract::{Outcome, TaskContract},
     workflows::Step,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// What a recipe may look at: the saved goal and journal, and the tools on offer now.
 pub struct Plan<'a> {
@@ -140,6 +141,57 @@ impl Recipe for ReplyToThis {
     }
 }
 
+/// "Mark buy milk done", "move my 3pm to 4", "add milk to my shopping note": read where
+/// the item lives, then bind the change to the one item the user named. Several matches
+/// are bound without an id for the user to pick in the sheet; no match is a question.
+struct EditItem;
+impl Recipe for EditItem {
+    fn id(&self) -> &'static str {
+        "edit_item"
+    }
+    fn bind(&self, plan: &Plan, next: &Outcome) -> Result<Option<BoundAction>, String> {
+        let tool = match (next.kind.as_str(), next.tool.as_deref()) {
+            ("read", Some(read)) if next.description.starts_with(crate::task_contract::EDIT_READ) => match read {
+                "read_reminders" => "complete_reminder",
+                "read_calendar" => "update_calendar_event",
+                "find_notes" => "append_to_note",
+                _ => return Ok(None),
+            },
+            ("write", Some(tool)) => match crate::actions::EDIT_TOOLS.iter().find(|edit| **edit == tool) {
+                Some(edit) => edit,
+                None => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        if next.kind == "write" && !plan.offers(tool) {
+            return Ok(None);
+        }
+        Ok(match crate::edit_targets::edit_plan(plan.goal, tool, plan.steps)? {
+            EditPlan::Read { tool: read, arguments } => {
+                if !plan.offers(read) {
+                    return Err("I can’t read that app for this request. Check it’s allowed in Settings → Apps.".into());
+                }
+                Some(BoundAction {
+                    tool: read,
+                    source: json!({"kind":"user_fields","source":"user_request","fields":arguments}),
+                    arguments,
+                })
+            }
+            _ if next.kind == "read" => None,
+            EditPlan::One(candidate) => Some(BoundAction {
+                tool,
+                arguments: candidate.arguments.clone(),
+                source: crate::edit_targets::provenance(tool, &candidate),
+            }),
+            EditPlan::Several(candidates) => Some(BoundAction {
+                tool,
+                arguments: crate::edit_targets::unpicked(&candidates),
+                source: json!({"kind":"source_record","stepId":candidates[0].step_id,"pick":"user"}),
+            }),
+        })
+    }
+}
+
 /// "Lease renewal" as "Re: Lease renewal", leaving an existing "Re:" alone.
 fn reply_subject(subject: &str) -> String {
     let subject = subject.trim();
@@ -153,6 +205,7 @@ fn reply_subject(subject: &str) -> String {
 }
 
 static RECIPES: &[&dyn Recipe] = &[
+    &EditItem,
     &FirstCalendarEvent,
     &LiteralNote,
     &LiteralReminder,
