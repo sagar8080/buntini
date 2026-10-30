@@ -106,6 +106,21 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
   };
 }
 
+/** The welcome shortcuts that read an app. */
+export type Shortcut = 'day' | 'reply';
+const shortcutApps: Record<Shortcut, { reads: string[]; apps: string[]; ask: string; allow: string }> = {
+  // The brief uses whichever of these is allowed, so any one of them is enough to start.
+  day: { reads: ['calendar', 'reminders', 'mail'], apps: ['calendar', 'reminders'], ask: 'To go over your day I read Calendar and Reminders, here on this Mac.', allow: 'Allow Calendar and Reminders' },
+  reply: { reads: ['mail'], apps: ['mail'], ask: 'To find email waiting for a reply I read Mail, here on this Mac. Nothing is sent.', allow: 'Allow Mail' },
+};
+
+/** What a welcome shortcut still needs on a fresh install, so it can be allowed in place
+    instead of dead-ending; null when it can run. */
+export function shortcutNeeds(shortcut: Shortcut, allowed: string[]): { apps: string[]; ask: string; allow: string } | null {
+  const { reads, apps, ask, allow } = shortcutApps[shortcut];
+  return reads.some(app => allowed.includes(app)) ? null : { apps, ask, allow };
+}
+
 /** Keys typed during setup, saved to the Keychain before the settings. */
 export function keysToSave(answers: Answers): [KeyProvider, string][] {
   const keys: [KeyProvider, string][] = [];

@@ -5,14 +5,14 @@ import BrainSettings from './BrainSettings';
 import Connections from './Connections';
 import PrivacyTab from './PrivacyTab';
 import AppsTab from './AppsTab';
-import { errorMessage } from './bridge';
+import type { SettingsSaver, SaveState } from './settingsSave';
 import type { Bootstrap, KeyProvider, Settings } from './types';
 
-type Tab = 'buntini' | 'brain' | 'apps' | 'connections' | 'privacy';
+export type Tab = 'buntini' | 'brain' | 'apps' | 'connections' | 'privacy';
 const tabs: { id: Tab; label: string }[] = [{ id: 'buntini', label: 'Buntini' }, { id: 'brain', label: 'Brain' }, { id: 'apps', label: 'Apps' }, { id: 'connections', label: 'Connections' }, { id: 'privacy', label: 'Privacy' }];
 
 type Props = {
-  data: Bootstrap; onSave: (settings: Settings) => Promise<void>; onError: (message: string) => void;
+  data: Bootstrap; saver: SettingsSaver; initialTab?: Tab; onError: (message: string) => void;
   onAddFolder: () => Promise<void>; onRemoveFolder: (path: string) => Promise<void>;
   onKey: (provider: KeyProvider, key: string) => Promise<void>; onAudit: () => void; onRestartSetup: () => void;
   onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>;
@@ -20,26 +20,24 @@ type Props = {
   onRefresh: () => Promise<void>; onNotice: (message: string) => void;
 };
 
-/** Settings in five tabs. Changes save on their own a moment after you stop editing. */
-export default function SettingsView({ data, onSave, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget, onPolicy, onRefresh, onNotice }: Props) {
-  const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('buntini-settings-tab') as Tab) || 'buntini'; } catch { return 'buntini'; } });
-  const [draft, setDraft] = useState(data.settings);
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+/** Settings in five tabs. Changes save on their own a moment after you stop editing, and right
+    away when Settings closes. While a task is running, model and policy changes wait for it. */
+export default function SettingsView({ data, saver, initialTab, onError, onAddFolder, onRemoveFolder, onKey, onAudit, onRestartSetup, onPreviewVoice, privacyExtras, onForget, onPolicy, onRefresh, onNotice }: Props) {
+  const [tab, setTab] = useState<Tab>(() => { if (initialTab) return initialTab; try { return (localStorage.getItem('buntini-settings-tab') as Tab) || 'buntini'; } catch { return 'buntini'; } });
+  // An edit still waiting to save (say, behind a running task) is what the toggles show.
+  const [draft, setDraft] = useState(() => saver.pending() ?? data.settings);
+  const [status, setStatus] = useState<SaveState>(() => saver.pending() ? saver.state : 'idle');
   const [problem, setProblem] = useState('');
   const edited = useRef(false);
-  const latest = useRef(0);
   const update = <K extends keyof Settings>(name: K, value: Settings[K]) => { edited.current = true; setDraft(previous => ({ ...previous, [name]: value })); };
   useEffect(() => { try { localStorage.setItem('buntini-settings-tab', tab); } catch { /* Remembering the tab is optional. */ } }, [tab]);
-  useEffect(() => {
-    if (!edited.current) return;
-    setStatus('saving');
-    const attempt = ++latest.current;
-    const id = window.setTimeout(async () => {
-      try { await onSave(draft); if (attempt === latest.current) { setStatus('saved'); setProblem(''); } }
-      catch (error) { if (attempt === latest.current) { setStatus('error'); setProblem(errorMessage(error)); } }
-    }, 600);
-    return () => window.clearTimeout(id);
-  }, [draft]);
+  useEffect(() => saver.subscribe((state, message) => { setStatus(state); setProblem(message); }), [saver]);
+  useEffect(() => { if (edited.current) saver.edit(draft); }, [draft]);
+  // Closing Settings (Esc, the header button, tucking the panel away) saves at once.
+  useEffect(() => () => {
+    void saver.flush();
+    if (saver.state === 'waiting') onNotice('Your settings will save as soon as the current task finishes.');
+  }, [saver]);
   return <div className="subpage settings-page">
     <div className="settings-top">
       <div className="settings-tabs" role="tablist" aria-label="Settings" onKeyDown={event => {
@@ -51,7 +49,7 @@ export default function SettingsView({ data, onSave, onError, onAddFolder, onRem
         setTab(next.id);
         (event.currentTarget.querySelector(`[data-tab="${next.id}"]`) as HTMLButtonElement | null)?.focus();
       }}>{tabs.map(item => <button key={item.id} data-tab={item.id} role="tab" type="button" tabIndex={tab === item.id ? 0 : -1} aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>
-      <span className={`save-state ${status}`} role="status">{status === 'saving' ? <><LoaderCircle size={12} className="spin" />Saving</> : status === 'saved' ? <><Check size={12} />Saved</> : status === 'error' ? 'Not saved' : ''}</span>
+      <span className={`save-state ${status}`} role="status">{status === 'saving' ? <><LoaderCircle size={12} className="spin" />Saving</> : status === 'waiting' ? <><LoaderCircle size={12} className="spin" />Saves after this task</> : status === 'saved' ? <><Check size={12} />Saved</> : status === 'error' ? 'Not saved' : ''}</span>
     </div>
     {status === 'error' && problem && <p className="settings-problem" role="alert">{problem}</p>}
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>

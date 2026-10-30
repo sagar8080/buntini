@@ -11,13 +11,16 @@ import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
-import { BackgroundWork } from './TaskProgress';
+import { BackgroundWork, stepLabel } from './TaskProgress';
 import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
 import Onboarding from './Onboarding';
-import SettingsView from './SettingsView';
+import SettingsView, { type Tab as SettingsTab } from './SettingsView';
+import { SettingsSaver } from './settingsSave';
+import { shortcutNeeds, type Shortcut } from './setupSteps';
+import ConfirmInline from './ConfirmInline';
 import YourData from './YourData';
 import ActionSheet, { type ActionProposal } from './ActionSheet';
-import { appearance, idleStatus, panelScale } from './themes.ts';
+import { appearance, idleStatus, panelScale, stillMotion } from './themes.ts';
 import { greeting, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
@@ -39,7 +42,11 @@ export default function App() {
   const [progress, setProgress] = useState<TaskProgress[]>([]);
   const [background, setBackground] = useState<BackgroundStatus | null>(null);
   const [onlineTaskId, setOnlineTaskId] = useState('');
-  const [page, setPage] = useState<Page>('home');
+  const [page, setPageState] = useState<Page>('home');
+  // Settings can open on a given tab, for example Apps from a welcome shortcut.
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>();
+  const pageRef = useRef<Page>('home');
+  const setPage = (next: Page, tab?: SettingsTab) => { pageRef.current = next; setSettingsTab(tab); setPageState(next); };
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<Mode>('auto');
   const [input, setInput] = useState('');
@@ -72,6 +79,9 @@ export default function App() {
   const [approval, setApproval] = useState<WebApproval | null>(null);
   const [approving, setApproving] = useState(false);
   const [proposal, setProposal] = useState<ActionProposal | null>(null);
+  // A welcome shortcut on a fresh install asks for its app in place rather than failing.
+  const [needs, setNeeds] = useState<Shortcut | null>(null);
+  const [allowing, setAllowing] = useState(false);
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState('');
   const [planning, setPlanning] = useState(false);
@@ -79,6 +89,9 @@ export default function App() {
   const actionBusy = useRef(false);
   const approvalBusy = useRef(false);
   const activeId = useRef('');
+  // While an approval sheet waits, nothing else starts: not a typed message, a voice question or a nudge.
+  const sheetWaiting = useRef(false);
+  sheetWaiting.current = !!proposal || !!approval;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const recordPromise = useRef<Promise<void> | null>(null);
@@ -136,6 +149,17 @@ export default function App() {
     refresh().catch(e => setError(errorMessage(e)));
     return () => { mounted.current = false; void speechQueue.current?.cancel().catch(() => {}); };
   }, [refresh]);
+  // Settings edits outlive the Settings page, so one made just before closing it still saves.
+  const saver = useRef<SettingsSaver | null>(null);
+  saver.current ??= new SettingsSaver(async settings => {
+    const saved = await saveSettings(settings);
+    if (mounted.current) setData(previous => previous && { ...previous, settings: saved });
+    // The save went through; a failed refresh is its own problem, not a failed save.
+    await refresh().catch(error => setError(errorMessage(error)));
+  });
+  useEffect(() => saver.current!.subscribe((state, problem) => {
+    if (state === 'error' && pageRef.current !== 'settings') setError(`Your settings weren’t saved. ${problem}`);
+  }), []);
   // The thread loads once; later turns are added as they finish.
   useEffect(() => {
     if (!data || threadLoaded.current) return;
@@ -193,7 +217,7 @@ export default function App() {
     // A nudge borrows room above the pet for its speech bubble.
     const size = panelScale[data?.settings.panelSize || 'standard'] ?? 1;
     const width = expanded ? Math.round(420 * size) : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
-    const height = expanded ? Math.round((page === 'home' ? chatting ? 620 : approval ? 520 : 460 : 690) * size) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
+    const height = expanded ? Math.round((page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 520 : 460 : 690) * size) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
     resizeQueue.current = resizeQueue.current.then(async () => {
       const window = getCurrentWindow();
       const [position, before, monitor] = await Promise.all([window.outerPosition(), window.outerSize(), currentMonitor()]);
@@ -209,7 +233,7 @@ export default function App() {
       }
       await window.setPosition(new PhysicalPosition(x, y));
     }).catch(e => setError(errorMessage(e)));
-  }, [expanded, nudging, page, chatting, !!approval, data?.settings.companionScale, data?.settings.panelSize]);
+  }, [expanded, nudging, page, chatting, !!approval, !!needs, data?.settings.companionScale, data?.settings.panelSize]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
@@ -240,6 +264,8 @@ export default function App() {
         else if (proposal && !acting) { void command('cancel_action', { id: proposal.id }).then(() => refresh()).catch(e => setError(errorMessage(e))); setProposal(null); setPetState('idle'); }
         else if (recordHeld.current || recording || transcribing) { void cancelVoice(); }
         else if (speaking) { void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
+        // Esc closes the companion menu first, not the whole panel.
+        else if (menu) setMenu(false);
         else if (page !== 'home') setPage('home');
         else if (expanded && !busy && !recording) void expand(false);
       }
@@ -253,12 +279,12 @@ export default function App() {
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval, approving, proposal, acting, onlineTaskId]);
+  }, [page, expanded, busy, recording, transcribing, speaking, expand, approval, approving, proposal, acting, onlineTaskId, menu]);
   useEffect(() => {
     const element = conversationRef.current;
     if (!element || page !== 'home') return;
     if (focusId) { document.getElementById(`turn-${focusId}`)?.scrollIntoView({ block: 'start' }); return; }
-    element.scrollTo({ top: element.scrollHeight, behavior: live ? 'smooth' : 'instant' });
+    element.scrollTo({ top: element.scrollHeight, behavior: live && !stillMotion(data?.settings.reducedMotion) ? 'smooth' : 'instant' });
   }, [page, expanded, focusId, conversationId, live?.answer, activity, turns.at(-1)?.id]);
   useEffect(() => {
     if (!notice) return;
@@ -300,7 +326,7 @@ export default function App() {
   // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
     // A spoken question arrives as the recording winds down, so it isn't held back by it.
-    if (!prompt.trim() || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
+    if (!prompt.trim() || (sheetWaiting.current && !approvalId) || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
@@ -308,7 +334,7 @@ export default function App() {
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
-    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false;
+    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false, streamError = '';
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
@@ -325,11 +351,13 @@ export default function App() {
           if (useSpeech) { streamedText += event.text || ''; speechQueue.current?.append(event.text || '', speechToken); }
         }
         else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
-        else if (event.type === 'error') setError(event.text || 'The task could not finish.');
+        else if (event.type === 'error') streamError = event.text || 'The task could not finish.';
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);
       setLive(null);
       setTurns(previous => mergeTurns(previous, [result]));
+      // A failed turn already says so in the thread; only an error it doesn't show gets a toast.
+      if (streamError && result.state !== 'error') setError(streamError);
       if (result.handoff === 'online') { goOnline = result.id; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       if (result.handoff === 'action' && result.action) { setActionError(''); setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       setTurns(previous => mergeTurns(previous, [result]));
@@ -343,7 +371,9 @@ export default function App() {
       await refresh().catch(error => setError(errorMessage(error)));
     } catch (e) {
       const message = errorMessage(e);
-      setError(message); react('sad');
+      // The failed turn shows the message itself unless part of an answer had already arrived.
+      if (answerSoFar) setError(message);
+      react('sad');
       setLive(null); setTurns(thread => mergeTurns(thread, [{ ...provisional, id: liveId || `local-${provisional.createdAt}`, state: 'error', answer: answerSoFar || message }])); await speechQueue.current?.cancel().catch(() => {});
     } finally {
       taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle');
@@ -370,7 +400,7 @@ export default function App() {
       if (typeof taskId === 'string') await openThread({ taskId });
       next = await continueTask(name, args, event => {
         if (event.taskId) activeId.current = event.taskId;
-        if (event.type === 'state' || event.type === 'tool') setActivity(event.tool ? `Working on ${event.tool.replaceAll('_', ' ')}` : 'Continuing your task');
+        if (event.type === 'state' || event.type === 'tool') setActivity(event.tool ? stepLabel(event.tool) : 'Continuing your task');
         if (event.type === 'notice' && event.text) setNotice(event.text);
       });
       setTurns(previous => mergeTurns(previous, [next!]));
@@ -466,12 +496,28 @@ export default function App() {
     await refresh(); react('happy');
   }
   const briefing = useRef(false);
+  // The brief is busy like a chat turn: a typing bubble, a working pet and the Stop button.
   async function brief() {
-    if (briefing.current || switchingThreadRef.current) return;
-    briefing.current = true;
-    try { const turn = await command<TaskRecord>('morning_brief'); setTurns(previous => mergeTurns(previous, [turn])); react('happy'); if (data?.settings.speakResponses) void speak(turn.answer); void refresh().catch(error => setError(errorMessage(error))); }
-    catch (e) { setError(errorMessage(e)); }
-    finally { briefing.current = false; }
+    if (briefing.current || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || sheetWaiting.current) return;
+    briefing.current = true; taskBusy.current = true;
+    const id = crypto.randomUUID();
+    activeId.current = id;
+    setError(''); setPage('home'); setBusy(true); setPetState('working'); setActivity('Looking over your day'); setFocusId('');
+    setLive({ id: '', prompt: '', answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] });
+    try {
+      const turn = await command<TaskRecord>('morning_brief', { id });
+      setLive(null); setTurns(previous => mergeTurns(previous, [turn])); react('happy');
+      setAnnouncement(`${data?.settings.assistantName || 'Buntini'}: ${turn.answer.slice(0, 400)}`);
+      if (data?.settings.speakResponses) void speak(turn.answer);
+      void refresh().catch(error => setError(errorMessage(error)));
+    } catch (e) {
+      setLive(null);
+      const message = errorMessage(e);
+      if (message !== 'Morning brief cancelled.') { setError(message); react('sad'); }
+    } finally {
+      briefing.current = false; taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = '';
+      if (!speechActive.current) setPetState('idle');
+    }
   }
   // Once a day, the first time the bubble opens.
   useEffect(() => { if (expanded && data?.briefDue && !busy) void brief(); }, [expanded, data?.briefDue]);
@@ -534,14 +580,48 @@ export default function App() {
     setError('');
     try { await action(); await refresh(); if (message) setNotice(message); } catch (e) { setError(errorMessage(e)); }
   }
+  const runShortcut = (kind: Shortcut) => { if (kind === 'day') void brief(); else void submit('What needs a reply?', 'auto'); };
+  function shortcut(kind: Shortcut) {
+    if (data && shortcutNeeds(kind, data.settings.apps)) { setNeeds(kind); return; }
+    setNeeds(null); runShortcut(kind);
+  }
+  async function allowShortcut(kind: Shortcut) {
+    const need = data && shortcutNeeds(kind, data.settings.apps);
+    if (!data || !need || allowing) return;
+    setAllowing(true); setError('');
+    try {
+      const base = saver.current!.pending() ?? data.settings;
+      await saver.current!.saveNow({ ...base, apps: [...new Set([...base.apps, ...need.apps])] });
+      // Calendar and Reminders ask macOS right away, one prompt at a time, as from Settings → Apps.
+      const failed: string[] = [];
+      for (const id of need.apps) await command<string>('check_app', { id }).catch(error => { failed.push(errorMessage(error)); });
+      setNeeds(null);
+      if (failed.length === need.apps.length) setError(failed[0]);
+      else { if (failed.length) setNotice(failed[0]); runShortcut(kind); }
+    } catch (e) { setError(errorMessage(e)); }
+    finally { setAllowing(false); }
+  }
+  const need = needs && data ? shortcutNeeds(needs, data.settings.apps) : null;
+  const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => { setConfirmClear(false); setNeeds(null); }, [page]);
+  useEffect(() => { if (needs) document.querySelector('.welcome-allow')?.scrollIntoView({ block: 'nearest' }); }, [needs]);
+  // Inputs are disabled while Buntini works, which drops focus; give it back to the composer.
+  const wasPending = useRef(false);
+  // Messages sit above the composer (or setup's buttons) so they never cover Send or the mic.
+  const toast = (error || notice) ? <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div> : null;
+  const toastAnchored = expanded && page === 'home' && !proposal && !approval;
   const currentMode = modes.find(item => item.id === mode)!;
   const modelReady = data?.diagnostics.modelReady;
   const pending = busy || planning || recording || transcribing || voiceStopping || acting || approving || switchingThread;
+  useEffect(() => {
+    if (wasPending.current && !pending && expanded && page === 'home' && !proposal && !approval && (!document.activeElement || document.activeElement === document.body)) inputRef.current?.focus();
+    wasPending.current = pending;
+  }, [pending]);
   const assistantName = data?.settings.assistantName || 'Buntini';
   const companionScale = data?.settings.companionScale || 1;
 
   return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
-    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : approval ? 520 : 460 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
+    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 520 : 460 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
           <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span>{assistantName}<span className="brand-dot">.</span></span></button>
@@ -553,10 +633,11 @@ export default function App() {
           </div>
         </header>
 
-        {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} />}
+        {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} toast={toastAnchored ? toast : null} />}
         {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
-            {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>What’s on your mind?</span></h1><div><button onClick={() => void brief()}><Sun size={12} /> My day</button><button onClick={() => void submit('What needs a reply?', 'auto')}><Mail size={12} /> Needs a reply</button><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button></div></div> : <>
+            {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>What’s on your mind?</span></h1><div><button onClick={() => shortcut('day')}><Sun size={12} /> My day</button><button onClick={() => shortcut('reply')}><Mail size={12} /> Needs a reply</button><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button></div>
+              {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={pending} title="Start a separate conversation; this one stays in History"><Plus size={11} /> New topic</button></div>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
@@ -564,6 +645,7 @@ export default function App() {
             </>}
           </div>
           <div className="composer-area">
+            {toastAnchored && toast}
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
@@ -574,24 +656,23 @@ export default function App() {
                 {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>
-            <div className="composer-hint"><span>{modelReady ? <><span className="status-dot" /> {backendLabel[data?.settings.modelBackend || 'apple']}</> : <button onClick={() => setPage('settings')}><span className="status-dot amber" /> Choose a brain <ChevronRight size={10} /></button>}</span><span><kbd>↵</kbd> to send <span className="hint-separator">·</span> <kbd>⇧ ↵</kbd> new line</span></div>
+            <div className="composer-hint"><span>{modelReady ? <><span className="status-dot" /> {backendLabel[data?.settings.modelBackend || 'apple']}</> : <button onClick={() => setPage('settings', 'brain')}><span className="status-dot amber" /> Choose a brain <ChevronRight size={10} /></button>}</span><span><kbd>↵</kbd> to send <span className="hint-separator">·</span> <kbd>⇧ ↵</kbd> new line</span></div>
           </div>
         </>}
 
         {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>History</h2></div>
           <BackgroundWork status={background} onCancel={id => void safeAction(() => command('cancel_timer', { id }))} />
-          <SavedSearches searches={data?.savedSearches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
+          <SavedSearches searches={data?.savedSearches || []} keyReady={data?.settings.searchProvider === 'tavily' ? !!data?.diagnostics.tavilyConfigured : !!data?.diagnostics.braveConfigured} onAddKey={() => setPage('settings', 'connections')} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">PAST CONVERSATIONS</div>
-          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}<button className="text-button danger clear-history" disabled={pending} onClick={() => void safeAction(async () => { await command('clear_history'); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}><Trash2 size={13} /> Clear conversation history</button></> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
-          <div className="history-privacy"><ShieldCheck size={13} /> Stored in SQLite. Never synced to a cloud.</div>
+          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}{confirmClear ? <ConfirmInline label="Clear conversation history" action="Clear history" working={pending} onCancel={() => setConfirmClear(false)} onConfirm={() => void safeAction(async () => { await command('clear_history'); setConfirmClear(false); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}>This erases every conversation and saved task on this Mac, and the search index of your folders’ text (Refresh index in Settings → Privacy builds it again). Things I remember stay. It can’t be undone.</ConfirmInline>
+            : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> Clear conversation history…</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
+          <div className="history-privacy"><ShieldCheck size={13} /> Kept on this Mac. Never synced to a cloud.</div>
         </div>}
 
-        {page === 'settings' && data && <SettingsView data={data} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onSave={async settings => {
-          const saved = await saveSettings(settings); setData(previous => previous && { ...previous, settings: saved }); await refresh();
-        }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
+        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
 
-        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
+        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
         {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onAllow={async () => {
           if (approvalBusy.current) return;
@@ -610,8 +691,8 @@ export default function App() {
           setProposal(null); setActionError(''); setPetState('idle');
         }} onAllow={args => void continueSaved('run_action', { id: proposal.id, args })} />}
         <div className="sr-only" aria-live="polite">{announcement}</div>
-        {(error || notice) && <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div>}
-        <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · Local-first desktop companion. Shortcut: ⌘ ⇧ Space. No unrestricted shell tools.')}><CircleHelp size={12} /></button></footer>
+        {!toastAnchored && toast}
+        <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · A local-first desktop companion. Open it any time with ⌘ ⇧ Space.')}><CircleHelp size={12} /></button></footer>
       </section>}
 
       <div className="pet-dock">
@@ -631,7 +712,7 @@ export default function App() {
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} speed={world.speed} /></button>
-        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void command('quit_app').catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
+        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void command('quit_app').catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>
     </div>
@@ -639,14 +720,22 @@ export default function App() {
 }
 
 
-function SavedSearches({ searches, onAction, onResult, onError }: { searches: SavedSearch[]; onAction: (name: string, args: Record<string, unknown>) => Promise<unknown>; onResult: (result: TaskRecord) => void; onError: (message: string) => void }) {
+function SavedSearches({ searches, keyReady, onAddKey, onAction, onResult, onError }: { searches: SavedSearch[]; keyReady: boolean; onAddKey: () => void; onAction: (name: string, args: Record<string, unknown>) => Promise<unknown>; onResult: (result: TaskRecord) => void; onError: (message: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const [working, setWorking] = useState('');
   async function act(id: string, action: () => Promise<unknown>) { setWorking(id); try { await action(); } catch (e) { onError(errorMessage(e)); } finally { setWorking(''); } }
   return <div className="saved-searches"><div className="section-label"><Bell size={11} /> KEEP AN EYE ON IT <button className="text-button" onClick={() => setAdding(!adding)}><Plus size={12} /> New search</button></div>
-    {adding && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label="Saved search query" placeholder="What should I keep an eye on?" value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label="Check frequency" value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>Every 15 minutes</option><option value={60}>Every hour</option><option value={360}>Every 6 hours</option><option value={1440}>Every day</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Save</button></div><p>Sends this query to your search provider while Buntini is running. Your monthly cap applies.</p></form>}
+    {/* Saved searches run through the search provider's API, so they need its key first. */}
+    {adding && !keyReady && <div className="saved-search-form"><p>Saved searches use your search provider, so they need its key first. Add one in Settings → Connections.</p><div><button type="button" className="primary-button" onClick={onAddKey}><Plus size={11} /> Add a search key</button></div></div>}
+    {adding && keyReady && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label="Saved search query" placeholder="What should I keep an eye on?" value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label="Check frequency" value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>Every 15 minutes</option><option value={60}>Every hour</option><option value={360}>Every 6 hours</option><option value={1440}>Every day</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Save</button></div><p>Sends this query to your search provider while Buntini is running. Your monthly cap applies.</p></form>}
     {searches.length ? searches.map(search => <article className={`saved-search ${search.enabled ? '' : 'paused'}`} key={search.id}><div className="saved-search-heading"><Search size={14} /><strong>{search.query}</strong><button className="icon-button" aria-label={`Delete saved search: ${search.query}`} disabled={!!working} onClick={() => void act(search.id, () => onAction('delete_saved_search', { id: search.id }))}><X size={12} /></button></div><div className="saved-search-info"><span>{search.enabled ? <><span className="status-dot" />{search.intervalMinutes < 60 ? `${search.intervalMinutes} min` : search.intervalMinutes < 1440 ? `${search.intervalMinutes / 60} hr` : 'Daily'} checks</> : 'Paused'}</span><button className="text-button" disabled={!!working} onClick={() => void act(search.id, () => onAction('update_saved_search', { id: search.id, enabled: !search.enabled, intervalMinutes: search.intervalMinutes }))}>{search.enabled ? <Square size={9} /> : <Play size={10} />}{search.enabled ? 'Pause' : 'Resume'}</button><button className="text-button" disabled={!!working} onClick={() => void act(search.id, async () => { const result = await onAction('run_saved_search', { id: search.id }); onResult(result as TaskRecord); })}>{working === search.id ? <LoaderCircle size={10} className="spin" /> : <RefreshCw size={10} />} Check now</button></div>{search.lastError && <p className="saved-search-error">{search.lastError}</p>}</article>) : !adding && <p className="saved-search-empty">Save a web query and I’ll check back for you.</p>}
   </div>;
+}
+
+/** Activity log entries are stored as ids like "saved_search.allowed"; show them as words. */
+function auditLabel(action: string) {
+  const words = action.replace(/[._]+/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }

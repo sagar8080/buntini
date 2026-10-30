@@ -1289,10 +1289,16 @@ fn brief_key() -> String {
     format!("brief-{}", chrono::Local::now().format("%Y-%m-%d"))
 }
 
-/// Today's brief, written from the calendar and reminders on this Mac.
+/// Today's brief, written from the calendar and reminders on this Mac. The window passes
+/// its own id so Stop can cancel the brief with `cancel_task` like any other turn.
 #[tauri::command]
-pub async fn morning_brief(state: State<'_, AppState>) -> Result<TaskRecord, String> {
-    let id = uuid::Uuid::new_v4().to_string();
+pub async fn morning_brief(
+    id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<TaskRecord, String> {
+    let id = id
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let cancel = Arc::new(AtomicBool::new(false));
     let settings = {
         let mut active = state.active.lock().unwrap();

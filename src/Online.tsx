@@ -1,4 +1,5 @@
 import { BookOpen, CloudSun, Coins, ExternalLink, Globe2, MapPin, Plane, ShieldCheck, ShoppingBag } from 'lucide-react';
+import ModalSheet from './ModalSheet';
 import type { ResultCard, WebApproval } from './types';
 
 const titles: Record<string, string> = {
@@ -10,14 +11,14 @@ const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: Ma
 /** Shows exactly what one approved request will send, and to whom, before anything leaves the Mac. */
 export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebInstead }: { approval: WebApproval; approving: boolean; onCancel: () => void; onAllow: () => void; onWebInstead: () => void }) {
   const web = approval.tool === 'web_search';
-  return <div className="approval-backdrop"><section className="approval-sheet" role="alertdialog" aria-modal="true" aria-labelledby="approval-title">
+  return <ModalSheet labelledBy="approval-title">
     <ShieldCheck size={23} /><h3 id="approval-title">{titles[approval.tool] || 'Send this request?'}</h3>
     <p>{approval.summary}. {web ? 'Your browser may use its existing cookies and signed-in accounts.' : 'Only these details are sent.'}</p>
     <dl className="approval-sends"><div><dt>Sent to</dt><dd>{approval.service} <span>{approval.host}</span></dd></div>{approval.sends.map(field => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>
     {approval.note && <p className="approval-note">{approval.note}</p>}
-    <small>{web ? 'Google opens in your existing or default browser. Reading requires browser access in Apps; sending browser content to a cloud model also requires Browser sharing. The selected API fallback uses your saved key and request allowance only if needed. ' : `${approval.usesKey ? `Uses your saved ${approval.service} key and counts toward your monthly request cap. ` : 'No account or key needed. '}Only the displayed request details are sent. `}This permission expires after one use.</small>
+    <small>{web ? 'Google opens in your browser. I read the results only if your browser is allowed in Settings → Apps, and a cloud brain sees them only if you share Browser tabs. If the browser can’t help and you added a search key, that is used, within its limits. ' : `${approval.usesKey ? `Uses your saved ${approval.service} key and counts toward your monthly limit. ` : 'No account or key needed. '}Only the details above are sent. `}This permission is for this one request.</small>
     <div>{!web && <button className="text-button" disabled={approving} onClick={onWebInstead}>Web search instead</button>}<button className="secondary-button" disabled={approving} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={approving} autoFocus onClick={onAllow}>{approving ? 'Starting…' : 'Allow once'}</button></div>
-  </section></div>;
+  </ModalSheet>;
 }
 
 /** Numbered cards matching the [n] citations in the answer. */
