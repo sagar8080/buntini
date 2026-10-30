@@ -6,6 +6,7 @@
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`.
 import AVFoundation
+import Contacts
 import CoreFoundation
 import EventKit
 import Foundation
@@ -362,7 +363,7 @@ func blockingJournalReply(goal: String, guidance: String, steps: [[String: Any]]
 func modelEvidence(_ value: [String: Any]) -> [String: Any] {
     guard value["schemaVersion"] as? Int == 1, value["records"] is [[String: Any]],
           let kind = value["kind"] as? String,
-          ["calendar", "reminders", "mail", "notes", "browser_tabs", "browser_page", "music"].contains(kind) else { return value }
+          ["calendar", "reminders", "mail", "notes", "browser_tabs", "browser_page", "music", "contacts"].contains(kind) else { return value }
     var projected = value
     projected.removeValue(forKey: "events")
     projected.removeValue(forKey: "text")
@@ -970,6 +971,99 @@ enum Agenda {
     }
 }
 
+/// Contacts reads stay small: one name or address, at most five people, and a few
+/// addresses and numbers each. The total says when more people matched.
+let contactLimit = 5
+let contactDetailLimit = 5
+
+/// A lookup is a name or an address. Blank text, control characters and anything that
+/// looks like a helper option are refused, so a value can never act as another flag.
+func contactQuery(_ raw: String) -> String? {
+    let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty, query.count <= 100, !query.hasPrefix("-"),
+          !query.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+    return query
+}
+
+/// One person as Contacts has them. Contacts' own identifier is kept exactly and a
+/// missing one stays null; repeated or empty addresses and numbers are dropped.
+func contactRow(id: String?, name: String, emails: [String], phones: [String]) -> [String: Any] {
+    func distinct(_ values: [String], fold: Bool) -> [String] {
+        var seen = Set<String>()
+        var kept: [String] = []
+        for value in values {
+            let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = fold ? clean.lowercased() : clean
+            guard !clean.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            kept.append(clean)
+            if kept.count == contactDetailLimit { break }
+        }
+        return kept
+    }
+    return ["id": id.flatMap { $0.isEmpty ? nil : $0 } as Any? ?? NSNull(),
+            "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+            "emails": distinct(emails, fold: true), "phones": distinct(phones, fold: false)]
+}
+
+/// The first five people and how many matched, so a reader never mistakes a bounded
+/// prefix for everyone with that name.
+func contactResult(_ rows: [[String: Any]]) -> [String: Any] {
+    ["contacts": Array(rows.prefix(contactLimit)), "total": rows.count,
+     "returned": min(rows.count, contactLimit), "complete": rows.count <= contactLimit]
+}
+
+/// `--find-contact <name or address>`: people in Contacts with their email addresses and
+/// phone numbers, so a draft the user approves can be addressed to the right person.
+/// Read-only. Prints one JSON object, or `{"error":"denied"}` when macOS or the user
+/// hasn't allowed Contacts. `--contacts-access` only asks for permission.
+enum People {
+    static func run(_ arguments: [String]) async -> Int32 {
+        if arguments.count == 2, arguments[1] == "--contacts-access" {
+            emit(["granted": await access()])
+            return 0
+        }
+        guard arguments.count == 3, arguments[1] == "--find-contact", let query = contactQuery(arguments[2]) else {
+            FileHandle.standardError.write(Data("invalid-query: Say whose contact to find, in up to 100 characters.\n".utf8))
+            return 2
+        }
+        guard await access() else {
+            emit(["error": "denied"])
+            return 0
+        }
+        let keys: [CNKeyDescriptor] = [CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
+                                       CNContactNicknameKey as CNKeyDescriptor, CNContactOrganizationNameKey as CNKeyDescriptor,
+                                       CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
+        let predicate = query.contains("@") ? CNContact.predicateForContacts(matchingEmailAddress: query)
+                                            : CNContact.predicateForContacts(matchingName: query)
+        do {
+            let found = try CNContactStore().unifiedContacts(matching: predicate, keysToFetch: keys)
+            let rows = found.map { contact -> [String: Any] in
+                let full = CNContactFormatter.string(from: contact, style: .fullName) ?? ""
+                let name = [full, contact.nickname, contact.organizationName]
+                    .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+                return contactRow(id: contact.identifier, name: name,
+                                  emails: contact.emailAddresses.map { $0.value as String },
+                                  phones: contact.phoneNumbers.map { $0.value.stringValue })
+            }.sorted { (($0["name"] as? String ?? "").lowercased(), $0["id"] as? String ?? "") < (($1["name"] as? String ?? "").lowercased(), $1["id"] as? String ?? "") }
+            emit(contactResult(rows))
+            return 0
+        } catch {
+            FileHandle.standardError.write(Data("read-failed: Contacts did not return a result.\n".utf8))
+            return 4
+        }
+    }
+
+    /// Asks once; a refused or restricted Contacts permission is never retried here.
+    static func access() async -> Bool {
+        switch CNContactStore.authorizationStatus(for: .contacts) {
+        case .notDetermined: return (try? await CNContactStore().requestAccess(for: .contacts)) ?? false
+        case .denied, .restricted: return false
+        default: return true
+        }
+    }
+}
+
 /// Pure contract checks: no model, microphone, account, Calendar or Reminders access.
 func contractSelfTest() async -> Int32 {
     var checks = 0
@@ -1072,6 +1166,19 @@ func contractSelfTest() async -> Int32 {
             let summary = agendaSummary(total: total, limit: limit)
             try require(summary["returned"] as? Int == returned && summary["complete"] as? Bool == complete && summary["total"] as? Int == total, "Agenda limits must report completeness and total count")
         }
+        for invalid in ["", "   ", "-x", "--events", "Ana\nSilva", String(repeating: "a", count: 101)] {
+            try require(contactQuery(invalid) == nil, "A contact lookup must refuse blank, flag-like, multi-line or overlong text")
+        }
+        try require(contactQuery("  Ana Silva ") == "Ana Silva" && contactQuery("ana@example.com") == "ana@example.com", "A contact lookup must accept a plain name or address")
+        let person = contactRow(id: nil, name: " Ana Silva ", emails: ["ana@example.com", "ANA@example.com", " ", "a2@example.com", "a3@x.com", "a4@x.com", "a5@x.com"], phones: ["+1 555 0100", "+1 555 0100", ""])
+        try require(person["id"] is NSNull && person["name"] as? String == "Ana Silva", "A missing Contacts identifier must stay null, never a name-derived ID")
+        try require(person["emails"] as? [String] == ["ana@example.com", "a2@example.com", "a3@x.com", "a4@x.com", "a5@x.com"], "Contact addresses must drop repeats and blanks and stay bounded")
+        try require(person["phones"] as? [String] == ["+1 555 0100"], "Contact numbers must drop repeats and blanks")
+        let everyone = contactResult(Array(repeating: person, count: 6))
+        try require((everyone["contacts"] as? [[String: Any]])?.count == 5 && everyone["total"] as? Int == 6 && everyone["returned"] as? Int == 5 && everyone["complete"] as? Bool == false, "A contact lookup must report that more people matched than it returned")
+        let nobody = contactResult([])
+        try require(nobody["total"] as? Int == 0 && nobody["complete"] as? Bool == true && JSONSerialization.isValidJSONObject(everyone), "An empty contact lookup must be a complete, valid result")
+        try require(modelEvidence(["kind": "contacts", "schemaVersion": 1, "records": [["id": "c-1"]], "text": "Display copy"])["text"] == nil, "Contact evidence must reach the model without duplicate display copy")
         let prior: [[String: Any]] = [["role": "assistant", "tool_calls": [["function": ["name": "create_note", "arguments": "{\"title\":\"Packing\",\"body\":\"Passport\"}"]]]], ["role": "tool", "content": "Verified note"]]
         try require(repeatsWrite("create_note", ["title": "Packing", "body": "Passport"], history: prior[...]), "A completed write must not be duplicated on follow-up")
         try require(!repeatsWrite("create_note", ["title": "Packing", "body": "Passport and tickets"], history: prior[...]), "A distinct approved intent may create a separate note")
@@ -1269,6 +1376,10 @@ func contractSelfTest() async -> Int32 {
 @main
 struct Helper {
     static func main() async {
+        // Checked first and by position, so a looked-up name can never select another mode.
+        if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
+            exit(await People.run(CommandLine.arguments))
+        }
         if CommandLine.arguments.contains("--self-test-contracts") {
             exit(await contractSelfTest())
         }

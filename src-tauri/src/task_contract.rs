@@ -58,6 +58,9 @@ pub struct Constraint {
     pub value: Value,
     pub source: String,
     pub revision: u32,
+    /// For a value read from a source record (a contact's address): which step and record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record: Option<Value>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -288,6 +291,12 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     }
     if has(&["files", "file", "folder", "folders"]) {
         vec!["search_files"]
+    } else if has(&["contact", "contacts"])
+        || clause.contains("email address")
+        || clause.contains("phone number")
+    {
+        // "Find Ana's email address": a person in Contacts, not a search of the inbox.
+        vec!["find_contact"]
     } else if has(&["calendar", "event", "events", "appointments", "meetings"]) {
         vec!["read_calendar"]
     } else if has(&["mail", "email", "emails", "inbox"]) {
@@ -767,7 +776,7 @@ impl TaskContract {
             if matching.len()==1 {
                 let outcome = &mut self.outcomes[matching[0]];
                 outcome.required_arguments[field] = value.clone();
-                self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:field.into(),value,source:"user_literal".into(),revision:self.revision});
+                self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:field.into(),value,source:"user_literal".into(),revision:self.revision,record:None});
             }
         }
         for bound in [
@@ -795,6 +804,7 @@ impl TaskContract {
                                 value: value.clone(),
                                 source: "user_literal".into(),
                                 revision: self.revision,
+                                record: None,
                             });
                         }
                     }
@@ -911,6 +921,7 @@ impl TaskContract {
                 }
             }
         }
+        self.bind_contact_recipient(steps);
         self.unresolved_fields.clear();
         for outcome in &self.outcomes {
             if outcome.kind != "write" || outcome.status == "complete" {
@@ -968,8 +979,90 @@ impl TaskContract {
             value,
             source: source.into(),
             revision: self.revision,
+            record: None,
         });
         true
+    }
+    /// The next requested email draft while nothing the user wrote, approved or had on
+    /// screen has fixed its recipient. Only then may Contacts be read for it.
+    fn awaiting_recipient(&self) -> Option<&Outcome> {
+        self.next_outcome().filter(|o| {
+            o.kind == "write"
+                && o.status == "ready"
+                && o.tool.as_deref() == Some("draft_email")
+                && !self
+                    .constraints
+                    .iter()
+                    .any(|c| c.outcome_id.as_deref() == Some(&o.id) && c.field == "to")
+        })
+    }
+    /// The person to look up before drafting, when the user named the recipient and no
+    /// lookup for that name has run yet. The controller reads Contacts with it itself.
+    pub fn contact_lookup(&self, steps: &[Step]) -> Option<String> {
+        self.awaiting_recipient()?;
+        if steps.iter().any(|s| s.tool == "draft_email") {
+            return None;
+        }
+        let name = crate::source_fields::named_recipient(&self.current_request)?;
+        (!steps
+            .iter()
+            .any(|s| s.tool == "find_contact" && s.arguments["name"] == name.as_str()))
+        .then_some(name)
+    }
+    /// Addresses the draft from a Contacts read in this journal, only when exactly one
+    /// person with exactly one address matched a name the user wrote. Once a draft has
+    /// been proposed, the recipient is the user's to change in the approval sheet.
+    fn bind_contact_recipient(&mut self, steps: &[Step]) {
+        if steps.iter().any(|s| s.tool == "draft_email") {
+            return;
+        }
+        let crate::source_fields::ContactRecipient::One {
+            address,
+            step_id,
+            record_id,
+        } = crate::source_fields::contact_recipient(&self.current_request, steps)
+        else {
+            return;
+        };
+        if self.bind_write_field("draft_email", "to", Value::String(address), "contact_record") {
+            if let Some(constraint) = self.constraints.last_mut() {
+                constraint.record =
+                    Some(json!({"app":"contacts","stepId":step_id,"recordId":record_id}));
+            }
+        }
+    }
+    /// Addresses the user can pick from when several people or addresses matched the
+    /// person they named. Empty once the recipient is fixed or there is nothing to pick.
+    pub fn recipient_choices(&self, steps: &[Step]) -> Vec<crate::source_fields::ContactChoice> {
+        if self.awaiting_recipient().is_none() {
+            return vec![];
+        }
+        match crate::source_fields::contact_recipient(&self.current_request, steps) {
+            crate::source_fields::ContactRecipient::Several(choices) => choices,
+            _ => vec![],
+        }
+    }
+    /// Fills fields of the next write that Buntini resolved from a source (the open
+    /// email's sender, the one matching contact) when a model left them out. It never
+    /// replaces a value; a different one is still refused by `validate_proposal`.
+    pub fn fill_resolved_fields(&self, tool: &str, arguments: &mut Value) {
+        let Some(outcome) = self
+            .next_outcome()
+            .filter(|o| o.kind == "write" && o.accepted_tools.iter().any(|t| t == tool))
+        else {
+            return;
+        };
+        let Some(fields) = arguments.as_object_mut() else {
+            return;
+        };
+        for constraint in self.constraints.iter().filter(|c| {
+            c.outcome_id.as_deref() == Some(&outcome.id)
+                && ["contact_record", "focus_referent"].contains(&c.source.as_str())
+        }) {
+            fields
+                .entry(constraint.field.clone())
+                .or_insert_with(|| constraint.value.clone());
+        }
     }
     pub fn next_outcome(&self) -> Option<&Outcome> {
         self.outcomes.iter().find(|o| o.status != "complete")
@@ -1030,6 +1123,7 @@ impl TaskContract {
                 value: value.clone(),
                 source: "user_clarification".into(),
                 revision: self.revision,
+                record: None,
             });
         }
         Ok(())
@@ -1051,6 +1145,12 @@ impl TaskContract {
             })
             .cloned()
             .collect();
+        let contacts: Vec<_> = self
+            .constraints
+            .iter()
+            .filter(|c| c.outcome_id == outcome_id && c.source == "contact_record")
+            .cloned()
+            .collect();
         let fields = self.provenance.entry(step_id.into()).or_default();
         for (field, value) in arguments.as_object().into_iter().flatten() {
             if fields.get(field).is_some_and(|p| p.approved) {
@@ -1069,6 +1169,19 @@ impl TaskContract {
                 provenance.field_ref = Some(field.clone());
                 provenance.source = Some(
                     json!({"kind":"task_constraint","source":"user_request","outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
+                );
+            } else if let Some(constraint) = contacts
+                .iter()
+                .find(|c| c.field == *field && c.value == *value)
+            {
+                // The one address of the one person the user named, read from Contacts.
+                let record = constraint.record.clone().unwrap_or_default();
+                provenance.origin = "contact_record".into();
+                provenance.source_step_id = record["stepId"].as_str().map(str::to_owned);
+                provenance.record_id = record["recordId"].as_str().map(str::to_owned);
+                provenance.field_ref = Some("emails/0".into());
+                provenance.source = Some(
+                    json!({"kind":"task_constraint","source":"contacts","outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
                 );
             }
             if let Some(source) = source {
@@ -1130,9 +1243,30 @@ impl TaskContract {
                     value: value.clone(),
                     source: "user_approved_edit".into(),
                     revision: self.revision,
+                    record: None,
                 });
                 if let Some(outcome) = self.outcomes.iter_mut().find(|o| o.id == outcome_id) {
                     outcome.required_arguments[field] = value.clone();
+                }
+            }
+            // A field the user cleared in the sheet (a To address) is theirs to leave out.
+            for field in before
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(field, _)| field)
+                .filter(|field| after.get(field.as_str()).is_none())
+            {
+                self.constraints.retain(|c| {
+                    c.outcome_id.as_deref() != Some(outcome_id.as_str()) || c.field != *field
+                });
+                if let Some(arguments) = self
+                    .outcomes
+                    .iter_mut()
+                    .find(|o| o.id == outcome_id)
+                    .and_then(|o| o.required_arguments.as_object_mut())
+                {
+                    arguments.remove(field);
                 }
             }
         }
@@ -1166,6 +1300,8 @@ impl TaskContract {
             .any(|s| ["failed", "unknown", "running", "waiting"].contains(&s.state.as_str()));
         let next = self.next_outcome();
         let next_write = next.filter(|o| o.kind == "write" && o.status == "ready");
+        // Looking up the person a draft is for is part of preparing that draft.
+        let contact_read = self.awaiting_recipient().is_some();
         let selected = definitions
             .as_array()
             .into_iter()
@@ -1180,7 +1316,7 @@ impl TaskContract {
                 if effect && !write_allowed && name != "control_music" {
                     return None;
                 }
-                let relevant_read = next.is_some_and(|o| {
+                let relevant_read = (contact_read && name == "find_contact") || next.is_some_and(|o| {
                     o.accepted_tools.iter().any(|t| t == name)
                         || (o.kind == "answer" && (name == "calculate" || crate::structured_math::TOOLS.contains(&name)))
                         || (o.kind == "answer"
@@ -1260,6 +1396,16 @@ impl TaskContract {
                     return Err("The proposed source read conflicts with the date or query in your request.".into());
                 }
                 return Ok(());
+            }
+            // Before a draft, Contacts may be read only for someone the user named.
+            if tool == "find_contact" && self.awaiting_recipient().is_some() {
+                return if arguments["name"].as_str().is_some_and(|name| {
+                    crate::source_fields::user_named(&self.current_request, name)
+                }) {
+                    Ok(())
+                } else {
+                    Err("Buntini looks up only people you named in your request.".into())
+                };
             }
             if outcome.kind == "answer"
                 && (tool == "calculate" || crate::structured_math::TOOLS.contains(&tool) || outcome.resources.is_empty()
@@ -1737,6 +1883,10 @@ mod tests {
         assert!(read.accepted_tools.contains(&"find_notes".into()));
         assert_eq!(read_tools("find the repair note in notes app"),vec!["find_notes"]);
         assert_eq!(read_tools("search files for calendar notes"),vec!["search_files"]);
+        for person in ["find ana's email address", "find sam's phone number", "check my contacts for priya"] {
+            assert_eq!(read_tools(person), vec!["find_contact"], "{person}");
+        }
+        assert_eq!(read_tools("find the email from ana"), vec!["read_mail"]);
         for recall in ["What did Ana say about the lease", "did Sam mention the trip", "What do you know about my landlord"] {
             assert_eq!(read_tools(recall), vec!["search_memory"], "{recall}");
         }

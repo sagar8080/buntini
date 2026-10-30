@@ -1,11 +1,13 @@
 //! Apps on this Mac that Buntini can work with, each only after the user allows it in
 //! Settings → Apps. No accounts and nothing online: Buntini talks to the apps already
 //! here, through AppleScript (values always passed as arguments, never as script text)
-//! and, for Calendar and Reminders, EventKit in the `buntini-fm` helper so repeating
-//! events are included. macOS still asks once per app before the first use.
+//! and, for Calendar, Reminders and Contacts, the `buntini-fm` helper (EventKit, so
+//! repeating events are included, and CNContactStore). macOS still asks once per app
+//! before the first use.
 //!
-//! Reading (email, the day's events, open reminders, notes, what's playing, open browser
-//! tabs and the Safari page) plus playback controls and switching tabs run straight away
+//! Reading (email, the day's events, open reminders, notes, people in Contacts, what's
+//! playing, open browser tabs and the Safari page) plus playback controls and switching
+//! tabs run straight away
 //! for an allowed app; anything that adds or writes goes through the approval sheet in
 //! `actions.rs`. Private and incognito browser windows are skipped wherever the browser
 //! says which they are.
@@ -28,11 +30,12 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 12] = [
+pub const APPS: [App; 13] = [
     App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
+    App { id: "contacts", name: "Contacts", can: &["Find the people you name, with their email addresses and phone numbers"], tools: &["find_contact"], share: Some(Share::Contacts), note: Some("A draft is addressed from Contacts only when exactly one person and one address match. Otherwise you pick the address when you approve it.") },
     App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
     App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None, note: None },
@@ -47,11 +50,12 @@ pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
 
 /// App read/control schemas. The workflow controller requires durable approval
 /// for playback mutations and tab switching; now_playing remains a read.
-pub const READ_TOOLS: [&str; 8] = [
+pub const READ_TOOLS: [&str; 9] = [
     "read_mail",
     "read_calendar",
     "read_reminders",
     "find_notes",
+    "find_contact",
     "control_music",
     "browser_tabs",
     "switch_tab",
@@ -190,6 +194,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "read_calendar" => &["day"],
         "read_reminders" => &[],
         "find_notes" => &["query"],
+        "find_contact" => &["name"],
         "control_music" => &["app", "action", "query"],
         "browser_tabs" => &["browser", "query"],
         "switch_tab" => &["browser", "query"],
@@ -239,6 +244,14 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                     .ok_or("Say what to look for in your notes.")?
                     .into(),
             );
+        }
+        "find_contact" => {
+            let name = text(args, "name", 100)?.ok_or("Say whose contact to find.")?;
+            // The helper takes the name as its last argument; it is never an option.
+            if name.starts_with('-') {
+                return Err("Say whose contact to find, by name or email address.".into());
+            }
+            out.insert("name".into(), name.into());
         }
         "control_music" => {
             let selected = text(args, "app", 10)?;
@@ -934,6 +947,174 @@ pub async fn reminders(helper_path: &Path) -> Result<Agenda<Reminder>, String> {
     helper(helper_path, &["--reminders"]).await
 }
 
+/// At most this many people per lookup, each with at most this many addresses and numbers.
+const CONTACT_LIMIT: usize = 5;
+const CONTACT_DETAILS: usize = 5;
+
+const CONTACTS_DENIED: &str = "macOS hasn’t allowed Buntini to read Contacts. Allow it in System Settings → Privacy & Security → Contacts.";
+const CONTACTS_HELPER: &str =
+    "Finding people in Contacts needs Buntini’s Apple helper, which isn’t on this Mac.";
+
+/// One person from Contacts, as the helper read them.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Contact {
+    pub id: Option<String>,
+    pub name: String,
+    pub emails: Vec<String>,
+    pub phones: Vec<String>,
+}
+
+/// One plain address a draft could go to: no display name, list or placeholder.
+pub fn plain_address(address: &str) -> bool {
+    address.split_once('@').is_some_and(|(user, domain)| {
+        !user.is_empty()
+            && domain.contains('.')
+            && !domain.starts_with('.')
+            && !domain.ends_with('.')
+    }) && address.chars().count() <= 254
+        && !address.contains(char::is_whitespace)
+        && !address.contains([',', ';', '<', '>', '[', ']', '"'])
+}
+
+/// The helper's answer, checked for a dropped or inconsistent count. Addresses that
+/// could not address a draft are dropped here, so records and display text agree.
+fn parse_contacts(output: &str) -> Result<Agenda<Contact>, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Found {
+        contacts: Vec<Contact>,
+        total: usize,
+        returned: usize,
+        complete: bool,
+    }
+    let invalid = || {
+        "Contacts returned incomplete data. Please try again with the current Apple helper."
+            .to_string()
+    };
+    let value: Value = serde_json::from_str(output.trim()).map_err(|_| invalid())?;
+    if value == json!({"error":"denied"}) {
+        return Err(CONTACTS_DENIED.into());
+    }
+    let found: Found = serde_json::from_value(value).map_err(|_| invalid())?;
+    if found.returned != found.contacts.len()
+        || found.returned > CONTACT_LIMIT
+        || found.total < found.returned
+        || found.complete != (found.total == found.returned)
+        || found.contacts.iter().any(|contact| {
+            contact.emails.len() > CONTACT_DETAILS || contact.phones.len() > CONTACT_DETAILS
+        })
+    {
+        return Err(invalid());
+    }
+    let items = found
+        .contacts
+        .into_iter()
+        .map(|mut contact| {
+            contact.emails.retain(|address| plain_address(address));
+            contact.phones.retain(|phone| !phone.trim().is_empty());
+            contact
+        })
+        .collect();
+    Ok(Agenda {
+        items,
+        total: found.total,
+    })
+}
+
+pub fn describe_contacts(name: &str, found: &Agenda<Contact>) -> String {
+    if found.total == 0 {
+        return format!("No one in Contacts matches “{name}”.");
+    }
+    let lines = found.items.iter().map(|contact| {
+        let who = if contact.name.is_empty() {
+            "(no name)"
+        } else {
+            &contact.name
+        };
+        let details: Vec<&str> = contact
+            .emails
+            .iter()
+            .chain(&contact.phones)
+            .map(String::as_str)
+            .collect();
+        if details.is_empty() {
+            format!("- {who}: no email address or phone number")
+        } else {
+            format!("- {who}: {}", details.join(", "))
+        }
+    });
+    let coverage = if found.complete() {
+        String::new()
+    } else {
+        format!(
+            "\nShowing the first {} of {} people who match. A fuller name narrows it down.",
+            found.items.len(),
+            found.total
+        )
+    };
+    format!(
+        "People in Contacts matching “{name}”:\n{}{coverage}",
+        lines.collect::<Vec<_>>().join("\n")
+    )
+}
+
+/// Contacts' own identifiers and details beside the display text. Several matches or a
+/// partial list stay as they are: choosing one is the user's call, never the model's.
+pub fn contact_evidence(name: &str, found: &Agenda<Contact>) -> Value {
+    let records = found
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, contact)| {
+            json!({"id":contact.id.as_deref().and_then(nonempty),
+                "reference":source_reference("contacts", contact.id.as_deref(), index),
+                "name":contact.name, "emails":contact.emails, "phones":contact.phones})
+        })
+        .collect();
+    evidence(
+        "contacts",
+        json!({"app":"contacts","name":name,"matches":"name_or_email","limit":CONTACT_LIMIT}),
+        records,
+        Some(found.total),
+        found.complete(),
+        describe_contacts(name, found),
+    )
+}
+
+/// People in Contacts matching a name or address, read with the Apple helper.
+pub async fn find_contact(helper_path: &Path, name: &str) -> Result<Value, String> {
+    if !helper_path.is_file() {
+        return Err(CONTACTS_HELPER.into());
+    }
+    let mut command = Command::new(helper_path);
+    command.args(["--find-contact", name]);
+    // The first use waits for the macOS permission prompt, so allow time to answer it.
+    let output = crate::actions::output(command, 90).await?;
+    Ok(contact_evidence(name, &parse_contacts(&output)?))
+}
+
+/// Asks macOS for Contacts right after the user allows it, so the prompt shows in Settings.
+async fn contacts_access(helper_path: &Path) -> Result<String, String> {
+    if !helper_path.is_file() {
+        return Err(CONTACTS_HELPER.into());
+    }
+    let mut command = Command::new(helper_path);
+    command.arg("--contacts-access");
+    let output = crate::actions::output(command, 90).await?;
+    match serde_json::from_str::<Value>(output.trim())
+        .ok()
+        .and_then(|value| value["granted"].as_bool())
+    {
+        Some(true) => Ok("Contacts is ready.".into()),
+        Some(false) => Err(CONTACTS_DENIED.into()),
+        None => Err(
+            "Contacts returned incomplete data. Please try again with the current Apple helper."
+                .into(),
+        ),
+    }
+}
+
 pub fn describe_events(day: &str, events: &Agenda<Event>) -> String {
     let label = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .map(|date| date.format("%A %-d %B").to_string())
@@ -1080,6 +1261,7 @@ pub async fn run_evidence(
             .await
         }
         "find_notes" => find_notes_evidence(get("query")).await,
+        "find_contact" => find_contact(helper_path, get("name")).await,
         "control_music" if get("action") == "now_playing" => {
             let selected = if get("app").is_empty() {
                 "music"
@@ -1131,6 +1313,7 @@ pub fn model_evidence(value: &Value) -> Value {
                 "browser_tabs",
                 "browser_page",
                 "music",
+                "contacts",
             ]
             .contains(&kind)
         })
@@ -1159,6 +1342,7 @@ pub fn validate_evidence(
         "read_reminders" => "reminders",
         "read_mail" => "mail",
         "find_notes" => "notes",
+        "find_contact" => "contacts",
         "browser_tabs" => "browser_tabs",
         "read_page" => "browser_page",
         "control_music" if args["action"] == "now_playing" => "music",
@@ -1203,6 +1387,7 @@ pub fn validate_evidence(
         "reminders" => "reminders",
         "mail" => "mail",
         "notes" => "notes",
+        "contacts" => "contacts",
         "browser_page" => "safari",
         "music" => args["app"].as_str().unwrap_or("music"),
         _ => "",
@@ -1277,6 +1462,15 @@ pub fn validate_evidence(
         }
         "browser_page"
             if scope["surface"] != "front_document" || scope["textLimit"] != 2500 || count > 1 =>
+        {
+            return Err(invalid())
+        }
+        "contacts"
+            if args["name"].as_str().is_none_or(str::is_empty)
+                || scope["name"] != args["name"]
+                || scope["matches"] != "name_or_email"
+                || scope["limit"] != CONTACT_LIMIT as u64
+                || count > CONTACT_LIMIT as u64 =>
         {
             return Err(invalid())
         }
@@ -1431,6 +1625,20 @@ pub fn validate_evidence(
                     || record["contentComplete"] != (length <= 2500)
                     || !record["private"].is_null()
                     || reference["surface"] != "front_document"
+                {
+                    return Err(invalid());
+                }
+            }
+            "contacts" => {
+                let listed = |key: &str, valid: fn(&str) -> bool| {
+                    record[key].as_array().is_some_and(|items| {
+                        items.len() <= CONTACT_DETAILS
+                            && items.iter().all(|item| item.as_str().is_some_and(valid))
+                    })
+                };
+                if !record["name"].is_string()
+                    || !listed("emails", plain_address)
+                    || !listed("phones", |phone| !phone.trim().is_empty())
                 {
                     return Err(invalid());
                 }
@@ -2370,6 +2578,10 @@ pub async fn run(
         )),
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
+        "find_contact" => Ok(find_contact(helper_path, &get("name")).await?["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()),
         "control_music" => control_music(&get("app"), &get("action"), &get("query"), false).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
@@ -2476,6 +2688,7 @@ pub async fn check_app(
         "reminders" => reminders(&helper_path)
             .await
             .map(|_| "Reminders is ready.".into()),
+        "contacts" => contacts_access(&helper_path).await,
         // Pressing play on a song you name uses Accessibility; ask for it now.
         "spotify" => Ok(
             if tokio::task::spawn_blocking(|| crate::ax::trusted(true))
@@ -2944,6 +3157,56 @@ mod tests {
         .unwrap();
         assert!(play.get("query").is_none(), "only play takes a query");
         assert!(validate("send_mail", &json!({})).is_err());
+    }
+
+    #[test]
+    fn contact_lookups_are_typed_bounded_and_checked() {
+        assert_eq!(validate("find_contact", &json!({"name":" Ana Silva "})).unwrap()["name"], "Ana Silva");
+        for invalid in [json!({}), json!({"name":""}), json!({"name":"--events"}), json!({"name":"a".repeat(101)}), json!({"name":"Ana","limit":3})] {
+            assert!(validate("find_contact", &invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(for_call("find_contact", &Map::new()).unwrap().id, "contacts");
+        assert_eq!(app("contacts").unwrap().share, Some(Share::Contacts));
+        // Addresses that could not address a draft are dropped, so records and text agree.
+        let output = json!({"contacts":[
+            {"id":"c-1","name":"Ana Silva","emails":["ana@example.com","Ana Silva <ana@x.com>","nobody"],"phones":["+1 555 0100",""]},
+            {"id":null,"name":"Ana Costa","emails":[],"phones":[]}
+        ],"total":2,"returned":2,"complete":true}).to_string();
+        let found = parse_contacts(&output).unwrap();
+        assert_eq!(found.items[0].emails, ["ana@example.com"]);
+        assert_eq!(found.items[0].phones, ["+1 555 0100"]);
+        let args = json!({"name":"Ana"});
+        let evidence = contact_evidence("Ana", &found);
+        assert!(validate_evidence("find_contact", &args, &evidence, true).is_ok());
+        assert_eq!(evidence["records"][1]["reference"]["kind"], "snapshot");
+        assert!(evidence["text"].as_str().unwrap().contains("Ana Silva: ana@example.com, +1 555 0100"));
+        assert!(model_evidence(&evidence).get("text").is_none());
+        // A read for another name, a smuggled address or a hidden extra person is refused.
+        assert!(validate_evidence("find_contact", &json!({"name":"Eve"}), &evidence, false).is_err());
+        let mut smuggled = evidence.clone();
+        smuggled["records"][0]["emails"] = json!(["Ana <eve@example.com>"]);
+        assert!(validate_evidence("find_contact", &args, &smuggled, false).is_err());
+        let mut uncounted = evidence.clone();
+        uncounted["count"] = json!(1);
+        assert!(validate_evidence("find_contact", &args, &uncounted, false).is_err());
+        // More people matched than were read: the read says so and is never complete.
+        let five: Vec<Value> = (0..5).map(|i| json!({"id":format!("c-{i}"),"name":"Ana","emails":[],"phones":[]})).collect();
+        let partial = parse_contacts(&json!({"contacts":five,"total":6,"returned":5,"complete":false}).to_string()).unwrap();
+        assert!(!partial.complete());
+        let read = contact_evidence("Ana", &partial);
+        assert!(validate_evidence("find_contact", &args, &read, false).is_ok());
+        assert!(validate_evidence("find_contact", &args, &read, true).is_err());
+        assert!(read["text"].as_str().unwrap().contains("first 5 of 6 people"));
+        assert!(parse_contacts(&json!({"contacts":five,"total":6,"returned":5,"complete":true}).to_string()).is_err(), "a missing person cannot be called complete");
+        let six: Vec<Value> = (0..6).map(|i| json!({"id":format!("c-{i}"),"name":"Ana","emails":[],"phones":[]})).collect();
+        assert!(parse_contacts(&json!({"contacts":six,"total":6,"returned":6,"complete":true}).to_string()).is_err(), "at most five people per read");
+        for broken in ["", "[]", "{\"contacts\":[],\"total\":1,\"returned\":0,\"complete\":true}", "{\"contacts\":[],\"total\":0,\"returned\":0,\"complete\":true,\"extra\":1}"] {
+            assert!(parse_contacts(broken).is_err(), "{broken}");
+        }
+        assert_eq!(parse_contacts("{\"error\":\"denied\"}").unwrap_err(), CONTACTS_DENIED);
+        let nobody = parse_contacts("{\"contacts\":[],\"total\":0,\"returned\":0,\"complete\":true}").unwrap();
+        assert_eq!(describe_contacts("Zed", &nobody), "No one in Contacts matches “Zed”.");
+        assert!(validate_evidence("find_contact", &json!({"name":"Zed"}), &contact_evidence("Zed", &nobody), true).is_ok());
     }
 
     #[test]

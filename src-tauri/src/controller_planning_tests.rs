@@ -828,3 +828,227 @@ async fn live_apple_note_reminder_journey_preserves_fields_and_finishes_from_rec
     )
     .await;
 }
+
+/// "Draft an email to Ana": Contacts is read by the name the user wrote, before any
+/// model call, and its answer decides the recipient only when it is unambiguous.
+async fn contact_journey(
+    dir: &std::path::Path,
+    apps: &[&str],
+    people: Vec<crate::apps::Contact>,
+    worker: &str,
+) -> (AppState, TaskRecord, Workflow) {
+    let goal = "Draft an email to Ana about lunch on Friday";
+    let (mut state, settings, mut task, _) = fixture_task_state(dir, goal, worker);
+    // Contacts are read through the Apple helper; the fixture below stands in for it.
+    // Intel Macs have no helper, and an "Apple helper missing" error must not stop a draft.
+    let helper = dir.join("buntini-fm");
+    if apps.contains(&"contacts") && !people.is_empty() {
+        std::fs::write(&helper, "").unwrap();
+    }
+    state.models = ModelHub::new(dir.join("task_contract_worker.py"), helper);
+    let settings = Settings {
+        apps: apps.iter().map(|id| id.to_string()).collect(),
+        ..settings
+    };
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+    let messages = vec![
+        json!({"role":"system","content":instructions(&state,&settings,true,"")}),
+        json!({"role":"user","content":goal}),
+    ];
+    let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
+    let found = crate::apps::Agenda {
+        total: people.len(),
+        items: people,
+    };
+    let reads = std::sync::Mutex::new(Vec::new());
+    continue_workflow_using(
+        &state,
+        &mut task,
+        &Channel::new(|_| Ok(())),
+        Arc::new(AtomicBool::new(false)),
+        &settings,
+        &mut flow,
+        |tool, args| {
+            reads.lock().unwrap().push((tool.clone(), args.clone()));
+            let evidence =
+                crate::apps::contact_evidence(args["name"].as_str().unwrap_or(""), &found);
+            async move {
+                if tool == "find_contact" {
+                    Ok(evidence)
+                } else {
+                    Err("Unexpected app read".into())
+                }
+            }
+        },
+    )
+    .await
+    .unwrap();
+    let reads = reads.into_inner().unwrap();
+    if state.models.apple_helper().is_file() {
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].0, "find_contact");
+        assert_eq!(reads[0].1["name"], "Ana", "the name the user wrote, not a model's");
+    } else {
+        assert!(reads.is_empty(), "no lookup without Contacts allowed and the helper present");
+    }
+    (state, task, flow)
+}
+
+fn contact(id: &str, name: &str, email: &str) -> crate::apps::Contact {
+    crate::apps::Contact {
+        id: Some(id.into()),
+        name: name.into(),
+        emails: vec![email.into()],
+        phones: vec![],
+    }
+}
+
+fn proposed_to(task: &TaskRecord) -> String {
+    task.action.as_ref().unwrap()["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["key"] == "to")
+        .unwrap()["value"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn one_matching_contact_addresses_the_draft() {
+    // The model leaves the address out; Buntini fills in the one Contacts gave.
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    draft=[t for t in req['tools'] if t['name']=='draft_email'][0]
+    assert draft['parameters']['properties']['to']['enum']==['ana@example.com'], draft
+    emit('tool_call',name='draft_email',arguments={'subject':'Lunch on Friday','body':'Are you free for lunch on Friday?'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let (state, task, flow) = contact_journey(
+        dir.path(),
+        &["mail", "contacts"],
+        vec![contact("c-1", "Ana Silva", "ana@example.com")],
+        worker,
+    )
+    .await;
+    assert_eq!(task.state, "waiting_action");
+    assert_eq!(proposed_to(&task), "ana@example.com");
+    assert!(task.action.as_ref().unwrap().get("choices").is_none());
+    assert!(task.touched.iter().any(|share| share == "contacts"));
+    let draft = flow.steps.last().unwrap();
+    assert_eq!(draft.arguments["to"], "ana@example.com");
+    assert_eq!(flow.contract.provenance[&draft.id]["to"].origin, "contact_record");
+    assert_eq!(
+        flow.contract.provenance[&flow.steps[0].id]["name"].origin,
+        "user_literal"
+    );
+    state.models.shutdown().await;
+}
+
+#[tokio::test]
+async fn several_matching_contacts_are_offered_not_chosen() {
+    // The model guesses one of them; the sheet shows both and leaves To to the user.
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    draft=[t for t in req['tools'] if t['name']=='draft_email'][0]
+    assert 'enum' not in draft['parameters']['properties']['to'], draft
+    emit('tool_call',name='draft_email',arguments={'to':'ana@example.com','subject':'Lunch on Friday','body':'Are you free for lunch on Friday?'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let (state, task, flow) = contact_journey(
+        dir.path(),
+        &["mail", "contacts"],
+        vec![
+            contact("c-1", "Ana Silva", "ana@example.com"),
+            contact("c-2", "Ana Costa", "costa@example.com"),
+        ],
+        worker,
+    )
+    .await;
+    assert_eq!(proposed_to(&task), "", "a model's pick is never shown as the answer");
+    let choices = task.action.as_ref().unwrap()["choices"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        choices
+            .iter()
+            .map(|choice| choice["value"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["ana@example.com", "costa@example.com"]
+    );
+    assert_eq!(choices[1]["label"], "Ana Costa · costa@example.com");
+    assert!(choices.iter().all(|choice| choice["field"] == "to"));
+    let draft = flow.steps.last().unwrap();
+    assert!(draft.arguments.get("to").is_none());
+    // The user's pick is an approved edit, and the draft runs with it.
+    let picked = json!({"to":"costa@example.com","subject":"Lunch on Friday","body":"Are you free for lunch on Friday?"});
+    run_workflow_action_with_reads(
+        &state,
+        &draft.id,
+        picked,
+        &Channel::new(|_| Ok(())),
+        |tool, args, _| async move { fixture_receipt(tool, args) },
+        |_, _, _| async { Err("Unexpected app read".into()) },
+    )
+    .await
+    .unwrap();
+    let saved = state
+        .store
+        .lock()
+        .unwrap()
+        .workflow(&task.id)
+        .unwrap()
+        .unwrap();
+    let step = saved.steps.last().unwrap();
+    assert_eq!(step.tool, "draft_email");
+    assert_eq!(step.arguments["to"], "costa@example.com");
+    assert_eq!(
+        saved.contract.provenance[&step.id]["to"].origin,
+        "user_approved_edit"
+    );
+    state.models.shutdown().await;
+}
+
+#[tokio::test]
+async fn without_contacts_allowed_the_draft_is_left_unaddressed() {
+    let worker = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    def emit(kind,**fields): print(json.dumps(dict(id=req['id'],type=kind,**fields)),flush=True)
+    assert 'find_contact' not in [t['name'] for t in req['tools']]
+    emit('tool_call',name='draft_email',arguments={'subject':'Lunch on Friday','body':'Are you free for lunch on Friday?'})
+    emit('done',text='',finish_reason='tool_call')
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let (state, task, flow) = contact_journey(dir.path(), &["mail"], vec![], worker).await;
+    assert_eq!(task.state, "waiting_action");
+    assert_eq!(proposed_to(&task), "");
+    assert!(!task.touched.iter().any(|share| share == "contacts"));
+    assert_eq!(flow.steps.len(), 1);
+    state.models.shutdown().await;
+    // Contacts allowed, but no Apple helper on this Mac: the draft still goes ahead.
+    let worker = worker.replace(
+        "    assert 'find_contact' not in [t['name'] for t in req['tools']]\n",
+        "",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let (state, task, flow) =
+        contact_journey(dir.path(), &["mail", "contacts"], vec![], &worker).await;
+    assert_eq!(task.state, "waiting_action");
+    assert_eq!(proposed_to(&task), "");
+    assert_eq!(flow.steps.len(), 1);
+    assert_eq!(flow.steps[0].tool, "draft_email");
+    state.models.shutdown().await;
+}

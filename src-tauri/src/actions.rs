@@ -80,6 +80,18 @@ pub struct Proposal {
     pub title: String,
     pub fields: Vec<Field>,
     pub note: String,
+    /// Values the user can pick for a field, such as the addresses of several people in
+    /// Contacts who match the name they gave. Picking one is an edit like any other.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Choice {
+    pub field: String,
+    pub label: String,
+    pub value: String,
 }
 
 fn text(
