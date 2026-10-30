@@ -546,31 +546,42 @@ fn recent_records(source: &'static str, share: Share, rows: Vec<crate::apps::Rec
         .collect()
 }
 
-async fn calendar_records(helper: &std::path::Path) -> Result<Vec<Record>, String> {
+/// The calendar's window, read with one helper call rather than one per day.
+async fn calendar_records(helper: &std::path::Path) -> Result<(Vec<Record>, Option<String>), String> {
     let today = chrono::Local::now().date_naive();
+    let day = |offset: i64| (today + chrono::Duration::days(offset)).format("%Y-%m-%d").to_string();
+    let found = crate::apps::events_between(helper, &day(-CALENDAR_PAST), &day(CALENDAR_AHEAD)).await?;
+    Ok(event_records(found))
+}
+
+/// Index records for events read from Calendar, once each; a cut-off read says so.
+fn event_records(found: crate::apps::Agenda<crate::apps::Event>) -> (Vec<Record>, Option<String>) {
+    let partial = (!found.complete())
+        .then(|| format!("only the first {} of {} events were read", found.items.len(), found.total));
     let mut records = Vec::new();
     let mut seen = HashSet::new();
-    for offset in -CALENDAR_PAST..=CALENDAR_AHEAD {
-        let day = (today + chrono::Duration::days(offset)).format("%Y-%m-%d").to_string();
-        for event in crate::apps::events(helper, &day).await?.items {
-            let id = format!("{}@{}", event.id.clone().unwrap_or_else(|| event.title.clone()), event.start);
-            if !seen.insert(id.clone()) {
-                continue;
-            }
-            let when = if event.all_day { format!("{day}, all day") } else { format!("{} to {}", event.start, event.end) };
-            let place = if event.location.is_empty() { String::new() } else { format!(" at {}", event.location) };
-            records.push(Record {
-                source: "calendar",
-                source_id: id,
-                scope: String::new(),
-                shares: vec![Share::Calendar],
-                title: event.title.clone(),
-                text: format!("Calendar event “{}”, {when}{place}", event.title),
-                observed_at: event.start.clone(),
-            });
+    for event in found.items {
+        let id = format!("{}@{}", event.id.clone().unwrap_or_else(|| event.title.clone()), event.start);
+        if !seen.insert(id.clone()) {
+            continue;
         }
+        let when = if event.all_day {
+            format!("{}, all day", event.start.get(..10).unwrap_or(&event.start))
+        } else {
+            format!("{} to {}", event.start, event.end)
+        };
+        let place = if event.location.is_empty() { String::new() } else { format!(" at {}", event.location) };
+        records.push(Record {
+            source: "calendar",
+            source_id: id,
+            scope: String::new(),
+            shares: vec![Share::Calendar],
+            title: event.title.clone(),
+            text: format!("Calendar event “{}”, {when}{place}", event.title),
+            observed_at: event.start.clone(),
+        });
     }
-    Ok(records)
+    (records, partial)
 }
 
 /// What reading one app gave.
@@ -631,7 +642,7 @@ async fn read_app_sources(
             "mail" => crate::apps::recent_mail(MAIL_DAYS, MAIL_MESSAGES, Launch::IfRunning)
                 .await
                 .map(|(rows, failed)| (recent_records("mail", Share::Mail, rows), failed)),
-            "calendar" => calendar_records(helper).await.map(|records| (records, None)),
+            "calendar" => calendar_records(helper).await,
             _ => crate::apps::reminders(helper).await.map(|read| {
                 let records = read
                     .items
@@ -1102,6 +1113,28 @@ mod tests {
         assert!(partial.failed[0].contains("partly read"));
         apply(&store, store.index_epoch(), vec![("mail", SourceRead::Records(vec![mail("m2", "Sam on the deposit")]))]).unwrap();
         assert_eq!(count(&store, "mail"), 1, "a complete read replaces the window");
+    }
+
+    #[test]
+    fn a_ranged_calendar_read_indexes_each_event_once_and_says_when_it_was_cut_off() {
+        let event = |id: &str, start: &str, all_day: bool| crate::apps::Event {
+            id: Some(id.into()),
+            start: start.into(),
+            end: start.into(),
+            all_day,
+            title: "Dentist".into(),
+            ..Default::default()
+        };
+        let found = crate::apps::Agenda {
+            items: vec![event("e1", "2026-11-02 09:00", false), event("e1", "2026-11-02 09:00", false), event("e2", "2026-11-03 00:00", true)],
+            total: 3,
+        };
+        let (records, partial) = event_records(found);
+        assert_eq!(records.len(), 2, "the same occurrence is indexed once");
+        assert_eq!(records[1].text, "Calendar event “Dentist”, 2026-11-03, all day");
+        assert!(partial.is_none());
+        let (_, partial) = event_records(crate::apps::Agenda { items: vec![event("e1", "2026-11-02 09:00", false)], total: 2500 });
+        assert_eq!(partial.as_deref(), Some("only the first 1 of 2500 events were read"));
     }
 
     #[test]

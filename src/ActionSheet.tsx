@@ -26,14 +26,14 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
         return <label key={field.key}><span>{field.label}</span>
           {field.kind === 'long' ? <textarea disabled={running} rows={4} value={values[field.key]} onChange={event => set(field.key, event.target.value)} />
             : field.kind === 'when' ? <input disabled={running} type="datetime-local" value={toPicker(values[field.key])} onChange={event => set(field.key, fromPicker(event.target.value))} />
-            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={choices.length ? 'Pick one below or type an address' : field.key === 'to' || field.key === 'location' ? 'Optional' : undefined} />}
+            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={choices.length ? (field.key === 'to' ? 'Pick one below or type an address' : 'Pick one below') : field.key === 'to' || field.key === 'location' ? 'Optional' : undefined} />}
           {choices.length > 0 && <span className="field-choices" role="group" aria-label={`Matching ${field.label}`}>
             {choices.map(choice => <button key={choice.value} type="button" className="secondary-button" disabled={running} aria-pressed={values[field.key] === choice.value} onClick={() => set(field.key, choice.value)}>{choice.label}</button>)}
           </span>}
         </label>;
       })}
     </form>
-    {proposal.choices?.length ? <small>More than one person in Contacts matches. Pick who this is for.</small> : null}
+    {proposal.choices?.length ? <small>{proposal.tool === 'run_shortcut' ? 'More than one of your shortcuts fits. Pick the one to run.' : 'More than one person in Contacts matches. Pick who this is for.'}</small> : null}
     {proposal.note && <small>{proposal.note}</small>}
     {error && <p role="alert">{error}</p>}
     <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>

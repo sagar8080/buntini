@@ -514,6 +514,26 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_listing_is_a_read_that_a_run_depends_on() {
+        let list = contract("list_shortcuts").unwrap();
+        assert_eq!(list.operation, ToolOperation::Read);
+        assert_eq!(list.resources, vec!["automation"]);
+        assert_eq!(list.success_verifier, SuccessVerifier::AppReadResult);
+        let schema = &definition("list_shortcuts").unwrap()["parameters"];
+        assert_eq!(schema["properties"]["query"]["maxLength"], 100);
+        assert!(schema.get("required").is_none(), "listing every shortcut needs no words");
+        for example in &list.examples {
+            assert!(crate::apps::validate("list_shortcuts", &example.arguments).is_ok());
+        }
+        let run = contract("run_shortcut").unwrap();
+        assert_eq!(run.resources, list.resources);
+        assert!(run.prerequisites.iter().any(|step| step.contains("list_shortcuts")));
+        for example in &run.examples {
+            assert!(crate::actions::validate("run_shortcut", &example.arguments).is_ok());
+        }
+    }
+
+    #[test]
     fn contracts_keep_reads_mixed_operations_and_weak_receipts_distinct() {
         assert_eq!(
             contract("read_calendar").unwrap().operation,

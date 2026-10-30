@@ -832,6 +832,19 @@ mod tests {
         assert_eq!(parse_battery("Now drawing from 'AC Power'"), None);
     }
 
+    /// The sysinfo paths health uses (CPU, the root disk) on the Mac running the tests.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn health_reads_root_disk() {
+        let health = health().expect("health of this Mac");
+        assert!(
+            health.disk_free_percent > 0.0 && health.disk_free_percent < 100.0,
+            "the root disk has a real size and is neither empty nor full: {health:?}"
+        );
+        assert!((0.0..=100.0 * 64.0).contains(&health.cpu_percent));
+        assert!(health.battery_percent.is_none_or(|percent| percent <= 100));
+    }
+
     #[test]
     fn motion_paths_start_and_end_where_asked() {
         for kind in ["walk", "jump", "fall"] {

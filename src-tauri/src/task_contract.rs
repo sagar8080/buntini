@@ -165,6 +165,12 @@ fn clauses(goal: &str) -> Vec<String> {
                         "play",
                         "pause",
                         "switch",
+                        "turn",
+                        "lock",
+                        "unlock",
+                        "dim",
+                        "brighten",
+                        "run",
                         "explain",
                         "summarize",
                         "summarise",
@@ -279,6 +285,14 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
         .first()
         .is_some_and(|word| ["what", "when", "which", "where"].contains(word))
         && has(&["my", "this", "these", "current", "today", "tomorrow"]);
+    // "Which shortcuts do I have?" lists the user's own shortcuts.
+    if has(&["shortcuts"])
+        && words
+            .first()
+            .is_some_and(|word| ["what", "which", "list", "show"].contains(word))
+    {
+        return vec!["list_shortcuts"];
+    }
     if !explicit && !question {
         return vec![];
     }
@@ -1052,6 +1066,116 @@ impl TaskContract {
             _ => vec![],
         }
     }
+    /// The next requested shortcut run while nothing has fixed which shortcut it is.
+    fn awaiting_shortcut(&self) -> Option<&Outcome> {
+        self.next_outcome().filter(|o| {
+            o.kind == "write"
+                && o.status == "ready"
+                && o.tool.as_deref() == Some("run_shortcut")
+                && !self
+                    .constraints
+                    .iter()
+                    .any(|c| c.outcome_id.as_deref() == Some(&o.id) && c.field == "name")
+        })
+    }
+    /// The user's own words for a requested shortcut run. A single run may use the whole
+    /// request, quoted names included ("run my “Start work” shortcut"); one of several
+    /// uses only its own clause, so "and lock the front door" never picks the lights.
+    fn shortcut_query(&self, outcome: &Outcome) -> String {
+        let runs = self
+            .outcomes
+            .iter()
+            .filter(|o| o.tool.as_deref() == Some("run_shortcut"))
+            .count();
+        let words = if runs == 1 {
+            self.current_request.replace(['“', '”', '"', '‘', '’', '`'], " ")
+        } else {
+            outcome.description.clone()
+        };
+        let mut query = String::new();
+        for word in words.split_whitespace() {
+            if query.chars().count() + word.chars().count() + 1 > 100 {
+                break;
+            }
+            if !query.is_empty() {
+                query.push(' ');
+            }
+            query.push_str(word);
+        }
+        query
+    }
+    /// The words to read the user's shortcuts with before a run, when nothing has fixed
+    /// which shortcut it is and no read for those words is in this journal yet. The
+    /// controller reads them itself, so a model never has to guess a shortcut's name.
+    pub fn shortcut_lookup(&self, steps: &[Step]) -> Option<String> {
+        let outcome = self.awaiting_shortcut()?;
+        let query = self.shortcut_query(outcome);
+        (!query.is_empty() && self.shortcut_read(steps, &query).is_none()).then_some(query)
+    }
+    /// The latest verified read of the user's shortcuts for exactly these words.
+    fn shortcut_read<'a>(&self, steps: &'a [Step], query: &str) -> Option<&'a Step> {
+        steps.iter().rev().find(|step| {
+            step.tool == "list_shortcuts"
+                && !step.effect
+                && step.state == "succeeded"
+                && step.arguments["query"] == query
+                && step.evidence.as_ref().is_some_and(|evidence| {
+                    crate::apps::validate_evidence(&step.tool, &step.arguments, evidence, false)
+                        .is_ok()
+                })
+        })
+    }
+    /// The user's shortcuts that fit the next requested run, most specific first, read
+    /// in this journal. Empty before that read or when the run is already fixed.
+    pub fn shortcut_choices(&self, steps: &[Step]) -> Vec<String> {
+        let Some(outcome) = self.awaiting_shortcut() else {
+            return vec![];
+        };
+        self.shortcut_read(steps, &self.shortcut_query(outcome))
+            .and_then(|step| step.evidence.as_ref())
+            .and_then(|evidence| evidence["records"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|record| record["name"].as_str().map(str::to_owned))
+            .collect()
+    }
+    /// The shortcuts the user picks from in the sheet when `name` is proposed: every one
+    /// that fits, unless `name` plainly names what they asked for or nothing else fits.
+    pub fn shortcut_alternatives(&self, steps: &[Step], name: &str) -> Vec<String> {
+        let Some(outcome) = self.awaiting_shortcut() else {
+            return vec![];
+        };
+        let choices = self.shortcut_choices(steps);
+        if choices.len() < 2 || crate::apps::shortcut_covers(&self.shortcut_query(outcome), name) {
+            return vec![];
+        }
+        choices
+    }
+    /// The shortcut to propose for the next requested run, with where its name came from:
+    /// the one the user's words plainly name, else the most specific that fits (the sheet
+    /// then offers the others). Err when none of the user's shortcuts fits, so nothing is
+    /// guessed. None before the read, or once the run is proposed.
+    pub fn shortcut_proposal(&self, steps: &[Step]) -> Result<Option<(String, Value)>, String> {
+        let Some(outcome) = self.awaiting_shortcut() else {
+            return Ok(None);
+        };
+        let query = self.shortcut_query(outcome);
+        let Some(step) = self.shortcut_read(steps, &query) else {
+            return Ok(None);
+        };
+        let choices = self.shortcut_choices(steps);
+        let Some(name) = choices
+            .iter()
+            .find(|name| crate::apps::shortcut_covers(&query, name))
+            .or(choices.first())
+        else {
+            return Err("None of your shortcuts fits that, so nothing ran. Make one in the Shortcuts app, name it after what it does (for example “Living Room Lights On”), then ask me again.".into());
+        };
+        Ok(Some((
+            name.clone(),
+            json!({"kind":"shortcut_record","source":"shortcuts","stepId":step.id,"recordId":name,"query":query,"choices":choices.len()}),
+        )))
+    }
     /// Fills fields of the next write that Buntini resolved from a source (the open
     /// email's sender, the one matching contact) when a model left them out. It never
     /// replaces a value; a different one is still refused by `validate_proposal`.
@@ -1208,6 +1332,16 @@ impl TaskContract {
                 {
                     provenance.origin = "runtime_default".into();
                     provenance.field_ref = None;
+                } else if source.get("kind").and_then(Value::as_str) == Some("shortcut_record")
+                    && field == "name"
+                    && source.get("recordId") == Some(value)
+                {
+                    // A name read from the user's own shortcuts for their words.
+                    provenance.origin = "shortcut_record".into();
+                    provenance.source_step_id =
+                        source.get("stepId").and_then(Value::as_str).map(str::to_owned);
+                    provenance.record_id = value.as_str().map(str::to_owned);
+                    provenance.field_ref = Some("name".into());
                 } else if source.get("kind").and_then(Value::as_str) == Some("calendar_reminder") {
                     provenance.origin = "deterministic_calculation".into();
                     provenance.source_step_id = source
@@ -1313,6 +1447,9 @@ impl TaskContract {
         // Looking up the person a draft is for is part of preparing that draft, once:
         // after that lookup the user picks among its matches in the sheet.
         let contact_read = self.contact_lookup(steps).is_some();
+        // So is reading the user's shortcuts before a run, with the words they used.
+        let shortcut_read = self.shortcut_lookup(steps);
+        let shortcuts = self.shortcut_choices(steps);
         let selected = definitions
             .as_array()
             .into_iter()
@@ -1327,7 +1464,9 @@ impl TaskContract {
                 if effect && !write_allowed && name != "control_music" {
                     return None;
                 }
-                let relevant_read = (contact_read && name == "find_contact") || next.is_some_and(|o| {
+                let relevant_read = (contact_read && name == "find_contact")
+                    || (shortcut_read.is_some() && name == "list_shortcuts")
+                    || next.is_some_and(|o| {
                     o.accepted_tools.iter().any(|t| t == name)
                         || (o.kind == "answer" && (name == "calculate" || crate::structured_math::TOOLS.contains(&name)))
                         || (o.kind == "answer"
@@ -1345,6 +1484,13 @@ impl TaskContract {
                 let mut result = definition.clone();
                 if name == "control_music" && !write_allowed {
                     result["parameters"]["properties"]["action"]["enum"] = json!(["now_playing"]);
+                }
+                if let Some(query) = shortcut_read.as_ref().filter(|_| name == "list_shortcuts") {
+                    result["parameters"]["properties"]["query"]["enum"] = json!([query]);
+                    result["parameters"]["required"] = json!(["query"]);
+                }
+                if name == "run_shortcut" && write_allowed && !shortcuts.is_empty() {
+                    result["parameters"]["properties"]["name"]["enum"] = json!(shortcuts);
                 }
                 if write_allowed {
                     if let Some(outcome) = next_write {
@@ -1419,6 +1565,16 @@ impl TaskContract {
                     Err("Buntini looks up only the person you asked to write to.".into())
                 };
             }
+            // Before a shortcut runs, the user's shortcuts are read with their own words.
+            if tool == "list_shortcuts" {
+                if let Some(outcome) = self.awaiting_shortcut() {
+                    return if arguments["query"] == self.shortcut_query(outcome).as_str() {
+                        Ok(())
+                    } else {
+                        Err("Buntini looks for your shortcuts only with the words you used.".into())
+                    };
+                }
+            }
             if outcome.kind == "answer"
                 && (tool == "calculate" || crate::structured_math::TOOLS.contains(&tool) || outcome.resources.is_empty()
                     || crate::tools::contract(tool)
@@ -1440,6 +1596,15 @@ impl TaskContract {
         }
         if !matches_arguments(&outcome.required_arguments, arguments) {
             return Err("The proposed action conflicts with your saved task constraints.".into());
+        }
+        // A shortcut runs only by a name read from the user's own shortcuts for this request.
+        if tool == "run_shortcut"
+            && self.awaiting_shortcut().is_some()
+            && !arguments["name"]
+                .as_str()
+                .is_some_and(|name| self.shortcut_choices(steps).iter().any(|choice| choice == name))
+        {
+            return Err("Buntini runs only one of your own shortcuts that fits your request.".into());
         }
         for field in &outcome.required_fields {
             if arguments
@@ -1596,6 +1761,74 @@ mod tests {
         assert!(contract
             .validate_proposal("add_reminder", &json!({"title":title,"due":"2026-10-30 09:00"}), &[])
             .is_ok());
+    }
+    fn shortcut_read(id: &str, query: &str, names: &[&str]) -> Step {
+        let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        Step {
+            evidence: Some(crate::apps::shortcut_evidence(query, &names)),
+            ..step(id, "list_shortcuts", json!({"query":query}), false)
+        }
+    }
+    #[test]
+    fn a_shortcut_run_is_bound_to_one_of_the_users_shortcuts_for_their_words() {
+        let goal = "Turn on the living room lights";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert_eq!(contract.next_outcome().unwrap().tool.as_deref(), Some("run_shortcut"));
+        // First the user's shortcuts are read, with the words they used, once.
+        assert_eq!(contract.shortcut_lookup(&[]).as_deref(), Some(goal));
+        assert!(contract.validate_proposal("list_shortcuts", &json!({"query":goal}), &[]).is_ok());
+        assert!(contract.validate_proposal("list_shortcuts", &json!({"query":"unlock the door"}), &[]).is_err());
+        assert!(contract.validate_proposal("run_shortcut", &json!({"name":"Living Room Lights On"}), &[]).is_err(), "not before the read");
+        let offered = contract.relevant_tools(&[], &crate::tools::offer(&["list_shortcuts", "run_shortcut"]));
+        assert_eq!(offered[0]["parameters"]["properties"]["query"]["enum"], json!([goal]));
+        assert_eq!(contract.shortcut_proposal(&[]).unwrap(), None);
+
+        let steps = vec![shortcut_read("read-1", goal, &["Lights On", "Living Room Lights On", "Living Room Lights Off"])];
+        contract.refresh(goal, &steps);
+        assert_eq!(contract.shortcut_lookup(&steps), None);
+        assert_eq!(contract.shortcut_choices(&steps), ["Living Room Lights On", "Lights On"]);
+        let (name, source) = contract.shortcut_proposal(&steps).unwrap().unwrap();
+        assert_eq!(name, "Living Room Lights On");
+        assert_eq!((source["kind"].as_str(), source["stepId"].as_str()), (Some("shortcut_record"), Some("read-1")));
+        let offered = contract.relevant_tools(&steps, &crate::tools::offer(&["list_shortcuts", "run_shortcut"]));
+        assert_eq!(names(&offered), ["run_shortcut"]);
+        assert_eq!(offered[0]["parameters"]["properties"]["name"]["enum"], json!(["Living Room Lights On", "Lights On"]));
+        assert!(contract.validate_proposal("run_shortcut", &json!({"name":"Lights On"}), &steps).is_ok());
+        for other in ["Living Room Lights Off", "Delete Everything", "living room lights on"] {
+            assert!(contract.validate_proposal("run_shortcut", &json!({"name":other}), &steps).is_err(), "{other}");
+        }
+        contract.record_proposal("run-1", &json!({"name":name}), Some(&source));
+        assert_eq!(contract.provenance["run-1"]["name"].origin, "shortcut_record");
+        assert_eq!(contract.provenance["run-1"]["name"].source_step_id.as_deref(), Some("read-1"));
+
+        // Nothing fits: nothing is proposed or guessed.
+        let none = vec![shortcut_read("read-1", goal, &["Lights Off", "Start work"])];
+        contract.refresh(goal, &none);
+        assert!(contract.shortcut_proposal(&none).unwrap_err().contains("None of your shortcuts fits"));
+    }
+    #[test]
+    fn each_of_several_shortcut_runs_is_read_with_its_own_clause() {
+        let goal = "Turn on the lights and lock the front door";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert_eq!(contract.shortcut_lookup(&[]).as_deref(), Some("turn on the lights"));
+        let names = ["Lights On", "Lock Front Door"];
+        let mut steps = vec![shortcut_read("read-1", "turn on the lights", &names)];
+        contract.refresh(goal, &steps);
+        assert_eq!(contract.shortcut_proposal(&steps).unwrap().unwrap().0, "Lights On");
+        steps.push(step("run-1", "run_shortcut", json!({"name":"Lights On"}), true));
+        contract.refresh(goal, &steps);
+        assert_eq!(contract.shortcut_lookup(&steps).as_deref(), Some("lock the front door"));
+        steps.push(shortcut_read("read-2", "lock the front door", &names));
+        contract.refresh(goal, &steps);
+        assert_eq!(contract.shortcut_proposal(&steps).unwrap().unwrap().0, "Lock Front Door");
+        // A quoted name the user wrote counts as their words when it is the only run.
+        let quoted = "Run my “Start work” shortcut";
+        let mut contract = TaskContract::from_request(quoted);
+        contract.refresh(quoted, &[]);
+        assert_eq!(contract.shortcut_lookup(&[]).as_deref(), Some("Run my Start work shortcut"));
+        assert_eq!(read_tools("which shortcuts do I have"), ["list_shortcuts"]);
     }
     fn names(definitions: &Value) -> Vec<&str> {
         definitions

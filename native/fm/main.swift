@@ -448,6 +448,20 @@ func agendaDay(_ raw: String, timeZone: TimeZone = .current) -> (start: Date, en
     return (start, end)
 }
 
+/// At most this many events per ranged read; a day on its own keeps its limit of 40.
+let agendaRangeLimit = 2000
+
+/// From the start of `first` to the end of `last`, when they are in order and at most
+/// 400 days apart.
+func agendaRange(_ first: (start: Date, end: Date), _ last: (start: Date, end: Date), timeZone: TimeZone = .current) -> (start: Date, end: Date)? {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    guard first.start <= last.start,
+          let days = calendar.dateComponents([.day], from: first.start, to: last.start).day,
+          days <= 400 else { return nil }
+    return (first.start, last.end)
+}
+
 func reminderDueDate(_ components: DateComponents?) -> Date? {
     guard let components else { return nil }
     return (components.calendar ?? Calendar.current).date(from: components)
@@ -913,6 +927,9 @@ enum Agenda {
     static func run(_ arguments: [String]) async -> Int32 {
         let events = arguments.contains("--events")
         var day: (start: Date, end: Date)?
+        // `--events FROM TO` reads every day from FROM through TO in one call, so indexing
+        // a few months of Calendar doesn't start one helper per day.
+        var range: (from: String, to: String)?
         if events {
             guard let flag = arguments.firstIndex(of: "--events"), flag + 1 < arguments.count,
                   let parsed = agendaDay(arguments[flag + 1]) else {
@@ -920,6 +937,14 @@ enum Agenda {
                 return 2
             }
             day = parsed
+            if flag + 2 < arguments.count {
+                guard let last = agendaDay(arguments[flag + 2]), let span = agendaRange(parsed, last) else {
+                    FileHandle.standardError.write(Data("invalid-date: A Calendar range needs two YYYY-MM-DD dates in order, at most 400 days apart.\n".utf8))
+                    return 2
+                }
+                day = span
+                range = (arguments[flag + 1], arguments[flag + 2])
+            }
         }
         let store = EKEventStore()
         var granted = false
@@ -937,7 +962,8 @@ enum Agenda {
         stamp.dateFormat = "yyyy-MM-dd HH:mm"
         if let day {
             let found = store.events(matching: store.predicateForEvents(withStart: day.start, end: day.end, calendars: nil)).sorted { $0.startDate < $1.startDate }
-            for event in found.prefix(40) {
+            let limit = range == nil ? 40 : agendaRangeLimit
+            for event in found.prefix(limit) {
                 var row = agendaIdentity(id: event.eventIdentifier, calendarId: event.calendar?.calendarIdentifier, modifiedAt: event.lastModifiedDate)
                 let iso = ISO8601DateFormatter()
                 row.merge(["start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate),
@@ -945,7 +971,13 @@ enum Agenda {
                            "allDay": event.isAllDay, "title": event.title ?? "", "location": event.location ?? "", "calendar": event.calendar?.title ?? ""]) { _, new in new }
                 emit(row)
             }
-            emit(agendaSummary(total: found.count, limit: 40))
+            var summary = agendaSummary(total: found.count, limit: limit)
+            if let range {
+                // Echoed so a reader can tell a ranged answer from an older helper's one day.
+                summary["from"] = range.from
+                summary["to"] = range.to
+            }
+            emit(summary)
         } else {
             let fetched: [EKReminder]? = await withCheckedContinuation { done in
                 store.fetchReminders(matching: store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)) { done.resume(returning: $0) }
@@ -1081,6 +1113,11 @@ func contractSelfTest() async -> Int32 {
         let autumn = agendaDay("2026-11-01", timeZone: zone)!
         try require(spring.end.timeIntervalSince(spring.start) == 23 * 3600, "Spring DST day must cover 23 hours")
         try require(autumn.end.timeIntervalSince(autumn.start) == 25 * 3600, "Autumn DST day must cover 25 hours")
+        let span = agendaRange(spring, autumn, timeZone: zone)
+        try require(span?.start == spring.start && span?.end == autumn.end, "A Calendar range must run from the first day's start to the last day's end")
+        try require(agendaRange(autumn, spring, timeZone: zone) == nil, "A Calendar range must be in order")
+        try require(agendaRange(agendaDay("2026-01-01", timeZone: zone)!, agendaDay("2027-02-05", timeZone: zone)!, timeZone: zone) != nil, "A 400-day Calendar range must be accepted")
+        try require(agendaRange(agendaDay("2026-01-01", timeZone: zone)!, agendaDay("2027-02-06", timeZone: zone)!, timeZone: zone) == nil, "A Calendar range must stay within 400 days")
 
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")

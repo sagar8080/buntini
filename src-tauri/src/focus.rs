@@ -73,10 +73,11 @@ fn frontmost() -> Option<Front> {
     })
 }
 
-/// Follows the app in front twice a second, ignoring Buntini itself.
+/// Follows the app in front twice a second, ignoring Buntini itself. Each check drains
+/// its own autorelease pool: this thread never returns to a run loop that would.
 pub fn start() {
     std::thread::spawn(|| loop {
-        if let Some(front) = frontmost() {
+        if let Some(front) = objc2::rc::autoreleasepool(|_| frontmost()) {
             *LAST.lock().unwrap() = Some(front);
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -86,13 +87,14 @@ pub fn start() {
 /// Takes a snapshot of the app the user was just in. Call it as Buntini opens, before
 /// its window takes focus; reading happens on a background thread.
 pub fn capture() {
-    let target = frontmost().or_else(|| LAST.lock().unwrap().clone());
+    let target = objc2::rc::autoreleasepool(|_| frontmost()).or_else(|| LAST.lock().unwrap().clone());
     if let Some(front) = &target {
         *LAST.lock().unwrap() = Some(front.clone());
     }
     let generation = STARTED.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
-        let snapshot = target.map(|app| {
+        // Accessibility reads on a short-lived thread still leave autoreleased objects.
+        let snapshot = objc2::rc::autoreleasepool(|_| target.map(|app| {
             let (window, selection, secure) = if crate::ax::trusted(false) {
                 let read = crate::ax::selection(app.pid, MAX_SELECTION);
                 (read.window, read.text, read.secure)
@@ -100,7 +102,7 @@ pub fn capture() {
                 (String::new(), String::new(), false)
             };
             Snapshot { at: Instant::now(), app, window, selection, secure }
-        });
+        }));
         let mut slot = SNAPSHOT.lock().unwrap();
         if slot.as_ref().is_none_or(|(done, _)| *done < generation) {
             *slot = Some((generation, snapshot));

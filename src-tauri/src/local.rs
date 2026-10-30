@@ -636,6 +636,21 @@ mod tests {
         assert!(search(&roots, "quotes", &cancel).unwrap().is_empty());
         assert!(search(&[], "quotes", &cancel).unwrap().is_empty());
     }
+    /// The sysinfo paths behind "How is my Mac doing?" on the Mac running the tests.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn system_snapshot_reads_this_mac() {
+        let snapshot = snapshot().unwrap();
+        assert!(snapshot.memory_total > 0 && snapshot.memory_used <= snapshot.memory_total);
+        assert!(snapshot.uptime_seconds > 0);
+        assert!(snapshot.os.contains("macOS") || snapshot.os.contains("Darwin"), "{}", snapshot.os);
+        assert!(!snapshot.disks.is_empty());
+        assert!(snapshot.disks.iter().all(|disk| disk.available_bytes <= disk.total_bytes));
+        assert!(!snapshot.processes.is_empty() && snapshot.processes.len() <= 8);
+        assert!(snapshot.processes.windows(2).all(|pair| pair[0].cpu_percent >= pair[1].cpu_percent));
+        assert!(system_answer(&snapshot).starts_with("Your Mac is using"));
+    }
+
     #[test]
     #[ignore = "Run explicitly on the target Mac to record current tool latency"]
     fn measure_system_snapshot_latency() {
