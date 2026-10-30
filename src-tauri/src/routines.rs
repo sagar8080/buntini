@@ -626,7 +626,7 @@ fn thread(routine: &Routine) -> (String, String) {
         format!("Routine: {}", routine.task.chars().take(85).collect::<String>()),
     )
 }
-fn assign_thread(store: &Store, task_id: &str, (id, title): &(String, String)) -> Result<(), String> {
+pub(crate) fn assign_thread(store: &Store, task_id: &str, (id, title): &(String, String)) -> Result<(), String> {
     store
         .db
         .execute("INSERT INTO chat_threads(id,title,created_at,updated_at,legacy) VALUES(?1,?2,?3,?3,0) ON CONFLICT(id) DO NOTHING", rusqlite::params![id, title, now()])

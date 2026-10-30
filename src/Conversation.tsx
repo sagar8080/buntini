@@ -74,7 +74,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'This one didn’t finish. Please try again.'}</p>}
         </div>
       </div>
-      {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}><Check size={10} /> {relativeTime(item.createdAt)}{item.backend === 'brief' ? ' · Morning brief' : item.backend ? ` · ${backendLabel[item.backend as ModelBackend] || item.backend}` : ''}</span>
+      {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}><Check size={10} /> {relativeTime(item.createdAt)}{item.backend === 'brief' ? ' · Morning brief' : item.backend === 'nudge' ? ' · Heads-up' : item.backend ? ` · ${backendLabel[item.backend as ModelBackend] || item.backend}` : ''}</span>
         <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? 'Stop' : 'Read aloud'}</button>
         <button className="text-button" onClick={() => { void navigator.clipboard?.writeText(item.answer).then(() => { setCopied(item.id); setTimeout(() => setCopied(current => current === item.id ? '' : current), 1500); }); }}>{copied === item.id ? <Check size={11} /> : <Copy size={11} />}{copied === item.id ? 'Copied' : 'Copy'}</button>
       </div>}

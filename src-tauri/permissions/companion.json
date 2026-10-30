@@ -82,7 +82,11 @@
           "add_tool_server_from_config",
           "remove_tool_server",
           "reconnect_tool_server",
-          "set_tool_safe"
+          "set_tool_safe",
+          "heads_ups",
+          "open_heads_up",
+          "dismiss_heads_up",
+          "take_heads_up_request"
         ]
       }
     }

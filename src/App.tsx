@@ -12,7 +12,7 @@ import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Routines from './Routines';
 import Conversation from './Conversation';
-import { BackgroundWork, WaitingForYou, stepLabel } from './TaskProgress';
+import { BackgroundWork, HeadsUps, WaitingForYou, stepLabel } from './TaskProgress';
 import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
 import Onboarding from './Onboarding';
 import SettingsView, { type Tab as SettingsTab } from './SettingsView';
@@ -27,7 +27,7 @@ import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
@@ -45,6 +45,7 @@ export default function App() {
   const [progress, setProgress] = useState<TaskProgress[]>([]);
   const [background, setBackground] = useState<BackgroundStatus | null>(null);
   const [waiting, setWaiting] = useState<PendingApprovalSummary[]>([]);
+  const [headsUps, setHeadsUps] = useState<HeadsUp[]>([]);
   const [onlineTaskId, setOnlineTaskId] = useState('');
   const [page, setPageState] = useState<Page>('home');
   // Settings can open on a given tab, for example Apps from a welcome shortcut.
@@ -150,8 +151,8 @@ export default function App() {
       }
     }
     if (desktop) {
-      const [flows, scheduled, approvals] = await Promise.all([command<TaskProgress[]>('task_progress'), command<BackgroundStatus>('background_status'), command<PendingApprovalSummary[]>('pending_approvals')]);
-      if (mounted.current) { setProgress(flows); setBackground(scheduled); setWaiting(approvals); }
+      const [flows, scheduled, approvals, nudges] = await Promise.all([command<TaskProgress[]>('task_progress'), command<BackgroundStatus>('background_status'), command<PendingApprovalSummary[]>('pending_approvals'), command<HeadsUp[]>('heads_ups')]);
+      if (mounted.current) { setProgress(flows); setBackground(scheduled); setWaiting(approvals); setHeadsUps(nudges); }
     } else if (reliabilityPreview) {
       setProgress(previewReliabilityProgress); setBackground(previewBackground);
     }
@@ -469,6 +470,20 @@ export default function App() {
     try { await reviewTask(await command<TaskRecord>('open_approval', { approvalId })); }
     catch (e) { setError(errorMessage(e)); await refresh().catch(() => {}); }
   }
+  // From the list or a heads-up notification: open its conversation and offer the obvious
+  // request in the composer. Sending it goes through the usual approval sheet.
+  async function openHeadsUp(id: string) {
+    setPage('home'); void expand(true);
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish the current task first, then open the heads-up.'); return; }
+    try {
+      const opened = await command<{ taskId: string; suggestion?: string | null }>('open_heads_up', { id });
+      await openThread({ taskId: opened.taskId });
+      if (opened.suggestion) { setInput(opened.suggestion); setTimeout(() => inputRef.current?.focus(), 100); }
+    } catch (e) { setError(errorMessage(e)); }
+    await refresh().catch(() => {});
+  }
+  const openHeadsUpRef = useRef(openHeadsUp);
+  openHeadsUpRef.current = openHeadsUp;
   const openApprovalRef = useRef(openApproval);
   openApprovalRef.current = openApproval;
   const openThreadRef = useRef(openThread);
@@ -482,7 +497,11 @@ export default function App() {
     void subscription.then(() => takeRequest());
     // A routine's notification opens the conversation that run is in.
     const routine = listen<{ taskId: string }>('routine-open', event => { void expand(true); void openThreadRef.current({ taskId: event.payload.taskId }).catch(e => setError(errorMessage(e))); });
-    return () => { void subscription.then(unlisten => unlisten()); void routine.then(unlisten => unlisten()); };
+    // A heads-up's notification; kept until taken, like Review.
+    const takeHeadsUp = () => command<string | null>('take_heads_up_request').then(id => { if (id) void openHeadsUpRef.current(id); }).catch(() => {});
+    const headsUp = listen('heads-up-open', () => { void takeHeadsUp(); });
+    void headsUp.then(() => takeHeadsUp());
+    return () => { void subscription.then(unlisten => unlisten()); void routine.then(unlisten => unlisten()); void headsUp.then(unlisten => unlisten()); };
   }, []);
   // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
   const submitRef = useRef(submit);
@@ -767,6 +786,7 @@ export default function App() {
         {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} toast={toastAnchored ? toast : null} />}
         {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
+            <HeadsUps items={headsUps} disabled={busy || pending} onOpen={id => void openHeadsUp(id)} onDismiss={id => void safeAction(async () => { await command('dismiss_heads_up', { id }); await refresh(); })} />
             <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} onStop={taskId => void safeAction(async () => { await command('cancel_task', { taskId }); await refresh(); })} />
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>What’s on your mind?</span></h1><div><button onClick={() => shortcut('day')}><Sun size={12} /> My day</button><button onClick={() => shortcut('reply')}><Mail size={12} /> Needs a reply</button><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button></div>
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>

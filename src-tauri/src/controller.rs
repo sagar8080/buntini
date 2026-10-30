@@ -526,10 +526,13 @@ pub fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     let store = state.store.lock().unwrap();
     // Their proposals go with the history, so their "Waiting for you" alerts do too.
     let waiting = store.waiting_approval_ids()?;
+    let heads_ups = crate::nudges::alert_identifiers(&store);
     store.clear_history()?;
     for id in waiting {
         crate::notifications::withdraw_approval(&id);
     }
+    // Heads-ups go with the history, so their alerts do too.
+    crate::delivery::os().remove(&heads_ups);
     Ok(())
 }
 #[tauri::command]

@@ -36,6 +36,7 @@ impl Store {
         crate::memory_index::initialize(&store.db)?;
         crate::routines::initialize(&store)?;
         crate::mcp::initialize(&store.db)?;
+        crate::nudges::initialize(&store.db)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -554,6 +555,7 @@ impl Store {
             "priceWatches": rows("SELECT data FROM price_watches")?,
             "routines": rows("SELECT data FROM routines ORDER BY created_at")?,
             "toolsYouAdded": self.mcp_export()?,
+            "headsUps": rows("SELECT data FROM nudges ORDER BY created_at")?,
             "memories": self.memories()?,
             "workflows": self.workflows()?,
             "timers": rows("SELECT data FROM timers")?,
@@ -571,10 +573,11 @@ impl Store {
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines;
                  DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
-                 DELETE FROM memory_records; DELETE FROM memory_fts;",
+                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent;",
             )
             .map_err(|e| e.to_string())?;
         self.bump_index();
+        crate::triage::forget_cache();
         // The empty database already uses the new thread schema. A task saved before
         // the next restart must not be mistaken for an unmigrated legacy turn.
         self.set_preference("conversation-migration-v1", "1")?;
@@ -602,7 +605,11 @@ impl Store {
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
-            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');").map_err(|e| e.to_string())?;
+            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');
+            DELETE FROM nudges;").map_err(|e| e.to_string())?;
+        // Heads-ups name events, reminders and emails, so they go with the history. What
+        // was already said (hashed keys and send times, no text) stays, so none repeats.
+        crate::triage::forget_cache();
         // Earlier conversations and folder text leave the memory index with them.
         crate::memory_index::purge(&tx, "history", None)?;
         crate::memory_index::purge(&tx, "files", None)?;
@@ -1112,6 +1119,14 @@ mod tests {
                 created_at: now(),
                 ..Default::default()
             })
+            .unwrap();
+        // A heads-up names the event it is about.
+        store
+            .db
+            .execute(
+                "INSERT INTO nudges(id,data,created_at,expires_at,state) VALUES('n1',?1,?2,?2,'new')",
+                params![format!("{{\"title\":\"{secret}-meeting\"}}"), now()],
+            )
             .unwrap();
         let mut db = Connection::open(&path).unwrap();
         crate::memory_index::replace_source(

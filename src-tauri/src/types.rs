@@ -52,6 +52,9 @@ pub struct Settings {
     /// A short brief from today's calendar and reminders when you first open Buntini each day.
     /// Mirrors the built-in morning brief routine, which is what decides whether it runs.
     pub morning_brief: bool,
+    /// Heads-ups from local data: before a meeting, when reminders are past due and when
+    /// someone is waiting on a reply. Buntini decides when by fixed rules (`nudges`).
+    pub heads_ups: bool,
     /// Open Buntini when you log in, through macOS login items. Saved only as
     /// what macOS confirmed.
     pub open_at_login: bool,
@@ -119,6 +122,7 @@ impl Default for Settings {
             voice_rate: 180,
             notifications_enabled: false,
             morning_brief: false,
+            heads_ups: false,
             open_at_login: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,

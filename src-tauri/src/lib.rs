@@ -37,6 +37,7 @@ mod migration;
 mod model;
 mod monitor_actions;
 mod notifications;
+mod nudges;
 mod overlay;
 mod planning;
 mod pricing;
@@ -318,7 +319,11 @@ pub fn run() {
             mcp::add_tool_server_from_config,
             mcp::remove_tool_server,
             mcp::reconnect_tool_server,
-            mcp::set_tool_safe
+            mcp::set_tool_safe,
+            nudges::heads_ups,
+            nudges::open_heads_up,
+            nudges::dismiss_heads_up,
+            notifications::take_heads_up_request
         ])
         .build(app_context())
         .expect("Buntini could not start")

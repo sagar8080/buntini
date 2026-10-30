@@ -452,7 +452,28 @@ pub fn brief_line(triage: &Triage) -> Option<String> {
 pub async fn run(launch: crate::apps::Launch) -> Result<Triage, String> {
     let (headers, total) = crate::apps::unreplied_mail(DAYS, launch).await?;
     let openings = crate::apps::mail_openings(&candidates(&headers), launch).await?;
-    Ok(sort(headers, total, &openings))
+    let triage = sort(headers, total, &openings);
+    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage.clone()));
+    Ok(triage)
+}
+
+/// The last sort, kept in memory only, so heads-ups about people waiting on a reply
+/// reuse what the user (or an earlier check) already read instead of asking Mail again.
+static CACHE: std::sync::Mutex<Option<(std::time::Instant, Triage)>> = std::sync::Mutex::new(None);
+
+/// The last sort while it is younger than `fresh`, else a new one read with `launch`.
+pub async fn cached(launch: crate::apps::Launch, fresh: std::time::Duration) -> Result<Triage, String> {
+    if let Some((at, triage)) = CACHE.lock().unwrap().as_ref() {
+        if at.elapsed() < fresh {
+            return Ok(triage.clone());
+        }
+    }
+    run(launch).await
+}
+
+/// Erasing data or clearing history forgets the cached sort with it.
+pub fn forget_cache() {
+    *CACHE.lock().unwrap() = None;
 }
 
 #[cfg(test)]
@@ -650,6 +671,20 @@ mod tests {
         let triage = sort(vec![], 0, &HashMap::new());
         assert!(compose(&triage).starts_with("Nothing in your inbox from the last 7 days"));
         assert_eq!(brief_line(&triage), None);
+    }
+
+    #[tokio::test]
+    async fn the_cached_sort_is_reused_while_fresh_and_forgotten_on_erase() {
+        let triage = sort(vec![header("1", "Ana <ana@x.com>", Some(true), 1, true)], 1, &HashMap::new());
+        *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage.clone()));
+        let reused = cached(crate::apps::Launch::IfRunning, std::time::Duration::from_secs(60)).await.unwrap();
+        assert_eq!(reused, triage);
+        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        store.clear_history().unwrap();
+        assert!(CACHE.lock().unwrap().is_none(), "clearing history forgets the sort");
+        *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage));
+        store.erase_everything().unwrap();
+        assert!(CACHE.lock().unwrap().is_none(), "erasing forgets the sort");
     }
 
     #[test]
