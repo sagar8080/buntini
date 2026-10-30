@@ -4,18 +4,22 @@ import { appleStatus, cloudProviders } from './brain.ts';
 import { coats } from './petOptions.ts';
 import type { CatCoat, CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
-export type Step = 'hello' | 'brain' | 'online' | 'roam' | 'done';
-export const steps: Step[] = ['hello', 'brain', 'online', 'roam', 'done'];
+// Online lookups need no setup (browser research works without a key), so setup asks
+// only what Buntini can't decide for itself: names, a brain and whether it may roam.
+export type Step = 'hello' | 'brain' | 'roam' | 'done';
+export const steps: Step[] = ['hello', 'brain', 'roam', 'done'];
+/** The steps that ask something, for "1 of 3". */
+export const questions = steps.length - 1;
 
 export interface Answers {
   userName: string; assistantName: string; coat: CatCoat;
   backend: ModelBackend; pythonPath: string; modelPath: string;
-  cloudProvider: CloudProvider; cloudModel: string; cloudKey: string; cloudBudget: number;
-  searchProvider: 'brave' | 'tavily'; searchKey: string; freeTier: boolean; dailyLimit: number;
+  cloudProvider: CloudProvider; cloudKey: string;
   roam: boolean; awareness: boolean; nudges: boolean;
 }
 
-const searchNames = { brave: 'Brave Search', tavily: 'Tavily' };
+/** The cloud cap setup uses when none was saved; it can be changed in Settings → Brain. */
+export const defaultCloudBudget = 5;
 // Apple Intelligence can be turned on later in these cases; in the others it never runs here.
 const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady', 'checking', undefined];
 
@@ -25,8 +29,7 @@ export function initialAnswers(settings: Settings, diagnostics: Diagnostics): An
   return {
     userName: settings.userName, assistantName: settings.assistantName, coat: settings.catCoat,
     backend, pythonPath: settings.pythonPath, modelPath: settings.modelPath,
-    cloudProvider: settings.cloudProvider, cloudModel: settings.cloudModel, cloudKey: '', cloudBudget: settings.cloudBudgetUsd,
-    searchProvider: settings.searchProvider, searchKey: '', freeTier: settings.freeTierOnly, dailyLimit: settings.dailySearchLimit,
+    cloudProvider: settings.cloudProvider, cloudKey: '',
     roam: settings.petRoam, awareness: settings.petAwareness, nudges: settings.petNudges,
   };
 }
@@ -43,15 +46,13 @@ export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics):
   }
   if (step === 'brain') {
     if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return `${appleStatus(diagnostics.appleIntelligence).advice || 'Apple Intelligence can’t run here.'} Choose a local or cloud model instead.`;
-    if (answers.backend === 'mlx' && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Add the Python interpreter and the model folder for your local model.';
+    if (answers.backend === 'mlx' && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Choose the Python environment and the model folder for your local model, or pick another brain.';
     if (answers.backend === 'cloud' && answers.cloudProvider === 'chatgpt') {
       if (!diagnostics.chatgptAccount) return 'Sign in with ChatGPT, or choose another brain.';
     } else if (answers.backend === 'cloud') {
       if (!answers.cloudKey.trim() && !diagnostics.cloudKeys?.includes(answers.cloudProvider)) return 'Paste your API key, or choose another brain.';
-      if (!(answers.cloudBudget > 0)) return 'Set a monthly spending cap above $0.';
     }
   }
-  if (step === 'online' && !(Number.isInteger(answers.dailyLimit) && answers.dailyLimit >= 1 && answers.dailyLimit <= 2000)) return 'Choose a daily limit between 1 and 2,000.';
   return '';
 }
 
@@ -65,14 +66,13 @@ export function message(step: Step, answers: Answers, diagnostics: Diagnostics):
       const nudge = apple.ready ? 'Apple Intelligence is built into your Mac: private, quick and nothing to set up.' : `Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}), so a local or cloud model might suit you better.`;
       return `Nice to meet you${you ? `, ${you}` : ''}! Which brain should I think with? ${nudge}`;
     }
-    case 'online': return 'I search in the browser first and read relevant pages. You can add an optional Brave or Tavily key for fallback searches and saved searches, with a request limit. I ask you to approve online research before it starts.';
     case 'roam': return `Last one: may I wander around your screen and notice which apps you’re using? That stays on this Mac${answers.backend === 'cloud' ? ', and the cloud model only sees it if you allow it in Settings' : ''}. Hold the mic to talk to me any time.`;
-    case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything. I’ll remember our chat until you start a new topic.`;
+    case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything. I’ll remember our chat until you start a new topic, and I’ll ask before I look anything up online.`;
   }
 }
 
 /** The user's side of the conversation once a step is answered. */
-export function reply(step: Step, answers: Answers): string {
+export function reply(step: Step, answers: Answers, settings?: Pick<Settings, 'cloudBudgetUsd'>): string {
   switch (step) {
     case 'hello': {
       const coat = coats.find(item => item.id === answers.coat)?.label.toLowerCase() || 'cat';
@@ -83,13 +83,15 @@ export function reply(step: Step, answers: Answers): string {
       if (answers.backend === 'mlx') return 'Use my local MLX model.';
       const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
       if (provider.id === 'chatgpt') return 'Use ChatGPT with my own plan.';
-      return `Use ${provider.name} (${answers.cloudModel.trim() || provider.model}), up to $${answers.cloudBudget} a month.`;
+      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month.`;
     }
-    case 'online': return answers.searchKey.trim() ? `Use ${searchNames[answers.searchProvider]} as fallback, up to ${answers.dailyLimit} API requests a day.` : 'Use browser search without an API fallback for now.';
     case 'roam': return answers.roam ? `Roam around${answers.awareness ? ' and notice what I’m up to' : ''}.` : 'Stay put for now.';
     case 'done': return '';
   }
 }
+
+/** The monthly cloud cap: the one saved earlier, else a small default. */
+const cloudBudget = (settings?: Pick<Settings, 'cloudBudgetUsd'>) => settings && settings.cloudBudgetUsd > 0 ? settings.cloudBudgetUsd : defaultCloudBudget;
 
 export function applyAnswers(settings: Settings, answers: Answers): Settings {
   const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
@@ -98,10 +100,9 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
     ...settings,
     userName: answers.userName.trim(), assistantName: answers.assistantName.trim(), avatar: 'cat', catCoat: answers.coat,
     modelBackend: answers.backend, pythonPath: answers.pythonPath.trim(), modelPath: answers.modelPath.trim(),
-    cloudProvider: answers.cloudProvider, cloudModel: answers.cloudModel.trim(), cloudBudgetUsd: answers.cloudBudget,
-    // A new provider starts from its own suggested prices.
+    // A new provider starts on its suggested model and list prices; the cap carries over.
+    cloudProvider: answers.cloudProvider, cloudModel: sameProvider ? settings.cloudModel : '', cloudBudgetUsd: cloudBudget(settings),
     cloudInputPrice: sameProvider ? settings.cloudInputPrice : provider.input, cloudOutputPrice: sameProvider ? settings.cloudOutputPrice : provider.output,
-    searchProvider: answers.searchProvider, freeTierOnly: answers.freeTier, dailySearchLimit: answers.dailyLimit,
     petRoam: answers.roam, petAwareness: answers.awareness, petNudges: answers.awareness && answers.nudges,
   };
 }
@@ -125,6 +126,5 @@ export function shortcutNeeds(shortcut: Shortcut, allowed: string[]): { apps: st
 export function keysToSave(answers: Answers): [KeyProvider, string][] {
   const keys: [KeyProvider, string][] = [];
   if (answers.backend === 'cloud' && answers.cloudProvider !== 'chatgpt' && answers.cloudKey.trim()) keys.push([answers.cloudProvider, answers.cloudKey.trim()]);
-  if (answers.searchKey.trim()) keys.push([answers.searchProvider, answers.searchKey.trim()]);
   return keys;
 }

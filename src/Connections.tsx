@@ -20,7 +20,7 @@ function KeyField({ label, placeholder, secret = true, value, onChange }: { labe
   return <div className="key-input"><KeyRound size={14} /><input type={secret ? 'password' : 'text'} autoComplete="off" spellCheck={false} aria-label={label} placeholder={placeholder} value={value} onChange={event => onChange(event.target.value)} /></div>;
 }
 
-/** The Connections tab: web search, eBay and flights, and lookup usage. */
+/** The Connections tab: web search, eBay and flights. Search usage shows once a key is in. */
 export default function Connections({ draft, update, diagnostics, onKey, onError }: Props) {
   const [searchKey, setSearchKey] = useState('');
   const [clientId, setClientId] = useState('');
@@ -43,6 +43,7 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
         <p className="field-help">Chat research searches in the browser first. This optional key is used when browser research is insufficient, and for saved searches.</p>
         <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved · paste to replace' : 'API key'} value={searchKey} onChange={setSearchKey} />
         {actions(draft.searchProvider, !!searchKey.trim(), searchKey.trim(), () => setSearchKey(''), searchSaved)}
+        {searchSaved && <SearchBudget draft={draft} update={update} diagnostics={diagnostics} />}
       </Service>
       <Service icon={<ShoppingBag size={18} />} name="eBay" detail="Listings and prices" connected={!!diagnostics.ebayConfigured}>
         <KeyField label="eBay client ID" secret={false} placeholder="Client ID (App ID)" value={clientId} onChange={setClientId} />
@@ -55,10 +56,6 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
         {actions('duffel', !!token.trim(), token.trim(), () => setToken(''), !!diagnostics.duffelConfigured)}
       </Service>
       <p className="field-help">Weather, exchange rates, Wikipedia and places work without a key. Buntini asks before every request.</p>
-    </section>
-    <section className="settings-section">
-      <div className="settings-section-heading"><h3>Usage</h3></div>
-      <SearchBudget draft={draft} update={update} diagnostics={diagnostics} />
     </section>
   </>;
 }

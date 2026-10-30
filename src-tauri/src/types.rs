@@ -56,6 +56,8 @@ pub struct Settings {
     /// what macOS confirmed.
     pub open_at_login: bool,
     pub monthly_budget_usd: f64,
+    /// No longer asked for: the price comes from `budget::PRESETS`. Kept so settings saved
+    /// by earlier versions still load.
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
     pub ebay_marketplace: String,
@@ -64,7 +66,8 @@ pub struct Settings {
     /// Apps the user allowed Buntini to use (ids from `apps::APPS`). None until they choose.
     pub apps: Vec<String>,
     /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
-    /// prices per million tokens used to estimate spending.
+    /// prices per million tokens. Prices are only read for a model an earlier version let
+    /// the person name; the suggested model uses `cloud::PROVIDERS` (see `cloud_prices`).
     pub cloud_provider: String,
     pub cloud_model: String,
     pub cloud_budget_usd: f64,
@@ -141,6 +144,20 @@ const CAT_ACCESSORIES: [&str; 6] = ["none", "bell", "bow", "bandana", "hat", "fl
 const PET_MOTIONS: [&str; 3] = ["calm", "playful", "sleepy"];
 
 impl Settings {
+    /// Prices per million tokens for estimating cloud spending. The suggested model is priced
+    /// from the built-in table; a model named in an earlier version keeps the prices typed for it.
+    pub fn cloud_prices(&self) -> (f64, f64) {
+        match crate::cloud::provider(&self.cloud_provider) {
+            Some(provider)
+                if self.cloud_model.trim().is_empty()
+                    || self.cloud_model.trim() == provider.model =>
+            {
+                (provider.input_per_m, provider.output_per_m)
+            }
+            _ => (self.cloud_input_price, self.cloud_output_price),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.assistant_name.trim().is_empty()
             || self.assistant_name.chars().count() > 40
@@ -687,5 +704,28 @@ mod appearance_tests {
         ] {
             assert!(broken.validate().is_err());
         }
+    }
+
+    #[test]
+    fn the_suggested_cloud_model_is_priced_from_the_built_in_table() {
+        // Prices an earlier version stored for the suggested model give way to the table.
+        let settings = Settings {
+            cloud_provider: "openai".into(),
+            cloud_input_price: 99.0,
+            cloud_output_price: 99.0,
+            ..Settings::default()
+        };
+        assert_eq!(settings.cloud_prices(), (0.25, 2.0));
+        let named = Settings {
+            cloud_model: "gpt-5-mini".into(),
+            ..settings.clone()
+        };
+        assert_eq!(named.cloud_prices(), (0.25, 2.0));
+        // A model named in an earlier version keeps the prices typed for it.
+        let custom = Settings {
+            cloud_model: "gpt-5".into(),
+            ..settings
+        };
+        assert_eq!(custom.cloud_prices(), (99.0, 99.0));
     }
 }

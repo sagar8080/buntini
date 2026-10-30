@@ -709,13 +709,13 @@ impl Store {
         let transaction = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         let usage = self.usage(provider)?;
         if usage.today >= limits.daily {
-            return Err(format!("Today’s limit of {} online lookups is used up. It resets at midnight, or you can raise it in Settings.", limits.daily));
+            return Err(format!("Today’s limit of {} online lookups is used up. It resets at midnight.", limits.daily));
         }
         if usage.month >= limits.monthly {
-            return Err(format!("This month’s limit of {} lookups for this service is used up. Review the limits in Settings to search again.", limits.monthly));
+            return Err(format!("This month’s limit of {} lookups for this service is used up. It resets next month.", limits.monthly));
         }
         if usage.spend + limits.unit_cost > limits.budget_usd + 0.000000001 {
-            return Err(format!("This month’s estimated {} budget of ${:.2} is used up. Review the limits in Settings, or wait for next month.", crate::budget::display_name(provider), limits.budget_usd));
+            return Err(format!("This month’s estimated {} budget of ${:.2} is used up. You can raise it in Settings, or wait for next month.", crate::budget::display_name(provider), limits.budget_usd));
         }
         transaction
             .execute(

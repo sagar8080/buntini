@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import LocalModel from './LocalModel';
 import IntelligenceMark from './IntelligenceMark';
 import Pet from './Pet';
 import { palettes } from './Cat';
 import { appleStatus, cloudProviders } from './brain.ts';
 import { coats, lookFrom } from './petOptions';
-import { applyAnswers, blocker, initialAnswers, keysToSave, message, next, previous, reply, steps, type Answers, type Step } from './setupSteps';
+import { applyAnswers, blocker, defaultCloudBudget, initialAnswers, keysToSave, message, next, previous, questions, reply, steps, type Answers, type Step } from './setupSteps';
 import { errorMessage } from './bridge';
 import { stillMotion } from './themes.ts';
 import ChatGPTAccount from './ChatGPTAccount';
@@ -36,7 +37,7 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
     const problem = blocker(step, answers, data.diagnostics);
     if (problem) { setError(problem); return; }
     if (step !== 'done') {
-      setSaid(previous => [...previous, { step, buntini: message(step, answers, data.diagnostics), you: reply(step, answers) }]);
+      setSaid(previous => [...previous, { step, buntini: message(step, answers, data.diagnostics), you: reply(step, answers, data.settings) }]);
       setStep(next(step));
       return;
     }
@@ -54,18 +55,16 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
     <div className="bubble bubble-buntini"><div className="answer-text">{text}</div>{children}</div>
   </div>;
   const index = steps.indexOf(step);
-  const skipOnline = step === 'online' && !answers.searchKey.trim();
 
   return <>
     <div className="conversation" ref={scroller}>
       <div className="thread setup-thread">
-        <div className="setup-progress"><span>Getting to know you · {Math.min(index + 1, 4)} of 4</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>Skip setup</button></div>
+        <div className="setup-progress"><span>Getting to know you · {Math.min(index + 1, questions)} of {questions}</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>Skip setup</button></div>
         {said.map(item => <div className="turn" key={item.step}>{bubble(item.buntini, `${item.step}-b`)}<div className="bubble-row is-you"><div className="bubble bubble-you">{item.you}</div></div></div>)}
         {typing ? <div className="bubble-row is-buntini"><span className="bubble-avatar"><Pet state="thinking" avatar="cat" look={look} /></span><div className="bubble bubble-buntini"><div className="typing" role="status" aria-label="Typing"><i /><i /><i /></div></div></div>
           : bubble(message(step, answers, data.diagnostics), step, step !== 'done' && <form className="setup-card" onSubmit={event => { event.preventDefault(); void advance(); }}>
             {step === 'hello' && <Hello answers={answers} set={set} />}
             {step === 'brain' && <Brain answers={answers} set={set} data={data} onRefresh={onRefresh} onError={setError} />}
-            {step === 'online' && <Online answers={answers} set={set} />}
             {step === 'roam' && <Roam answers={answers} set={set} />}
             <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
           </form>)}
@@ -78,7 +77,7 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
         <button type="button" className="text-button" onClick={back} disabled={index === 0 || saving}><ArrowLeft size={12} /> Back</button>
         <button type="button" className="primary-button" onClick={() => void advance()} disabled={saving || typing}>
           {saving ? <LoaderCircle size={13} className="spin" /> : step === 'done' ? <Check size={13} /> : null}
-          {saving ? 'Saving…' : step === 'done' ? (error ? 'Try again' : 'Start chatting') : skipOnline ? 'Skip for now' : 'Continue'}
+          {saving ? 'Saving…' : step === 'done' ? (error ? 'Try again' : 'Start chatting') : 'Continue'}
           {!saving && step !== 'done' && <ArrowRight size={13} />}
         </button>
       </div>
@@ -106,38 +105,29 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
   const apple = appleStatus(data.diagnostics.appleIntelligence);
   const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
   const saved = !!data.diagnostics.cloudKeys?.includes(provider.id);
+  const cap = data.settings.cloudBudgetUsd > 0 ? data.settings.cloudBudgetUsd : defaultCloudBudget;
+  // The same local setup as Settings → Brain, reading and writing the answers instead.
+  const local = { ...data.settings, pythonPath: answers.pythonPath, modelPath: answers.modelPath };
+  const updateLocal = <K extends keyof Settings>(key: K, value: Settings[K]) => { if (key === 'pythonPath' || key === 'modelPath') set(key, value as string); };
+  const providers = <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>;
   const option = (id: Answers['backend'], icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={answers.backend === id} className={answers.backend === id ? 'active' : ''} onClick={() => set('backend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
   return <>
     <div className="brain-options" role="radiogroup" aria-label="Brain">
       {option('apple', <IntelligenceMark size={16} />, 'Apple Intelligence', 'Built in · private · fast', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
-      {option('mlx', <Cpu size={16} />, 'Local model', 'Your own MLX model folder · bigger, slower, private')}
+      {option('mlx', <Cpu size={16} />, 'Local model', 'Qwen or Gemma on this Mac · bigger, slower, private')}
       {option('cloud', <Cloud size={16} />, 'Cloud model', 'Anthropic, OpenAI or Gemini · your key, your cap')}
     </div>
     {answers.backend === 'apple' && apple.advice && <div className="field-help">{apple.advice}</div>}
-    {answers.backend === 'mlx' && <>
-      <label>Python interpreter<input value={answers.pythonPath} onChange={event => set('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
-      <label>Model folder<input value={answers.modelPath} onChange={event => set('modelPath', event.target.value)} placeholder="/path/to/local/model" spellCheck={false} /></label>
-    </>}
+    {answers.backend === 'mlx' && <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} />}
     {answers.backend === 'cloud' && provider.id === 'chatgpt' && <>
-      <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudModel', ''); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <ChatGPTAccount account={data.diagnostics.chatgptAccount} model="" onChange={onRefresh} onError={onError} />
+      {providers}
+      <ChatGPTAccount account={data.diagnostics.chatgptAccount} onChange={onRefresh} onError={onError} />
     </>}
     {answers.backend === 'cloud' && provider.id !== 'chatgpt' && <>
-      <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudModel', ''); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      {providers}
       <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `Paste your ${provider.name} key`} aria-label={`${provider.name} API key`} /></div></label>
-      <label className="inline-field"><span>Monthly spending cap<small>I stop using {provider.name} when it’s reached</small></span><input aria-label="Monthly cloud spending cap in USD" type="number" min="0" max="10000" step="0.5" value={answers.cloudBudget} onChange={event => set('cloudBudget', Number(event.target.value))} /></label>
-      <div className="field-help">I’ll use {provider.model}; you can change the model, prices and what it may see in Settings.</div>
+      <div className="field-help">I stop using {provider.name} once about ${cap} is spent in a month. You can change that, and what it may see, in Settings.</div>
     </>}
-  </>;
-}
-
-function Online({ answers, set }: StepProps) {
-  return <>
-    <label>Fallback search provider<select value={answers.searchProvider} onChange={event => { set('searchProvider', event.target.value as Answers['searchProvider']); set('searchKey', ''); }}><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></label>
-    <label><span className="setup-label">API key <span className="label-status">Optional</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.searchKey} onChange={event => set('searchKey', event.target.value)} placeholder="Paste your key, or skip" aria-label="Search API key" /></div></label>
-    <div className="field-help">Get one at {answers.searchProvider === 'brave' ? 'brave.com/search/api' : 'app.tavily.com'}. It stays in your Mac’s Keychain.</div>
-    <label className="notification-choice"><input type="checkbox" checked={answers.freeTier} onChange={event => set('freeTier', event.target.checked)} />Stay within the free allowance</label>
-    <label className="inline-field"><span>Daily lookup limit<small>Keeps one busy afternoon from using the month</small></span><input aria-label="Daily lookup limit" type="number" min="1" max="2000" value={answers.dailyLimit} onChange={event => set('dailyLimit', Number(event.target.value))} /></label>
   </>;
 }
 

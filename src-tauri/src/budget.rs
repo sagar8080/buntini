@@ -2,24 +2,30 @@
 //! held to. Every request is reserved before it is sent (see `Store::reserve`).
 use crate::types::Settings;
 
-/// Free allowances as published in October 2026 (prices after that: Brave $0.005,
-/// Tavily $0.008 per search). Providers change these, so Settings says to check.
+/// Free allowances and the price of each search past them, as published in October 2026.
+/// Spending is estimated from this table, so nobody has to look up or type a price.
 pub struct Preset {
     pub provider: &'static str,
     pub free_monthly: u32,
+    pub cost_per_search: f64,
 }
 pub const PRESETS: [Preset; 2] = [
     // $5 per 1,000 requests with a $5 monthly credit (a card is required).
     Preset {
         provider: "brave",
         free_monthly: 1000,
+        cost_per_search: 0.005,
     },
     // 1,000 free credits a month; a basic search costs one credit, then $0.008.
     Preset {
         provider: "tavily",
         free_monthly: 1000,
+        cost_per_search: 0.008,
     },
 ];
+
+/// The most lookups one month may hold, whatever the budget would buy.
+const MAX_MONTHLY: u32 = 10_000;
 
 pub fn preset(provider: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|preset| preset.provider == provider)
@@ -34,7 +40,8 @@ pub struct Limits {
 }
 
 /// Limits for the web search provider. Free-tier mode stays inside the provider's free
-/// allowance and never estimates any spend.
+/// allowance and never estimates any spend. Past it, the monthly budget is the one cap the
+/// person sets: the count is what that budget buys at the table price.
 pub fn search_limits(settings: &Settings) -> Limits {
     let daily = settings.daily_search_limit;
     match (settings.free_tier_only, preset(&settings.search_provider)) {
@@ -44,11 +51,20 @@ pub fn search_limits(settings: &Settings) -> Limits {
             budget_usd: 0.0,
             unit_cost: 0.0,
         },
-        _ => Limits {
+        (_, Some(preset)) => Limits {
             daily,
-            monthly: settings.monthly_search_limit,
+            monthly: (settings.monthly_budget_usd / preset.cost_per_search + 1e-9)
+                .floor()
+                .min(MAX_MONTHLY as f64) as u32,
             budget_usd: settings.monthly_budget_usd,
-            unit_cost: settings.cost_per_search_usd,
+            unit_cost: preset.cost_per_search,
+        },
+        // Settings only allow providers in the table; anything else gets no lookups.
+        (_, None) => Limits {
+            daily,
+            monthly: 0,
+            budget_usd: 0.0,
+            unit_cost: 0.0,
         },
     }
 }
@@ -131,18 +147,38 @@ mod tests {
         assert_eq!(
             search_limits(&settings).monthly,
             200,
-            "a lower personal cap still wins"
+            "a lower cap saved by an earlier version still wins"
         );
-        settings.free_tier_only = false;
+    }
+
+    #[test]
+    fn past_the_free_allowance_the_table_price_and_the_budget_set_the_limits() {
+        let mut settings = Settings {
+            search_provider: "tavily".into(),
+            free_tier_only: false,
+            monthly_search_limit: 200,
+            monthly_budget_usd: 50.0,
+            // A price typed into an earlier version no longer counts.
+            cost_per_search_usd: 3.0,
+            ..Settings::default()
+        };
         assert_eq!(
             search_limits(&settings),
             Limits {
                 daily: 30,
-                monthly: 200,
+                monthly: 6250,
                 budget_usd: 50.0,
-                unit_cost: settings.cost_per_search_usd
+                unit_cost: 0.008
             }
         );
+        settings.search_provider = "brave".into();
+        settings.monthly_budget_usd = 5.0;
+        assert_eq!(search_limits(&settings).monthly, 1000);
+        assert_eq!(search_limits(&settings).unit_cost, 0.005);
+        settings.monthly_budget_usd = 500.0;
+        assert_eq!(search_limits(&settings).monthly, MAX_MONTHLY);
+        settings.monthly_budget_usd = 0.0;
+        assert_eq!(search_limits(&settings).monthly, 0, "no budget, no paid lookups");
     }
 
     #[test]
