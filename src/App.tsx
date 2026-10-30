@@ -25,10 +25,12 @@ import { appearance, idleStatus, panelScale, stillMotion } from './themes.ts';
 import { greeting, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
+import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
+type VoicePayload = { session: number; text?: string; level?: number };
 const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
   { id: 'auto', name: 'Ask anything', icon: Sparkles, placeholder: 'What can I help you with?' },
   { id: 'files', name: 'My files', icon: Folder, placeholder: 'Find a file or a phrase…' },
@@ -110,6 +112,15 @@ export default function App() {
     const id = window.setInterval(() => setListenSeconds(Math.floor((Date.now() - started) / 1000)), 250);
     return () => window.clearInterval(id);
   }, [recording]);
+  // Hands-free voice: a tap listens until you pause. When the answer is spoken, Buntini
+  // listens again (a conversation) until you say “that’s all”, press Esc or stay quiet.
+  const conversation = useRef(false);
+  const endpointer = useRef<Endpointer | null>(null);
+  const followUpTurn = useRef(false);
+  const voiceSession = useRef(0);
+  const liveWords = useRef(false);
+  const [heard, setHeard] = useState('');
+  const voiceHooks = useRef({ finish: () => {}, timeout: () => {}, event: (_name: string, _payload: VoicePayload) => {}, afterAnswer: (_aloud: boolean) => {} });
   const voiceVersion = useRef(0);
   const voiceStoppingRef = useRef(false);
   const taskBusy = useRef(false);
@@ -119,7 +130,7 @@ export default function App() {
   if (!speechQueue.current) speechQueue.current = new SpeechQueue({
     play: text => playbackOverride.current ? command('preview_voice', { ...playbackOverride.current, text }) : command('speak', { text }),
     stop: () => command('stop_speaking'),
-    onActive: active => { speechActive.current = active; setSpeaking(active); setPetState(active ? 'speaking' : taskBusy.current ? 'thinking' : 'idle'); },
+    onActive: active => { speechActive.current = active; setSpeaking(active); endpointer.current?.setSpeaking(active, Date.now()); setPetState(active ? 'speaking' : recordHeld.current ? 'listening' : taskBusy.current ? 'thinking' : 'idle'); },
     onError: error => setError(errorMessage(error)),
   });
   const resizeQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -279,7 +290,7 @@ export default function App() {
         if (approval && !approving) { cancelOnlineApproval(); }
         else if (proposal && !acting) { void command('cancel_action', { id: proposal.id }).then(() => refresh()).catch(e => setError(errorMessage(e))); setProposal(null); setPetState('idle'); }
         else if (recordHeld.current || recording || transcribing) { void cancelVoice(); }
-        else if (speaking) { void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
+        else if (speaking) { conversation.current = false; void speechQueue.current?.cancel().catch(error => setError(errorMessage(error))); }
         // Esc closes the companion menu first, not the whole panel.
         else if (menu) setMenu(false);
         else if (page !== 'home') setPage('home');
@@ -350,7 +361,7 @@ export default function App() {
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
-    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false, streamError = '';
+    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false, streamError = '', answeredAloud = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
@@ -380,6 +391,7 @@ export default function App() {
       if (result.state === 'completed') setAnnouncement(`${data?.settings.assistantName || 'Buntini'}: ${result.answer.slice(0, 400)}`);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
+        answeredAloud = true;
         speechQueue.current?.completeAnswer(speechToken, result.answer, streamedText);
       } else await speechQueue.current?.cancel();
       // Refreshing diagnostics cannot turn an authoritative completed task into
@@ -396,6 +408,8 @@ export default function App() {
       // The model wants to look this up online: show the approval sheet for the same message.
       if (goOnline) void planOnline(prompt.trim(), false, goOnline);
       if (askAction) setPetState('approval');
+      // In a voice conversation, a spoken answer is followed by listening again.
+      if (spoken) voiceHooks.current.afterAnswer(answeredAloud && !goOnline && !askAction);
     }
   }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
   function cancelOnlineApproval() {
@@ -485,49 +499,122 @@ export default function App() {
     }).catch(error => setError(errorMessage(error))) : Promise.resolve();
     await Promise.all([stopTask, speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))]);
   }
-  async function startVoice() {
-    if (taskBusy.current || planningBusy.current || actionBusy.current || approvalBusy.current || transcribing || recordHeld.current || voiceStoppingRef.current) return;
+  // `followUp`: Buntini just answered out loud in a voice conversation and listens again.
+  // With live words the microphone opens while the reply plays, so you can talk over it.
+  async function startVoice(followUp = false) {
+    if (taskBusy.current || planningBusy.current || actionBusy.current || approvalBusy.current || sheetWaiting.current || transcribing || recordHeld.current || voiceStoppingRef.current) return;
     // Recording checks that voice is available: Apple speech, or a local Whisper model.
-    setHandsFreeMode(false);
-    playbackOverride.current = null;
-    void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)));
+    setHandsFreeMode(followUp);
+    followUpTurn.current = followUp;
+    if (!followUp) {
+      conversation.current = false;
+      playbackOverride.current = null;
+      void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)));
+    }
     const version = ++voiceVersion.current;
-    recordHeld.current = true; setError('');
-    setRecording(true); setPetState('listening');
+    recordHeld.current = true; setError(''); setHeard('');
+    const turn = new Endpointer();
+    turn.setSpeaking(speechActive.current, Date.now());
+    endpointer.current = turn;
+    setRecording(true); setPetState(speechActive.current ? 'speaking' : 'listening');
     recordPromise.current = (async () => {
-      try { await command('start_recording'); if (version !== voiceVersion.current) await command('cancel_recording'); }
-      catch (e) { if (version === voiceVersion.current) { recordHeld.current = false; setRecording(false); setError(errorMessage(e)); setPetState('idle'); } throw e; }
+      try {
+        const started = await command<Listening | undefined>('start_recording', { bargeIn: followUp });
+        if (version !== voiceVersion.current) { await command('cancel_recording'); return; }
+        voiceSession.current = started?.session ?? 0;
+        liveWords.current = !!started?.live;
+        turn.begin(liveWords.current, Date.now());
+      }
+      catch (e) { if (version === voiceVersion.current) { recordHeld.current = false; conversation.current = false; endpointer.current = null; setRecording(false); setError(errorMessage(e)); setPetState('idle'); } throw e; }
     })();
     try { await recordPromise.current; } catch { /* Error is shown above. */ }
   }
   async function finishVoice() {
     if (!recordHeld.current) return;
     const version = voiceVersion.current;
-    recordHeld.current = false; setHandsFreeMode(false);
+    recordHeld.current = false; setHandsFreeMode(false); endpointer.current = null;
     try { await recordPromise.current; } catch { return; }
     if (version !== voiceVersion.current) return;
     setRecording(false); setTranscribing(true); setPetState('thinking');
+    // Whatever is left of a reply the user talked over stops: it is their turn now.
+    if (speechActive.current) void speechQueue.current?.cancel().catch(() => {});
     let heard = '';
     try {
       const text = await command<string>('stop_recording');
       if (version !== voiceVersion.current) return;
       heard = text.trim();
       setPage('home');
-      if (!heard) setNotice('I didn’t catch any words. Try again a little closer to the mic.');
+      // Saying nothing after an answer just ends the conversation.
+      if (!heard && !followUpTurn.current) setNotice('I didn’t catch any words. Try again a little closer to the mic.');
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
-    finally { if (version === voiceVersion.current) { setTranscribing(false); if (!heard) setPetState('idle'); recordPromise.current = null; } }
+    finally { if (version === voiceVersion.current) { setTranscribing(false); setHeard(''); if (!heard) setPetState('idle'); recordPromise.current = null; } }
+    if (version !== voiceVersion.current) return;
+    if (!heard) { conversation.current = false; return; }
+    if (conversation.current && isConversationEnd(heard)) {
+      conversation.current = false; setPetState('idle'); setNotice('Okay. Tap the mic when you need me.');
+      return;
+    }
     // What was heard is sent right away and answered out loud, as with any voice assistant.
-    if (heard && version === voiceVersion.current) void submitRef.current(heard, undefined, undefined, true);
+    void submitRef.current(heard, undefined, undefined, true);
   }
   async function cancelVoice() {
     if (voiceStoppingRef.current) return;
     voiceStoppingRef.current = true; setVoiceStopping(true);
     const pendingStart = recordPromise.current;
     const version = ++voiceVersion.current;
-    recordHeld.current = false; setHandsFreeMode(false); setRecording(false); setTranscribing(false); setPetState('idle');
+    // Leaving voice leaves the whole conversation, including a reply still playing.
+    conversation.current = false; endpointer.current = null;
+    if (speechActive.current) void speechQueue.current?.cancel().catch(() => {});
+    recordHeld.current = false; setHandsFreeMode(false); setRecording(false); setTranscribing(false); setHeard(''); setPetState('idle');
     try { await command('cancel_recording'); } catch (e) { setError(errorMessage(e)); }
     finally { await pendingStart?.catch(() => {}); if (version === voiceVersion.current) { recordPromise.current = null; voiceStoppingRef.current = false; setVoiceStopping(false); } }
   }
+  // Voice events and timers reach the latest render's handlers through this ref.
+  voiceHooks.current = {
+    finish: () => { void finishVoice(); },
+    timeout: () => {
+      const firstTurn = !followUpTurn.current;
+      void cancelVoice();
+      if (firstTurn) setNotice('I didn’t hear anything, so I stopped listening.');
+    },
+    event: (name, payload) => {
+      if (!recordHeld.current || payload.session !== voiceSession.current) return;
+      const now = Date.now();
+      if (name === 'voice-partial') {
+        const text = payload.text ?? '';
+        setHeard(text);
+        endpointer.current?.text(text, now);
+        // Talking over the reply stops it; Buntini's own echo never gets here.
+        if (speechActive.current && shouldBargeIn(text)) { void speechQueue.current?.cancel().catch(() => {}); setPetState('listening'); }
+      } else if (name === 'voice-level') endpointer.current?.level(payload.level ?? 0, now);
+      // The microphone closed on its own (time limit or a problem): collect what it has.
+      else if (name === 'voice-ended') void finishVoice();
+    },
+    afterAnswer: aloud => {
+      // Only keep listening while you are still here with the panel in front of you.
+      if (!conversation.current || !aloud || !mounted.current || document.hidden || !document.hasFocus()) { conversation.current = false; return; }
+      if (liveWords.current) { void startVoice(true); return; }
+      // Without live words Buntini can't tell its own voice from yours, so it waits.
+      void speechQueue.current?.settled().then(() => { if (conversation.current && !recordHeld.current) void startVoice(true); });
+    },
+  };
+  useEffect(() => {
+    if (!desktop) return;
+    const subscriptions = ['voice-partial', 'voice-level', 'voice-ended'].map(name => listen<VoicePayload>(name, event => voiceHooks.current.event(name, event.payload)));
+    return () => { for (const pending of subscriptions) void pending.then(unlisten => unlisten()); };
+  }, []);
+  // A tap (not a hold) ends the turn by itself when you pause, or gives up when you say nothing.
+  useEffect(() => {
+    if (!recording) return;
+    const id = window.setInterval(() => {
+      const turn = endpointer.current;
+      if (!turn || !handsFreeRef.current || !recordHeld.current || voiceStoppingRef.current) return;
+      const decision = turn.check(Date.now());
+      if (decision === 'endpoint' || decision === 'limit') voiceHooks.current.finish();
+      else if (decision === 'timeout') voiceHooks.current.timeout();
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [recording]);
   async function finishSetup(settings: Settings, keys: [KeyProvider, string][]) {
     // An edit from before setup must not land on top of the choices just made.
     saver.current!.discard();
@@ -669,7 +756,7 @@ export default function App() {
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
           <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span>{assistantName}<span className="brand-dot">.</span></span></button>
-          <span className="header-status"><span className={`status-dot ${busy ? 'pulsing' : ''}`} />{recording ? 'Listening' : busy ? 'On it' : speaking ? 'Speaking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span>
+          <span className="header-status"><span className={`status-dot ${busy ? 'pulsing' : ''}`} />{recording && !speaking ? 'Listening' : busy ? 'On it' : speaking ? 'Speaking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span>
           <div className="header-actions">
             <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title="Task history" aria-label="Task history" onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
             <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title="Settings" aria-label="Settings" onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>
@@ -694,10 +781,10 @@ export default function App() {
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
-              <textarea ref={inputRef} rows={2} value={input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'Listening…' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? 'Tap the mic to send' : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
+              <textarea ref={inputRef} rows={2} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? 'Listening…' : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : <><ShieldCheck size={11} />{mode === 'web' ? 'Asks before anything is sent online' : data?.settings.modelBackend === 'cloud' ? 'Cloud model · sees only what you share' : 'Local by default'}</>}</span><div>
                 {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label="Cancel voice input" title="Cancel (Esc)" onClick={() => void cancelVoice()}><X size={15} /></button>}
-                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree ? 'Tap to send' : 'Let go to send') : 'Tap or hold to talk'} aria-label={recording ? 'Send what you said' : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
+                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree ? (speaking ? 'Tap to interrupt' : 'Tap to send now') : 'Let go to send') : 'Tap or hold to talk'} aria-label={recording ? 'Send what you said' : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>

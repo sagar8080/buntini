@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>NSMicrophoneUsageDescription</key><string>Buntini uses your microphone only while you hold push to talk. Audio is transcribed locally.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Buntini listens only after you press the mic, and during a voice conversation you start. Your voice is turned into words on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key><string>Buntini uses only the apps you allow in Settings → Apps: it reads them on this Mac, and adds or drafts things only after you approve each one.</string>
   <key>NSCalendarsFullAccessUsageDescription</key><string>Buntini shows your events when you ask and in your morning brief, only after you allow Calendar in Settings → Apps.</string>
   <key>NSCalendarsUsageDescription</key><string>Buntini shows your events when you ask and in your morning brief, only after you allow Calendar in Settings → Apps.</string>

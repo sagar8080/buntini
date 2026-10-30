@@ -189,3 +189,33 @@ test('800-character hard wrapping preserves Unicode surrogate pairs', async () =
   assert.equal(played.join(''), text);
   assert.ok(played.every(chunk => chunk.length <= 800 && !/[\uD800-\uDBFF]$/.test(chunk) && !/^[\uDC00-\uDFFF]/.test(chunk)));
 });
+
+test('settled waits for queued speech to finish, and for a cancelled reply to stop', async () => {
+  const flights: ReturnType<typeof deferred>[] = [];
+  const speech = new SpeechQueue({
+    play() { const flight = deferred(); flights.push(flight); return flight.promise; },
+    async stop() { flights.at(-1)?.resolve(); },
+    onActive() {},
+  });
+  let quiet = false;
+  await speech.settled();
+  const token = speech.begin();
+  speech.append('First sentence. Second sentence.', token);
+  speech.finish(token);
+  void speech.settled().then(() => { quiet = true; });
+  await tick();
+  flights[0].resolve();
+  await tick();
+  assert.equal(quiet, false, 'the second sentence is still playing');
+  flights[1].resolve();
+  await tick();
+  assert.equal(quiet, true);
+  quiet = false;
+  const next = speech.begin();
+  speech.append('A long reply that gets interrupted.', next);
+  void speech.settled().then(() => { quiet = true; });
+  await tick();
+  await speech.cancel();
+  await tick();
+  assert.equal(quiet, true);
+});
