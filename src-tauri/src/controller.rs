@@ -28,6 +28,8 @@ pub struct AppState {
     /// Counts Delete everything runs, so a settings save queued behind one never writes
     /// the erased settings back.
     pub erasures: std::sync::atomic::AtomicU64,
+    /// Ids stopped before their work had started (a morning brief's Stop can arrive first).
+    pub stopped_early: Mutex<std::collections::HashSet<String>>,
 }
 pub struct PendingAction {
     tool: String,
@@ -186,6 +188,7 @@ impl AppState {
             pending_actions: Mutex::new(HashMap::new()),
             index_cancel: Arc::new(AtomicBool::new(false)),
             erasures: std::sync::atomic::AtomicU64::new(0),
+            stopped_early: Mutex::new(std::collections::HashSet::new()),
         })
     }
     pub(crate) fn audit(&self, action: &str, detail: &str) {
@@ -492,8 +495,16 @@ pub fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
 }
 #[tauri::command]
 pub fn cancel_task(task_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(cancel) = state.active.lock().unwrap().get(&task_id) {
+    let running = state.active.lock().unwrap().get(&task_id).cloned();
+    if let Some(cancel) = running {
         cancel.store(true, Ordering::Relaxed);
+    } else if state.store.lock().unwrap().workflow(&task_id)?.is_none() {
+        // Stop can reach Buntini before the brief it stops has started; remember it.
+        let mut early = state.stopped_early.lock().unwrap();
+        if early.len() >= 20 {
+            early.clear();
+        }
+        early.insert(task_id.clone());
     }
     cancel_workflow(&state, &task_id)?;
     state.audit("task.cancelled", &task_id);
@@ -1433,6 +1444,10 @@ pub async fn morning_brief(
         if !active.is_empty() {
             return Err("Finish the current task before preparing the brief.".into());
         }
+        // Stop pressed before this brief had started: it doesn't start.
+        if state.stopped_early.lock().unwrap().remove(&id) {
+            return Err("Morning brief cancelled.".into());
+        }
         let settings = state.store.lock().unwrap().settings()?;
         active.insert(id.clone(), cancel.clone());
         settings
@@ -1441,7 +1456,17 @@ pub async fn morning_brief(
         state: &state,
         id: id.clone(),
     };
-    let day = crate::brief::gather(state.models.apple_helper(), &settings, launch).await;
+    // Stop ends the reads themselves (their helper processes are killed when dropped),
+    // rather than letting Mail, Calendar and Reminders run on and discarding the result.
+    let stopped = async {
+        while !cancel.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+    let day = tokio::select! {
+        day = crate::brief::gather(state.models.apple_helper(), &settings, launch) => day,
+        () = stopped => return Err("Morning brief cancelled.".into()),
+    };
     if cancel.load(Ordering::Relaxed) {
         return Err("Morning brief cancelled.".into());
     }

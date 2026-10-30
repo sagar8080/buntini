@@ -81,6 +81,9 @@ pub fn candidates(headers: &[MailHeader]) -> Vec<String> {
         .collect()
 }
 
+/// Why a message sent to the user is listed although Buntini never read it.
+const UNOPENED: &str = "sent to you, not opened";
+
 pub fn sort(headers: Vec<MailHeader>, total: usize, openings: &HashMap<String, String>) -> Triage {
     let mut triage = Triage {
         partial: (total > headers.len()).then_some((headers.len(), total)),
@@ -107,7 +110,7 @@ pub fn sort(headers: Vec<MailHeader>, total: usize, openings: &HashMap<String, S
             Some(reason) => triage.reply.push(Item { header, reason }),
             None if direct(&header) && opening.is_none() => {
                 triage.unopened += 1;
-                triage.look.push(Item { header, reason: "sent to you, not opened" });
+                triage.look.push(Item { header, reason: UNOPENED });
             }
             None => triage.look.push(Item {
                 reason: if direct(&header) { "sent to you" } else { "you’re one of several recipients" },
@@ -140,25 +143,41 @@ pub fn compose(triage: &Triage) -> String {
         1 => "1 email sent to you that I didn’t open".to_string(),
         n => format!("{n} emails sent to you that I didn’t open"),
     };
+    // The ones past the reading limit are named, so "check them" says which.
+    let (unread, others): (Vec<&Item>, Vec<&Item>) =
+        triage.look.iter().partition(|item| item.reason == UNOPENED);
+    let list_unread = |lines: &mut Vec<String>| {
+        lines.extend(unread.iter().take(5).map(|item| line(item)));
+        if unread.len() > 5 {
+            lines.push(format!("…and {} more.", unread.len() - 5));
+        }
+    };
     match triage.reply.len() {
         // "Nothing" would claim more than was read.
         0 if triage.unopened > 0 => lines.push(format!(
-            "None of the emails I opened looks like it needs a reply, but I only open the newest {READ_AT_MOST} sent to you, so check the {unopened}."
+            "None of the emails I opened looks like it needs a reply, but I only open the newest {READ_AT_MOST} sent to you, so check the {unopened}:"
         )),
         0 => lines.push(format!("Nothing in your inbox from the last {DAYS} days looks like it needs a reply.")),
         1 => lines.push("One email looks like it needs a reply:".into()),
         n => lines.push(format!("{n} emails look like they need a reply:")),
     }
+    if triage.reply.is_empty() {
+        list_unread(&mut lines);
+    }
     lines.extend(triage.reply.iter().take(8).map(line));
     if triage.reply.len() > 8 {
         lines.push(format!("…and {} more.", triage.reply.len() - 8));
     }
-    if !triage.look.is_empty() {
+    if !triage.reply.is_empty() && triage.unopened > 0 {
+        lines.push(format!("I only open the newest {READ_AT_MOST} emails sent to you, so the {unopened} may need a reply too:"));
+        list_unread(&mut lines);
+    }
+    if !others.is_empty() {
         lines.push(format!(
             "{} from people that may not need an answer:",
-            if triage.look.len() == 1 { "One more".to_string() } else { format!("{} more", triage.look.len()) }
+            if others.len() == 1 { "One more".to_string() } else { format!("{} more", others.len()) }
         ));
-        lines.extend(triage.look.iter().take(5).map(line));
+        lines.extend(others.iter().take(5).map(|item| line(item)));
     }
     if triage.automated > 0 {
         lines.push(format!(
@@ -166,9 +185,6 @@ pub fn compose(triage: &Triage) -> String {
             triage.automated,
             if triage.automated == 1 { "message" } else { "messages" }
         ));
-    }
-    if !triage.reply.is_empty() && triage.unopened > 0 {
-        lines.push(format!("I only open the newest {READ_AT_MOST} emails sent to you, so the {unopened} may need a reply too."));
     }
     if let Some((checked, total)) = triage.partial {
         lines.push(format!("I checked the newest {checked} of {total} unreplied messages, so older ones may be missing."));
@@ -292,10 +308,14 @@ mod tests {
         assert!(!text.starts_with("Nothing"), "{text}");
         assert!(text.contains("newest 12") && text.contains("1 email sent to you that I didn’t open"), "{text}");
         assert_eq!(triage.look.last().unwrap().reason, "sent to you, not opened");
-        // With a reply found as well, the limit is still stated.
+        // The one to check is named, and not counted among those that need no answer.
+        assert!(text.contains("P13"), "{text}");
+        assert!(text.contains("12 more from people that may not need an answer"), "{text}");
+        // With a reply found as well, the limit is still stated, and the email named.
         let mut both = triage.clone();
         both.reply.push(both.look.remove(0));
-        assert!(compose(&both).contains("may need a reply too"));
+        let text = compose(&both);
+        assert!(text.contains("may need a reply too") && text.contains("P13"), "{text}");
     }
 
     #[test]

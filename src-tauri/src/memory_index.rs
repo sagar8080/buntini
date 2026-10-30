@@ -352,13 +352,14 @@ fn dot(a: &[i8], b: &[i8]) -> i32 {
 /// Brains search through `search_visible`; this unfiltered form is for tests.
 #[cfg(test)]
 pub fn search(db: &Connection, query: &str, vector: Option<&[i8]>, limit: usize) -> Result<Vec<Hit>, String> {
-    let best = fused(db, query, vector, CANDIDATES)?;
+    let (best, _) = fused(db, query, vector, CANDIDATES)?;
     best.into_iter().take(limit).map(|(id, score)| hit(db, id, score)).collect()
 }
 
 /// The best `limit` records for a query that `keep` accepts (what a brain may see).
-/// Records are filtered before the limit, from a wider pool of candidates, so hidden ones
-/// never take the places of visible ones and hide a match.
+/// Records are filtered before the limit, and the pool of candidates widens until
+/// `limit` visible ones are found or the rankings run out, so hidden ones never take the
+/// places of visible ones and hide a match.
 pub fn search_visible(
     db: &Connection,
     query: &str,
@@ -366,32 +367,42 @@ pub fn search_visible(
     limit: usize,
     keep: impl Fn(&Hit) -> bool,
 ) -> Result<Vec<Hit>, String> {
-    let mut hits = Vec::new();
-    for (id, score) in fused(db, query, vector, CANDIDATES * 4)? {
-        let found = hit(db, id, score)?;
-        if keep(&found) {
-            hits.push(found);
-            if hits.len() == limit {
-                break;
+    let mut pool = CANDIDATES * 4;
+    loop {
+        let (best, truncated) = fused(db, query, vector, pool)?;
+        let mut hits = Vec::new();
+        for (id, score) in best {
+            let found = hit(db, id, score)?;
+            if keep(&found) {
+                hits.push(found);
+                if hits.len() == limit {
+                    return Ok(hits);
+                }
             }
         }
+        if !truncated {
+            return Ok(hits);
+        }
+        pool *= 4;
     }
-    Ok(hits)
 }
 
-/// Record ids with their fused score, best first, from the top `pool` of each ranking.
-fn fused(db: &Connection, query: &str, vector: Option<&[i8]>, pool: usize) -> Result<Vec<(i64, f64)>, String> {
+/// Record ids with their fused score, best first, from the top `pool` of each ranking,
+/// and whether either ranking had more than `pool` records.
+fn fused(db: &Connection, query: &str, vector: Option<&[i8]>, pool: usize) -> Result<(Vec<(i64, f64)>, bool), String> {
+    let mut truncated = false;
     let mut score: HashMap<i64, f64> = HashMap::new();
     if let Some(expression) = fts_query(query) {
         let mut statement = db
             .prepare("SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?1 ORDER BY bm25(memory_fts, 2.0, 1.0) LIMIT ?2")
             .map_err(|e| e.to_string())?;
         let ids = statement
-            .query_map(params![expression, pool as i64], |row| row.get::<_, i64>(0))
+            .query_map(params![expression, pool as i64 + 1], |row| row.get::<_, i64>(0))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-        for (rank, id) in ids.into_iter().enumerate() {
+        truncated |= ids.len() > pool;
+        for (rank, id) in ids.into_iter().take(pool).enumerate() {
             *score.entry(id).or_default() += KEYWORD_WEIGHT / (RRF + rank as f64 + 1.0);
         }
     }
@@ -409,13 +420,14 @@ fn fused(db: &Connection, query: &str, vector: Option<&[i8]>, pool: usize) -> Re
             })
             .collect();
         ranked.sort_unstable_by(|a, b| b.cmp(a));
+        truncated |= ranked.len() > pool;
         for (rank, (_, id)) in ranked.into_iter().take(pool).enumerate() {
             *score.entry(id).or_default() += 1.0 / (RRF + rank as f64 + 1.0);
         }
     }
     let mut best: Vec<(i64, f64)> = score.into_iter().collect();
     best.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    Ok(best)
+    Ok((best, truncated))
 }
 
 fn hit(db: &Connection, id: i64, score: f64) -> Result<Hit, String> {
@@ -807,16 +819,31 @@ fn on_battery() -> bool {
         .is_some_and(|(_, charging)| !charging)
 }
 
+/// `on_battery`, read again at most every 30 seconds, since each read runs pmset.
+fn on_battery_lately(last: &std::sync::Mutex<Option<(std::time::Instant, bool)>>) -> bool {
+    let mut last = last.lock().unwrap();
+    match *last {
+        Some((at, battery)) if at.elapsed() < std::time::Duration::from_secs(30) => battery,
+        _ => {
+            let battery = on_battery();
+            *last = Some((std::time::Instant::now(), battery));
+            battery
+        }
+    }
+}
+
 /// Keeps the index current: a first pass shortly after launch, then every six hours.
-/// Each pass waits while a chat is running or the Mac is on battery.
+/// Each pass waits while a chat is running or the Mac is on battery, before it starts
+/// and before each app read and embedding batch.
 pub fn start(app: tauri::AppHandle) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+        let battery = std::sync::Mutex::new(None);
         loop {
             let state = app.state::<crate::controller::AppState>();
-            let busy = || !state.active.lock().unwrap().is_empty();
-            while busy() || on_battery() {
+            let busy = || !state.active.lock().unwrap().is_empty() || on_battery_lately(&battery);
+            while busy() {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
             match refresh(&state.store, &state.models, &state.index_cancel, &busy).await {
@@ -1094,7 +1121,8 @@ mod tests {
     #[test]
     fn hidden_hits_do_not_crowd_out_visible_ones() {
         let mut db = db();
-        let mail: Vec<Record> = (0..30)
+        // More hidden matches than the first pool of candidates holds, all ranked higher.
+        let mail: Vec<Record> = (0..CANDIDATES * 4 + 50)
             .map(|n| record("mail", &format!("m{n}"), "Lease", "Lease renewal: the lease, the lease terms and the lease deposit", vec![Share::Mail]))
             .collect();
         replace_source(&mut db, "mail", &mail).unwrap();
