@@ -654,11 +654,6 @@ pub async fn chatgpt_sign_out(
     Ok(confirmed)
 }
 
-#[tauri::command]
-pub async fn chatgpt_models() -> Result<Vec<ModelInfo>, String> {
-    models().await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

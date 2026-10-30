@@ -44,7 +44,7 @@ If you deliberately choose to install voice into an **existing** MLX environment
 
 The installer pins every already-installed package to its current version. A compatibility conflict stops resolution instead of downgrading MLX, NumPy, Transformers, or other shared packages. A new isolated environment is preferable when a shared environment cannot satisfy those constraints. Whisper's published dependencies include Torch and Numba; the setup may download those packages too. Silero filtering itself uses CPU ONNX Runtime and does not import Torch.
 
-Model downloads are optional, separate operations. `--install` alone never downloads weights. To use existing weights, skip download flags and select their absolute local paths in Settings. To explicitly fetch models later, use the download flags and a new destination without `--install`.
+Model downloads are optional, separate operations. `--install` alone never downloads weights. To use existing weights, skip download flags and choose the chat model folder in Settings → Brain; for Whisper and Silero, set `BUNTINI_WHISPER_MODEL_PATH` and `BUNTINI_VAD_MODEL_PATH` before the first launch (Settings no longer asks for them, and folders saved by an earlier version keep working). To explicitly fetch models later, use the download flags and a new destination without `--install`.
 
 Sources: the [Whisper tiny.en MLX model card](https://huggingface.co/mlx-community/whisper-tiny.en-mlx), [official MLX Whisper package](https://github.com/ml-explore/mlx-examples/tree/main/whisper), [official Silero VAD implementation](https://github.com/snakers4/silero-vad), and [ONNX Runtime's CPU guidance for macOS](https://onnxruntime.ai/docs/get-started/with-python.html).
 

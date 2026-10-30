@@ -797,7 +797,6 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .disclosure > summary::before { content: '›'; display: inline-block; transition: transform .15s; font-size: 14px; }
 .disclosure[open] > summary::before { transform: rotate(90deg); }
 .disclosure > textarea { width: 100%; margin-top: 8px; font-size: 12px; }
-.settings-advanced { padding: 14px 0; border-bottom: 1px solid var(--border); margin-top: 0; }
 .settings-page label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; margin-top: 12px; }
 .settings-page .field-help, .settings-page .worker-status { font-size: 11px; line-height: 1.5; margin-top: 10px; }
 .settings-page .inline-field { margin-top: 12px; font-size: 12px; color: var(--text); }
