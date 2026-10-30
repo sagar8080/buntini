@@ -157,7 +157,21 @@ export default function App() {
     if (mounted.current) setData(previous => previous && { ...previous, settings: saved });
     // The save went through; a failed refresh is its own problem, not a failed save.
     await refresh().catch(error => setError(errorMessage(error)));
+    return saved;
   });
+  // Quitting first saves an edit still in its pause. One still waiting for a task can't be
+  // saved before Buntini closes, so the first ⌘Q says so and a second one quits anyway.
+  const quitWarned = useRef(0);
+  async function quit() {
+    const pending = saver.current!;
+    await Promise.race([pending.flush(), new Promise(resolve => setTimeout(resolve, 2000))]);
+    if (pending.pending() && Date.now() - quitWarned.current > 10_000) {
+      quitWarned.current = Date.now();
+      setNotice('A settings change is still waiting for the current task and won’t be kept if you quit now. Quit again to quit anyway.');
+      return;
+    }
+    await command('quit_app');
+  }
   useEffect(() => saver.current!.subscribe((state, problem) => {
     if (state === 'error' && pageRef.current !== 'settings') setError(`Your settings weren’t saved. ${problem}`);
   }), []);
@@ -272,7 +286,7 @@ export default function App() {
       }
       // Buntini has no menu bar of its own, so ⌘Q is handled here while the panel has focus.
       if (desktop && event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'q') {
-        event.preventDefault(); void command('quit_app').catch(error => setError(errorMessage(error)));
+        event.preventDefault(); void quit().catch(error => setError(errorMessage(error)));
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault(); setPage('home'); void expand(true);
@@ -503,6 +517,8 @@ export default function App() {
     finally { await pendingStart?.catch(() => {}); if (version === voiceVersion.current) { recordPromise.current = null; voiceStoppingRef.current = false; setVoiceStopping(false); } }
   }
   async function finishSetup(settings: Settings, keys: [KeyProvider, string][]) {
+    // An edit from before setup must not land on top of the choices just made.
+    saver.current!.discard();
     for (const [provider, key] of keys) await command('set_api_key', { provider, key });
     // A scheduled task may briefly hold the settings; try once more before giving up.
     const saved = await saveSettings(settings).catch(() => new Promise(resolve => setTimeout(resolve, 800)).then(() => saveSettings(settings)));
@@ -687,7 +703,13 @@ export default function App() {
           <div className="history-privacy"><ShieldCheck size={13} /> Kept on this Mac. Never synced to a cloud.</div>
         </div>}
 
-        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
+        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErase={async () => {
+          // An edit not saved yet must not write the old settings back after the erase.
+          const pending = saver.current!.pending();
+          saver.current!.discard();
+          try { await command('delete_all_data', { confirm: 'delete everything' }); }
+          catch (error) { if (pending) saver.current!.edit(pending); throw error; }
+        }} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
 
@@ -729,7 +751,7 @@ export default function App() {
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} speed={world.speed} /></button>
-        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void command('quit_app').catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
+        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>
     </div>

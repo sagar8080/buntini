@@ -28,11 +28,19 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
   const [draft, setDraft] = useState(() => saver.pending() ?? data.settings);
   const [status, setStatus] = useState<SaveState>(() => saver.pending() ? saver.state : 'idle');
   const [problem, setProblem] = useState('');
+  const [loginProblem, setLoginProblem] = useState('');
   const edited = useRef(false);
   const update = <K extends keyof Settings>(name: K, value: Settings[K]) => { edited.current = true; setDraft(previous => ({ ...previous, [name]: value })); };
   useEffect(() => { try { localStorage.setItem('buntini-settings-tab', tab); } catch { /* Remembering the tab is optional. */ } }, [tab]);
   useEffect(() => saver.subscribe((state, message) => { setStatus(state); setProblem(message); }), [saver]);
   useEffect(() => { if (edited.current) saver.edit(draft); }, [draft]);
+  // Open at login is saved as what macOS confirmed: when it refused, the switch says so.
+  useEffect(() => saver.subscribeSaved((sent, saved) => {
+    if (sent.openAtLogin === saved.openAtLogin) { setLoginProblem(''); return; }
+    edited.current = false;
+    setDraft(previous => ({ ...previous, openAtLogin: saved.openAtLogin }));
+    setLoginProblem(saved.openAtLogin ? 'macOS still lists me in your login items. Remove me in System Settings → General → Login Items.' : 'macOS didn’t add me to your login items, so Open at login is still off.');
+  }), [saver]);
   // Closing Settings (Esc, the header button, tucking the panel away) saves at once.
   useEffect(() => () => {
     void saver.flush();
@@ -52,6 +60,7 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
       <span className={`save-state ${status}`} role="status">{status === 'saving' ? <><LoaderCircle size={12} className="spin" />Saving</> : status === 'waiting' ? <><LoaderCircle size={12} className="spin" />Saves after this task</> : status === 'saved' ? <><Check size={12} />Saved</> : status === 'error' ? 'Not saved' : ''}</span>
     </div>
     {status === 'error' && problem && <p className="settings-problem" role="alert">{problem}</p>}
+    {loginProblem && <p className="settings-problem" role="alert">{loginProblem}</p>}
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}

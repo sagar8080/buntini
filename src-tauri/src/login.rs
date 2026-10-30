@@ -162,6 +162,11 @@ pub fn apply_setting(store: &crate::store::Store, enabled: bool) -> bool {
             );
             status.registered()
         }
+        // A build that can't register has no login item to remove, so off is the truth.
+        Err(error) if error == UNAVAILABLE && !enabled => {
+            let _ = store.audit("login_item.disabled", "Nothing to remove in this build");
+            false
+        }
         Err(error) => {
             let _ = store.audit("login_item.failed", &error);
             // Turning it off failed: it is still on. Turning it on failed: it is off.
@@ -190,6 +195,8 @@ mod tests {
             .unwrap()
             .iter()
             .any(|entry| entry.action == "login_item.failed"));
+        // A setting saved as on by the installed app can always be turned off here.
+        assert!(!apply_setting(&store, false), "nothing is registered in this build");
     }
 
     #[test]

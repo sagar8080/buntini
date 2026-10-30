@@ -59,3 +59,36 @@ test('saves run one at a time, newest last', async () => {
   assert.deepEqual(order, ['a', 'b']);
   assert.ok(isBusyRefusal(busy) && !isBusyRefusal('Choose a daily limit'));
 });
+
+test('Delete everything drops a waiting edit so the old settings never come back', async () => {
+  let taskRunning = true;
+  const saved: string[][] = [];
+  const saver = new SettingsSaver(async next => { if (taskRunning) throw busy; saved.push(next.apps); }, { delayMs: 0, retryMs: 5 });
+  saver.edit(settings(['mail']));
+  void saver.flush();
+  await pause(20);
+  assert.equal(saver.state, 'waiting');
+  saver.discard();
+  taskRunning = false;
+  await pause(30);
+  assert.deepEqual(saved, [], 'the retry stops');
+  assert.equal(saver.pending(), null);
+  // The saver still works for edits made afterwards.
+  await saver.saveNow(settings(['notes']));
+  assert.deepEqual(saved, [['notes']]);
+});
+
+test('a field the backend kept differently is reported and carried into the next edit', async () => {
+  const sent: Settings[] = [];
+  const saver = new SettingsSaver(async next => { sent.push(next); await pause(5); return { ...next, openAtLogin: false }; }, { delayMs: 0 });
+  const reports: [boolean, boolean][] = [];
+  saver.subscribeSaved((asked, kept) => reports.push([asked.openAtLogin, kept.openAtLogin]));
+  const first = saver.saveNow({ apps: [], openAtLogin: true } as unknown as Settings);
+  saver.edit({ apps: ['mail'], openAtLogin: true } as unknown as Settings);
+  await first;
+  await saver.flush();
+  await pause(10);
+  assert.deepEqual(reports[0], [true, false], 'macOS refused: Settings hears it');
+  assert.equal(sent[1].openAtLogin, false, 'the next edit does not ask for the refused change again');
+  assert.deepEqual(sent[1].apps, ['mail']);
+});

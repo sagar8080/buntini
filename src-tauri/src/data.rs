@@ -262,7 +262,17 @@ where
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }
+    // Saves that waited behind the erase carry the old settings; they are refused.
+    state
+        .erasures
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     crate::delivery::erase_os_requests();
+    // Settings go back to Open at login off, so macOS stops opening Buntini at login too.
+    if crate::login::status().registered() {
+        if let Err(error) = crate::login::apply(false) {
+            failures.push(error);
+        }
+    }
     for provider in ["brave", "tavily", "ebay", "duffel"]
         .into_iter()
         .chain(crate::cloud::PROVIDERS.iter().map(|provider| provider.id))
@@ -407,6 +417,38 @@ mod tests {
         assert!(!recording.exists());
         assert!(recording.with_file_name("unrelated-file.txt").exists());
         assert!(!state.data_dir.join("logs").exists());
+    }
+
+    #[tokio::test]
+    async fn a_settings_save_queued_behind_the_erase_is_refused() {
+        let (_dir, state) = fixture_state();
+        let mut before = state.store.lock().unwrap().settings().unwrap();
+        before.user_name = "Before the erase".into();
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        // The erase holds the settings gate while it signs out; the save arrives meanwhile.
+        let erase = erase_with_services(
+            "delete everything",
+            &state,
+            || async {
+                let _ = released.await;
+                Ok(true)
+            },
+            || std::future::ready(Ok(())),
+            |_| Ok(()),
+        );
+        let save = crate::controller::save_settings_in(&state, before);
+        let finish = async {
+            tokio::task::yield_now().await;
+            let _ = release.send(());
+        };
+        let (erased, saved, ()) = tokio::join!(erase, save, finish);
+        erased.unwrap();
+        assert!(saved.unwrap_err().contains("erased"));
+        assert_eq!(state.store.lock().unwrap().settings().unwrap().user_name, crate::types::Settings::default().user_name);
+        // A save made after the erase goes through.
+        let mut after = state.store.lock().unwrap().settings().unwrap();
+        after.user_name = "After".into();
+        assert!(crate::controller::save_settings_in(&state, after).await.is_ok());
     }
 
     #[tokio::test]

@@ -25,6 +25,9 @@ pub struct AppState {
     pub pending_actions: Mutex<HashMap<String, PendingAction>>,
     /// Stops a memory index refresh that is running (Delete everything, Clear history).
     pub index_cancel: Arc<AtomicBool>,
+    /// Counts Delete everything runs, so a settings save queued behind one never writes
+    /// the erased settings back.
+    pub erasures: std::sync::atomic::AtomicU64,
 }
 pub struct PendingAction {
     tool: String,
@@ -182,6 +185,7 @@ impl AppState {
             data_dir: data,
             pending_actions: Mutex::new(HashMap::new()),
             index_cancel: Arc::new(AtomicBool::new(false)),
+            erasures: std::sync::atomic::AtomicU64::new(0),
         })
     }
     pub(crate) fn audit(&self, action: &str, detail: &str) {
@@ -284,12 +288,28 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
 }
 #[tauri::command]
 pub async fn save_settings(
-    mut settings: Settings,
+    settings: Settings,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Settings, String> {
+    let settings = save_settings_in(&state, settings).await?;
+    // Name, personality, allowed apps and the brain all shape the instructions.
+    warm_up_soon(&app);
+    Ok(settings)
+}
+
+pub(crate) async fn save_settings_in(
+    state: &AppState,
+    mut settings: Settings,
+) -> Result<Settings, String> {
     settings.validate()?;
+    let erasures = state.erasures.load(Ordering::SeqCst);
     let _gate = state.config_gate.lock().await;
+    // This edit was made before Delete everything ran: saving it would bring back what
+    // was erased.
+    if state.erasures.load(Ordering::SeqCst) != erasures {
+        return Err("Your data was erased, so this settings change wasn’t saved.".into());
+    }
     let previous = state.store.lock().unwrap().settings()?;
     let changed = previous.model_backend != settings.model_backend
         || previous.python_path != settings.python_path
@@ -314,7 +334,8 @@ pub async fn save_settings(
         {
             let store = state.store.lock().unwrap();
             if previous.open_at_login != settings.open_at_login {
-                // Saved as what macOS confirmed, never only as what was asked.
+                // Saved as what macOS confirmed, never only as what was asked. The returned
+                // settings carry it, so Settings shows a refusal instead of "Saved".
                 settings.open_at_login =
                     crate::login::apply_setting(&store, settings.open_at_login);
             }
@@ -332,8 +353,6 @@ pub async fn save_settings(
     }
     saved?;
     state.audit("settings.saved", "Local preferences updated");
-    // Name, personality, allowed apps and the brain all shape the instructions.
-    warm_up_soon(&app);
     Ok(settings)
 }
 
