@@ -512,6 +512,9 @@ let toolExamples: [String: String] = [
     "find_notes": "find my packing note",
     "add_calendar_event": "put lunch with Sam on Friday at 1pm in my calendar",
     "create_note": "make a note of these packing ideas",
+    "complete_reminder": "mark buy milk as done",
+    "update_calendar_event": "move my 3pm to 4",
+    "append_to_note": "add milk to my shopping note",
     "draft_email": "draft an email to my landlord about the leak",
     "run_shortcut": "run my Morning Routine shortcut",
     "open_app": "open Safari",
@@ -942,7 +945,8 @@ enum Agenda {
                 let iso = ISO8601DateFormatter()
                 row.merge(["start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate),
                            "startAt": iso.string(from: event.startDate), "endAt": iso.string(from: event.endDate),
-                           "allDay": event.isAllDay, "title": event.title ?? "", "location": event.location ?? "", "calendar": event.calendar?.title ?? ""]) { _, new in new }
+                           "allDay": event.isAllDay, "title": event.title ?? "", "location": event.location ?? "", "calendar": event.calendar?.title ?? "",
+                           "recurring": event.hasRecurrenceRules]) { _, new in new }
                 emit(row)
             }
             emit(agendaSummary(total: found.count, limit: 40))
@@ -1061,6 +1065,185 @@ enum People {
         case .denied, .restricted: return false
         default: return true
         }
+    }
+}
+
+/// The approved change to one event, as Rust validated it: which occurrence it was (id,
+/// local start and title as read) and the title, start, length and place it should have.
+struct EventChange: Decodable {
+    let id: String
+    let occurrence: String
+    let wasTitle: String
+    let title: String
+    let start: String
+    let minutes: Int
+    let location: String
+}
+
+/// Wall-clock "YYYY-MM-DD HH:MM" in the user's zone, the form every read and change uses.
+func localStamp(timeZone: TimeZone = .current) -> DateFormatter {
+    let stamp = DateFormatter()
+    stamp.locale = Locale(identifier: "en_US_POSIX")
+    stamp.calendar = Calendar(identifier: .gregorian)
+    stamp.timeZone = timeZone
+    stamp.dateFormat = "yyyy-MM-dd HH:mm"
+    stamp.isLenient = false
+    return stamp
+}
+
+/// A change is refused unless every part is present, bounded and an exact local time.
+func eventChange(_ raw: String, timeZone: TimeZone = .current) -> EventChange? {
+    guard raw.utf8.count <= 4096, let change = try? JSONDecoder().decode(EventChange.self, from: Data(raw.utf8)) else { return nil }
+    let stamp = localStamp(timeZone: timeZone)
+    let exact = { (text: String) in stamp.date(from: text).map { stamp.string(from: $0) == text } ?? false }
+    guard !change.id.isEmpty, change.id.count <= 300, !change.wasTitle.isEmpty, !change.title.isEmpty,
+          change.title.count <= 200, change.location.count <= 200, (5...1440).contains(change.minutes),
+          exact(change.occurrence), exact(change.start) else { return nil }
+    return change
+}
+
+/// What a reminder is like, for comparing just before and after a change.
+func reminderSnapshot(_ reminder: EKReminder, stamp: DateFormatter) -> [String: Any] {
+    ["title": reminder.title ?? "", "due": reminderDueText(reminder.dueDateComponents, stamp: stamp),
+     "listId": reminder.calendar?.calendarIdentifier ?? "", "notes": reminder.notes ?? "", "priority": reminder.priority,
+     "url": reminder.url?.absoluteString ?? "", "alarms": reminder.alarms?.count ?? 0, "completed": reminder.isCompleted]
+}
+
+/// What an event occurrence is like, for comparing just before and after a change.
+func eventSnapshot(_ event: EKEvent, stamp: DateFormatter) -> [String: Any] {
+    ["title": event.title ?? "", "start": stamp.string(from: event.startDate), "end": stamp.string(from: event.endDate),
+     "startSecond": Calendar.current.component(.second, from: event.startDate),
+     "durationSeconds": Int(event.endDate.timeIntervalSince(event.startDate)), "location": event.location ?? "",
+     "allDay": event.isAllDay, "calendarId": event.calendar?.calendarIdentifier ?? "", "notes": event.notes ?? "",
+     "url": event.url?.absoluteString ?? "", "alarms": event.alarms?.count ?? 0, "recurring": event.hasRecurrenceRules]
+}
+
+/// `--complete-reminder <id> <title>` and `--update-event <change JSON>`: change one item
+/// Buntini read with `--reminders` or `--events`, after the user approved exactly that.
+/// Nothing is written unless the item is still what was read. Prints one receipt with
+/// the item just before the change and as a fresh store reads it afterwards, so Rust can
+/// check that only the approved change happened. A repeating event changes one
+/// occurrence, and the next occurrence is read before and after to show it kept its time.
+enum Edits {
+    static func receipt(_ outcome: String, id: String = "", destination: String = "", evidence: [String: Any] = [:], error: String = "") -> Int32 {
+        emit(["outcome": outcome, "objectId": id, "destination": destination, "evidence": evidence, "error": error])
+        return 0
+    }
+
+    static func access(_ type: EKEntityType, _ store: EKEventStore) async -> Bool {
+        if #available(macOS 14.0, *) {
+            return (try? await (type == .event ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
+        }
+        return (try? await store.requestAccess(to: type)) ?? false
+    }
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        if arguments.count == 4, arguments[1] == "--complete-reminder" {
+            return await completeReminder(id: arguments[2], title: arguments[3])
+        }
+        if arguments.count == 3, arguments[1] == "--update-event", let change = eventChange(arguments[2]) {
+            return await updateEvent(change)
+        }
+        return receipt("failed", error: "Buntini’s Apple helper didn’t understand that change.")
+    }
+
+    static func completeReminder(id: String, title: String) async -> Int32 {
+        let store = EKEventStore()
+        guard await access(.reminder, store) else {
+            return receipt("failed", error: "macOS hasn’t allowed Buntini to change Reminders. Allow it in System Settings → Privacy & Security → Reminders.")
+        }
+        let stamp = localStamp()
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            return receipt("failed", error: "That reminder isn’t in Reminders any more.")
+        }
+        let before = reminderSnapshot(reminder, stamp: stamp)
+        guard reminder.title == title, !reminder.isCompleted else {
+            return receipt("failed", error: "That reminder changed since Buntini read it. Ask again so it reads your reminders afresh.")
+        }
+        guard reminder.calendar?.allowsContentModifications == true else {
+            return receipt("failed", error: "That reminder’s list can’t be changed.")
+        }
+        reminder.isCompleted = true
+        let saveError = (try? store.save(reminder, commit: true)) == nil
+        guard let stored = EKEventStore().calendarItem(withIdentifier: id) as? EKReminder else {
+            return receipt("unknown", id: id, error: "Reminders didn’t return the reminder after the change.")
+        }
+        let after = reminderSnapshot(stored, stamp: stamp)
+        if saveError && !stored.isCompleted && NSDictionary(dictionary: after).isEqual(to: before) {
+            return receipt("failed", error: "Reminders didn’t accept the change. Nothing was changed.")
+        }
+        return receipt("succeeded", id: id, destination: stored.calendar?.title ?? "Reminders",
+                       evidence: ["destinationId": before["listId"] ?? "", "identifierScope": "persistent", "title": stored.title ?? "",
+                                  "before": before, "after": after], error: saveError ? "Reminders reported an error while saving." : "")
+    }
+
+    /// The one occurrence of event `id` that starts at `start`, by its EventKit identifier
+    /// or, for a detached occurrence, the identifier of the item it belongs to.
+    static func occurrences(_ store: EKEventStore, id: String, item: String?, start: String, stamp: DateFormatter) -> [EKEvent] {
+        guard let at = stamp.date(from: start) else { return [] }
+        let found = store.events(matching: store.predicateForEvents(withStart: at.addingTimeInterval(-86_400), end: at.addingTimeInterval(86_400), calendars: nil))
+        return found.filter { ($0.eventIdentifier == id || (item != nil && $0.calendarItemIdentifier == item)) && stamp.string(from: $0.startDate) == start }
+    }
+
+    /// The next occurrence of a repeating event after `after`, as "start|title", skipping
+    /// the moved occurrence itself; empty when none falls within the next 400 days.
+    static func nextOccurrence(_ store: EKEventStore, id: String, calendar: EKCalendar?, after: Date, skipping: String, stamp: DateFormatter) -> String {
+        guard let calendar else { return "" }
+        let found = store.events(matching: store.predicateForEvents(withStart: after.addingTimeInterval(60), end: after.addingTimeInterval(400 * 86_400), calendars: [calendar]))
+            .filter { $0.eventIdentifier == id && $0.startDate > after && stamp.string(from: $0.startDate) != skipping }
+            .sorted { $0.startDate < $1.startDate }
+        return found.first.map { "\(stamp.string(from: $0.startDate))|\($0.title ?? "")" } ?? ""
+    }
+
+    static func updateEvent(_ change: EventChange) async -> Int32 {
+        let store = EKEventStore()
+        guard await access(.event, store) else {
+            return receipt("failed", error: "macOS hasn’t allowed Buntini to change Calendar. Allow it in System Settings → Privacy & Security → Calendars.")
+        }
+        let stamp = localStamp()
+        let found = occurrences(store, id: change.id, item: nil, start: change.occurrence, stamp: stamp)
+        guard found.count == 1, let event = found.first, let originalStart = stamp.date(from: change.occurrence),
+              let newStart = stamp.date(from: change.start) else {
+            return receipt("failed", error: "That event isn’t at the time Buntini read any more. Ask again so it reads your calendar afresh.")
+        }
+        guard event.title == change.wasTitle else {
+            return receipt("failed", error: "That event changed since Buntini read it. Ask again so it reads your calendar afresh.")
+        }
+        guard !event.isAllDay else {
+            return receipt("failed", error: "That’s an all-day event, which Buntini can’t move yet. Change it in Calendar.")
+        }
+        guard event.calendar?.allowsContentModifications == true else {
+            return receipt("failed", error: "That event’s calendar can’t be changed.")
+        }
+        let before = eventSnapshot(event, stamp: stamp)
+        let recurring = event.hasRecurrenceRules
+        let item = event.calendarItemIdentifier
+        let calendar = event.calendar
+        let nextBefore = recurring ? nextOccurrence(store, id: change.id, calendar: calendar, after: originalStart, skipping: change.start, stamp: stamp) : ""
+        if (event.title ?? "") != change.title { event.title = change.title }
+        if (event.location ?? "") != change.location { event.location = change.location.isEmpty ? nil : change.location }
+        event.startDate = newStart
+        event.endDate = newStart.addingTimeInterval(TimeInterval(change.minutes * 60))
+        // `.thisEvent` changes only this occurrence of a repeating event.
+        let saveError = (try? store.save(event, span: .thisEvent, commit: true)) == nil
+        let fresh = EKEventStore()
+        let moved = occurrences(fresh, id: change.id, item: item, start: change.start, stamp: stamp)
+        let left = change.start == change.occurrence ? [] : occurrences(fresh, id: change.id, item: item, start: change.occurrence, stamp: stamp)
+        guard moved.count == 1, let stored = moved.first else {
+            if saveError && left.count == 1 && NSDictionary(dictionary: eventSnapshot(left[0], stamp: stamp)).isEqual(to: before) {
+                return receipt("failed", error: "Calendar didn’t accept the change. Nothing was changed.")
+            }
+            return receipt("unknown", id: change.id, error: "Calendar didn’t show the event at its new time after the change.")
+        }
+        var evidence: [String: Any] = ["destinationId": before["calendarId"] ?? "", "identifierScope": "persistent", "title": stored.title ?? "",
+                                       "before": before, "after": eventSnapshot(stored, stamp: stamp), "oldSlotVacated": left.isEmpty,
+                                       "span": recurring ? "this_occurrence" : "this_event"]
+        if recurring {
+            evidence["nextBefore"] = nextBefore
+            evidence["nextAfter"] = nextOccurrence(fresh, id: change.id, calendar: calendar, after: originalStart, skipping: change.start, stamp: stamp)
+        }
+        return receipt("succeeded", id: stored.eventIdentifier ?? change.id, destination: stored.calendar?.title ?? "Calendar",
+                       evidence: evidence, error: saveError ? "Calendar reported an error while saving." : "")
     }
 }
 
@@ -1352,6 +1535,19 @@ func contractSelfTest() async -> Int32 {
         var unknownDate = sourceNote; unknownDate["availableTools"] = ["add_calendar_event"]; unknownDate["requiredFields"] = ["title","start"]
         try require(requiredNextTool(unknownDate,offered:["add_calendar_event"]) == nil, "Creative note-body metadata cannot invent dates or relax unrelated writes")
 
+        let valid = #"{"id":"event-7","occurrence":"2026-11-03 15:00","wasTitle":"Dentist","title":"Dentist","start":"2026-11-06 15:00","minutes":30,"location":""}"#
+        let parsed = eventChange(valid, timeZone: zone)
+        try require(parsed?.id == "event-7" && parsed?.minutes == 30 && parsed?.start == "2026-11-06 15:00", "An approved event change must keep its exact values")
+        for invalid in [valid.replacingOccurrences(of: "\"minutes\":30", with: "\"minutes\":2"),
+                        valid.replacingOccurrences(of: "2026-11-06 15:00", with: "2026-11-06"),
+                        valid.replacingOccurrences(of: "2026-11-06 15:00", with: "2026-02-30 15:00"),
+                        valid.replacingOccurrences(of: "\"id\":\"event-7\"", with: "\"id\":\"\""),
+                        valid.replacingOccurrences(of: "\"title\":\"Dentist\",", with: ""),
+                        "not json", ""] {
+            try require(eventChange(invalid, timeZone: zone) == nil, "An event change must refuse a missing, invented or out-of-range value")
+        }
+        try require(eventChange(valid.replacingOccurrences(of: "2026-11-06 15:00", with: "2026-03-08 02:30"), timeZone: zone) == nil,
+                    "A local time skipped by the clocks changing must not become another time")
         let registry = TaskRegistry()
         let completed = await registry.insert("done", Task {})
         await completed.value
@@ -1376,7 +1572,11 @@ func contractSelfTest() async -> Int32 {
 @main
 struct Helper {
     static func main() async {
-        // Checked first and by position, so a looked-up name can never select another mode.
+        // Checked first and by position, so a looked-up name or a reminder's title can
+        // never select another mode.
+        if CommandLine.arguments.count > 1, ["--complete-reminder", "--update-event"].contains(CommandLine.arguments[1]) {
+            exit(await Edits.run(CommandLine.arguments))
+        }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
             exit(await People.run(CommandLine.arguments))
         }
