@@ -943,9 +943,14 @@ where
         finish_workflow(state, &mut flow, &mut task, Ok(()), true)?;
         return Ok(task);
     }
+    let changed_tool = tool.clone();
     let receipt = dispatch(tool, normalized.clone(), cancel.clone()).await;
     let value = serde_json::to_value(&receipt).map_err(|e| e.to_string())?;
     let status = value["outcome"].as_str().unwrap_or("unknown");
+    // Whatever may have changed in the app is read afresh, not served from memory.
+    if status != "failed" {
+        let _ = crate::memory_index::app_changed(&state.store.lock().unwrap().db, &changed_tool, &normalized);
+    }
     flow.finish_step(
         status,
         json!({"receipt":value,"approvedArguments":normalized,"intentId":id}),

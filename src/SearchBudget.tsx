@@ -13,7 +13,7 @@ export default function SearchBudget({ draft, update, diagnostics }: { draft: Se
   const preset = presets[draft.searchProvider] ?? presets.brave;
   const used = diagnostics.searchesUsed;
   // The same limit budget.rs search_limits works out, so the meter follows edits at once.
-  const limit = draft.freeTierOnly ? Math.min(draft.monthlySearchLimit, preset.free) : Math.min(10_000, Math.floor(draft.monthlyBudgetUsd / preset.cost + 1e-9));
+  const limit = draft.freeTierOnly ? preset.free : Math.min(10_000, Math.floor(draft.monthlyBudgetUsd / preset.cost + 1e-9));
   const ratio = limit > 0 ? Math.min(1, used / limit) : 1;
   return <div className="search-budget">
     <div className="usage-meter">

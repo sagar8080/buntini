@@ -26,6 +26,17 @@ pub const PRESETS: [Preset; 2] = [
 
 /// The most lookups one month may hold, whatever the budget would buy.
 const MAX_MONTHLY: u32 = 10_000;
+/// The fewest lookups a day allows, so a busy day isn't cut short.
+const DAILY_FLOOR: u32 = 30;
+/// Keyed lookups (eBay, Duffel) allowed a month.
+const SERVICE_MONTHLY: u32 = 1_000;
+
+/// A day's share of the month: an even split over four weeks, never fewer than
+/// `DAILY_FLOOR`, so the month's limit can really be used and a runaway loop still stops
+/// the same day. Buntini sets it; there is no setting for it.
+fn daily(monthly: u32) -> u32 {
+    monthly.div_ceil(28).max(DAILY_FLOOR)
+}
 
 pub fn preset(provider: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|preset| preset.provider == provider)
@@ -41,27 +52,30 @@ pub struct Limits {
 
 /// Limits for the web search provider. Free-tier mode stays inside the provider's free
 /// allowance and never estimates any spend. Past it, the monthly budget is the one cap the
-/// person sets: the count is what that budget buys at the table price.
+/// person sets: the count is what that budget buys at the table price. Daily and monthly
+/// counts saved by earlier versions, which no setting shows any more, don't count.
 pub fn search_limits(settings: &Settings) -> Limits {
-    let daily = settings.daily_search_limit;
     match (settings.free_tier_only, preset(&settings.search_provider)) {
         (true, Some(preset)) => Limits {
-            daily,
-            monthly: settings.monthly_search_limit.min(preset.free_monthly),
+            daily: daily(preset.free_monthly),
+            monthly: preset.free_monthly,
             budget_usd: 0.0,
             unit_cost: 0.0,
         },
-        (_, Some(preset)) => Limits {
-            daily,
-            monthly: (settings.monthly_budget_usd / preset.cost_per_search + 1e-9)
+        (_, Some(preset)) => {
+            let monthly = (settings.monthly_budget_usd / preset.cost_per_search + 1e-9)
                 .floor()
-                .min(MAX_MONTHLY as f64) as u32,
-            budget_usd: settings.monthly_budget_usd,
-            unit_cost: preset.cost_per_search,
-        },
+                .min(MAX_MONTHLY as f64) as u32;
+            Limits {
+                daily: daily(monthly),
+                monthly,
+                budget_usd: settings.monthly_budget_usd,
+                unit_cost: preset.cost_per_search,
+            }
+        }
         // Settings only allow providers in the table; anything else gets no lookups.
         (_, None) => Limits {
-            daily,
+            daily: 0,
             monthly: 0,
             budget_usd: 0.0,
             unit_cost: 0.0,
@@ -71,10 +85,10 @@ pub fn search_limits(settings: &Settings) -> Limits {
 
 /// Keyed lookups (eBay, Duffel) have no per-search fee in their free tiers; they are
 /// counted on their own so they never use up the search provider's allowance.
-pub fn service_limits(settings: &Settings) -> Limits {
+pub fn service_limits(_settings: &Settings) -> Limits {
     Limits {
-        daily: settings.daily_search_limit,
-        monthly: settings.monthly_search_limit,
+        daily: daily(SERVICE_MONTHLY),
+        monthly: SERVICE_MONTHLY,
         budget_usd: f64::INFINITY,
         unit_cost: 0.0,
     }
@@ -137,18 +151,19 @@ mod tests {
         assert_eq!(
             search_limits(&settings),
             Limits {
-                daily: 30,
+                daily: 36,
                 monthly: 1000,
                 budget_usd: 0.0,
                 unit_cost: 0.0
             }
         );
-        settings.monthly_search_limit = 200;
-        assert_eq!(
-            search_limits(&settings).monthly,
-            200,
-            "a lower cap saved by an earlier version still wins"
-        );
+        // Counts saved by an earlier version have no setting any more, so they don't
+        // hold the user below what the meter shows.
+        settings.monthly_search_limit = 0;
+        settings.daily_search_limit = 5;
+        assert_eq!(search_limits(&settings).monthly, 1000);
+        assert_eq!(search_limits(&settings).daily, 36);
+        assert_eq!((service_limits(&settings).daily, service_limits(&settings).monthly), (36, 1000));
     }
 
     #[test]
@@ -165,7 +180,7 @@ mod tests {
         assert_eq!(
             search_limits(&settings),
             Limits {
-                daily: 30,
+                daily: 224,
                 monthly: 6250,
                 budget_usd: 50.0,
                 unit_cost: 0.008

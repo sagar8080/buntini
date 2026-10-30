@@ -98,6 +98,18 @@ impl Store {
         if settings.avatar == "fox" || settings.avatar == "kyuubi" {
             settings.avatar = "cat".into();
         }
+        // Settings no longer show the Whisper folder or speech filter. One that has since
+        // moved or been deleted can't be cleared by the user, so it is forgotten here
+        // instead of failing every later save; voice then uses Apple's speech.
+        if !settings.whisper_model.is_empty() && !Path::new(&settings.whisper_model).is_dir() {
+            settings.whisper_model.clear();
+        }
+        let vad = Path::new(&settings.vad_model_path);
+        if !settings.vad_model_path.is_empty() && !(vad.is_absolute() && vad.is_file()) {
+            settings.vad_model_path.clear();
+        }
+        // The status line has no setting any more either; Buntini words it itself.
+        settings.status_text.clear();
         if needs_backend {
             settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) {
                 "mlx"
@@ -978,6 +990,34 @@ mod tests {
             unit_cost,
         }
     }
+    #[test]
+    fn settings_no_screen_shows_any_more_never_block_a_save() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut settings = s.settings().unwrap();
+        settings.whisper_model = folder.path().join("whisper").to_string_lossy().into();
+        settings.vad_model_path = folder.path().join("silero.onnx").to_string_lossy().into();
+        settings.status_text = "On vacation".into();
+        // Saved by an earlier version, when the files were there.
+        s.db.execute(
+            "INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)",
+            [serde_json::to_string(&settings).unwrap()],
+        )
+        .unwrap();
+        let loaded = s.settings().unwrap();
+        assert!(loaded.whisper_model.is_empty() && loaded.vad_model_path.is_empty());
+        assert!(loaded.status_text.is_empty());
+        s.save_settings(&loaded).unwrap();
+        // A Whisper folder that is still there is kept.
+        std::fs::create_dir(folder.path().join("whisper")).unwrap();
+        s.db.execute(
+            "INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)",
+            [serde_json::to_string(&settings).unwrap()],
+        )
+        .unwrap();
+        assert_eq!(s.settings().unwrap().whisper_model, settings.whisper_model);
+    }
+
     #[test]
     fn daily_monthly_and_spend_limits_are_enforced_per_provider() {
         let s = Store::open(Path::new(":memory:")).unwrap();

@@ -243,6 +243,37 @@ pub fn purge(db: &Connection, source: &str, scope: Option<&str>) -> Result<usize
         .map_err(|e| e.to_string())
 }
 
+/// After an approved change to an item in an app, drops what the index held for that
+/// item and marks the app to be read again on the next refresh, so memory never answers
+/// with the item as it was before (a meeting's old time, a reminder still open).
+pub fn app_changed(db: &Connection, tool: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let source = match tool {
+        "complete_reminder" | "add_reminder" => "reminders",
+        "update_calendar_event" | "add_calendar_event" => "calendar",
+        "append_to_note" | "create_note" => "notes",
+        _ => return Ok(()),
+    };
+    db.execute("DELETE FROM preferences WHERE key=?1", [refreshed_key(source)])
+        .map_err(|e| e.to_string())?;
+    let Some(id) = arguments.get("id").and_then(serde_json::Value::as_str).filter(|id| !id.is_empty()) else {
+        return Ok(());
+    };
+    // An event is indexed once per occurrence, as "<id>@<start>".
+    let (filter, value) = if source == "calendar" {
+        ("source=?1 AND substr(source_id,1,length(?2)+1)=?2||'@'", id.to_string())
+    } else {
+        ("source=?1 AND source_id=?2", id.to_string())
+    };
+    db.execute(
+        &format!("DELETE FROM memory_fts WHERE rowid IN (SELECT id FROM memory_records WHERE {filter})"),
+        params![source, value],
+    )
+    .map_err(|e| e.to_string())?;
+    db.execute(&format!("DELETE FROM memory_records WHERE {filter}"), params![source, value])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Removes one record, such as a forgotten fact.
 pub fn purge_record(db: &Connection, source: &str, source_id: &str) -> Result<(), String> {
     db.execute(
@@ -1308,6 +1339,35 @@ mod tests {
         settings.apps = vec!["notes".into()];
         purge_disallowed(&db, &settings).unwrap();
         assert_eq!(counts(&db).unwrap(), [("files".to_string(), 1)]);
+    }
+
+    #[test]
+    fn an_approved_change_drops_the_item_as_it_was_and_reads_the_app_again() {
+        let mut db = db();
+        replace_source(&mut db, "calendar", &[
+            record("calendar", "e-1@2026-10-29 15:00", "Dentist", "Calendar event “Dentist”, 2026-10-29 15:00", vec![Share::Calendar]),
+            record("calendar", "e-12@2026-10-30 09:00", "Dentistry talk", "Calendar event “Dentistry talk”", vec![Share::Calendar]),
+        ])
+        .unwrap();
+        replace_source(&mut db, "reminders", &[record("reminders", "r-1", "Buy milk", "Reminder “Buy milk”, open", vec![Share::Calendar])]).unwrap();
+        for source in ["calendar", "reminders"] {
+            db.execute("INSERT OR REPLACE INTO preferences(key,value) VALUES(?1,?2)", params![refreshed_key(source), chrono::Local::now().to_rfc3339()]).unwrap();
+        }
+        let moved = serde_json::json!({"id":"e-1","occurrence":"2026-10-29 15:00","start":"2026-10-30 16:00"});
+        app_changed(&db, "update_calendar_event", moved.as_object().unwrap()).unwrap();
+        let left: Vec<String> = db
+            .prepare("SELECT source_id FROM memory_records WHERE source='calendar'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(left, ["e-12@2026-10-30 09:00"], "only that event's old record goes");
+        assert!(search(&db, "dentist", None, 5).unwrap().is_empty());
+        assert_eq!(recently_refreshed(&db, chrono::Duration::hours(FRESH_HOURS)), HashSet::from(["reminders"]));
+        app_changed(&db, "complete_reminder", serde_json::json!({"id":"r-1","title":"Buy milk"}).as_object().unwrap()).unwrap();
+        assert!(search(&db, "milk", None, 5).unwrap().is_empty());
+        assert!(recently_refreshed(&db, chrono::Duration::hours(FRESH_HOURS)).is_empty());
     }
 
     #[test]

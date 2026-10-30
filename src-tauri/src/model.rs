@@ -277,8 +277,8 @@ impl ModelHub {
             return Ok(());
         }
         match self.apple_status() {
-            Some((false, reason)) if reason == "unsupported" || reason == "missing" => Err("Voice needs macOS 26 for Apple speech recognition, or a local MLX Whisper model folder in Settings.".into()),
-            _ if !self.apple_helper.is_file() => Err("Voice needs a local MLX Whisper model folder in Settings.".into()),
+            Some((false, reason)) if reason == "unsupported" || reason == "missing" => Err("Voice needs macOS 26, which has Apple’s speech recognition.".into()),
+            _ if !self.apple_helper.is_file() => Err("Voice needs Buntini’s Apple helper, which this copy of Buntini doesn’t include. Reinstall Buntini to use voice.".into()),
             _ => Ok(()),
         }
     }
