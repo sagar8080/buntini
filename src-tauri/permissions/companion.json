@@ -18,6 +18,8 @@
           "run_action",
           "resume_task",
           "task_progress",
+          "pending_approvals",
+          "open_approval",
           "plan_task_online",
           "continue_task_online",
           "background_status",

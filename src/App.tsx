@@ -11,7 +11,7 @@ import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
 import Conversation from './Conversation';
-import { BackgroundWork } from './TaskProgress';
+import { BackgroundWork, WaitingForYou } from './TaskProgress';
 import { reliabilityPreview, previewReliabilityProgress, previewBackground } from './reliabilityPreview';
 import Onboarding from './Onboarding';
 import SettingsView from './SettingsView';
@@ -22,7 +22,7 @@ import { greeting, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
@@ -38,6 +38,7 @@ export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
   const [progress, setProgress] = useState<TaskProgress[]>([]);
   const [background, setBackground] = useState<BackgroundStatus | null>(null);
+  const [waiting, setWaiting] = useState<PendingApprovalSummary[]>([]);
   const [onlineTaskId, setOnlineTaskId] = useState('');
   const [page, setPage] = useState<Page>('home');
   const [expanded, setExpanded] = useState(false);
@@ -124,8 +125,8 @@ export default function App() {
       }
     }
     if (desktop) {
-      const [flows, scheduled] = await Promise.all([command<TaskProgress[]>('task_progress'), command<BackgroundStatus>('background_status')]);
-      if (mounted.current) { setProgress(flows); setBackground(scheduled); }
+      const [flows, scheduled, approvals] = await Promise.all([command<TaskProgress[]>('task_progress'), command<BackgroundStatus>('background_status'), command<PendingApprovalSummary[]>('pending_approvals')]);
+      if (mounted.current) { setProgress(flows); setBackground(scheduled); setWaiting(approvals); }
     } else if (reliabilityPreview) {
       setProgress(previewReliabilityProgress); setBackground(previewBackground);
     }
@@ -399,6 +400,20 @@ export default function App() {
     await command('cancel_task', { taskId: task.id });
     await refresh();
   }
+  // From Waiting for you or a Review notification: reload the saved proposal, then open its sheet. Never approves.
+  async function openApproval(approvalId: string) {
+    setPage('home'); void expand(true);
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish the current task first, then review it under Waiting for you.'); return; }
+    try { await reviewTask(await command<TaskRecord>('open_approval', { approvalId })); }
+    catch (e) { setError(errorMessage(e)); await refresh().catch(() => {}); }
+  }
+  const openApprovalRef = useRef(openApproval);
+  openApprovalRef.current = openApproval;
+  useEffect(() => {
+    if (!desktop) return;
+    const subscription = listen<{ approvalId: string }>('approval-open', event => { void openApprovalRef.current(event.payload.approvalId); });
+    return () => { void subscription.then(unlisten => unlisten()); };
+  }, []);
   // Voice handlers run from the render where the mic was pressed; they send through the latest submit.
   const submitRef = useRef(submit);
   submitRef.current = submit;
@@ -556,6 +571,7 @@ export default function App() {
         {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} />}
         {page === 'home' && !onboarding && <>
           <div className="conversation" ref={conversationRef}>
+            <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} />
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>What’s on your mind?</span></h1><div><button onClick={() => void brief()}><Sun size={12} /> My day</button><button onClick={() => void submit('What needs a reply?', 'auto')}><Mail size={12} /> Needs a reply</button><button onClick={() => { setMode('files'); inputRef.current?.focus(); }}><Folder size={12} /> Find a file</button><button onClick={() => { setMode('web'); inputRef.current?.focus(); }}><Globe2 size={12} /> Look it up</button><button onClick={() => void submit('How is my Mac doing?', 'system')}><Laptop size={12} /> Check my Mac</button></div></div> : <>
               <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={pending} title="Start a separate conversation; this one stays in History"><Plus size={11} /> New topic</button></div>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}

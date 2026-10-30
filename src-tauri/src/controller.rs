@@ -281,7 +281,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
 }
 #[tauri::command]
 pub async fn save_settings(
-    settings: Settings,
+    mut settings: Settings,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Settings, String> {
@@ -308,7 +308,18 @@ pub async fn save_settings(
             // Switching brains frees the previous model process (an MLX model can hold gigabytes).
             state.models.reset().await;
         }
-        state.store.lock().unwrap().save_settings(&settings)?;
+        {
+            let store = state.store.lock().unwrap();
+            if previous.open_at_login != settings.open_at_login {
+                // Saved as what macOS confirmed, never only as what was asked.
+                settings.open_at_login =
+                    crate::login::apply_setting(&store, settings.open_at_login);
+            }
+            store.save_settings(&settings)?;
+            if previous.notifications_enabled != settings.notifications_enabled {
+                crate::delivery::sync_os_requests(&store, chrono::Utc::now())?;
+            }
+        }
         crate::overlay::set_scale(settings.companion_scale);
         Ok::<_, String>(())
     }
@@ -628,9 +639,13 @@ pub async fn run_action(
     args: Value,
     on_event: Channel<TaskEvent>,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
     if state.store.lock().unwrap().workflow(&id)?.is_some() {
-        return run_workflow_action(&state, &id, args, &on_event).await;
+        let task = run_workflow_action(&state, &id, args, &on_event).await?;
+        crate::notifications::withdraw_approval(&id);
+        crate::notifications::announce_waiting(&app, &task).await;
+        return Ok(task);
     }
     let (pending, args, _claim) = claim_action(&state, &id, &args)?;
     state.audit(&format!("action.{}", pending.tool), "Approved by the user");
@@ -902,6 +917,59 @@ fn cancel_workflow(state: &AppState, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The approval inbox: every saved proposal still waiting for the person.
+#[tauri::command]
+pub fn pending_approvals(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::store::PendingApprovalSummary>, String> {
+    state.store.lock().unwrap().pending_approvals()
+}
+
+/// Restores a saved proposal so its sheet can open again, after a restart or
+/// from a notification. Opening never approves; Allow still goes through
+/// run_action's claim, which re-checks everything.
+#[tauri::command]
+pub fn open_approval(
+    approval_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskRecord, String> {
+    open_approval_in(&state.store.lock().unwrap(), &approval_id)
+}
+
+/// The same checks the claim makes, so a used, cancelled or outdated approval
+/// is refused when it is opened rather than after the person edits it.
+fn open_approval_in(store: &Store, approval_id: &str) -> Result<TaskRecord, String> {
+    const STALE: &str =
+        "That request was already handled or stopped. Ask again and I’ll set it up.";
+    let flow = store.workflow(approval_id)?.ok_or(STALE)?;
+    let step = flow
+        .steps
+        .last()
+        .filter(|step| step.id == approval_id && step.state == "waiting")
+        .ok_or(STALE)?;
+    if !["waiting_action", "waiting_online"].contains(&flow.state.as_str()) {
+        return Err(STALE.into());
+    }
+    let task = store.task(&flow.id)?.ok_or(STALE)?;
+    let settings = store.settings()?;
+    flow.check_resume(&task, &settings)?;
+    if flow.state == "waiting_action" {
+        let args = step.arguments.as_object().cloned().unwrap_or_default();
+        if !action_allowed(&settings, &step.tool, &args) {
+            return Err("That app is no longer allowed. Review Settings → Apps.".into());
+        }
+        if task
+            .action
+            .as_ref()
+            .and_then(|action| action["id"].as_str())
+            != Some(approval_id)
+        {
+            return Err(STALE.into());
+        }
+    }
+    Ok(task)
+}
+
 #[tauri::command]
 pub fn task_progress(state: State<'_, AppState>) -> Result<Vec<Value>, String> {
     Ok(state.store.lock().unwrap().workflows()?.into_iter().enumerate().filter(|(index, flow)| *index < 100 || flow.can_resume() || ["waiting_action", "waiting_online", "unknown"].contains(&flow.state.as_str())).map(|(_, flow)| json!({"id":flow.id,"goal":flow.goal,"state":flow.state,"steps":flow.steps,"contract":flow.contract,"updatedAt":flow.updated_at,"error":flow.error,"canResume":flow.can_resume()})).collect())
@@ -1011,6 +1079,7 @@ pub async fn resume_task(
     field_updates: Option<Vec<TaskFieldUpdate>>,
     on_event: Channel<TaskEvent>,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
     let guidance = guidance
         .map(|text| text.trim().to_string())
@@ -1083,6 +1152,7 @@ pub async fn resume_task(
         result,
         cancel.load(Ordering::Relaxed),
     )?;
+    crate::notifications::announce_waiting(&app, &task).await;
     Ok(task)
 }
 
@@ -1116,6 +1186,7 @@ pub async fn continue_task_online(
     approval_id: String,
     on_event: Channel<TaskEvent>,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
     let cancel = Arc::new(AtomicBool::new(false));
     let (mut flow, mut task, settings, _query, call, _claim) = {
@@ -1266,6 +1337,7 @@ pub async fn continue_task_online(
         result,
         cancel.load(Ordering::Relaxed),
     )?;
+    crate::notifications::announce_waiting(&app, &task).await;
     Ok(task)
 }
 /// Quits Buntini from its own menu or ⌘Q. The exit handler in lib.rs stops the models
@@ -1278,6 +1350,7 @@ pub fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 pub fn cancel_action(id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.pending_actions.lock().unwrap().remove(&id);
+    crate::notifications::withdraw_approval(&id);
     let flow = state.store.lock().unwrap().workflow(&id)?;
     if let Some(flow) = flow {
         cancel_workflow(&state, &flow.id)?;
@@ -3348,7 +3421,13 @@ pub async fn run_task(
     let mut event = TaskEvent::new("done", &task.id, None);
     event.task = Some(task.clone());
     let _ = on_event.send(event);
-    if started.elapsed() >= std::time::Duration::from_secs(30) && task.state != "cancelled" {
+    // A proposal asks right away when Buntini is out of sight; other results
+    // only announce themselves after a long run.
+    let waiting = crate::notifications::announce_waiting(&app, &task).await;
+    if !waiting
+        && started.elapsed() >= std::time::Duration::from_secs(30)
+        && task.state != "cancelled"
+    {
         let unobtrusive = app
             .get_webview_window("main")
             .map(|window| !window.is_visible().unwrap_or(true) || !crate::overlay::is_expanded())
@@ -3888,6 +3967,51 @@ for line in sys.stdin:
         .await
         .unwrap();
         assert_eq!(replay.state, "unknown");
+    }
+
+    #[test]
+    fn a_stale_approval_id_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("test.db")).unwrap();
+        let settings = store.settings().unwrap();
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"inbox-task","prompt":"Open the project site","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        let mut flow = Workflow::new(&task, "auto", &settings, vec![], None, &["open_link"]);
+        let args = json!({"url":"https://example.com/"});
+        let id = flow
+            .begin(
+                "open_link",
+                args.clone(),
+                json!({"role":"assistant"}),
+                true,
+                true,
+            )
+            .unwrap();
+        task.state = flow.state.clone();
+        task.handoff = Some("action".into());
+        task.action = Some(
+            json!({"id":id,"tool":"open_link","title":"Open this link?","fields":[],"note":""}),
+        );
+        store.checkpoint(&mut flow, &task).unwrap();
+        let restored = open_approval_in(&store, &id).unwrap();
+        assert_eq!(restored.action.unwrap()["id"], id.as_str());
+        assert!(open_approval_in(&store, "no-such-approval").is_err());
+        assert!(
+            open_approval_in(&store, "inbox-task").is_err(),
+            "a task id is not an approval id"
+        );
+        // Another brain cannot pick up this task's saved context.
+        let mut other = settings.clone();
+        other.model_backend = "mlx".into();
+        store.save_settings(&other).unwrap();
+        assert!(open_approval_in(&store, &id).is_err());
+        store.save_settings(&settings).unwrap();
+        // Once used, the same id never reopens the sheet.
+        flow.approve(&id, args).unwrap();
+        task.state = "running".into();
+        task.action = None;
+        store.checkpoint(&mut flow, &task).unwrap();
+        let error = open_approval_in(&store, &id).unwrap_err();
+        assert!(error.contains("already handled"));
     }
 
     fn pending_action(tool: &str) -> PendingAction {

@@ -36,6 +36,7 @@ export interface Settings {
   voiceRate: number;
   notificationsEnabled: boolean;
   morningBrief: boolean;
+  openAtLogin: boolean;
   monthlyBudgetUsd: number;
   costPerSearchUsd: number;
   vadModelPath: string;
@@ -122,4 +123,8 @@ export interface FieldProvenance { value: unknown; origin: string; sourceStepId?
 export interface TaskContract { version: number; originalRequest: string; currentRequest: string; revision: number; intentStatus: string; outcomes: TaskOutcome[]; unresolvedFields: { outcomeId: string; field: string; reason: string; status: string }[]; constraints: unknown[]; provenance: Record<string, Record<string, FieldProvenance>>; revisions: unknown[] }
 export interface TaskFieldUpdate { outcomeId: string; fields: Record<string, string> }
 export interface TaskProgress { id: string; goal: string; state: string; updatedAt: string; error?: string; canResume?: boolean; contract?: TaskContract; steps: { id: string; tool: string; arguments: Record<string, unknown>; state: string; approvedAt?: string; finishedAt?: string; evidence?: unknown }[] }
-export interface BackgroundStatus { executionMode: string; limitation: string; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
+/** What macOS reports for Open at login. */
+export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'notFound' | 'unavailable';
+/** A saved proposal waiting for the person; `description` never holds field values. */
+export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
+export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }

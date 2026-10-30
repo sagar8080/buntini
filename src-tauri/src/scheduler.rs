@@ -337,9 +337,44 @@ pub fn start(app: tauri::AppHandle) {
             for id in price_due {
                 let _ = crate::watches::run(&app, &id, true).await;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            // The sleep's clock stops while the Mac sleeps; a wake cuts it short.
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                _ = WAKE.notified() => {}
+            }
         }
     });
+}
+
+static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Checks for due searches and price watches now instead of at the next tick.
+/// Timers need no nudge: their claim loop looks every second.
+pub fn tick_now() {
+    WAKE.notify_one();
+}
+
+/// Catches up as soon as the Mac wakes, so overdue checks and timers do not
+/// wait out a sleep-stretched tick. Call once, on the main thread.
+pub fn observe_wake() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSWorkspace, NSWorkspaceDidWakeNotification};
+        use objc2_foundation::NSNotification;
+        let block = block2::RcBlock::new(|_: std::ptr::NonNull<NSNotification>| tick_now());
+        let observer = unsafe {
+            NSWorkspace::sharedWorkspace()
+                .notificationCenter()
+                .addObserverForName_object_queue_usingBlock(
+                    Some(NSWorkspaceDidWakeNotification),
+                    None,
+                    None,
+                    &block,
+                )
+        };
+        // Observed for the app's whole life.
+        std::mem::forget(observer);
+    }
 }
 #[cfg(test)]
 mod tests {

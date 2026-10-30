@@ -258,6 +258,7 @@ where
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }
+    crate::delivery::erase_os_requests();
     for provider in ["brave", "tavily", "ebay", "duffel"]
         .into_iter()
         .chain(crate::cloud::PROVIDERS.iter().map(|provider| provider.id))
@@ -402,6 +403,36 @@ mod tests {
         assert!(!recording.exists());
         assert!(recording.with_file_name("unrelated-file.txt").exists());
         assert!(!state.data_dir.join("logs").exists());
+    }
+
+    #[tokio::test]
+    async fn erase_clears_pending_os_requests() {
+        let (_dir, state) = fixture_state();
+        let timer = {
+            let store = state.store.lock().unwrap();
+            let mut settings = store.settings().unwrap();
+            settings.notifications_enabled = true;
+            store.save_settings(&settings).unwrap();
+            crate::delivery::schedule(&store, 600, chrono::Utc::now()).unwrap()
+        };
+        let identifier = crate::delivery::os_identifier(&timer.id);
+        assert!(crate::delivery::fake::pending().contains_key(&identifier));
+        erase_with_services(
+            "delete everything",
+            &state,
+            || std::future::ready(Ok(true)),
+            || std::future::ready(Ok(())),
+            |_| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            crate::delivery::fake::pending().is_empty(),
+            "an erased timer must not alert from macOS later"
+        );
+        assert!(crate::delivery::timers(&state.store.lock().unwrap())
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

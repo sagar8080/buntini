@@ -6,7 +6,39 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
-pub const LIMITATION: &str = "Timers and checks run while Buntini is open and your Mac is awake. Closing the window keeps Buntini running. After sleep or quitting, overdue work runs once when Buntini returns; it cannot alert you while the app is quit or the Mac is asleep.";
+pub const LIMITATION: &str = "Checks run while Buntini is open and your Mac is awake. Closing the window keeps Buntini running. With desktop notifications on, macOS also holds each timer's alert, so it can appear after you quit Buntini. Sleep still delays alerts, and overdue work runs once when Buntini returns or your Mac wakes.";
+
+/// Timer alerts handed to macOS as well, so one can appear while Buntini is
+/// quit. Each claim, cancel and erase withdraws the request before acting, so a
+/// timer alerts once.
+pub trait OsNotifier: Sync {
+    fn schedule(&self, identifier: &str, seconds: u64, title: &str, body: &str);
+    /// Stops alerts that have not appeared yet.
+    fn remove_pending(&self, identifiers: &[String]);
+    /// Stops pending alerts and clears shown ones from Notification Center.
+    fn remove(&self, identifiers: &[String]);
+    fn remove_all(&self);
+}
+
+pub(crate) fn os_identifier(timer_id: &str) -> String {
+    format!("timer-{timer_id}")
+}
+
+#[cfg(not(test))]
+pub(crate) fn os() -> &'static dyn OsNotifier {
+    &crate::notifications::SystemNotifier
+}
+#[cfg(test)]
+pub(crate) fn os() -> &'static dyn OsNotifier {
+    &fake::ThreadNotifier
+}
+
+fn timer_body(seconds: u64) -> String {
+    format!(
+        "Your {} timer is done.",
+        crate::skills::mac::spoken(seconds)
+    )
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +86,8 @@ pub struct MonitorStatus {
 pub struct BackgroundStatus {
     pub execution_mode: String,
     pub limitation: String,
+    /// What macOS reports for Open at login, not just the saved setting.
+    pub open_at_login: crate::login::LoginStatus,
     pub timers: Vec<TimerRecord>,
     pub monitors: Vec<MonitorStatus>,
 }
@@ -178,6 +212,14 @@ pub fn schedule(store: &Store, seconds: u64, at: DateTime<Utc>) -> Result<TimerR
         error: None,
     };
     write_timer(&store.db, &timer)?;
+    if store.settings()?.notifications_enabled {
+        os().schedule(
+            &os_identifier(&timer.id),
+            seconds,
+            "Timer",
+            &timer_body(seconds),
+        );
+    }
     Ok(timer)
 }
 pub fn cancel(store: &Store, id: Option<&str>) -> Result<usize, String> {
@@ -185,17 +227,76 @@ pub fn cancel(store: &Store, id: Option<&str>) -> Result<usize, String> {
         .db
         .unchecked_transaction()
         .map_err(|e| e.to_string())?;
-    let mut count = 0;
+    let mut cancelled = vec![];
     for mut timer in timers(store)? {
         if timer.state == "pending" && id.is_none_or(|id| id == timer.id) {
             timer.state = "cancelled".into();
             timer.finished_at = Some(Utc::now().to_rfc3339());
             write_timer(&store.db, &timer)?;
-            count += 1;
+            cancelled.push(os_identifier(&timer.id));
         }
     }
     transaction.commit().map_err(|e| e.to_string())?;
-    Ok(count)
+    os().remove(&cancelled);
+    Ok(cancelled.len())
+}
+/// Keeps macOS's copies in step with the timers and the notification setting:
+/// future pending timers are (re)registered when notifications are on and
+/// withdrawn when they are off. Past-due timers are left to the claim.
+pub fn sync_os_requests(store: &Store, at: DateTime<Utc>) -> Result<(), String> {
+    let enabled = store.settings()?.notifications_enabled;
+    let mut withdrawn = vec![];
+    for timer in timers(store)?.into_iter().filter(|t| t.state == "pending") {
+        let remaining = DateTime::parse_from_rfc3339(&timer.due_at)
+            .map(|due| (due.with_timezone(&Utc) - at).num_seconds())
+            .unwrap_or(0);
+        if enabled && remaining > 0 {
+            // The same identifier replaces any earlier copy instead of adding one.
+            os().schedule(
+                &os_identifier(&timer.id),
+                remaining as u64,
+                "Timer",
+                &timer_body(timer.seconds),
+            );
+        } else if !enabled {
+            withdrawn.push(os_identifier(&timer.id));
+        }
+    }
+    os().remove_pending(&withdrawn);
+    Ok(())
+}
+/// After a quit, a past-due timer whose macOS alert is still in Notification
+/// Center already alerted the person: record that instead of alerting again.
+/// The rest stay pending and the claim delivers them now, marked late.
+pub fn reconcile(
+    store: &Store,
+    delivered: &std::collections::HashSet<String>,
+    at: DateTime<Utc>,
+) -> Result<Vec<TimerRecord>, String> {
+    let transaction = store
+        .db
+        .unchecked_transaction()
+        .map_err(|e| e.to_string())?;
+    let mut settled = vec![];
+    for mut timer in timers(store)? {
+        let due = DateTime::parse_from_rfc3339(&timer.due_at)
+            .map(|due| due.with_timezone(&Utc) <= at)
+            .unwrap_or(false);
+        if timer.state == "pending" && due && delivered.contains(&os_identifier(&timer.id)) {
+            timer.state = "completed".into();
+            timer.finished_at = Some(at.to_rfc3339());
+            timer.delivery_state = Some("os_scheduled".into());
+            write_timer(&store.db, &timer)?;
+            settled.push(timer);
+        }
+    }
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(settled)
+}
+/// Delete everything also clears every Buntini alert macOS still holds,
+/// scheduled or shown, since their text came from the erased data.
+pub fn erase_os_requests() {
+    os().remove_all();
 }
 fn lateness(due: &str, at: DateTime<Utc>) -> i64 {
     DateTime::parse_from_rfc3339(due)
@@ -229,6 +330,10 @@ fn claim_due(store: &Store, at: DateTime<Utc>) -> Result<Option<TimerRecord>, St
         })
         .transpose()?;
     transaction.commit().map_err(|e| e.to_string())?;
+    if let Some(timer) = &timer {
+        // Shown copies stay: the claim checks them before alerting again.
+        os().remove_pending(&[os_identifier(&timer.id)]);
+    }
     Ok(timer)
 }
 fn finish_timer(
@@ -422,6 +527,7 @@ pub fn status(store: &Store) -> Result<BackgroundStatus, String> {
     Ok(BackgroundStatus {
         execution_mode: "app_open_and_awake".into(),
         limitation: LIMITATION.into(),
+        open_at_login: crate::login::status(),
         timers: timers(store)?,
         monitors,
     })
@@ -443,6 +549,18 @@ pub fn cancel_timer(id: String, state: State<'_, AppState>) -> Result<(), String
 }
 pub fn start(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
+        {
+            // Before the first claim: settle timers macOS already showed while
+            // Buntini was quit, then re-register the future ones.
+            let delivered = crate::notifications::delivered_identifiers().await;
+            let state = app.state::<AppState>();
+            let store = state.store.lock().unwrap();
+            if let Err(error) = reconcile(&store, &delivered, Utc::now())
+                .and_then(|_| sync_os_requests(&store, Utc::now()))
+            {
+                let _ = store.audit("timer.reconcile_failed", &error);
+            }
+        }
         loop {
             let state = app.state::<AppState>();
             let next = claim_due(&state.store.lock().unwrap(), Utc::now());
@@ -454,16 +572,28 @@ pub fn start(app: tauri::AppHandle) {
                     } else {
                         format!("Your {length} timer is done.")
                     };
+                    // The claim withdrew macOS's pending copy; one already shown
+                    // counts as the desktop alert, so it is not repeated.
+                    let shown = crate::notifications::delivered_identifiers()
+                        .await
+                        .contains(&os_identifier(&timer.id));
                     // Claim is committed before either externally observable effect.
                     let app_result = app.emit("timer-done", &message).map_err(|e| {
                         format!("The timer finished but its in-app alert failed: {e}")
                     });
-                    let desktop =
+                    let desktop = if shown {
+                        Ok("os_scheduled".to_string())
+                    } else {
                         crate::notifications::deliver_timer(&app, &timer.id, "Timer", &message)
-                            .await;
+                            .await
+                    };
                     let delivery = match (app_result, desktop) {
                         (Ok(()), Ok(channel)) => Ok(channel),
-                        (Err(_error), Ok(channel)) if channel == "desktop_accepted" => Ok(channel),
+                        (Err(_error), Ok(channel))
+                            if channel == "desktop_accepted" || channel == "os_scheduled" =>
+                        {
+                            Ok(channel)
+                        }
                         (Err(error), _) => Err(error),
                         (_, Err(error)) => Err(error),
                     };
@@ -484,9 +614,115 @@ pub fn start(app: tauri::AppHandle) {
     });
 }
 
+/// A stand-in for macOS's notification center, one per test thread so tests
+/// running in parallel never see each other's requests.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::{cell::RefCell, collections::BTreeMap};
+    thread_local! {
+        static PENDING: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
+        static SCHEDULED: RefCell<usize> = const { RefCell::new(0) };
+    }
+    pub struct ThreadNotifier;
+    impl super::OsNotifier for ThreadNotifier {
+        fn schedule(&self, identifier: &str, seconds: u64, _title: &str, body: &str) {
+            assert!(!body.is_empty());
+            PENDING.with(|p| p.borrow_mut().insert(identifier.into(), seconds));
+            SCHEDULED.with(|count| *count.borrow_mut() += 1);
+        }
+        fn remove_pending(&self, identifiers: &[String]) {
+            PENDING.with(|p| p.borrow_mut().retain(|id, _| !identifiers.contains(id)));
+        }
+        fn remove(&self, identifiers: &[String]) {
+            self.remove_pending(identifiers);
+        }
+        fn remove_all(&self) {
+            PENDING.with(|p| p.borrow_mut().clear());
+        }
+    }
+    /// Requests macOS would still show, with their delay in seconds.
+    pub fn pending() -> BTreeMap<String, u64> {
+        PENDING.with(|p| p.borrow().clone())
+    }
+    pub fn scheduled() -> usize {
+        SCHEDULED.with(|count| *count.borrow())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn notifying(store: &Store) {
+        let mut settings = store.settings().unwrap();
+        settings.notifications_enabled = true;
+        store.save_settings(&settings).unwrap();
+    }
+    #[test]
+    fn scheduling_registers_one_os_request_and_claim_removes_it() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        notifying(&store);
+        let before = fake::scheduled();
+        let timer = schedule(&store, 90, at()).unwrap();
+        assert_eq!(fake::scheduled(), before + 1, "one OS request per timer");
+        assert_eq!(fake::pending().get(&os_identifier(&timer.id)), Some(&90));
+        let claimed = claim_due(&store, at() + chrono::Duration::seconds(90))
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, timer.id);
+        assert!(
+            !fake::pending().contains_key(&os_identifier(&timer.id)),
+            "the in-app claim withdraws the OS copy before alerting"
+        );
+        let cancelled = schedule(&store, 60, at()).unwrap();
+        assert!(fake::pending().contains_key(&os_identifier(&cancelled.id)));
+        cancel(&store, Some(&cancelled.id)).unwrap();
+        assert!(!fake::pending().contains_key(&os_identifier(&cancelled.id)));
+    }
+    #[test]
+    fn timers_without_notifications_stay_in_app() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let timer = schedule(&store, 60, at()).unwrap();
+        assert!(!fake::pending().contains_key(&os_identifier(&timer.id)));
+        notifying(&store);
+        sync_os_requests(&store, at() + chrono::Duration::seconds(20)).unwrap();
+        assert_eq!(
+            fake::pending().get(&os_identifier(&timer.id)),
+            Some(&40),
+            "turning notifications on registers the time that is left"
+        );
+        let mut settings = store.settings().unwrap();
+        settings.notifications_enabled = false;
+        store.save_settings(&settings).unwrap();
+        sync_os_requests(&store, at() + chrono::Duration::seconds(30)).unwrap();
+        assert!(!fake::pending().contains_key(&os_identifier(&timer.id)));
+    }
+    #[test]
+    fn reconcile_does_not_realert_a_delivered_timer() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        notifying(&store);
+        let shown = schedule(&store, 60, at()).unwrap();
+        let missed = schedule(&store, 60, at()).unwrap();
+        let future = schedule(&store, 3600, at()).unwrap();
+        let later = at() + chrono::Duration::minutes(10);
+        let delivered = [os_identifier(&shown.id), os_identifier(&future.id)]
+            .into_iter()
+            .collect();
+        let settled = reconcile(&store, &delivered, later).unwrap();
+        assert_eq!(
+            settled.len(),
+            1,
+            "only a past-due timer macOS showed is settled"
+        );
+        let record = timer(&store, &shown.id).unwrap().unwrap();
+        assert_eq!(record.state, "completed");
+        assert_eq!(record.delivery_state.as_deref(), Some("os_scheduled"));
+        // The one macOS never showed is still claimed and alerted now, marked late.
+        let claimed = claim_due(&store, later).unwrap().unwrap();
+        assert_eq!(claimed.id, missed.id);
+        assert_eq!(claimed.late_seconds, 540);
+        assert!(claim_due(&store, later).unwrap().is_none());
+        assert_eq!(timer(&store, &future.id).unwrap().unwrap().state, "pending");
+    }
     fn at() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-22T12:00:00Z")
             .unwrap()
