@@ -3,6 +3,7 @@
 //! only when the user allowed that app in Settings → Apps.
 use std::path::Path;
 
+#[derive(Default)]
 pub struct Day {
     /// (time, title); None when Calendar isn't allowed or couldn't be read.
     pub events: Option<Vec<(String, String)>>,
@@ -16,9 +17,13 @@ pub struct Day {
     /// Unreplied email sorted by `triage`; None when Mail isn't allowed or couldn't be read.
     pub mail: Option<crate::triage::Triage>,
     pub mail_allowed: bool,
+    /// Mail was closed and the brief ran on its own, so the inbox was left alone.
+    pub mail_skipped: bool,
 }
 
-pub async fn gather(helper: &Path, settings: &crate::types::Settings) -> Day {
+/// Reads today's parts. The automatic brief passes `Launch::IfRunning` so it never opens
+/// Mail; "My day" asked for by the user passes `Launch::Allow`.
+pub async fn gather(helper: &Path, settings: &crate::types::Settings, launch: crate::apps::Launch) -> Day {
     let calendar_allowed = crate::apps::allowed(settings, "calendar");
     let reminders_allowed = crate::apps::allowed(settings, "reminders");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -40,11 +45,14 @@ pub async fn gather(helper: &Path, settings: &crate::types::Settings) -> Day {
     let mail_allowed = crate::apps::allowed(settings, "mail");
     let mail = async {
         if !mail_allowed {
-            return None;
+            return (None, false);
         }
-        crate::triage::run().await.ok()
+        match crate::triage::run(launch).await {
+            Ok(triage) => (Some(triage), false),
+            Err(error) => (None, crate::apps::is_not_running(&error)),
+        }
     };
-    let (events, reminders, mail) = tokio::join!(events, reminders, mail);
+    let (events, reminders, (mail, mail_skipped)) = tokio::join!(events, reminders, mail);
     let calendar_coverage = events
         .as_ref()
         .filter(|read| !read.complete())
@@ -84,6 +92,7 @@ pub async fn gather(helper: &Path, settings: &crate::types::Settings) -> Day {
         reminders_coverage,
         mail,
         mail_allowed,
+        mail_skipped,
     }
 }
 
@@ -139,6 +148,7 @@ pub fn compose(
     }
     match &day.mail {
         Some(triage) => lines.extend(crate::triage::brief_line(triage)),
+        None if day.mail_skipped => lines.push("Mail isn’t open, so I skipped your inbox.".into()),
         None if day.mail_allowed => lines.push("I couldn’t check your email. Check Mail is open and allowed under System Settings → Privacy & Security → Automation.".into()),
         None => {}
     }
@@ -178,6 +188,7 @@ mod tests {
             reminders_coverage: None,
             mail: Some(triage),
             mail_allowed: true,
+            mail_skipped: false,
         };
         assert!(compose("", morning, &day, false)
             .ends_with("Your calendar is clear today. One email looks like it needs a reply, from Ana Silva."));
@@ -185,6 +196,25 @@ mod tests {
         assert!(compose("", morning, &day, false).contains("couldn’t check your email"));
         day.mail_allowed = false;
         assert!(!compose("", morning, &day, false).contains("email"));
+    }
+
+    #[test]
+    fn a_skipped_inbox_is_stated() {
+        let morning = chrono::Local
+            .with_ymd_and_hms(2026, 10, 22, 8, 30, 0)
+            .unwrap();
+        let day = Day {
+            events: Some(vec![]),
+            reminders: Some(vec![]),
+            calendar_allowed: true,
+            reminders_allowed: true,
+            mail_allowed: true,
+            mail_skipped: true,
+            ..Default::default()
+        };
+        let answer = compose("", morning, &day, false);
+        assert!(answer.ends_with("Mail isn’t open, so I skipped your inbox."), "{answer}");
+        assert!(!answer.contains("couldn’t check your email"), "a closed Mail is not a failure");
     }
 
     #[test]
@@ -204,6 +234,7 @@ mod tests {
             reminders_coverage: None,
             mail: None,
             mail_allowed: false,
+            mail_skipped: false,
         };
         assert_eq!(compose("Sam", morning, &day, false), "Good morning, Sam! It’s Thursday 22 October. On your calendar: Standup at 09:00 and Lunch with Sam at 13:00. Reminders due: Call mum.");
         let quiet = Day {
@@ -215,6 +246,7 @@ mod tests {
             reminders_coverage: None,
             mail: None,
             mail_allowed: false,
+            mail_skipped: false,
         };
         assert_eq!(compose("", morning, &quiet, true), "Good morning! It’s Thursday 22 October. Your calendar is clear today. Your battery is low, so it might be time to plug in.");
         let blocked = Day {
@@ -226,6 +258,7 @@ mod tests {
             reminders_coverage: None,
             mail: None,
             mail_allowed: false,
+            mail_skipped: false,
         };
         assert!(compose("", morning, &blocked, false).contains("Calendar"));
         assert!(compose("", morning, &blocked, false).contains("couldn’t read your reminders"));
@@ -238,6 +271,7 @@ mod tests {
             reminders_coverage: None,
             mail: None,
             mail_allowed: false,
+            mail_skipped: false,
         };
         assert!(compose("", morning, &not_allowed, false).contains("Settings → Apps"));
         assert!(!compose("", morning, &not_allowed, false).contains("couldn’t read your reminders"));
@@ -250,6 +284,7 @@ mod tests {
             reminders_coverage: Some((50, 63)),
             mail: None,
             mail_allowed: false,
+            mail_skipped: false,
         };
         let answer = compose("", morning, &partial, false);
         assert!(
