@@ -390,6 +390,11 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
         "reply_email" => "Buntini drafted a reply and needs your OK.",
         "add_reminder" => "Buntini prepared a reminder and needs your OK.",
         "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
+        // A change names no item: "Dentist" or "Divorce lawyer" is as private as a title.
+        "complete_reminder" => "Buntini wants to mark a reminder done and needs your OK.",
+        "reschedule_reminder" => "Buntini wants to move a reminder and needs your OK.",
+        "update_calendar_event" => "Buntini wants to change a calendar event and needs your OK.",
+        "append_to_note" => "Buntini wants to add to a note and needs your OK.",
         "create_note" => "Buntini wrote a note and needs your OK.",
         "run_shortcut" => "Buntini wants to run a shortcut and needs your OK.",
         "open_app" | "open_link" => "Buntini wants to open something for you and needs your OK.",
@@ -862,6 +867,8 @@ mod tests {
                 assert!(!body.contains(value), "{tool} leaked {value}");
             }
             if crate::actions::TOOLS.contains(tool) {
+                // Each write says what kind of work waits, not just that something does.
+                assert_ne!(body, approval_body("unknown_tool"), "{tool} has no wording of its own");
                 // The sheet shows these values; the lock screen must not.
                 let (_, fields, _) = crate::actions::describe(tool, args);
                 for field in fields.iter().filter(|field| !field.value.is_empty()) {
