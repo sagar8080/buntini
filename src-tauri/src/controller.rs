@@ -388,6 +388,10 @@ pub(crate) async fn save_settings_in(
             if previous.notifications_enabled != settings.notifications_enabled {
                 crate::delivery::sync_os_requests(&store, chrono::Utc::now())?;
             }
+            // Switching heads-ups off takes back the alerts already given.
+            if previous.heads_ups && !settings.heads_ups {
+                crate::delivery::os().remove(&crate::nudges::alert_identifiers(&store));
+            }
         }
         crate::overlay::set_scale(settings.companion_scale);
         Ok::<_, String>(())

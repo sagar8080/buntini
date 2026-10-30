@@ -196,6 +196,14 @@ const TOO_LATE_MINUTES: i64 = 2;
 /// Blocks this long ("Work", "Out of office") are not meetings to prepare for.
 const LONGEST_MEETING_HOURS: i64 = 6;
 
+/// The days whose events the meeting rule reads: today, and tomorrow too when the lead
+/// window crosses midnight.
+pub fn meeting_days(now: DateTime<Local>) -> (String, Option<String>) {
+    let today = now.format("%Y-%m-%d").to_string();
+    let ahead = (now + Duration::minutes(LEAD_MINUTES)).format("%Y-%m-%d").to_string();
+    (today.clone(), (ahead != today).then_some(ahead))
+}
+
 /// The next timed event starting within the lead window.
 pub fn meeting(now: DateTime<Local>, events: &[Event]) -> Option<Candidate> {
     let event = events
@@ -389,7 +397,13 @@ fn usual_hours(store: &Store, now: DateTime<Utc>) -> Active {
     let since = (now - Duration::days(30)).to_rfc3339();
     let hours = store
         .db
-        .prepare("SELECT created_at FROM tasks WHERE created_at>=?1 AND COALESCE(json_extract(data,'$.prompt'),'')<>''")
+        // Routine runs and goal check-ins carry a prompt too, but they run on their own
+        // schedule, not when the user is at the Mac.
+        .prepare(
+            "SELECT t.created_at FROM tasks t LEFT JOIN conversation_turns c ON c.task_id=t.id
+             WHERE t.created_at>=?1 AND COALESCE(json_extract(t.data,'$.prompt'),'')<>''
+               AND COALESCE(c.conversation_id,'') NOT LIKE 'routine:%' AND COALESCE(c.conversation_id,'') NOT LIKE 'goal:%'",
+        )
         .and_then(|mut statement| {
             statement
                 .query_map([since], |row| row.get::<_, String>(0))
@@ -506,7 +520,8 @@ pub fn record(store: &Store, candidate: &Candidate, at: DateTime<Utc>) -> Result
     let days = (at - Duration::days(2)).to_rfc3339();
     store.db.execute("DELETE FROM nudge_marks WHERE at<?1", [month]).map_err(|e| e.to_string())?;
     store.db.execute("DELETE FROM nudge_sent WHERE at<?1", [&days]).map_err(|e| e.to_string())?;
-    store.db.execute("DELETE FROM nudges WHERE expires_at<?1 AND state<>'opened'", [&days]).map_err(|e| e.to_string())?;
+    // An opened one's conversation turn holds what it said; the row itself isn't kept.
+    store.db.execute("DELETE FROM nudges WHERE expires_at<?1", [&days]).map_err(|e| e.to_string())?;
     transaction.commit().map_err(|e| e.to_string())?;
     Ok(nudge)
 }
@@ -549,7 +564,9 @@ fn focus_on() -> bool {
         .is_some_and(|text| focus_in(&text))
 }
 
-/// A Focus turned on by hand or by a schedule leaves an assertion record here.
+/// A Focus turned on by hand leaves an assertion record here. One started by a schedule
+/// or a smart trigger usually doesn't, so this is best effort: during those, the alert
+/// (never marked time sensitive) is held by the Focus itself.
 pub fn focus_in(assertions: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(assertions).ok().is_some_and(|value| {
         value["data"].as_array().is_some_and(|data| {
@@ -584,6 +601,9 @@ pub async fn run_due(app: &tauri::AppHandle) {
     if !state.active.lock().unwrap().is_empty() || !due(&LAST_CHECK, CHECK_EVERY) {
         return;
     }
+    // A Delete everything (or switching heads-ups off) while the reads run wins.
+    let erasures = state.erasures.load(std::sync::atomic::Ordering::SeqCst);
+    let cleared = triage::generation();
     let (settings, active, history_sent) = {
         let store = state.store.lock().unwrap();
         let Ok(settings) = store.settings() else { return };
@@ -599,7 +619,11 @@ pub async fn run_due(app: &tauri::AppHandle) {
     let helper = state.models.apple_helper().to_path_buf();
     let mut found = Vec::new();
     if crate::apps::allowed(&settings, "calendar") {
-        if let Ok(events) = crate::apps::events(&helper, &now.format("%Y-%m-%d").to_string()).await {
+        let events = match meeting_days(now) {
+            (today, None) => crate::apps::events(&helper, &today).await,
+            (today, Some(tomorrow)) => crate::apps::events_between(&helper, &today, &tomorrow).await,
+        };
+        if let Ok(events) = events {
             found.extend(meeting(now, &events.items));
         }
     }
@@ -621,6 +645,9 @@ pub async fn run_due(app: &tauri::AppHandle) {
         }
         let saved = {
             let store = state.store.lock().unwrap();
+            if !still_wanted(&store, &state, erasures, cleared) {
+                return;
+            }
             let check = |key: &str| marked(&store, key);
             let sent = sent(&store);
             if !admit(&candidate, now, active, &History { sent: &sent, marked: &check }) {
@@ -637,6 +664,15 @@ pub async fn run_due(app: &tauri::AppHandle) {
             Err(error) => state.audit("nudge.failed", &error),
         }
     }
+}
+
+/// Whether heads-ups found by reads that began before are still wanted: still switched
+/// on and set up, and nothing was deleted or cleared meanwhile.
+fn still_wanted(store: &Store, state: &AppState, erasures: u64, cleared: u64) -> bool {
+    state.erasures.load(std::sync::atomic::Ordering::SeqCst) == erasures
+        && !triage::forgotten_since(cleared)
+        && store.settings().is_ok_and(|settings| settings.heads_ups)
+        && store.onboarded().unwrap_or(false)
 }
 
 fn day_label(stamp: &str) -> String {
@@ -818,7 +854,14 @@ pub fn heads_ups(state: tauri::State<'_, AppState>) -> Result<Vec<Entry>, String
 /// window then shows that conversation and offers the suggested request.
 #[tauri::command]
 pub fn open_heads_up(id: String, state: tauri::State<'_, AppState>) -> Result<Opened, String> {
-    let opened = open(&state.store.lock().unwrap(), &id, Local::now())?;
+    let store = state.store.lock().unwrap();
+    // An alert left from before heads-ups were switched off writes nothing.
+    if !store.settings()?.heads_ups {
+        crate::delivery::os().remove(&[identifier(&id)]);
+        return Err("Heads-ups are off, so this one wasn’t opened. You can switch them on in Settings.".into());
+    }
+    let opened = open(&store, &id, Local::now())?;
+    drop(store);
     crate::delivery::os().remove(&[identifier(&id)]);
     Ok(opened)
 }
@@ -1025,6 +1068,69 @@ mod tests {
         assert!(raw(&store).is_empty());
         assert!(!marked(&store, &found.keys[0]));
         assert!(sent(&store).is_empty());
+    }
+
+    #[test]
+    fn opened_heads_ups_go_when_expired_or_when_their_turn_is_deleted() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let now = at("2026-10-30 10:30");
+        let sorted = triage::sort(vec![header("1", "Ana Silva <ana@x.com>", "2026-10-29 16:00")], 1, &Default::default());
+        let found = replies(now, &sorted).unwrap();
+        let rows = |store: &Store| -> i64 { store.db.query_row("SELECT count(*) FROM nudges", [], |row| row.get(0)).unwrap() };
+        let saved = record(&store, &found, now.with_timezone(&Utc)).unwrap();
+        let opened = open(&store, &saved.id, now).unwrap();
+        store.delete_task(&opened.task_id).unwrap();
+        assert_eq!(rows(&store), 0, "deleting the turn deletes the heads-up that repeats it");
+        let saved = record(&store, &found, now.with_timezone(&Utc)).unwrap();
+        open(&store, &saved.id, now).unwrap();
+        let later = triage::sort(vec![header("2", "Sam <sam@x.com>", "2026-11-03 16:00")], 1, &Default::default());
+        record(&store, &replies(at("2026-11-04 10:30"), &later).unwrap(), at("2026-11-08 10:30").with_timezone(&Utc)).unwrap();
+        let left: Option<String> = store.db.query_row("SELECT group_concat(data) FROM nudges", [], |row| row.get(0)).unwrap();
+        assert!(!left.unwrap_or_default().contains("Ana Silva"), "an opened one is not kept past its time");
+    }
+
+    #[test]
+    fn heads_ups_read_before_a_delete_or_switch_off_are_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        {
+            let store = state.store.lock().unwrap();
+            store.save_settings(&crate::types::Settings { heads_ups: true, ..Default::default() }).unwrap();
+            store.set_onboarded(true).unwrap();
+        }
+        let erasures = state.erasures.load(std::sync::atomic::Ordering::SeqCst);
+        let cleared = triage::generation();
+        assert!(still_wanted(&state.store.lock().unwrap(), &state, erasures, cleared) || triage::forgotten_since(cleared));
+        state.erasures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(!still_wanted(&state.store.lock().unwrap(), &state, erasures, cleared), "a Delete everything meanwhile wins");
+        let erasures = state.erasures.load(std::sync::atomic::Ordering::SeqCst);
+        state.store.lock().unwrap().save_settings(&crate::types::Settings { heads_ups: false, ..Default::default() }).unwrap();
+        assert!(!still_wanted(&state.store.lock().unwrap(), &state, erasures, triage::generation()), "switched off meanwhile");
+    }
+
+    #[test]
+    fn meetings_just_after_midnight_are_read_from_tomorrow() {
+        assert_eq!(meeting_days(at("2026-10-30 14:00")), ("2026-10-30".into(), None));
+        assert_eq!(meeting_days(at("2026-10-30 23:50")), ("2026-10-30".into(), Some("2026-10-31".into())));
+        let events = vec![event("e1", "2026-10-31 00:05", "2026-10-31 00:30", "Late call")];
+        assert!(meeting(at("2026-10-30 23:52"), &events).is_some());
+    }
+
+    #[test]
+    fn active_hours_learn_from_the_users_own_requests_not_routine_runs() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let now = Utc::now();
+        for n in 0..30 {
+            for (hour, thread) in [(6, Some("routine:r1")), (22, Some("goal:g1"))] {
+                let created = (Local::now() - Duration::days(1 + n % 20)).with_hour(hour).unwrap().with_timezone(&Utc).to_rfc3339();
+                let id = format!("t-{hour}-{n}");
+                if let Some(thread) = thread {
+                    crate::routines::assign_thread(&store, &id, &(thread.into(), "Routine".into())).unwrap();
+                }
+                store.db.execute("INSERT INTO tasks(id,data,created_at) VALUES(?1,?2,?3)", params![id, serde_json::json!({"prompt":"Check the news"}).to_string(), created]).unwrap();
+            }
+        }
+        assert_eq!(usual_hours(&store, now), Active::DEFAULT, "scheduled runs say nothing about when the user is here");
     }
 
     #[test]

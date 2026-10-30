@@ -291,6 +291,10 @@ impl Store {
                 [crate::triage::LISTING, id],
             )
             .map_err(|e| e.to_string())?;
+        // So does the heads-up that turn was opened from, which repeats what it said.
+        self.db
+            .execute("DELETE FROM nudges WHERE json_extract(data,'$.taskId')=?1", [id])
+            .map_err(|e| e.to_string())?;
         crate::memory_index::purge_record(&self.db, "history", id)?;
         self.bump_index();
         Ok(())

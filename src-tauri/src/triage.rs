@@ -450,30 +450,68 @@ pub fn brief_line(triage: &Triage) -> Option<String> {
 /// `Launch::IfRunning` a closed Mail stays closed and the read fails with
 /// `apps::NOT_RUNNING`.
 pub async fn run(launch: crate::apps::Launch) -> Result<Triage, String> {
+    fill(|| read(launch)).await
+}
+
+async fn read(launch: crate::apps::Launch) -> Result<Triage, String> {
     let (headers, total) = crate::apps::unreplied_mail(DAYS, launch).await?;
     let openings = crate::apps::mail_openings(&candidates(&headers), launch).await?;
-    let triage = sort(headers, total, &openings);
-    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage.clone()));
+    Ok(sort(headers, total, &openings))
+}
+
+/// Sorts with `read` and keeps the result, unless history was cleared or everything
+/// deleted while it read: then what it read is not kept.
+async fn fill<F, Fut>(read: F) -> Result<Triage, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Triage, String>>,
+{
+    let generation = GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+    let triage = read().await?;
+    let mut cache = CACHE.lock().unwrap();
+    if GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation {
+        *cache = Some((std::time::Instant::now(), triage.clone()));
+    }
     Ok(triage)
 }
 
 /// The last sort, kept in memory only, so heads-ups about people waiting on a reply
 /// reuse what the user (or an earlier check) already read instead of asking Mail again.
 static CACHE: std::sync::Mutex<Option<(std::time::Instant, Triage)>> = std::sync::Mutex::new(None);
+/// Moves on each time the cache is forgotten, so a read that began before never refills it.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The last sort while it is younger than `fresh`, else a new one read with `launch`.
 pub async fn cached(launch: crate::apps::Launch, fresh: std::time::Duration) -> Result<Triage, String> {
+    cached_with(fresh, || read(launch)).await
+}
+
+async fn cached_with<F, Fut>(fresh: std::time::Duration, read: F) -> Result<Triage, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Triage, String>>,
+{
     if let Some((at, triage)) = CACHE.lock().unwrap().as_ref() {
         if at.elapsed() < fresh {
             return Ok(triage.clone());
         }
     }
-    run(launch).await
+    fill(read).await
+}
+
+/// Whether the cache was forgotten since `generation`.
+pub fn forgotten_since(generation: u64) -> bool {
+    GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation
+}
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Erasing data or clearing history forgets the cached sort with it.
 pub fn forget_cache() {
-    *CACHE.lock().unwrap() = None;
+    let mut cache = CACHE.lock().unwrap();
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *cache = None;
 }
 
 #[cfg(test)]
@@ -675,16 +713,35 @@ mod tests {
 
     #[tokio::test]
     async fn the_cached_sort_is_reused_while_fresh_and_forgotten_on_erase() {
+        // Never reads Mail: the read is a stand-in, so other tests clearing history at
+        // the same time can't send this one to the real inbox.
         let triage = sort(vec![header("1", "Ana <ana@x.com>", Some(true), 1, true)], 1, &HashMap::new());
+        let before = generation();
         *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage.clone()));
-        let reused = cached(crate::apps::Launch::IfRunning, std::time::Duration::from_secs(60)).await.unwrap();
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let reused = cached_with(std::time::Duration::from_secs(60), || async {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(triage.clone())
+        })
+        .await
+        .unwrap();
         assert_eq!(reused, triage);
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst) || forgotten_since(before), "a fresh sort is reused");
         let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
         store.clear_history().unwrap();
         assert!(CACHE.lock().unwrap().is_none(), "clearing history forgets the sort");
-        *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage));
+        *CACHE.lock().unwrap() = Some((std::time::Instant::now(), triage.clone()));
         store.erase_everything().unwrap();
         assert!(CACHE.lock().unwrap().is_none(), "erasing forgets the sort");
+        // A read that was running while everything was deleted doesn't bring the sort back.
+        let read = fill(|| async {
+            forget_cache();
+            Ok(triage.clone())
+        })
+        .await
+        .unwrap();
+        assert_eq!(read, triage);
+        assert!(CACHE.lock().unwrap().is_none(), "what was read before the erase isn't kept");
     }
 
     #[test]
