@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, Check, ChevronRight, CircleHelp, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mail, Mic, Minus, MoreHorizontal, Play, Plus, Power, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Sun, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, CalendarDays, Check, ChevronRight, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mail, Mic, Minus, MoreHorizontal, Play, Plus, Power, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
@@ -21,7 +21,7 @@ import { shortcutNeeds, type Shortcut } from './setupSteps';
 import ConfirmInline from './ConfirmInline';
 import YourData from './YourData';
 import ActionSheet, { type ActionProposal } from './ActionSheet';
-import { appearance, idleStatus, panelScale, stillMotion } from './themes.ts';
+import { appearance, panelScale, stillMotion } from './themes.ts';
 import { greeting, invitation, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
@@ -31,11 +31,31 @@ import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
+/** "16:00" on this Mac's clock, as people say it ("4:00 PM" or "16:00"). */
+const clockTime = (time: string) => {
+  const [hour, minute] = time.split(':').map(Number);
+  if (Number.isNaN(hour)) return time;
+  return new Date(2000, 0, 1, hour, minute || 0).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+};
+type Suggestion = { label: string; prompt?: string; shortcut?: Shortcut; mode?: Mode };
+/** A few things to ask now: what fits the time of day, then what this person usually asks. */
+function suggestions(now: Date, usual: string[], apps: string[]): Suggestion[] {
+  const hour = now.getHours(), day = now.getDay();
+  const timely: Suggestion[] = [];
+  if (hour >= 5 && hour < 12) timely.push({ label: 'Brief me', shortcut: 'day' });
+  if (day === 5 && hour >= 12 || day === 6 || day === 0 && hour < 12) timely.push({ label: 'Plan my weekend', prompt: 'Help me plan my weekend' });
+  if (hour >= 17) timely.push({ label: 'What’s on tomorrow?', prompt: 'What’s on my calendar tomorrow?' });
+  if (apps.includes('mail')) timely.push({ label: 'Who’s waiting on me?', shortcut: 'reply' });
+  const own: Suggestion[] = usual.map(prompt => ({ label: prompt, prompt }));
+  const picked: Suggestion[] = [...timely, ...own].filter((item, index, all) => all.findIndex(other => other.label.toLowerCase() === item.label.toLowerCase()) === index);
+  const fallback: Suggestion[] = [{ label: 'What’s my day like?', shortcut: 'day' }, { label: 'Find a file', mode: 'files' }, { label: 'Look something up', mode: 'web' }];
+  return [...picked, ...fallback.filter(item => !picked.some(other => other.shortcut && other.shortcut === item.shortcut))].slice(0, 4);
+}
 const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
-  { id: 'auto', name: 'Ask anything', icon: Sparkles, placeholder: 'What can I help you with?' },
-  { id: 'files', name: 'My files', icon: Folder, placeholder: 'Find a file or a phrase…' },
+  { id: 'auto', name: 'Ask anything', icon: Sparkles, placeholder: 'Ask me anything…' },
+  { id: 'files', name: 'My files', icon: Folder, placeholder: 'Lease renewal date' },
   { id: 'system', name: 'My Mac', icon: Laptop, placeholder: 'How is my Mac doing?' },
-  { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather, rates, places, prices, flights or the web…' },
+  { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather in Porto this weekend' },
 ];
 // What the activity line says while a skill (skills/ in the Rust app) is working.
 const skillActivity: Record<string, string> = {
@@ -190,7 +210,7 @@ export default function App() {
     await Promise.race([pending.flush(), new Promise(resolve => setTimeout(resolve, 2000))]);
     if (pending.pending() && Date.now() - quitWarned.current > 10_000) {
       quitWarned.current = Date.now();
-      setNotice('A settings change is still waiting for the current task and won’t be kept if you quit now. Quit again to quit anyway.');
+      setNotice('A setting is still saving. Quit again to quit anyway.');
       return;
     }
     await command('quit_app');
@@ -210,6 +230,16 @@ export default function App() {
   }, [data]);
   const onboarding = data?.onboarded === false;
   const chatting = turns.length > 0 || !!live || onboarding;
+  // Home: what's next today and what this person usually asks, both read on this Mac.
+  const [glance, setGlance] = useState<{ kind: 'event' | 'reminder'; title: string; time: string; place: string }[]>([]);
+  const [usual, setUsual] = useState<string[]>([]);
+  useEffect(() => {
+    if (!desktop || !expanded || page !== 'home' || chatting) return;
+    let active = true;
+    void command<typeof glance>('day_glance').then(items => { if (active) setGlance(items); }).catch(() => {});
+    void command<string[]>('usual_requests').then(items => { if (active) setUsual(items); }).catch(() => {});
+    return () => { active = false; };
+  }, [expanded, page, chatting]);
   // The look follows settings and, for "Auto", macOS's light or dark mode as it changes.
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
@@ -484,8 +514,8 @@ export default function App() {
   // From Waiting for you or a Review notification: reload the saved proposal, then open its sheet. Never approves.
   async function openApproval(approvalId: string) {
     setPage('home'); void expand(true);
-    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish the current task first, then review it under Waiting for you.'); return; }
-    if (sheetWaiting.current) { setNotice('Answer the request that’s open first, then review this one under Waiting for you.'); return; }
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish this first.'); return; }
+    if (sheetWaiting.current) { setNotice('Answer the open request first.'); return; }
     try { await reviewTask(await command<TaskRecord>('open_approval', { approvalId })); }
     catch (e) { setError(errorMessage(e)); await refresh().catch(() => {}); }
   }
@@ -493,7 +523,7 @@ export default function App() {
   // request in the composer. Sending it goes through the usual approval sheet.
   async function openHeadsUp(id: string) {
     setPage('home'); void expand(true);
-    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish the current task first, then open the heads-up.'); return; }
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish this first.'); return; }
     try {
       const opened = await command<{ taskId: string; suggestion?: string | null }>('open_heads_up', { id });
       await openThread({ taskId: opened.taskId });
@@ -591,13 +621,13 @@ export default function App() {
       if (outlasted && speechActive.current) void speechQueue.current?.cancel().catch(() => {});
       setPage('home');
       // Saying nothing after an answer just ends the conversation.
-      if (!heard && !followUpTurn.current) setNotice('I didn’t catch any words. Try again a little closer to the mic.');
+      if (!heard && !followUpTurn.current) setNotice('I didn’t catch that.');
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
     finally { if (version === voiceVersion.current) { setTranscribing(false); setHeard(''); if (!heard) setPetState('idle'); recordPromise.current = null; } }
     if (version !== voiceVersion.current) return;
     if (!heard) { conversation.current = false; return; }
     if (conversation.current && isConversationEnd(heard)) {
-      conversation.current = false; setPetState('idle'); setNotice('Okay. Tap the mic when you need me.');
+      conversation.current = false; setPetState('idle'); setNotice('Okay.');
       return;
     }
     // What was heard is sent right away and answered out loud, as with any voice assistant.
@@ -621,7 +651,7 @@ export default function App() {
     timeout: () => {
       const firstTurn = !followUpTurn.current;
       void cancelVoice();
-      if (firstTurn) setNotice('I didn’t hear anything, so I stopped listening.');
+      if (firstTurn) setNotice('I didn’t hear anything.');
     },
     event: (name, payload) => {
       if (!recordHeld.current || payload.session !== voiceSession.current) return;
@@ -704,7 +734,7 @@ export default function App() {
   async function newTopic() {
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
     switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;
-    try { showConversation(await command<ConversationPage>('new_topic')); setInput(''); setProposal(null); setApproval(null); setNotice('New conversation started. Earlier conversations are in History.'); await refresh(); }
+    try { showConversation(await command<ConversationPage>('new_topic')); setInput(''); setProposal(null); setApproval(null); setNotice(''); await refresh(); }
     catch (e) { setError(errorMessage(e)); }
     finally { switchingThreadRef.current = false; setSwitchingThread(false); }
   }
@@ -753,7 +783,7 @@ export default function App() {
   async function addFolder() {
     try {
       const path = await command<string | null>('pick_folder');
-      if (path) { await command('add_root', { path }); await refresh(); setNotice('Folder access granted. You can revoke it any time.'); }
+      if (path) { await command('add_root', { path }); await refresh(); setNotice('Folder added.'); }
     } catch (e) { setError(errorMessage(e)); }
   }
   async function safeAction(action: () => Promise<unknown>, message?: string) {
@@ -804,8 +834,9 @@ export default function App() {
     <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
-          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong><span className={`header-status ${busy || recording || speaking ? 'is-busy' : ''}`} aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (live?.answer && (!activity || activity === 'Thinking it over') ? 'Writing…' : activity || 'On it…') : speaking ? 'Talking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span></span></button>
+          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong>{(busy || recording || speaking) && <span className="header-status is-busy" aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (live?.answer && (!activity || activity === 'Thinking it over') ? 'Writing…' : activity || 'On it…') : 'Talking'}</span>}</span></button>
           <div className="header-actions">
+            {page === 'home' && chatting && !onboarding && <button className="icon-button" title="New topic" aria-label="New topic" disabled={pending} onClick={() => void newTopic()}><Plus size={16} /></button>}
             <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title="Task history" aria-label="Task history" onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
             <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title="Settings" aria-label="Settings" onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>
             <button className="icon-button" title="Collapse companion" aria-label="Collapse companion" onClick={() => void expand(false)}><Minus size={17} /></button>
@@ -817,29 +848,24 @@ export default function App() {
           <div className="conversation" ref={conversationRef}>
             <HeadsUps items={headsUps} disabled={busy || pending} onOpen={id => void openHeadsUp(id)} onDismiss={id => void safeAction(async () => { await command('dismiss_heads_up', { id }); await refresh(); })} />
             <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} onStop={taskId => void safeAction(async () => { await command('cancel_task', { taskId }); await refresh(); })} />
-            {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}<span>{invitation(new Date())}</span></h1><div className="welcome-suggestions">{[
-                { icon: <Sun />, label: 'What’s my day like?', run: () => shortcut('day') },
-                { icon: <Mail />, label: 'Who’s waiting on a reply?', run: () => shortcut('reply') },
-                { icon: <Folder />, label: 'Find something in my files', run: () => { setMode('files'); inputRef.current?.focus(); } },
-                { icon: <Globe2 />, label: 'Look something up', run: () => { setMode('web'); inputRef.current?.focus(); } },
-                { icon: <Laptop />, label: 'How’s my Mac doing?', run: () => void submit('How is my Mac doing?', 'system') },
-              ].map(item => <button key={item.label} onClick={item.run}><i>{item.icon}</i>{item.label}<ChevronRight size={14} /></button>)}</div>
+            {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}{!glance.length && <span>{invitation(new Date())}</span>}</h1>
+              {glance.length > 0 && <div className="glance">{glance.map(item => <button key={item.kind} onClick={() => void submit(item.kind === 'event' ? 'What’s on my calendar today?' : 'What are my reminders?')}><i>{item.kind === 'event' ? <CalendarDays /> : <Bell />}</i><span><strong>{item.title}</strong><small>{clockTime(item.time)}{item.place ? ` · ${item.place}` : ''}</small></span></button>)}</div>}
+              <div className="welcome-chips">{suggestions(new Date(), usual, data?.settings.apps ?? []).map(item => <button key={item.label} onClick={() => item.prompt ? void submit(item.prompt) : item.shortcut ? shortcut(item.shortcut) : (setMode(item.mode!), inputRef.current?.focus())}>{item.label}</button>)}</div>
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
-              <div className="thread-bar"><span>{greeting(new Date(), data?.settings.userName)}</span><button className="text-button" onClick={() => void newTopic()} disabled={pending} title="Start a separate conversation; this one stays in History"><Plus size={11} /> New topic</button></div>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
-                progress={progress} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
+                progress={progress} onFollowUp={text => void submit(text)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
             </>}
           </div>
           <div className="composer-area">
             {toastAnchored && toast}
-            {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>Choosing the right source…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
+            {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>One moment…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
-              <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? 'Listening…' : 'Getting the microphone ready…') : transcribing ? 'Turning your voice into words…' : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : mode === 'web' ? <><ShieldCheck size={12} />I’ll ask before anything goes online</> : data?.settings.modelBackend === 'cloud' ? <><ShieldCheck size={12} />The cloud model sees only what you share</> : null}</span><div>
+              <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? 'Listening…' : 'Getting the microphone ready…') : transcribing ? 'Turning your voice into words…' : mode === 'auto' && glance[0]?.kind === 'event' ? `Ask about ${glance[0].title}…` : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : null}</span><div>
                 {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label="Cancel voice input" title="Cancel (Esc)" onClick={() => void cancelVoice()}><X size={15} /></button>}
-                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree ? (speaking ? 'Tap to interrupt' : 'Tap to send now') : 'Let go to send') : 'Tap or hold to talk'} aria-label={recording ? (handsFree && speaking ? 'Interrupt' : handsFree ? 'Send what you said now' : 'Let go to send') : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
+                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree && speaking ? 'Interrupt' : 'Send') : 'Talk'} aria-label={recording ? (handsFree && speaking ? 'Interrupt' : handsFree ? 'Send what you said now' : 'Let go to send') : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>
@@ -854,12 +880,11 @@ export default function App() {
           <SavedSearches searches={data?.savedSearches || []} keyReady={data?.settings.searchProvider === 'tavily' ? !!data?.diagnostics.tavilyConfigured : !!data?.diagnostics.braveConfigured} onAddKey={() => setPage('settings', 'connections')} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
           <div className="section-label history-section-label">Past conversations</div>
-          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}{confirmClear ? <ConfirmInline label="Clear conversation history" action="Clear history" working={pending} onCancel={() => setConfirmClear(false)} onConfirm={() => void safeAction(async () => { await command('clear_history'); setConfirmClear(false); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}>This erases every conversation and saved task on this Mac, and the search index of your folders’ text (Refresh index in Settings → Privacy builds it again). Things I remember stay. It can’t be undone.</ConfirmInline>
-            : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> Clear conversation history…</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>A fresh start.</h3><p>Your conversations will find a home here.</p></div>}
-          <div className="history-privacy"><ShieldCheck size={13} /> Kept on this Mac. Never synced to a cloud.</div>
+          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}{confirmClear ? <ConfirmInline label="Clear conversation history" action="Clear history" working={pending} onCancel={() => setConfirmClear(false)} onConfirm={() => void safeAction(async () => { await command('clear_history'); setConfirmClear(false); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}>Erases every conversation and task on this Mac. Things I remember stay.</ConfirmInline>
+            : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> Clear conversation history…</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>No conversations yet</h3></div>}
         </div>}
 
-        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'API key stored in macOS Keychain.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErase={async () => {
+        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'Key saved.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErase={async () => {
           // An edit not saved yet must not write the old settings back after the erase.
           const pending = saver.current!.pending();
           saver.current!.discard();
@@ -867,7 +892,7 @@ export default function App() {
           catch (error) { if (pending) saver.current!.edit(pending); throw error; }
         }} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
 
-        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2><p>Tools used and permissions given, kept on this Mac.</p></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Quiet so far.</h3><p>Activity will appear here as we work.</p></div>}</div>}
+        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Nothing yet</h3></div>}</div>}
 
         {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onAllow={async () => {
           if (approvalBusy.current) return;
@@ -887,13 +912,12 @@ export default function App() {
         }} onAllow={args => void continueSaved('run_action', { id: proposal.id, args })} />}
         <div className="sr-only" aria-live="polite">{announcement}</div>
         {!toastAnchored && toast}
-        <footer className="panel-footer"><span><span className="footer-dot" />{desktop ? 'Made for your little corner of the world' : 'Browser preview · desktop tools need the app'}</span><button title="About Buntini" aria-label="About Buntini" onClick={() => setNotice('Buntini 0.1 · A local-first desktop companion. Open it any time with ⌘ ⇧ Space.')}><CircleHelp size={12} /></button></footer>
       </section>}
 
       <div className="pet-dock">
         {nudging && world.nudge && <div className="nudge-bubble" role="status" aria-live="polite"><p>{world.nudge.text}</p><div>{world.nudge.actions.map(item => <button key={item.label} onClick={() => world.act(item.action)}>{item.label}</button>)}</div></div>}
         {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? 'All ears.' : petState === 'thinking' ? 'A little thinking…' : petState === 'working' ? 'On it, one moment.' : petState === 'speaking' ? 'Something to say.' : 'Here when you need me.'}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
-        <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  title={expanded ? 'Drag to move · click to tuck away' : 'Click to open Buntini'} onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
+        <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
           if (!desktop || event.button !== 0) return;
           petDragged.current = false;
           const startX = event.clientX, startY = event.clientY;
@@ -923,9 +947,9 @@ function SavedSearches({ searches, keyReady, onAddKey, onAction, onResult, onErr
   async function act(id: string, action: () => Promise<unknown>) { setWorking(id); try { await action(); } catch (e) { onError(errorMessage(e)); } finally { setWorking(''); } }
   return <div className="saved-searches"><div className="section-label"><Bell size={12} /> Keep an eye on it <button className="text-button" onClick={() => setAdding(!adding)}><Plus size={12} /> New search</button></div>
     {/* Saved searches run through the search provider's API, so they need its key first. */}
-    {adding && !keyReady && <div className="saved-search-form"><p>Saved searches use your search provider, so they need its key first. Add one in Settings → Connections.</p><div><button type="button" className="primary-button" onClick={onAddKey}><Plus size={11} /> Add a search key</button></div></div>}
-    {adding && keyReady && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label="Saved search query" placeholder="What should I keep an eye on?" value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label="Check frequency" value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>Every 15 minutes</option><option value={60}>Every hour</option><option value={360}>Every 6 hours</option><option value={1440}>Every day</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Save</button></div><p>Sends this query to your search provider while Buntini is running. Your monthly cap applies.</p></form>}
-    {searches.length ? searches.map(search => <article className={`saved-search ${search.enabled ? '' : 'paused'}`} key={search.id}><div className="saved-search-heading"><Search size={14} /><strong>{search.query}</strong><button className="icon-button" aria-label={`Delete saved search: ${search.query}`} disabled={!!working} onClick={() => void act(search.id, () => onAction('delete_saved_search', { id: search.id }))}><X size={12} /></button></div><div className="saved-search-info"><span>{search.enabled ? <><span className="status-dot" />{search.intervalMinutes < 60 ? `${search.intervalMinutes} min` : search.intervalMinutes < 1440 ? `${search.intervalMinutes / 60} hr` : 'Daily'} checks</> : 'Paused'}</span><button className="text-button" disabled={!!working} onClick={() => void act(search.id, () => onAction('update_saved_search', { id: search.id, enabled: !search.enabled, intervalMinutes: search.intervalMinutes }))}>{search.enabled ? <Square size={9} /> : <Play size={10} />}{search.enabled ? 'Pause' : 'Resume'}</button><button className="text-button" disabled={!!working} onClick={() => void act(search.id, async () => { const result = await onAction('run_saved_search', { id: search.id }); onResult(result as TaskRecord); })}>{working === search.id ? <LoaderCircle size={10} className="spin" /> : <RefreshCw size={10} />} Check now</button></div>{search.lastError && <p className="saved-search-error">{search.lastError}</p>}</article>) : !adding && <p className="saved-search-empty">Save a web query and I’ll check back for you.</p>}
+    {adding && !keyReady && <div className="saved-search-form"><p>Add a search key first.</p><div><button type="button" className="primary-button" onClick={onAddKey}><Plus size={11} /> Add a search key</button></div></div>}
+    {adding && keyReady && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label="Saved search query" placeholder="What should I keep an eye on?" value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label="Check frequency" value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>Every 15 minutes</option><option value={60}>Every hour</option><option value={360}>Every 6 hours</option><option value={1440}>Every day</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Save</button></div></form>}
+    {searches.length ? searches.map(search => <article className={`saved-search ${search.enabled ? '' : 'paused'}`} key={search.id}><div className="saved-search-heading"><Search size={14} /><strong>{search.query}</strong><button className="icon-button" aria-label={`Delete saved search: ${search.query}`} disabled={!!working} onClick={() => void act(search.id, () => onAction('delete_saved_search', { id: search.id }))}><X size={12} /></button></div><div className="saved-search-info"><span>{search.enabled ? <><span className="status-dot" />{search.intervalMinutes < 60 ? `${search.intervalMinutes} min` : search.intervalMinutes < 1440 ? `${search.intervalMinutes / 60} hr` : 'Daily'} checks</> : 'Paused'}</span><button className="text-button" disabled={!!working} onClick={() => void act(search.id, () => onAction('update_saved_search', { id: search.id, enabled: !search.enabled, intervalMinutes: search.intervalMinutes }))}>{search.enabled ? <Square size={9} /> : <Play size={10} />}{search.enabled ? 'Pause' : 'Resume'}</button><button className="text-button" disabled={!!working} onClick={() => void act(search.id, async () => { const result = await onAction('run_saved_search', { id: search.id }); onResult(result as TaskRecord); })}>{working === search.id ? <LoaderCircle size={10} className="spin" /> : <RefreshCw size={10} />} Check now</button></div>{search.lastError && <p className="saved-search-error">{search.lastError}</p>}</article>) : !adding && null}
   </div>;
 }
 

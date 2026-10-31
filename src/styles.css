@@ -90,7 +90,7 @@ button svg { vertical-align: middle; }
 .icon-button svg { width: 16px; height: 16px; }
 .icon-button:hover { color: var(--text); background: var(--surface-soft); }
 .icon-button.selected { color: var(--accent); background: var(--accent-soft); }
-.icon-button:active, .send-button:active, .mic-button:active, .primary-button:active, .secondary-button:active, .welcome-suggestions button:active { transform: scale(.96); }
+.icon-button:active, .send-button:active, .mic-button:active, .primary-button:active, .secondary-button:active { transform: scale(.96); }
 .conversation { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
 /* Welcome: a greeting in Buntini's voice and a few things it can do right now. */
 .overlay-welcome { padding: 8px 20px 12px; display: flex; flex-direction: column; height: 100%; min-height: 72px; }
@@ -98,15 +98,18 @@ button svg { vertical-align: middle; }
 .overlay-welcome > div:last-child { margin-bottom: auto; }
 .overlay-welcome > h1 { margin: 0; font-family: var(--voice); font-size: 25px; font-weight: 650; letter-spacing: -.6px; line-height: 1.2; animation: rise .32s var(--ease-out) both; }
 .overlay-welcome > h1 span { display: block; color: var(--muted); font-weight: 500; font-size: 18px; letter-spacing: -.3px; margin-top: 4px; }
-.welcome-suggestions { display: flex; flex-direction: column; gap: 1px; margin: 14px -8px 0; }
-.welcome-suggestions button { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: transparent; color: var(--text); font-family: var(--voice); font-size: 14px; font-weight: 500; padding: 5px 8px; border-radius: 12px; transition: background .15s, transform .15s var(--spring); animation: rise .34s var(--ease-out) both; }
-.welcome-suggestions button:nth-child(2) { animation-delay: 40ms; } .welcome-suggestions button:nth-child(3) { animation-delay: 80ms; }
-.welcome-suggestions button:nth-child(4) { animation-delay: 120ms; } .welcome-suggestions button:nth-child(5) { animation-delay: 160ms; }
-.welcome-suggestions button > i { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; font-style: normal; }
-.welcome-suggestions button > i svg { width: 15px; height: 15px; }
-.welcome-suggestions button > svg:last-child { margin-left: auto; color: var(--muted); opacity: 0; transform: translateX(-4px); transition: opacity .15s, transform .2s var(--ease-out); }
-.welcome-suggestions button:hover { background: var(--surface-soft); }
-.welcome-suggestions button:hover > svg:last-child { opacity: 1; transform: none; }
+/* Today at a glance: the next event and the next reminder due. */
+.glance { display: flex; flex-direction: column; gap: 2px; margin: 16px 0 0; padding: 4px; background: var(--reply); border-radius: 16px; animation: rise .34s var(--ease-out) both; }
+.glance button { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: transparent; color: var(--text); padding: 7px 8px; border-radius: 12px; transition: background .15s, transform .15s var(--spring); }
+.glance button:hover { background: var(--surface-soft); }
+.glance button > i { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; font-style: normal; }
+.glance button > i svg { width: 15px; height: 15px; }
+.glance strong { display: block; font-family: var(--voice); font-size: 14px; font-weight: 600; }
+.glance small { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+.welcome-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.welcome-chips button, .reply-chips button { font-family: var(--voice); font-size: 13px; font-weight: 500; color: var(--text); background: var(--surface-soft); padding: 7px 13px; border-radius: 99px; transition: background .15s, color .15s, transform .15s var(--spring); animation: rise .34s var(--ease-out) both; }
+.welcome-chips button:hover, .reply-chips button:hover { background: var(--accent-soft); color: var(--accent); }
+.welcome-chips button:active, .reply-chips button:active, .glance button:active { transform: scale(.96); }
 /* A shortcut that needs an app first asks for it right here (setupSteps.ts shortcutNeeds). */
 .overlay-welcome > .welcome-allow { display: block; margin-top: 14px; padding: 12px 14px; background: var(--accent-soft); border-radius: 14px; }
 .welcome-allow p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text); }
@@ -174,10 +177,7 @@ button svg { vertical-align: middle; }
 .back-link { display: flex; align-items: center; gap: 5px; background: transparent; font-size: 12px; padding: 0; color: var(--muted); margin-bottom: 16px; }
 .back-link:hover { color: var(--accent); }
 /* Conversation: your words in the system face on ginger, Buntini's in its rounded voice. */
-.thread { padding: 4px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
-.thread-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 6px 18px 8px; background: linear-gradient(var(--panel) 65%, transparent); font-family: var(--voice); font-size: 12px; color: var(--muted); }
-.thread-bar .text-button { font-size: 12px; }
-.thread-bar .text-button:disabled { opacity: .45; }
+.thread { padding: 8px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
 .load-earlier { align-self: center; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); background: var(--surface-soft); border-radius: 20px; padding: 6px 12px; }
 .load-earlier:hover:not(:disabled) { color: var(--accent); }
 .topic-divider { display: flex; align-items: center; gap: 10px; font-family: var(--voice); font-size: 11.5px; color: var(--muted); }
@@ -983,3 +983,17 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .approval-sheet .secondary-button:hover { background: var(--surface-soft); color: var(--text); }
 .approval-sheet .primary-button { min-width: 96px; }
 .history-section-label { margin-top: 20px; }
+.action-was { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
+.reply-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 36px; }
+.bubble-buntini .answer-text li.reply-row { list-style: none; margin: 0; padding: 7px 0; border-top: 1px solid var(--hairline); }
+.bubble-buntini .answer-text li.reply-row:first-child { border-top: 0; padding-top: 2px; }
+.bubble-buntini .answer-text li.reply-row > strong { display: block; font-weight: 600; }
+.bubble-buntini .answer-text li.reply-row > span { display: block; color: var(--muted); font-size: 13px; }
+.bubble-buntini .answer-text ol:has(> li.reply-row), .bubble-buntini .answer-text ul:has(> li.reply-row) { padding-left: 0; }
+.confirmations { display: flex; flex-direction: column; gap: 6px; font-family: -apple-system, system-ui, sans-serif; }
+.confirmation { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); }
+.confirmation strong { color: var(--text); font-weight: 600; }
+.confirmation > i { width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, #3b9a5a 18%, transparent); color: #2f8a4c; flex: none; font-style: normal; animation: pop-in .3s var(--spring); }
+:root[data-mode=dark] .confirmation > i { color: #7fd39a; }
+.bubble-meta > span { opacity: 0; transition: opacity .15s; }
+.turn:hover .bubble-meta > span { opacity: .8; }

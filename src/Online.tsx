@@ -13,10 +13,9 @@ export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebIns
   const web = approval.tool === 'web_search';
   return <ModalSheet labelledBy="approval-title">
     <ShieldCheck size={23} /><h3 id="approval-title">{titles[approval.tool] || 'Send this request?'}</h3>
-    <p>{approval.summary}. {web ? 'Your browser may use its existing cookies and signed-in accounts.' : 'Only these details are sent.'}</p>
+    <p>{approval.summary}</p>
     <dl className="approval-sends"><div><dt>Sent to</dt><dd>{approval.service} <span>{approval.host}</span></dd></div>{approval.sends.map(field => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>
     {approval.note && <p className="approval-note">{approval.note}</p>}
-    <small>{web ? 'Google opens in your browser. I read the results only if your browser is allowed in Settings → Apps, and a cloud brain sees them only if you share Browser tabs. If the browser can’t help and you added a search key, that is used, within its limits. ' : `${approval.usesKey ? `Uses your saved ${approval.service} key and counts toward your monthly limit. ` : 'No account or key needed. '}Only the details above are sent. `}This permission is for this one request.</small>
     <div>{!web && <button className="text-button" disabled={approving} onClick={onWebInstead}>Web search instead</button>}<button className="secondary-button" disabled={approving} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={approving} autoFocus onClick={onAllow}>{approving ? 'Starting…' : 'Allow once'}</button></div>
   </ModalSheet>;
 }

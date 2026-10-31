@@ -5,7 +5,7 @@ export function appleStatus(reason?: string): { ready: boolean; label: string; a
   switch (reason) {
     case 'available': return { ready: true, label: 'Ready on this Mac' };
     case 'appleIntelligenceNotEnabled': return { ready: false, label: 'Turned off', advice: 'Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri.' };
-    case 'modelNotReady': return { ready: false, label: 'Downloading', advice: 'macOS is still downloading the model. Try again in a few minutes.' };
+    case 'modelNotReady': return { ready: false, label: 'Downloading' };
     case 'deviceNotEligible': return { ready: false, label: 'Not supported', advice: 'This Mac doesn’t support Apple Intelligence.' };
     case 'unsupported': return { ready: false, label: 'Needs macOS 26', advice: 'Apple Intelligence needs macOS 26 on an Apple silicon Mac.' };
     case 'missing': return { ready: false, label: 'Missing', advice: 'The Apple Intelligence helper is missing from this installation.' };
@@ -36,10 +36,10 @@ export function folderName(path: string): string {
 /** The model worker's status in plain words. */
 export function friendlyStatus(status: string, ready: boolean, backend: ModelBackend): string {
   if (backend === 'mlx') {
-    if (!ready) return 'Not set up yet.';
-    if (status.startsWith('Not started')) return 'Ready. The model loads the first time you chat.';
-    if (status.startsWith('Stopped')) return 'Paused. It starts again with your next message.';
-    if (status.startsWith('Ready')) return 'Ready and loaded.';
+    if (!ready) return 'Not set up';
+    if (status.startsWith('Not started')) return 'Ready';
+    if (status.startsWith('Stopped')) return 'Paused';
+    if (status.startsWith('Ready')) return 'Loaded';
   }
   return status;
 }

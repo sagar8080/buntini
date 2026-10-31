@@ -16,10 +16,10 @@ export default function YourData({ onNotice, onError, onErase, onErased }: Props
   return <section className="settings-section">
     <div className="settings-section-heading"><h3>Your data</h3></div>
     <div className="row-actions">
-      <button type="button" className="secondary-button" disabled={!!working} onClick={() => void act('export', async () => { const path = await command<string | null>('export_data'); if (path) onNotice('Exported. Your keys were not included.'); })}>{working === 'export' ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />} Export</button>
-      <button type="button" className="secondary-button" disabled={!!working} onClick={() => void act('support', async () => { await navigator.clipboard.writeText(await command<string>('support_info')); onNotice('Support info copied. It has no messages, files or keys.'); })}>{working === 'support' ? <LoaderCircle size={14} className="spin" /> : <ClipboardCopy size={14} />} Copy support info</button>
+      <button type="button" className="secondary-button" disabled={!!working} onClick={() => void act('export', async () => { const path = await command<string | null>('export_data'); if (path) onNotice('Exported.'); })}>{working === 'export' ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />} Export</button>
+      <button type="button" className="secondary-button" disabled={!!working} onClick={() => void act('support', async () => { await navigator.clipboard.writeText(await command<string>('support_info')); onNotice('Copied.'); })}>{working === 'support' ? <LoaderCircle size={14} className="spin" /> : <ClipboardCopy size={14} />} Copy support info</button>
     </div>
     {!confirming ? <button type="button" className="text-button danger erase-button" onClick={() => setConfirming(true)}><Trash2 size={13} /> Delete everything…</button>
-      : <ConfirmInline label="Delete everything" action="Delete everything" working={working === 'erase'} onCancel={() => setConfirming(false)} onConfirm={() => void act('erase', async () => { await onErase(); setConfirming(false); await onErased(); })}>This erases your conversation, settings, folders, lists, saved keys and recordings on this Mac. It can’t be undone.</ConfirmInline>}
+      : <ConfirmInline label="Delete everything" action="Delete everything" working={working === 'erase'} onCancel={() => setConfirming(false)} onConfirm={() => void act('erase', async () => { await onErase(); setConfirming(false); await onErased(); })}>Erases everything here for good.</ConfirmInline>}
   </section>;
 }

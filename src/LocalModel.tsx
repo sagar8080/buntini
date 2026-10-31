@@ -33,12 +33,12 @@ export default function LocalModel({ draft, update, onError, testable = true }: 
   return <>
     {!chosen && <ModelAdvisor draft={draft} update={update} />}
     <div className="local-choices">
-      {row('Python environment', 'The folder where MLX is installed', draft.pythonPath, 'environment')}
-      {row('Model', 'The Qwen or Gemma folder you downloaded', draft.modelPath, 'model')}
+      {row('Python environment', 'Not chosen', draft.pythonPath, 'environment')}
+      {row('Model', 'Not chosen', draft.modelPath, 'model')}
     </div>
     {chosen && testable && <div className="row-actions"><button type="button" className="secondary-button" disabled={testing} onClick={() => void test()}>{testing ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{testing ? 'Testing…' : 'Test setup'}</button></div>}
     {lines && <ul className="setup-report">{lines.map(line => <li key={line.label} className={line.ok ? 'ok' : 'problem'}>{line.ok ? <Check size={14} /> : <CircleAlert size={14} />}<span><strong>{line.label}</strong> {line.detail}</span></li>)}</ul>}
-    <details className="disclosure"><summary>Enter paths manually</summary>
+    <details className="disclosure"><summary>Edit paths</summary>
       <label className="field">Python<input value={draft.pythonPath} onChange={event => update('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
       <label className="field">Model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
     </details>

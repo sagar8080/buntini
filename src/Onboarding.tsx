@@ -59,7 +59,7 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
   return <>
     <div className="conversation" ref={scroller}>
       <div className="thread setup-thread">
-        <div className="setup-progress"><span>Getting to know you · {Math.min(index + 1, questions)} of {questions}</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>Skip setup</button></div>
+        <div className="setup-progress"><span>{Math.min(index + 1, questions)} of {questions}</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>Skip setup</button></div>
         {said.map(item => <div className="turn" key={item.step}>{bubble(item.buntini, `${item.step}-b`)}<div className="bubble-row is-you"><div className="bubble bubble-you">{item.you}</div></div></div>)}
         {typing ? <div className="bubble-row is-buntini"><span className="bubble-avatar"><Pet state="thinking" avatar="cat" look={look} /></span><div className="bubble bubble-buntini"><div className="typing" role="status" aria-label="Typing"><i /><i /><i /></div></div></div>
           : bubble(message(step, answers, data.diagnostics), step, step !== 'done' && <form className="setup-card" onSubmit={event => { event.preventDefault(); void advance(); }}>
@@ -95,7 +95,7 @@ function swatch(id: CatCoat): CSSProperties {
 
 function Hello({ answers, set }: StepProps) {
   return <>
-    <label>Your name<input value={answers.userName} onChange={event => set('userName', event.target.value)} placeholder="What should I call you?" maxLength={40} autoFocus /></label>
+    <label>Your name<input value={answers.userName} onChange={event => set('userName', event.target.value)} placeholder="Sam" maxLength={40} autoFocus /></label>
     <label>My name<input value={answers.assistantName} onChange={event => set('assistantName', event.target.value)} maxLength={40} required /></label>
     <div className="coat-picker" role="radiogroup" aria-label="Coat">{coats.map(coat => <button type="button" key={coat.id} role="radio" aria-checked={answers.coat === coat.id} className={answers.coat === coat.id ? 'active' : ''} onClick={() => set('coat', coat.id)}><i style={swatch(coat.id)} />{coat.label}</button>)}</div>
   </>;
@@ -113,9 +113,9 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
   const option = (id: Answers['backend'], icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={answers.backend === id} className={answers.backend === id ? 'active' : ''} onClick={() => set('backend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
   return <>
     <div className="brain-options" role="radiogroup" aria-label="Brain">
-      {option('apple', <IntelligenceMark size={16} />, 'Apple Intelligence', 'Built in · private · fast', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
-      {option('mlx', <Cpu size={16} />, 'Local model', 'Qwen or Gemma on this Mac · bigger, slower, private')}
-      {option('cloud', <Cloud size={16} />, 'Cloud model', 'Anthropic, OpenAI or Gemini · your key, your cap')}
+      {option('apple', <IntelligenceMark size={16} />, 'Apple Intelligence', 'Built in · private', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
+      {option('mlx', <Cpu size={16} />, 'Local model', 'Qwen or Gemma')}
+      {option('cloud', <Cloud size={16} />, 'Cloud model', 'Anthropic, OpenAI or Gemini')}
     </div>
     {answers.backend === 'apple' && apple.advice && <div className="field-help">{apple.advice}</div>}
     {answers.backend === 'mlx' && <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} />}
@@ -125,17 +125,17 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
     </>}
     {answers.backend === 'cloud' && provider.id !== 'chatgpt' && <>
       {providers}
-      <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `Paste your ${provider.name} key`} aria-label={`${provider.name} API key`} /></div></label>
-      <div className="field-help">I stop using {provider.name} once about ${cap} is spent in a month. You can change that, and what it may see, in Settings.</div>
+      <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /></div></label>
+      <div className="field-help">Monthly cap ${cap}</div>
     </>}
   </>;
 }
 
 function Roam({ answers, set }: StepProps) {
-  const choice = (key: 'roam' | 'awareness' | 'nudges', label: string, detail: string, disabled = false) => <label className="notification-choice cloud-share"><input type="checkbox" checked={answers[key] && !disabled} disabled={disabled} onChange={event => set(key, event.target.checked)} /><span>{label}<small>{detail}</small></span></label>;
+  const choice = (key: 'roam' | 'awareness' | 'nudges', label: string, detail?: string, disabled = false) => <label className="notification-choice cloud-share"><input type="checkbox" checked={answers[key] && !disabled} disabled={disabled} onChange={event => set(key, event.target.checked)} /><span>{label}{detail && <small>{detail}</small>}</span></label>;
   return <>
-    {choice('roam', 'Wander around', 'Walk along the bottom of the screen and nap on window tops.')}
-    {choice('awareness', 'Notice what you’re doing', 'App names and active times, on this Mac only. Never window contents.')}
-    {choice('nudges', 'Offer a hand', 'Now and then, suggest something helpful.', !answers.awareness)}
+    {choice('roam', 'Wander around')}
+    {choice('awareness', 'Notice what you’re doing', 'App names and times, on this Mac')}
+    {choice('nudges', 'Offer a hand', undefined, !answers.awareness)}
   </>;
 }

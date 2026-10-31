@@ -386,3 +386,132 @@ mod tests {
         );
     }
 }
+
+/// One thing on the home screen: the next event today, or the next reminder due.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlanceItem {
+    pub kind: &'static str,
+    pub title: String,
+    /// "16:00", on this Mac's clock.
+    pub time: String,
+    pub place: String,
+}
+
+/// The next timed event still ahead today and the earliest reminder due today, from apps
+/// the user allowed. All-day events and reminders without a time aren't "next".
+pub fn glance_items(events: &[crate::apps::Event], reminders: &[crate::apps::Reminder], now: chrono::NaiveDateTime) -> Vec<GlanceItem> {
+    let today = now.format("%Y-%m-%d").to_string();
+    let clock = now.format("%Y-%m-%d %H:%M").to_string();
+    let mut items = Vec::new();
+    if let Some(event) = events
+        .iter()
+        .filter(|event| !event.all_day && event.start.starts_with(&today) && event.end.as_str() > clock.as_str())
+        .min_by(|a, b| a.start.cmp(&b.start))
+    {
+        items.push(GlanceItem { kind: "event", title: event.title.trim().into(), time: event.start.get(11..16).unwrap_or_default().into(), place: event.location.trim().into() });
+    }
+    if let Some(reminder) = reminders
+        .iter()
+        .filter(|reminder| reminder.due.len() == 16 && reminder.due.starts_with(&today))
+        .min_by(|a, b| a.due.cmp(&b.due))
+    {
+        items.push(GlanceItem { kind: "reminder", title: reminder.title.trim().into(), time: reminder.due[11..16].into(), place: String::new() });
+    }
+    items
+}
+
+#[tauri::command]
+pub async fn day_glance(state: tauri::State<'_, AppState>) -> Result<Vec<GlanceItem>, String> {
+    let settings = state.store.lock().unwrap().settings()?;
+    let helper = state.models.apple_helper().to_path_buf();
+    let events = async {
+        if !crate::apps::allowed(&settings, "calendar") { return Vec::new(); }
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        crate::apps::events(&helper, &today).await.map(|read| read.items).unwrap_or_default()
+    };
+    let reminders = async {
+        if !crate::apps::allowed(&settings, "reminders") { return Vec::new(); }
+        crate::apps::reminders(&helper).await.map(|read| read.items).unwrap_or_default()
+    };
+    let (events, reminders) = tokio::join!(events, reminders);
+    Ok(glance_items(&events, &reminders, chrono::Local::now().naive_local()))
+}
+
+/// What the user asks for again and again, in their own words: at most two requests made
+/// at least twice in the last 30 days. Routine and goal runs, heads-ups and the morning
+/// brief are Buntini's own and don't count.
+pub fn usual(tasks: &[TaskRecord], scheduled: &[String], now: chrono::DateTime<chrono::Utc>) -> Vec<String> {
+    let since = now - chrono::Duration::days(30);
+    let key = |prompt: &str| prompt.trim().trim_end_matches(['?', '.', '!']).to_lowercase();
+    let scheduled: Vec<String> = scheduled.iter().map(|task| key(task)).collect();
+    let mut counts: Vec<(String, String, usize)> = Vec::new();
+    for task in tasks {
+        let recent = chrono::DateTime::parse_from_rfc3339(&task.created_at).is_ok_and(|at| at.with_timezone(&chrono::Utc) >= since);
+        let prompt = task.prompt.trim();
+        let words = prompt.split_whitespace().count();
+        if !recent || ["nudge", "brief"].contains(&task.backend.as_str()) || !(2..=8).contains(&words) || prompt.chars().count() > 48 {
+            continue;
+        }
+        let normal = key(prompt);
+        if scheduled.contains(&normal) {
+            continue;
+        }
+        match counts.iter_mut().find(|(seen, _, _)| *seen == normal) {
+            // Tasks come newest first, so the first wording kept is the latest.
+            Some((_, _, count)) => *count += 1,
+            None => counts.push((normal, prompt.to_string(), 1)),
+        }
+    }
+    let mut repeated: Vec<_> = counts.into_iter().filter(|(_, _, count)| *count >= 2).collect();
+    repeated.sort_by(|a, b| b.2.cmp(&a.2));
+    repeated.into_iter().take(2).map(|(_, prompt, _)| prompt).collect()
+}
+
+#[tauri::command]
+pub fn usual_requests(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let store = state.store.lock().unwrap();
+    let scheduled: Vec<String> = store.routines()?.into_iter().map(|routine| routine.task).collect();
+    Ok(usual(&store.tasks()?, &scheduled, chrono::Utc::now()))
+}
+
+#[cfg(test)]
+mod glance_tests {
+    use super::*;
+
+    #[test]
+    fn the_glance_shows_what_is_next_today() {
+        let event = |title: &str, start: &str, end: &str, all_day: bool| crate::apps::Event {
+            title: title.into(), start: start.into(), end: end.into(), all_day, location: "Room 4".into(), ..Default::default()
+        };
+        let reminder = |title: &str, due: &str| crate::apps::Reminder { title: title.into(), due: due.into(), ..Default::default() };
+        let now = chrono::NaiveDateTime::parse_from_str("2026-10-31 10:30", "%Y-%m-%d %H:%M").unwrap();
+        let items = glance_items(
+            &[event("Standup", "2026-10-31 09:00", "2026-10-31 09:15", false), event("Holiday", "2026-10-31 00:00", "2026-10-31 23:59", true),
+              event("Planning", "2026-10-31 16:00", "2026-10-31 16:45", false), event("Tomorrow", "2026-11-01 09:00", "2026-11-01 10:00", false)],
+            &[reminder("Someday", ""), reminder("Water the plant", "2026-10-31 18:00"), reminder("Call mum", "2026-10-31 12:00"), reminder("Dentist", "2026-11-02 09:00")],
+            now,
+        );
+        assert_eq!(items.iter().map(|item| (item.kind, item.title.as_str(), item.time.as_str())).collect::<Vec<_>>(),
+            [("event", "Planning", "16:00"), ("reminder", "Call mum", "12:00")]);
+    }
+
+    #[test]
+    fn usual_requests_are_the_users_own_repeated_words() {
+        let now = chrono::Utc::now();
+        let task = |prompt: &str, days: i64, backend: &str| -> TaskRecord {
+            serde_json::from_value(serde_json::json!({"id": prompt, "prompt": prompt, "answer": "", "state": "completed",
+                "createdAt": (now - chrono::Duration::days(days)).to_rfc3339(), "sources": [], "files": [], "backend": backend})).unwrap()
+        };
+        let tasks = [
+            task("What's the weather in Porto?", 1, "apple"), task("what's the weather in porto", 3, "apple"),
+            task("Play my focus playlist", 2, "apple"), task("Play my focus playlist", 4, "apple"), task("Play my focus playlist", 5, "apple"),
+            task("Tell me what's on my calendar tomorrow", 1, "apple"), task("Tell me what's on my calendar tomorrow", 2, "apple"),
+            task("Brief me", 1, "brief"), task("Brief me", 2, "brief"),
+            task("hi", 1, "apple"), task("hi", 2, "apple"),
+            task("Old habit here", 40, "apple"), task("Old habit here", 41, "apple"),
+        ];
+        let scheduled = ["Tell me what’s on my calendar tomorrow".replace('’', "'")];
+        assert_eq!(usual(&tasks, &scheduled, now), ["Play my focus playlist", "What's the weather in Porto?"]);
+    }
+}

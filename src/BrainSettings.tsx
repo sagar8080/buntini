@@ -19,9 +19,9 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
   return <>
     <section className="settings-section">
       <div className="brain-options" role="radiogroup" aria-label="Brain">
-        {option('apple', <IntelligenceMark size={18} />, 'Apple Intelligence', 'Private and built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
-        {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma, run by MLX')}
-        {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'Your own ChatGPT plan' : `${provider.name} with your key`, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
+        {option('apple', <IntelligenceMark size={18} />, 'Apple Intelligence', 'Built in', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={11} />}{apple.label}</em>)}
+        {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma')}
+        {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'ChatGPT plan' : provider.name, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
       {draft.modelBackend === 'mlx' && <LocalModel draft={draft} update={update} onError={onError} />}
@@ -53,19 +53,17 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
     {providers}
     <ChatGPTAccount account={diagnostics.chatgptAccount} onChange={onRefresh} onError={onError} onNotice={onNotice} />
-    {draft.cloudModel.trim() && <div className="row-actions"><span className="field-help">Using {draft.cloudModel.trim()}, the model you picked earlier.</span><button type="button" className="text-button" onClick={() => update('cloudModel', '')}>Use your plan’s default</button></div>}
-    <p className="field-help">It sees only what you allow in Privacy.</p>
+    {draft.cloudModel.trim() && <div className="row-actions"><span className="field-help">Using {draft.cloudModel.trim()}</span><button type="button" className="text-button" onClick={() => update('cloudModel', '')}>Use default</button></div>}
   </div>;
   return <div className="cloud-settings">
     {providers}
-    <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? 'Key saved · paste to replace' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /><button type="button" disabled={!key.trim() || saving} onClick={() => void save(key.trim())}>{saving ? <LoaderCircle size={13} className="spin" /> : 'Save'}</button></div>
+    <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? 'Key saved' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /><button type="button" disabled={!key.trim() || saving} onClick={() => void save(key.trim())}>{saving ? <LoaderCircle size={13} className="spin" /> : 'Save'}</button></div>
     {saved && <button type="button" className="text-button danger" onClick={() => void save('')}>Remove key</button>}
     <div className="usage-meter">
       <div><span>This month</span><strong>${spend.toFixed(2)} of ${draft.cloudBudgetUsd.toFixed(2)}</strong></div>
       <div className={`usage-track ${ratio >= .8 ? 'is-high' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={draft.cloudBudgetUsd} aria-valuenow={spend} aria-label="Cloud spending this month"><i style={{ width: `${ratio * 100}%` }} /><b style={{ left: '80%' }} /></div>
     </div>
     <label className="inline-field"><span>Monthly cap ($)</span><input aria-label="Monthly cloud spending cap in USD" type="number" min="0" max="10000" step="0.5" value={draft.cloudBudgetUsd} onChange={event => update('cloudBudgetUsd', Number(event.target.value))} /></label>
-    {named && <div className="row-actions"><span className="field-help">Using {named}, the model you named earlier.</span><button type="button" className="text-button" onClick={() => { update('cloudModel', ''); update('cloudInputPrice', provider.input); update('cloudOutputPrice', provider.output); }}>Use the suggested model</button></div>}
-    <p className="field-help">Spending is estimated from {provider.name}’s list prices; their invoice is final. It sees only what you allow in Privacy.</p>
+    {named && <div className="row-actions"><span className="field-help">Using {named}</span><button type="button" className="text-button" onClick={() => { update('cloudModel', ''); update('cloudInputPrice', provider.input); update('cloudOutputPrice', provider.output); }}>Use default</button></div>}
   </div>;
 }

@@ -18,17 +18,13 @@ export default function ChatGPTAccount({ account, onChange, onError, onNotice }:
     finally { setSigningIn(false); await onChange(); }
   }
   async function signOut() {
-    try { const confirmed = await command<boolean>('chatgpt_sign_out'); onNotice?.(confirmed ? 'Signed out of ChatGPT.' : 'Signed out on this Mac. To be sure, disconnect Buntini in ChatGPT → Settings.'); }
+    try { const confirmed = await command<boolean>('chatgpt_sign_out'); onNotice?.(confirmed ? 'Signed out of ChatGPT.' : 'Signed out here. Also disconnect Buntini in ChatGPT → Settings.'); }
     catch (error) { onError(errorMessage(error)); }
     finally { await onChange(); }
   }
-  if (signingIn) return <div className="chatgpt-account"><LoaderCircle size={14} className="spin" /><span>Finish signing in in your browser…</span><button type="button" className="text-button" onClick={() => void command('chatgpt_cancel_sign_in')}>Cancel</button></div>;
+  if (signingIn) return <div className="chatgpt-account"><LoaderCircle size={14} className="spin" /><span>Finish in your browser…</span><button type="button" className="text-button" onClick={() => void command('chatgpt_cancel_sign_in')}>Cancel</button></div>;
   if (!account) return <div className="chatgpt-signin">
     <button type="button" className="primary-button" onClick={() => void signIn()}>Sign in with ChatGPT</button>
-    <p className="field-help">Uses your own ChatGPT plan. Your browser opens to sign in and allow Buntini.</p>
   </div>;
-  return <>
-    <div className="chatgpt-account"><Check size={14} /><span>Signed in as <strong>{account}</strong></span><button type="button" className="text-button" onClick={() => void signOut()}>Sign out</button></div>
-    <p className="field-help">Uses your ChatGPT plan, so there’s no per-message cost. OpenAI sets the limits.</p>
-  </>;
+  return <div className="chatgpt-account"><Check size={14} /><span>Signed in as <strong>{account}</strong></span><button type="button" className="text-button" onClick={() => void signOut()}>Sign out</button></div>;
 }

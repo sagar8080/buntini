@@ -37,7 +37,6 @@ export default function Routines({ routines, onAction, onOpen, onError }: { rout
       </div>
       {routine.lastError && <p className="saved-search-error">{routine.lastError}</p>}
     </article>)}
-    {routines.every(routine => routine.builtIn) && <p className="saved-search-empty">Ask me to do something on a schedule, like “Every weekday at 8, brief me”.</p>}
   </section>;
 }
 
@@ -58,6 +57,6 @@ export function Goals({ goals, onAction, onOpen, onError }: { goals: Goal[]; onA
         {open ? goal.note && <p className="saved-search-error">{goal.note}</p> : goal.outcome && <p className="saved-search-empty">{goal.outcome}</p>}
       </article>;
     })}
-    {goals.length === 0 && <p className="saved-search-empty">Ask me to help with something over a few days, like “Follow up with Ana until she replies”.</p>}
+    {goals.length === 0 && <p className="saved-search-empty">None yet</p>}
   </section>;
 }

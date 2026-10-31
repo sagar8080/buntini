@@ -22,8 +22,7 @@ export default function SearchBudget({ draft, update, diagnostics }: { draft: Se
         <i style={{ width: `${ratio * 100}%` }} /><b style={{ left: '80%' }} />
       </div>
     </div>
-    <Toggle label="Stay within the free allowance" detail={`About ${preset.free.toLocaleString()} searches a month`} checked={draft.freeTierOnly} onChange={value => update('freeTierOnly', value)} />
-    {!draft.freeTierOnly && <label className="inline-field"><span>Monthly budget ($)<small>{preset.name} charges about ${preset.cost} a search</small></span><input aria-label="Monthly search budget in USD" type="number" min="0" max="1000" step="1" value={draft.monthlyBudgetUsd} onChange={event => update('monthlyBudgetUsd', Number(event.target.value))} /></label>}
-    <p className="field-help">Every lookup is counted before it’s sent. You’ll hear once at 80%.</p>
+    <Toggle label="Stay within the free allowance" detail={`${preset.free.toLocaleString()} a month`} checked={draft.freeTierOnly} onChange={value => update('freeTierOnly', value)} />
+    {!draft.freeTierOnly && <label className="inline-field"><span>Monthly budget ($)<small>${preset.cost} a search</small></span><input aria-label="Monthly search budget in USD" type="number" min="0" max="1000" step="1" value={draft.monthlyBudgetUsd} onChange={event => update('monthlyBudgetUsd', Number(event.target.value))} /></label>}
   </div>;
 }

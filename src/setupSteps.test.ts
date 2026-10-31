@@ -46,7 +46,7 @@ test('answers read naturally and become settings and keys', () => {
   assert.equal(reply('hello', answers), 'Call me Sam. You’re Miso, my calico.');
   assert.equal(reply('brain', answers, settings), 'Use OpenAI, up to $5 a month.');
   assert.equal(reply('brain', answers, { cloudBudgetUsd: 0 }), 'Use OpenAI, up to $5 a month.', 'no saved cap: the default');
-  assert.match(message('done', answers, diagnostics('available')), /All set, Sam!.*ask before I look anything up online/);
+  assert.match(message('done', answers, diagnostics('available')), /^All set, Sam! Ask me anything\.$/);
   const saved = applyAnswers({ ...settings, cloudModel: 'claude-old', freeTierOnly: false, dailySearchLimit: 12 }, answers);
   assert.equal(saved.userName, 'Sam');
   assert.equal(saved.modelBackend, 'cloud');

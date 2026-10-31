@@ -930,7 +930,7 @@ fn clock_times(text: &str) -> Vec<String> {
 }
 
 /// Sentences and lines of an answer, each with its own punctuation.
-fn sentences(text: &str) -> Vec<&str> {
+pub(crate) fn sentences(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     for line in text.split_inclusive('\n') {
         let mut start = 0;
@@ -1116,9 +1116,9 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         .collect();
     if unsupported || !missing.is_empty() {
         let explanation = if unsupported {
-            "The requested task includes an action Buntini cannot verify or perform through its current tools. That part is unfinished."
+            "That part is something I can’t do yet."
         } else {
-            "A requested app action has no verified receipt. That part is unfinished; Buntini has not confirmed that it was done."
+            "I couldn’t confirm the rest, so I’m not calling it done."
         };
         let mut answer = if messages.is_empty() {
             explanation.into()
@@ -1149,10 +1149,10 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             return Ok(summary);
         }
         if text.trim().is_empty() {
-            return Err(format!("{summary}\n\nThe requested explanation or additional answer is still missing. Continue the task to finish that part."));
+            return Err(format!("{summary}\n\nI still owe you the rest. Continue to finish it."));
         }
         if claims_own_write(text) {
-            return Err(format!("{summary}\n\nThe requested explanation or additional answer is still unfinished. Buntini could not provide it without an unverified action claim; continue the task to finish that part."));
+            return Err(format!("{summary}\n\nI still owe you the rest. Continue to finish it."));
         }
         return Ok(format!("{summary}\n\n{}", text.trim()));
     }
@@ -1431,7 +1431,7 @@ mod tests {
                 )
                 .unwrap_err();
                 assert!(
-                    unverified.contains("unfinished") && !unverified.contains("I sent the email")
+                    unverified.contains("I still owe you the rest") && !unverified.contains("I sent the email")
                 );
             }
         }

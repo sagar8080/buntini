@@ -31,19 +31,19 @@ pub struct App {
 }
 
 pub const APPS: [App; 13] = [
-    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
-    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve", "Move or rename events you approve"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
-    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve", "Mark reminders done or move them when you approve"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
-    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve", "Add to the end of a note when you approve"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
-    App { id: "contacts", name: "Contacts", can: &["Find the people you name, with their email addresses and phone numbers"], tools: &["find_contact"], share: Some(Share::Contacts), note: Some("A draft is addressed from Contacts only when exactly one person and one address match. Otherwise you pick the address when you approve it.") },
-    App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
-    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
-    App { id: "shortcuts", name: "Shortcuts", can: &["Find your shortcuts", "Run them after you approve, like one that turns on your lights"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
-    App { id: "safari", name: "Safari", can: &["List and find your open tabs", "Switch to a tab", "Read the page you’re on"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.") },
-    App { id: "chrome", name: "Google Chrome", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "brave", name: "Brave Browser", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "edge", name: "Microsoft Edge", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "arc", name: "Arc", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
+    App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
+    App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
+    App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
+    App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
+    App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
+    App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
+    App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "brave", name: "Brave Browser", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "arc", name: "Arc", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
@@ -1311,7 +1311,7 @@ async fn contacts_access(helper_path: &Path) -> Result<String, String> {
         .ok()
         .and_then(|value| value["granted"].as_bool())
     {
-        Some(true) => Ok("Contacts is ready.".into()),
+        Some(true) => Ok("Ready".into()),
         Some(false) => Err(CONTACTS_DENIED.into()),
         None => Err(
             "Contacts returned incomplete data. Please try again with the current Apple helper."
@@ -2949,10 +2949,10 @@ pub async fn check_app(
             &chrono::Local::now().format("%Y-%m-%d").to_string(),
         )
         .await
-        .map(|_| "Calendar is ready.".into()),
+        .map(|_| "Ready".into()),
         "reminders" => reminders(&helper_path)
             .await
-            .map(|_| "Reminders is ready.".into()),
+            .map(|_| "Ready".into()),
         "contacts" => contacts_access(&helper_path).await,
         // Pressing play on a song you name uses Accessibility; ask for it now.
         "spotify" => Ok(
@@ -2960,19 +2960,12 @@ pub async fn check_app(
                 .await
                 .unwrap_or(false)
             {
-                "Spotify is ready, including playing songs you name.".into()
+                "Ready".into()
             } else {
-                "To play songs you name, allow Buntini under System Settings → Privacy & Security → Accessibility. Play, pause and skip work without it.".into()
+                "Songs by name need Accessibility".into()
             },
         ),
-        _ => Ok(app(&id)
-            .map(|app| {
-                format!(
-                    "macOS will ask you once, the first time Buntini uses {}.",
-                    app.name
-                )
-            })
-            .unwrap_or_default()),
+        _ => Ok(String::new()),
     }
 }
 

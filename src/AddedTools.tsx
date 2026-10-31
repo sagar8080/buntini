@@ -12,11 +12,10 @@ function Server({ server, busy, onSafe, onReconnect, onRemove }: { server: Added
   return <div className={`service-row ${open ? 'is-open' : ''}`}>
     <button type="button" className="service-summary" aria-expanded={open} onClick={() => setOpen(!open)}><Plug size={18} /><span><strong>{server.name}</strong><small title={server.command}>{server.command}</small></span><ChevronDown size={14} /></button>
     {open && <div className="service-body">
-      {server.env.length > 0 && <p className="field-help">Uses {server.env.join(', ')}, kept on this Mac.</p>}
+      {server.env.length > 0 && <p className="field-help">Uses {server.env.join(', ')}</p>}
       {server.tools.map(tool => tool.unusable
         ? <p className="field-help" key={tool.name}>{tool.name}: {tool.unusable}</p>
-        : <Toggle key={tool.name} label={tool.name} detail={tool.safe ? 'Runs without asking' : 'Asks you first'} checked={tool.safe} disabled={busy} onChange={safe => onSafe(tool.name, safe)} />)}
-      <p className="field-help">Turn a tool on only if it just reads. What it says about itself isn’t checked.</p>
+        : <Toggle key={tool.name} label={tool.name} detail={tool.safe ? 'Runs without asking' : 'Asks first'} checked={tool.safe} disabled={busy} onChange={safe => onSafe(tool.name, safe)} />)}
       <div className="service-actions">
         <button type="button" className="secondary-button" disabled={busy} onClick={onReconnect}>{busy ? <LoaderCircle size={13} className="spin" /> : 'Reconnect'}</button>
         <button type="button" className="text-button danger" disabled={busy} onClick={onRemove}>Remove</button>
@@ -58,7 +57,7 @@ export default function AddedTools({ onError }: { onError: (error: string) => vo
       onError(message);
     } finally { setBusy(''); }
   }
-  const nameField = (key: string) => naming === key && <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label="Name for this tool" placeholder="Another name, like GitHub Work" value={name} onChange={event => setName(event.target.value)} /></div>;
+  const nameField = (key: string) => naming === key && <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label="Name for this tool" placeholder="GitHub Work" value={name} onChange={event => setName(event.target.value)} /></div>;
   return <section className="settings-section">
     <div className="settings-section-heading"><h3>Tools you added</h3></div>
     {servers.map(server => <Server key={server.id} server={server} busy={busy === server.id}
@@ -69,11 +68,10 @@ export default function AddedTools({ onError }: { onError: (error: string) => vo
     {nameField('paste')}
     <div className="row-actions">
       <button type="button" className="secondary-button" disabled={!line.trim() || !!busy} onClick={() => void add('paste', name => command<AddedTool>('add_tool_server', { command: line.trim(), name }))}>{busy === 'paste' ? <LoaderCircle size={13} className="spin" /> : <Plus size={13} />}Add</button>
-      <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('pick', async () => setFound(await command<Found[] | null>('pick_tool_config')))}><FileJson size={12} />Add from a config file</button>
+      <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('pick', async () => setFound(await command<Found[] | null>('pick_tool_config')))}><FileJson size={12} />From config file</button>
     </div>
     {found?.map(item => <div key={item.name}><div className="root-item"><span title={item.command}>{item.name}{item.unsupported ? ` · ${item.unsupported}` : ''}</span>
       {!item.unsupported && <button type="button" aria-label={`Add ${item.name}`} title="Add" disabled={!!busy} onClick={() => void add(`config:${item.name}`, name => command<AddedTool>('add_tool_server_from_config', { entry: item.name, name }))}>{busy === `config:${item.name}` ? <LoaderCircle size={13} className="spin" /> : <Plus size={14} />}</button>}
     </div>{nameField(`config:${item.name}`)}</div>)}
-    <p className="field-help">Paste the command that starts a local MCP server, with any values it needs first, like TOKEN=… npx …. Then ask “use {servers[0]?.name ?? 'GitHub'} to …”. I ask before each call.</p>
   </section>;
 }

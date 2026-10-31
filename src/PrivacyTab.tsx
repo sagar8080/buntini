@@ -41,12 +41,11 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Memory</h3></div>
       {memories.length ? memories.map(memory => <div className="root-item" key={memory.id}><span title={memory.fact}>{memory.fact}</span><button type="button" aria-label={`Forget: ${memory.fact}`} title="Forget" onClick={() => void onForget(memory.id)}><X size={14} /></button></div>)
-        : <p className="field-help">Ask me to remember something, like “remember I’m vegetarian”.</p>}
+        : <p className="field-help">Nothing yet</p>}
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Cloud models may see</h3></div>
       {shares.map(item => <Toggle key={item.id} label={item.label} checked={draft.externalShares.includes(item.id)} onChange={value => toggle(item.id, value)} />)}
-      <p className="field-help">{draft.modelBackend === 'cloud' ? 'You use a cloud brain, so your messages go to it. Everything else stays here unless you turn it on.' : 'Your brain runs on this Mac, so nothing goes to a cloud model. These choices apply if you switch to one.'}</p>
     </section>
     {children}
     <MacUpdates onError={onError} />

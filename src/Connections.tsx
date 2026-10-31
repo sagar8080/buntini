@@ -39,10 +39,9 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
   </div>;
   return <>
     <section className="settings-section">
-      <Service icon={<Globe2 size={18} />} name="Search API fallback" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
+      <Service icon={<Globe2 size={18} />} name="Web search" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
         <div className="chip-row" role="radiogroup" aria-label="Fallback search provider">{(['brave', 'tavily'] as const).map(id => <button type="button" key={id} role="radio" aria-checked={draft.searchProvider === id} className={draft.searchProvider === id ? 'active' : ''} onClick={() => { update('searchProvider', id); setSearchKey(''); }}>{id === 'brave' ? 'Brave Search' : 'Tavily'}</button>)}</div>
-        <p className="field-help">Chat research searches in the browser first. This optional key is used when browser research is insufficient, and for saved searches.</p>
-        <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved · paste to replace' : 'API key'} value={searchKey} onChange={setSearchKey} />
+        <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved' : 'API key'} value={searchKey} onChange={setSearchKey} />
         {actions(draft.searchProvider, !!searchKey.trim(), searchKey.trim(), () => setSearchKey(''), searchSaved)}
         {searchSaved && <SearchBudget draft={draft} update={update} diagnostics={diagnostics} />}
       </Service>
@@ -53,10 +52,9 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
         {actions('ebay', !!clientId.trim() && !!clientSecret.trim(), JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim() }), () => { setClientId(''); setClientSecret(''); }, !!diagnostics.ebayConfigured)}
       </Service>
       <Service icon={<Plane size={18} />} name="Flights" detail="Duffel · search only" connected={!!diagnostics.duffelConfigured}>
-        <KeyField label="Duffel access token" placeholder="duffel_test_… or duffel_live_…" value={token} onChange={setToken} />
+        <KeyField label="Duffel access token" placeholder="duffel_live_…" value={token} onChange={setToken} />
         {actions('duffel', !!token.trim(), token.trim(), () => setToken(''), !!diagnostics.duffelConfigured)}
       </Service>
-      <p className="field-help">Weather, exchange rates, Wikipedia and places work without a key. Buntini asks before every request.</p>
     </section>
     <AddedTools onError={onError} />
   </>;

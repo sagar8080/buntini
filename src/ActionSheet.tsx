@@ -12,8 +12,19 @@ const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_ev
 // The sheet edits "YYYY-MM-DD HH:MM"; the browser's picker wants "YYYY-MM-DDTHH:MM".
 const toPicker = (value: string) => value.replace(' ', 'T');
 const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
+/** "2026-10-31 09:00" as "Sat 31 Oct, 9:00". */
+const shown = (value: string) => {
+  const at = new Date(value.replace(' ', 'T'));
+  if (Number.isNaN(at.getTime())) return value;
+  const day = at.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return value.length > 10 ? `${day}, ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : day;
+};
+// The button says what happens.
+const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', create_saved_search: 'Save', create_price_watch: 'Watch' };
+// What an edit changes from, shown struck through beside its new value.
+const before: Record<string, string> = { due: 'was_due', start: 'occurrence' };
 
-/** Shows exactly what an action will do, lets the user fix any detail, and runs only on Allow. */
+/** Shows exactly what an action will do, lets the user fix any detail, and runs only when they confirm. */
 export default function ActionSheet({ proposal, running, error, onCancel, onAllow }: { proposal: ActionProposal; running: boolean; error?: string; onCancel: () => void; onAllow: (args: Record<string, string | number>) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(proposal.fields.map(field => [field.key, field.value])));
   // An error answers the details as they were; it goes once the user changes them.
@@ -39,21 +50,20 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
       {proposal.fields.map(field => {
         const choices = choicesFor(field.key);
         if (field.kind === 'hidden') return choices.length > 0 ? <div key={field.key} className="action-pick"><span>{field.label}</span>{picker(field.label, choices, field.key)}</div> : null;
+        // The title names the item; its present state and "Done" don't need a row.
+        if (field.key === 'now' || field.key === 'after') return null;
         if (field.kind === 'fixed') return <div key={field.key} className="action-fixed"><span>{field.label}</span><output>{values[field.key] || field.value}</output></div>;
+        const was = before[field.key] && values[before[field.key]];
         return <label key={field.key}><span>{field.label}</span>
+          {was && was !== values[field.key] && <s className="action-was">{shown(was)}</s>}
           {field.kind === 'long' ? <textarea disabled={running} rows={4} value={values[field.key]} onChange={event => set(field.key, event.target.value)} />
             : field.kind === 'when' ? <input disabled={running} type="datetime-local" value={toPicker(values[field.key])} onChange={event => set(field.key, fromPicker(event.target.value))} />
-            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={choices.length ? (field.key === 'to' ? 'Pick one below or type an address' : 'Pick one below') : field.key === 'to' || field.key === 'location' ? 'Optional' : undefined} />}
+            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={field.key === 'to' || field.key === 'location' ? 'Optional' : undefined} />}
           {choices.length > 0 && picker(field.label, choices, field.key)}
         </label>;
       })}
     </form>
-    {choicesFor('to').length ? <small>More than one person in Contacts matches. Pick who this is for.</small> : null}
-    {choicesFor('name').length ? <small>More than one of your shortcuts fits. Pick the one to run.</small> : null}
-    {choicesFor('id').length ? <small>More than one matches what you said. Pick the one you mean.</small> : null}
-    {choicesFor('message').length ? <small>More than one email could be the one you mean. Pick the one to answer.</small> : null}
-    {proposal.note && <small>{proposal.note}</small>}
     {shownError && <p role="alert">{shownError}</p>}
-    <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>
+    <div><button className="secondary-button" disabled={running} onClick={onCancel}>Not now</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : verbs[proposal.tool] ?? (proposal.tool.startsWith('mcp_') ? 'Run' : 'Allow')}</button></div>
   </ModalSheet>;
 }

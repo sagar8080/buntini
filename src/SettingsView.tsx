@@ -39,12 +39,12 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
     if (sent.openAtLogin === saved.openAtLogin) { setLoginProblem(''); return; }
     edited.current = false;
     setDraft(previous => ({ ...previous, openAtLogin: saved.openAtLogin }));
-    setLoginProblem(saved.openAtLogin ? 'macOS still lists me in your login items. Remove me in System Settings → General → Login Items.' : 'macOS didn’t add me to your login items, so Open at login is still off.');
+    setLoginProblem(saved.openAtLogin ? 'Still in your login items. Remove me in System Settings → General → Login Items.' : 'macOS didn’t add me to your login items.');
   }), [saver]);
   // Closing Settings (Esc, the header button, tucking the panel away) saves at once.
   useEffect(() => () => {
     void saver.flush();
-    if (saver.state === 'waiting') onNotice('Your settings will save as soon as the current task finishes.');
+    if (saver.state === 'waiting') onNotice('Settings save after this task.');
   }, [saver]);
   return <div className="subpage settings-page">
     <div className="settings-top">

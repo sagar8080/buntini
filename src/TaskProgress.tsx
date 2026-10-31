@@ -45,9 +45,9 @@ export function ProgressDetails({ progress }: { progress?: TaskProgress }) {
 
 export function BackgroundWork({ status, onCancel }: { status: BackgroundStatus | null; onCancel: (id: string) => void }) {
   if (!status) return null;
-  return <details className="background-work"><summary>Scheduled work</summary><p>{status.limitation}</p>
+  return <details className="background-work"><summary>Scheduled work</summary>
     {status.timers.map(timer => <article key={timer.id}><strong>{timer.seconds % 60 === 0 ? `${timer.seconds / 60} minute` : `${timer.seconds} second`} timer</strong><span>{timer.state.replaceAll('_', ' ')} · due {new Date(timer.dueAt).toLocaleString()}</span>{timer.lateSeconds > 0 && <small>Delivered or checked {Math.ceil(timer.lateSeconds / 60)} minutes late.</small>}{timer.error && <p role="status">{timer.error}</p>}{timer.state === 'pending' && <button className="text-button" onClick={() => onCancel(timer.id)}>Cancel timer</button>}</article>)}
     {status.monitors.map(monitor => <article key={`${monitor.kind}-${monitor.id}`}><strong>{monitor.label}</strong><span>{monitor.enabled ? `Next check ${new Date(monitor.nextRunAt).toLocaleString()}` : 'Paused'}</span><small>{monitor.lastSuccessAt ? `Last success ${new Date(monitor.lastSuccessAt).toLocaleString()}` : 'No successful check yet'}{monitor.overdueSeconds > 0 ? ' · Overdue; will check when available' : ''}</small>{monitor.lastRun?.error && <p>{monitor.lastRun.error}</p>}{monitor.lastDeliveryError && <p role="status">Notification: {monitor.lastDeliveryError}</p>}</article>)}
-    {!status.timers.length && !status.monitors.length && <p>No timers or scheduled checks yet.</p>}
+    {!status.timers.length && !status.monitors.length && <p></p>}
   </details>;
 }

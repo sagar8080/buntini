@@ -595,3 +595,57 @@ mod tests {
         assert_eq!(normalize(source, original, "Orion", ""), original);
     }
 }
+
+/// A chat reply without what makes it read like a chatbot: closing offers ("Let me know
+/// if…", "I hope this helps"), sign-offs ("Best, Buntini") and "That's all for now".
+/// Writing the user asked for (a draft, a letter) is theirs and stays as written.
+pub fn without_filler(goal: &str, answer: &str, assistant_name: &str) -> String {
+    if authored(goal) {
+        return answer.to_string();
+    }
+    const OPENERS: [&str; 14] = [
+        "i hope this helps", "i hope that helps", "hope this helps", "hope that helps", "let me know if",
+        "feel free to", "if you have any other questions", "if you have any more questions", "if you need anything else",
+        "if you need any more", "is there anything else", "that's all for now", "happy to help", "i'm here to help you with anything",
+    ];
+    let name = assistant_name.trim().to_lowercase();
+    let mut lines: Vec<String> = Vec::new();
+    for line in answer.lines() {
+        let plain = line.trim().trim_end_matches(['.', '!', ',']).to_lowercase().replace('’', "'");
+        // A sign-off: "Best," / "Cheers!" / the assistant's own name on its own line.
+        if ["best", "cheers", "warmly", "regards", "kind regards", "best wishes", "sincerely"].contains(&plain.as_str())
+            || (!name.is_empty() && plain == name)
+            || (!name.is_empty() && plain.ends_with(&format!(", {name}")) && plain.len() < name.len() + 16)
+        {
+            continue;
+        }
+        let kept: String = crate::completion::sentences(line)
+            .into_iter()
+            .filter(|sentence| {
+                let start = sentence.trim().to_lowercase().replace('’', "'");
+                !OPENERS.iter().any(|opener| start.starts_with(opener))
+            })
+            .collect();
+        if kept.trim().is_empty() && !line.trim().is_empty() {
+            continue;
+        }
+        lines.push(kept.trim_end().to_string());
+    }
+    let joined = lines.join("\n");
+    let trimmed = joined.trim();
+    if trimmed.chars().any(char::is_alphabetic) { trimmed.to_string() } else { answer.trim().to_string() }
+}
+
+#[cfg(test)]
+mod filler_tests {
+    use super::without_filler;
+
+    #[test]
+    fn closing_offers_and_sign_offs_go_but_the_answer_stays() {
+        let reply = "Hey Sagar!\n\nTea and a book is a lovely start. I hope this helps!\n\nLet me know if you need anything else.\n\nBest,\nBuntini";
+        assert_eq!(without_filler("cozy ideas?", reply, "Buntini"), "Hey Sagar!\n\nTea and a book is a lovely start.");
+        assert_eq!(without_filler("hi", "That's all for now! Feel free to ask.", "Buntini"), "That's all for now! Feel free to ask.", "nothing else left: keep it");
+        let draft = "Hi Ana,\n\nLet me know if Friday works.\n\nBest,\nSagar";
+        assert_eq!(without_filler("draft an email to Ana asking if Friday works", draft, "Buntini"), draft);
+    }
+}

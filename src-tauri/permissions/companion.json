@@ -36,6 +36,8 @@
           "chatgpt_cancel_sign_in",
           "chatgpt_sign_out",
           "morning_brief",
+          "day_glance",
+          "usual_requests",
           "forget_memory",
           "cancel_action",
           "export_data",

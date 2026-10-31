@@ -60,14 +60,14 @@ export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics):
 export function message(step: Step, answers: Answers, diagnostics: Diagnostics): string {
   const you = answers.userName.trim();
   switch (step) {
-    case 'hello': return 'Hi! I’m the little cat who lives in the corner of your screen. What should I call you? You can rename me and pick my coat too.';
+    case 'hello': return 'Hi! I’m the little cat in the corner of your screen. What should I call you?';
     case 'brain': {
       const apple = appleStatus(diagnostics.appleIntelligence);
-      const nudge = apple.ready ? 'Apple Intelligence is built into your Mac: private, quick and nothing to set up.' : `Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}), so a local or cloud model might suit you better.`;
-      return `Nice to meet you${you ? `, ${you}` : ''}! Which brain should I think with? ${nudge}`;
+      const nudge = apple.ready ? '' : ` Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}).`;
+      return `Nice to meet you${you ? `, ${you}` : ''}! Which brain should I think with?${nudge}`;
     }
-    case 'roam': return `Last one: may I wander around your screen and notice which apps you’re using? That stays on this Mac${answers.backend === 'cloud' ? ', and the cloud model only sees it if you allow it in Settings' : ''}. Hold the mic to talk to me any time.`;
-    case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything. I’ll remember our chat until you start a new topic, and I’ll ask before I look anything up online.`;
+    case 'roam': return 'Last one: may I wander around your screen and notice which apps you’re using?';
+    case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything.`;
   }
 }
 
@@ -111,8 +111,8 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
 export type Shortcut = 'day' | 'reply';
 const shortcutApps: Record<Shortcut, { reads: string[]; apps: string[]; ask: string; allow: string }> = {
   // The brief uses whichever of these is allowed, so any one of them is enough to start.
-  day: { reads: ['calendar', 'reminders', 'mail'], apps: ['calendar', 'reminders'], ask: 'To go over your day I read Calendar and Reminders, here on this Mac.', allow: 'Allow Calendar and Reminders' },
-  reply: { reads: ['mail'], apps: ['mail'], ask: 'To find email waiting for a reply I read Mail, here on this Mac. Nothing is sent.', allow: 'Allow Mail' },
+  day: { reads: ['calendar', 'reminders', 'mail'], apps: ['calendar', 'reminders'], ask: 'I’ll need Calendar and Reminders for that.', allow: 'Allow Calendar and Reminders' },
+  reply: { reads: ['mail'], apps: ['mail'], ask: 'I’ll need Mail for that.', allow: 'Allow Mail' },
 };
 
 /** What a welcome shortcut still needs on a fresh install, so it can be allowed in place

@@ -279,6 +279,8 @@ pub fn run() {
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
             brief::morning_brief,
+            brief::day_glance,
+            brief::usual_requests,
             controller::forget_memory,
             controller::cancel_action,
             data::export_data,

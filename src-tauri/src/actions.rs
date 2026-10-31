@@ -475,44 +475,53 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
         value: get(key),
         kind,
     };
+    // A sheet is named for what it does to which item: "Move “Dentist”".
+    let quoted = |verb: &str, key: &str, fallback: &str| match get(key).trim() {
+        "" => fallback.to_string(),
+        item => format!("{verb} “{item}”"),
+    };
+    let named = |verb: &str, key: &str, fallback: &str| match get(key).trim() {
+        "" => fallback.to_string(),
+        item => format!("{verb} {item}"),
+    };
     match tool {
         "add_reminder" => (
-            "Add this reminder?".into(),
+            "New reminder".into(),
             vec![
                 field("title", "Reminder", "text"),
                 field("due", "When", "when"),
             ],
-            "Added to your default list in Reminders.".into(),
+            String::new(),
         ),
         "add_calendar_event" => (
-            "Add this to your calendar?".into(),
+            "New event".into(),
             vec![
                 field("title", "Event", "text"),
                 field("start", "Starts", "when"),
                 field("minutes", "Minutes", "text"),
                 field("location", "Where", "text"),
             ],
-            "Added to your first writable calendar.".into(),
+            String::new(),
         ),
         "create_note" => (
-            "Save this note?".into(),
+            "New note".into(),
             vec![
                 field("title", "Title", "text"),
                 field("body", "Note", "long"),
             ],
-            "Saved in Notes.".into(),
+            String::new(),
         ),
         "draft_email" => (
-            "Open this email draft?".into(),
+            "New email".into(),
             vec![
                 field("to", "To", "text"),
                 field("subject", "Subject", "text"),
                 field("body", "Message", "long"),
             ],
-            "Opens in Mail for you to review. Buntini never sends email.".into(),
+            String::new(),
         ),
         "reply_email" => (
-            "Open this reply in Mail?".into(),
+            named("Reply to", "to", "Reply"),
             [
                 // Picked in the sheet when the inbox search found several.
                 field("message", "Which email", "hidden"),
@@ -529,20 +538,20 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 _ => true,
             })
             .collect(),
-            "Opens in Mail as a reply in the same thread, for you to review. Buntini never sends email.".into(),
+            String::new(),
         ),
         "run_shortcut" => (
-            "Run this shortcut?".into(),
+            quoted("Run", "name", "Run a shortcut"),
             vec![field("name", "Shortcut", "text")],
-            "Shortcuts can do anything you built them to do.".into(),
+            String::new(),
         ),
         "open_app" => (
-            "Open this app?".into(),
+            named("Open", "name", "Open an app"),
             vec![field("name", "App", "text")],
             String::new(),
         ),
         "complete_reminder" => (
-            "Mark this reminder done?".into(),
+            format!("{} done", quoted("Mark", "title", "Mark a reminder")),
             vec![
                 field("id", "Which reminder", "hidden"),
                 field("title", "Reminder", "hidden"),
@@ -553,10 +562,10 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                     kind: "fixed",
                 },
             ],
-            "Marked as done in Reminders. Nothing else about it changes.".into(),
+            String::new(),
         ),
         "reschedule_reminder" => (
-            "Move this reminder?".into(),
+            quoted("Move", "title", "Move a reminder"),
             vec![
                 field("id", "Which reminder", "hidden"),
                 field("title", "Reminder", "hidden"),
@@ -564,10 +573,10 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 // A date without a time stays one: the time picker can't show it.
                 field("due", "Due", if get("due").len() == 10 { "text" } else { "when" }),
             ],
-            "Only its due date changes in Reminders. An alarm at its due time moves with it.".into(),
+            String::new(),
         ),
         "update_calendar_event" => (
-            "Change this event?".into(),
+            quoted("Change", "was_title", "Change an event"),
             vec![
                 field("id", "Which event", "hidden"),
                 field("occurrence", "Occurrence", "hidden"),
@@ -577,22 +586,21 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 field("minutes", "Minutes", "text"),
                 field("location", "Where", "text"),
             ],
-            "Only this event changes. For a repeating event, only this one occurrence changes."
-                .into(),
+            String::new(),
         ),
         "append_to_note" => (
-            "Add this to your note?".into(),
+            quoted("Add to", "title", "Add to a note"),
             vec![
                 field("id", "Which note", "hidden"),
                 field("title", "Note", "hidden"),
                 field("text", "Add", "long"),
             ],
-            "Added to the end of the note in Notes. The rest of the note stays as it is.".into(),
+            String::new(),
         ),
         _ => (
-            "Open this page?".into(),
+            "Open link".into(),
             vec![field("url", "Address", "text")],
-            "Opens in your default browser.".into(),
+            String::new(),
         ),
     }
 }
@@ -1517,16 +1525,17 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
         ActionReceipt::failure(tool, outcome, detail)
     } else {
         let message = match tool {
-            "add_reminder" if !get("due").is_empty() => format!("Verified “{}” in Reminders for {}.", get("title"), get("due")),
-            "add_reminder" => format!("Verified “{}” in Reminders.", get("title")),
-            "add_calendar_event" => format!("Verified “{}” in {} at {}.", get("title"), helper.destination, get("start")),
-            "create_note" => format!("Verified “{}” in Notes.", get("title")),
-            "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
-            "complete_reminder" => format!("Marked “{}” as done in Reminders. I checked it’s done and nothing else about it changed.", get("title")),
-            "reschedule_reminder" => format!("Moved “{}” in Reminders: it’s now due {}. I read it back and nothing else about it changed.", get("title"), crate::edit_targets::pretty(&get("due"))),
-            "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), crate::edit_targets::pretty(&get("start")), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
-            "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the text that was there is unchanged.", get("title")),
-            _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
+            // What was done, as one line: the item, then what is now true of it.
+            "add_reminder" if !get("due").is_empty() => format!("{} · {}", get("title"), crate::edit_targets::pretty(&get("due"))),
+            "add_reminder" => format!("{} · in Reminders", get("title")),
+            "add_calendar_event" => format!("{} · {}", get("title"), crate::edit_targets::pretty(&get("start"))),
+            "create_note" => format!("{} · in Notes", get("title")),
+            "reply_email" => format!("Reply to {} · ready in Mail", get("to")),
+            "complete_reminder" => format!("{} · done", get("title")),
+            "reschedule_reminder" => format!("{} · now {}", get("title"), crate::edit_targets::pretty(&get("due"))),
+            "update_calendar_event" => format!("{} · {}{}", get("title"), crate::edit_targets::pretty(&get("start")), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
+            "append_to_note" => format!("{} · added to", get("title")),
+            _ => format!("Draft{} · ready in Mail", if get("to").is_empty() { String::new() } else { format!(" to {}", get("to")) }),
         };
         ActionReceipt {
             outcome,
@@ -2107,12 +2116,12 @@ mod tests {
         assert_eq!(argv, ["4821", "m-1@example.com", "ana@example.com", "Re: Friday", "Yes, I'll be there."]);
         // The sheet shows which email it answers and who it goes to, and can't change them.
         let (title, fields, note) = describe("reply_email", &args);
-        assert_eq!(title, "Open this reply in Mail?");
+        assert!(title.starts_with("Reply to "), "{title}");
         assert_eq!(
             fields.iter().map(|field| (field.key.as_str(), field.kind)).collect::<Vec<_>>(),
             [("answers", "fixed"), ("to", "fixed"), ("subject", "text"), ("body", "long")]
         );
-        assert!(note.contains("never sends"));
+        assert!(note.is_empty(), "a sheet carries no explanation");
         let edited = json!({"to":"eve@example.com", "subject":"Re: Friday!", "body":"Edited", "message":"1"});
         let kept = keep_fixed("reply_email", &Value::Object(args.clone()), &edited);
         assert_eq!(kept["to"], "ana@example.com");
@@ -2128,7 +2137,7 @@ mod tests {
         let args = reply_args();
         let receipt = parse_receipt("reply_email", &args, &reply_receipt().to_string());
         assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
-        assert!(receipt.message.contains("ana@example.com") && receipt.message.contains("same thread"));
+        assert_eq!(receipt.message, "Reply to ana@example.com · ready in Mail");
         // Only the threading headers are kept from the saved draft.
         assert!(receipt.evidence.get("savedHeaders").is_none());
         assert_eq!(receipt.evidence["savedInReplyTo"], "<m-1@example.com> <m-0@example.com> <m-1@example.com>");
@@ -2208,7 +2217,7 @@ mod tests {
         )
         .unwrap();
         let (title, fields, _) = describe("add_calendar_event", &args);
-        assert_eq!(title, "Add this to your calendar?");
+        assert_eq!(title, "New event");
         assert_eq!(
             fields
                 .iter()
@@ -2283,7 +2292,7 @@ mod tests {
         let change: Value = serde_json::from_str(&helper_arguments("update_calendar_event", &moved).unwrap()[1]).unwrap();
         assert_eq!(change, json!({"id":"e-1","occurrence":"2026-11-03 15:00","wasTitle":"Review","title":"Review","start":"2026-11-03 16:00","minutes":45,"location":""}));
         let (title, fields, _) = describe("update_calendar_event", &moved);
-        assert_eq!(title, "Change this event?");
+        assert_eq!(title, "Change “Review”");
         assert!(fields.iter().filter(|f| ["id", "occurrence", "was_title"].contains(&f.key.as_str())).all(|f| f.kind == "hidden"));
     }
 
@@ -2308,7 +2317,7 @@ mod tests {
         let valid = json!({"destinationId":"list-1","identifierScope":"persistent","title":"Buy milk","before":before,"after":after});
         let receipt = change_receipt("complete_reminder", &args, valid.clone());
         assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
-        assert!(receipt.message.contains("Marked “Buy milk” as done"));
+        assert_eq!(receipt.message, "Buy milk · done");
         for (side, key, value) in [("after", "completed", json!(false)), ("after", "due", json!("2026-11-04 09:00")), ("after", "notes", json!("changed")),
             ("before", "completed", json!(true)), ("before", "title", json!("Buy milk powder")), ("after", "alarms", json!(0))] {
             let mut wrong = valid.clone();
@@ -2349,7 +2358,7 @@ mod tests {
         let valid = json!({"destinationId":"list-1","identifierScope":"persistent","title":"Dentist","before":before,"after":after});
         let receipt = change_receipt("reschedule_reminder", &args, valid.clone());
         assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
-        assert!(receipt.message.contains("now due Fri 6 Nov 09:00"), "{}", receipt.message);
+        assert!(receipt.message.contains("now Fri 6 Nov 09:00"), "{}", receipt.message);
         for (side, key, value) in [
             ("after", "due", json!("2026-11-03 09:00")),
             ("after", "completed", json!(true)),
