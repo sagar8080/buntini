@@ -28,7 +28,7 @@ export function goalSchedule(goal: Goal) {
 export default function Routines({ routines, onAction, onOpen, onError }: { routines: Routine[]; onAction: (command: string, args: Record<string, unknown>) => Promise<unknown>; onOpen: (taskId: string) => void; onError: (message: string) => void }) {
   const [working, setWorking] = useState('');
   async function act(id: string, action: () => Promise<unknown>) { setWorking(id); try { await action(); } catch (error) { onError(errorMessage(error)); } finally { setWorking(''); } }
-  return <section className="saved-searches routines"><div className="section-label"><Repeat size={11} /> ROUTINES</div>
+  return <section className="saved-searches routines"><div className="section-label"><Repeat size={12} /> Routines</div>
     {routines.map(routine => <article className={`saved-search ${routine.enabled ? '' : 'paused'}`} key={routine.id}>
       <div className="saved-search-heading"><Repeat size={14} /><strong>{routine.task}</strong>{!routine.builtIn && <button className="icon-button" aria-label={`Delete routine: ${routine.task}`} disabled={!!working} onClick={() => void act(routine.id, () => onAction('delete_routine', { id: routine.id }))}><X size={12} /></button>}</div>
       <div className="saved-search-info"><span>{routine.enabled ? <><span className="status-dot" />{routineSchedule(routine)}</> : 'Paused'}</span>
@@ -45,7 +45,7 @@ export default function Routines({ routines, onAction, onOpen, onError }: { rout
 export function Goals({ goals, onAction, onOpen, onError }: { goals: Goal[]; onAction: (command: string, args: Record<string, unknown>) => Promise<unknown>; onOpen: (taskId: string) => void; onError: (message: string) => void }) {
   const [working, setWorking] = useState('');
   async function act(id: string, action: () => Promise<unknown>) { setWorking(id); try { await action(); } catch (error) { onError(errorMessage(error)); } finally { setWorking(''); } }
-  return <section className="saved-searches routines goals"><div className="section-label"><Target size={11} /> GOALS</div>
+  return <section className="saved-searches routines goals"><div className="section-label"><Target size={12} /> Goals</div>
     {goals.map(goal => {
       const open = goal.state === 'active' || goal.state === 'paused';
       return <article className={`saved-search ${goal.state === 'active' ? '' : 'paused'}`} key={goal.id}>

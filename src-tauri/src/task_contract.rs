@@ -1860,7 +1860,7 @@ impl TaskContract {
             .iter()
             .find(|o| o.kind != "answer" && o.status != "complete")
         {
-            return Err(format!("This task is unfinished: {}. The requested source or action has not been verified.",outcome.description));
+            return Err(format!("I didn’t get this done yet: {}. I couldn’t check it, so I’m not calling it finished.",outcome.description));
         }
         if self.outcomes.iter().any(|o| o.kind == "answer") && text.trim().is_empty() {
             return Err("The requested answer is still missing.".into());

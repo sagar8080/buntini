@@ -4,7 +4,7 @@ import type { BackgroundStatus, HeadsUp, PendingApprovalSummary, TaskProgress } 
     Stop ends one that can't be reviewed any more (say, after switching brains). */
 export function WaitingForYou({ items, disabled, onReview, onStop }: { items: PendingApprovalSummary[]; disabled: boolean; onReview: (approvalId: string) => void; onStop: (taskId: string) => void }) {
   if (!items.length) return null;
-  return <section className="waiting-for-you" aria-label="Waiting for you"><div className="section-label">WAITING FOR YOU <span>{items.length}</span></div>
+  return <section className="waiting-for-you" aria-label="Waiting for you"><div className="section-label">Waiting for you</div>
     {items.map(item => <article key={item.approvalId}><div><strong>{item.goal}</strong><small>{item.description} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="text-button" disabled={disabled} onClick={() => onReview(item.approvalId)}>Review</button><button className="text-button" disabled={disabled} aria-label={`Stop: ${item.goal}`} onClick={() => onStop(item.taskId)}>Stop</button></article>)}
   </section>;
 }
@@ -12,7 +12,7 @@ export function WaitingForYou({ items, disabled, onReview, onStop }: { items: Pe
 /** Heads-ups from this Mac's own data. Open starts a conversation with the details; nothing is changed from here. */
 export function HeadsUps({ items, disabled, onOpen, onDismiss }: { items: HeadsUp[]; disabled: boolean; onOpen: (id: string) => void; onDismiss: (id: string) => void }) {
   if (!items.length) return null;
-  return <section className="waiting-for-you heads-ups" aria-label="Heads-ups"><div className="section-label">HEADS-UP</div>
+  return <section className="waiting-for-you heads-ups" aria-label="Heads-ups"><div className="section-label">Heads-up</div>
     {items.map(item => <article key={item.id}><div><strong>{item.title}</strong><small>{item.detail}</small></div><button className="text-button" disabled={disabled} onClick={() => onOpen(item.id)}>Open</button><button className="text-button" disabled={disabled} aria-label={`Dismiss: ${item.title}`} onClick={() => onDismiss(item.id)}>Dismiss</button></article>)}
   </section>;
 }

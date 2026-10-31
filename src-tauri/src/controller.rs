@@ -833,7 +833,7 @@ fn finish_workflow(
     }
     if cancelled && flow.state != "unknown" {
         flow.state = "cancelled".into();
-        task.answer = "Task stopped. Completed actions remain in their destination apps; no further steps will run.".into();
+        task.answer = "Okay, I’ve stopped there. Anything I already did stays done, and nothing else will happen.".into();
     } else if let Err(error) = result {
         if flow.state != "unknown" {
             flow.state = if flow.steps.iter().any(|s| s.state == "failed") {
@@ -1093,7 +1093,7 @@ fn cancel_workflow(state: &AppState, id: &str) -> Result<(), String> {
         task.handoff = None;
         task.action = None;
         task.answer =
-            "Task stopped. Completed steps are preserved; no further steps will run.".into();
+            "Okay, I’ve stopped. Nothing else will happen.".into();
         store.checkpoint(&mut flow, &task)?;
         if let Some(step) = stopped {
             crate::notifications::withdraw_approval(&step);

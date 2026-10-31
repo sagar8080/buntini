@@ -23,7 +23,7 @@ export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebIns
 
 /** Numbered cards matching the [n] citations in the answer. */
 export function ResultCards({ cards, onOpen }: { cards: ResultCard[]; onOpen: (url: string) => void }) {
-  return <div className="result-cards"><div className="section-label">LIVE RESULTS <span>{cards.length}</span></div>
+  return <div className="result-cards"><div className="section-label">Live results</div>
     {cards.map((card, index) => {
       const Icon = icons[card.kind] || Globe2;
       return <article key={`${card.title}-${index}`} className={`result-card result-card--${card.kind}`}>

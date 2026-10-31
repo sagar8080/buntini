@@ -22,7 +22,7 @@ test('accents can follow the theme, use a fixed colour or a custom one', () => {
   assert.equal(accentHex({ ...base, themePreset: 'sakura' }, true), '#f08aa7');
   assert.equal(accentHex({ ...base, accent: 'ocean' }, false), '#71bacb');
   assert.equal(accentHex({ ...base, accent: 'custom', accentColor: '#123ABC' }, false), '#123ABC');
-  assert.equal(accentHex({ ...base, accent: 'custom', accentColor: 'nope' }, false), '#ab4c19', 'an invalid custom colour falls back to the theme');
+  assert.equal(accentHex({ ...base, accent: 'custom', accentColor: 'nope' }, false), '#a9491a', 'an invalid custom colour falls back to the theme');
   const custom = appearance({ ...base, accent: 'custom', accentColor: '#123abc' }, false);
   assert.equal(custom.variables['--accent'], '#123abc', 'a readable colour is kept as picked');
   assert.match(custom.variables['--accent-soft'], /color-mix/);

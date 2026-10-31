@@ -7,7 +7,7 @@ export interface Palette { panel: string; accent: string }
 // Each preset's colours are also in styles.css; themes.test.ts checks the two agree and that
 // text and accents there are readable (4.5:1, WCAG AA for small text).
 export const presets: { id: Settings['themePreset']; label: string; light: Palette; dark: Palette }[] = [
-  { id: 'classic', label: 'Classic', light: { panel: '#f6f7f9', accent: '#ab4c19' }, dark: { panel: '#121419', accent: '#ff9a55' } },
+  { id: 'classic', label: 'Classic', light: { panel: '#fbf7f2', accent: '#a9491a' }, dark: { panel: '#1a1512', accent: '#ff9e62' } },
   { id: 'midnight', label: 'Midnight', light: { panel: '#f4f5fb', accent: '#4d5dcd' }, dark: { panel: '#171a2b', accent: '#8c9bff' } },
   { id: 'paper', label: 'Paper', light: { panel: '#f7f4ec', accent: '#3d5a80' }, dark: { panel: '#22201c', accent: '#9db4d6' } },
   { id: 'sakura', label: 'Sakura', light: { panel: '#fdf5f7', accent: '#aa4662' }, dark: { panel: '#2a2226', accent: '#f08aa7' } },
