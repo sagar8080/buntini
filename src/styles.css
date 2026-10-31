@@ -997,3 +997,34 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 :root[data-mode=dark] .confirmation > i { color: #7fd39a; }
 .bubble-meta > span { opacity: 0; transition: opacity .15s; }
 .turn:hover .bubble-meta > span { opacity: .8; }
+/* Playfulness (petLife.ts): hunting the pointer, making biscuits, loafing, mischief, zoomies. */
+.pet.pet--act-stalk .pet-body { animation: cat-stalk 1.5s ease-in-out; transform-origin: 90px 160px; }
+.pet.pet--act-stalk .cat-pupil, .pet.pet--act-hunt .cat-pupil { transform: scale(1.32); }
+.pet.pet--act-stalk .cat-ear-left { transform: rotate(6deg); }
+.pet.pet--act-stalk .cat-ear-right { transform: rotate(-6deg); }
+.pet.pet--act-stalk .cat-tail { animation: cat-tail-twitch .38s ease-in-out infinite; }
+.pet.pet--act-hunt { animation: cat-hunt .9s cubic-bezier(.3, 0, .2, 1); }
+.pet.pet--act-hunt .cat-paw-left, .pet.pet--act-hunt .cat-paw-right { animation: cat-hunt-paws .9s ease-out; }
+.pet.pet--act-knead .cat-paw-left { animation: cat-knead .55s ease-in-out infinite; }
+.pet.pet--act-knead .cat-paw-right { animation: cat-knead .55s ease-in-out .27s infinite; }
+.pet.pet--act-knead .pet-body { animation: pet-purr .12s linear infinite; }
+.pet--cat.pet--act-knead .pet-eyes { display: none; }
+.pet--cat.pet--act-knead .cat-eyes-happy { display: block; }
+.pet.pet--act-loaf .cat-paw { opacity: 0; transition: opacity .5s ease; }
+.pet.pet--act-loaf .pet-body { animation: cat-loaf 7s ease-in-out; transform-origin: 90px 165px; }
+.pet.pet--act-loaf .pet-eyes { animation: pet-slowblink 3.5s ease-in-out 1.5s; }
+.pet.pet--act-mischief .cat-paw-left { animation: cat-bat 2.2s ease-in-out; }
+.pet.pet--act-mischief .cat-yarn-ball { animation: yarn-roll 2.8s ease-in-out; }
+.pet.pet--act-mischief .cat-yarn-shadow { animation: yarn-shadow 2.8s ease-in-out; }
+.pet.pet--act-mischief .cat-yarn-strand { animation: yarn-strand 2.8s ease-in-out; }
+.pet.pet--act-mischief .cat-look { animation: cat-innocent 2.8s ease-in-out; }
+.pet.pet--act-mischief .cat-head { animation: cat-mischief-head 2.8s ease-in-out; }
+.pet--dashing .cat-ear-left { transform: rotate(-26deg) translateY(4px); transition: transform .2s; }
+.pet--dashing .cat-ear-right { transform: rotate(26deg) translateY(4px); transition: transform .2s; }
+@keyframes cat-stalk { 0% { transform: none; } 25%, 70% { transform: translateY(6px) scale(1.05, .88); } 76%, 84%, 92% { transform: translateY(6px) scale(1.05, .88) rotate(-2.5deg); } 80%, 88%, 96% { transform: translateY(6px) scale(1.05, .88) rotate(2.5deg); } 100% { transform: translateY(6px) scale(1.05, .88); } }
+@keyframes cat-hunt { 0% { transform: translateY(4px) scale(1.04, .9); } 45% { transform: translate(calc(var(--hunt-dir, 1) * 14px), -16px) scale(.96, 1.06); } 70% { transform: translate(calc(var(--hunt-dir, 1) * 20px), 2px) scale(1.06, .92); } 100% { transform: none; } }
+@keyframes cat-hunt-paws { 30%, 55% { transform: translateY(-6px) rotate(-14deg); } 70% { transform: translateY(1px); } }
+@keyframes cat-tail-twitch { 50% { transform: rotate(3deg); } }
+@keyframes cat-loaf { 0%, 100% { transform: none; } 12%, 88% { transform: translateY(3px) scale(1.04, .95); } }
+@keyframes cat-innocent { 0%, 55% { transform: translate(-2.4px, 1.8px); } 65%, 100% { transform: none; } }
+@keyframes cat-mischief-head { 0%, 55% { transform: rotate(-6deg) translateY(1.5px); } 70%, 90% { transform: rotate(4deg); } 100% { transform: none; } }

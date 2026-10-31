@@ -2,14 +2,14 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { actionDuration, gazeToward, isToyAction, nextBlinkDelay, nextHabitDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, toyActions } from './petLife.ts';
+import { actionDuration, gazeToward, Hunter, isToyAction, nextBlinkDelay, nextHabitDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, toyActions } from './petLife.ts';
 
 const sequence = (...values: number[]) => () => values.shift() ?? 0;
 
 test('idle actions follow the personality and the character', () => {
   const seen = new Set<string>();
   for (let index = 0; index < 200; index++) seen.add(pickIdleAction('sleepy', true, sequence(index / 200)));
-  assert.deepEqual([...seen].sort(), ['ear', 'nod', 'nudge', 'tailcurl', 'yawn']);
+  assert.deepEqual([...seen].sort(), ['ear', 'loaf', 'nod', 'nudge', 'tailcurl', 'yawn']);
   for (let index = 0; index < 200; index++) {
     const action = pickIdleAction('playful', false, sequence(index / 200));
     assert.ok(['tilt', 'wiggle', 'stretch', 'slowblink'].includes(action), action);
@@ -67,4 +67,19 @@ test('gaze points toward the cursor and stays within range', () => {
     const glance = randomGlance();
     assert.ok(Math.abs(glance.x) <= 1 && glance.y >= -.7 && glance.y <= .5);
   }
+});
+
+test('a pointer that darts about nearby and then freezes gets pounced on, not one far away', () => {
+  const hunter = new Hunter();
+  // Darting back and forth 100–180 px to the cat's left.
+  for (let at = 0, side = 1; at < 600; at += 100, side = -side) hunter.moved(-140 + side * 40, -20, at);
+  assert.equal(hunter.ready(800, 'playful'), null, 'it waits until the pointer stops');
+  assert.equal(hunter.ready(1200, 'playful'), -1, 'then pounces toward it');
+  assert.equal(hunter.ready(1300, 'playful'), null, 'once, then rests');
+  const lazy = new Hunter();
+  for (let at = 0, side = 1; at < 600; at += 100, side = -side) lazy.moved(-140 + side * 40, -20, at);
+  assert.equal(lazy.ready(1200, 'sleepy'), null, 'a sleepy cat can’t be bothered');
+  const far = new Hunter();
+  for (let at = 0, side = 1; at < 600; at += 100, side = -side) far.moved(-600 + side * 40, -20, at);
+  assert.equal(far.ready(1200, 'playful'), null, 'too far away to bother');
 });

@@ -11,7 +11,7 @@ export default function Pet({ state, small = false, avatar = 'cat', look = defau
   // Habits wait while the pet is travelling or napping.
   const { action, blinking } = usePetLife(element, { alive, state: moving || asleep ? 'working' : state, motion: look.motion, cat: avatar === 'cat', reaction });
 
-  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && !moving && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small', moving && `pet--${moving}ing`, facing > 0 && 'pet--facing-right', landing && 'pet--landing', asleep && !moving && 'pet--asleep'];
+  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && !moving && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small', moving && `pet--${moving}ing`, moving === 'walk' && speed > 200 && 'pet--dashing', facing > 0 && 'pet--facing-right', landing && 'pet--landing', asleep && !moving && 'pet--asleep'];
   // One full gait cycle covers about 36 points, so the paws keep pace with the window.
   const stride = `${Math.min(.7, Math.max(.26, 36 / speed)).toFixed(2)}s`;
   return <div ref={element} className={classes.filter(Boolean).join(' ')} style={{ '--stride': stride } as CSSProperties} aria-hidden="true">

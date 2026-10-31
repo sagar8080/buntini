@@ -118,3 +118,11 @@ test('focus timers end with a nudge and pause break reminders', () => {
   assert.equal(rules.update(coding, 25 * MINUTE, 10)?.kind, 'focus-done');
   assert.equal(rules.update(coding, 26 * MINUTE, 10), null, 'the break clock restarts after focus');
 });
+
+test('only a playful cat gets the zoomies, and they cover real ground', () => {
+  const dashes = (motion: 'calm' | 'playful' | 'sleepy') => Array.from({ length: 400 }, () => chooseMove(world(), 1, motion)).filter(move => move?.dash);
+  const playful = dashes('playful');
+  assert.ok(playful.length > 0);
+  assert.ok(playful.every(move => Math.abs(move!.x - world().pet.x) > 100), 'a sprint, not a shuffle');
+  assert.equal(dashes('calm').length + dashes('sleepy').length, 0);
+});

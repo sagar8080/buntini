@@ -18,6 +18,7 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   react: (kind: PetAction) => void; onAction: (action: NudgeAction) => void;
 }) {
   const [moving, setMoving] = useState<Moving>(null);
+  const [speed, setSpeed] = useState(90);
   const [facing, setFacing] = useState<-1 | 1>(-1);
   const [landingNow, setLanding] = useState(false);
   const [asleep, setAsleep] = useState(false);
@@ -51,7 +52,9 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
       await new Promise(resolve => window.setTimeout(resolve, 220));
     }
     if (!movingRef.current || live.current.expanded) { setMoving(null); movingRef.current = false; return; }
-    try { await command('pet_move', { x: move.x, y: move.y, kind: move.kind, speed: speeds[live.current.motion] }); }
+    const speed = speeds[live.current.motion] * (move.dash ? 3 : 1);
+    setSpeed(speed);
+    try { await command('pet_move', { x: move.x, y: move.y, kind: move.kind, speed }); }
     catch { movingRef.current = false; setMoving(null); }
   }, []);
   const land = useCallback(async () => {
@@ -163,5 +166,5 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     void command('pet_stop').catch(() => {});
   }, []);
 
-  return { moving, facing, speed: speeds[motion], landing: landingNow, asleep, quiet, nudge, act, beforeDrag };
+  return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, quiet, nudge, act, beforeDrag };
 }
