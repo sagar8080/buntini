@@ -11,7 +11,7 @@
     "tauri": "tauri",
     "desktop": "tauri dev",
     "test:speech": "node --test src/speech.test.ts src/voiceLoop.test.ts",
-    "test:pet": "node --test src/petLife.test.ts src/petWorld.test.ts src/thread.test.ts src/taskRecovery.test.ts src/setupSteps.test.ts src/markdown.test.ts src/themes.test.ts src/brain.test.ts src/settingsSave.test.ts",
+    "test:pet": "node --test src/petLife.test.ts src/petMood.test.ts src/petWorld.test.ts src/thread.test.ts src/taskRecovery.test.ts src/setupSteps.test.ts src/markdown.test.ts src/themes.test.ts src/brain.test.ts src/settingsSave.test.ts",
     "test:worker": "python3 -m unittest discover -s worker/tests -v",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target",
     "build:audio": "bash native/build.sh",

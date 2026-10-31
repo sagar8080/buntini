@@ -155,11 +155,12 @@ button svg { vertical-align: middle; }
 .pet-eyes { transform-origin: 90px 94px; animation: blink 7s infinite; }
 .pet-shadow { transform-origin: 90px 169px; animation: shadow-breathe 4.8s ease-in-out infinite; }
 .pet-speaking-mouth { display: none; }
-.pet-aura { position: absolute; inset: 15% 12% 8%; background: radial-gradient(ellipse, #ed8a3230, transparent 65%); pointer-events: none; }
+/* The glow shows only while listening, so a resting cat sits on the wallpaper without a halo. */
+.pet-aura { position: absolute; inset: 15% 12% 8%; background: radial-gradient(ellipse, color-mix(in srgb, var(--accent) 24%, transparent), transparent 65%); pointer-events: none; opacity: 0; transition: opacity .3s ease; }
 .pet--thinking .pet-body { animation: pet-think 1.8s ease-in-out infinite; }
 .pet--working .pet-body { animation: pet-work .8s ease-in-out infinite; }
 .pet--listening .pet-body { animation: pet-listen 2s ease-in-out infinite; }
-.pet--listening .pet-aura { animation: aura-pulse 1.4s infinite; }
+.pet--listening .pet-aura { opacity: 1; animation: aura-pulse 1.4s infinite; }
 .pet--speaking .pet-speaking-mouth { display: block; animation: pet-speak .3s infinite; transform-origin: 90px 120px; }
 .pet--speaking .pet-mouth { display: none; }
 .pet-caption, .collapsed-label, .shortcut { display: none; }
@@ -441,9 +442,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .research-evidence p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
 /* Cat parts and motion personalities. Motion rules come first so state reactions win. */
 .cat-tail { transform-origin: 110px 154px; animation: cat-tail 3.6s ease-in-out infinite; }
-.cat-ear-left { transform-origin: 72px 70px; transition: transform .3s ease; }
-.cat-ear-right { transform-origin: 108px 70px; transition: transform .3s ease; }
-.cat-pupil { transform-box: fill-box; transform-origin: center; transition: transform .35s ease; }
+/* Ears swivel on their own (--ear-left/right) and both turn forward, and the pupils widen,
+   as the pointer comes near (--near); see usePetLife.ts. */
+.cat-ear-left { transform-origin: 72px 70px; transition: transform .3s ease; transform: rotate(calc(var(--ear-left, 0) * 1deg + var(--near, 0) * 5deg)); }
+.cat-ear-right { transform-origin: 108px 70px; transition: transform .3s ease; transform: rotate(calc(var(--ear-right, 0) * 1deg - var(--near, 0) * 5deg)); }
+.cat-pupil { transform-box: fill-box; transform-origin: center; transition: transform .35s ease; transform: scale(calc(1 + var(--near, 0) * .16)); }
 .cat-paw { transform-box: fill-box; transform-origin: center bottom; }
 .cat-eyes-closed, .cat-zzz { display: none; }
 .cat-zzz text { animation: cat-zzz 3.2s ease-in-out infinite; opacity: 0; }
@@ -661,10 +664,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 /* Walking pose (Cat.tsx): one cat whose seated body crossfades into a walking body under
    the same head. Legs move in a diagonal gait timed by --stride; turning flips smoothly. */
 .pet svg { transition: transform .22s ease; }
-.cat-sit, .cat-walkbody, .cat-front, .cat-sit-shadow, .cat-walk-shadow { transition: opacity .18s ease, transform .24s ease; }
+.cat-sit, .cat-walkbody, .cat-front, .cat-ruff, .cat-sit-shadow, .cat-walk-shadow { transition: opacity .18s ease, transform .24s ease; }
 .cat-sit { transform-origin: 90px 160px; }
 .cat-walkbody, .cat-walk-shadow { opacity: 0; }
 .cat--walk .cat-sit, .cat--leap .cat-sit, .cat--walk .cat-sit-shadow, .cat--leap .cat-sit-shadow { opacity: 0; transform: scale(.94, .84); }
+.cat--walk .cat-ruff, .cat--leap .cat-ruff { opacity: 0; }
 .cat--walk .cat-walkbody, .cat--leap .cat-walkbody, .cat--walk .cat-walk-shadow { opacity: 1; }
 /* On the move the head turns toward where the cat is going: the face slides over and
    the far eye narrows, so head and body read as one cat rather than a face on a card. */
@@ -1068,3 +1072,168 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet-ask { position: absolute; top: calc(4px * var(--companion-scale, 1)); left: calc(6px * var(--companion-scale, 1)); width: calc(34px * var(--companion-scale, 1)); height: calc(30px * var(--companion-scale, 1)); padding: 0; border-radius: 15px; border: 1px solid var(--hairline); background: var(--panel); color: var(--accent); box-shadow: var(--shadow); display: grid; place-items: center; z-index: 3; animation: nudge-in .3s var(--spring), cat-ask-bob 2.2s ease-in-out .3s infinite; }
 .pet-ask svg { width: 60%; height: 60%; }
 .pet-ask:hover { transform: scale(1.08); }
+/* Moods (petMood.ts). Upper lids wait above the eyes until a mood lowers or tilts them.
+   Resting faces use :where() so states (listening, thinking) and habits always win. */
+.cat-lid { transform-box: fill-box; transform-origin: 50% 100%; transition: transform .45s ease; }
+.cat-lid-left { transform: translateY(calc(var(--lid, 0) * 14px - 14px)) rotate(calc(var(--lid-tilt, 0) * 1deg)); }
+.cat-lid-right { transform: translateY(calc(var(--lid, 0) * 14px - 14px)) rotate(calc(var(--lid-tilt, 0) * -1deg)); }
+:where(.pet--face-content) { --lid: .4; }
+:where(.pet--face-drowsy) { --lid: .72; --lid-tilt: -6; }
+:where(.pet--face-bored) { --lid: .56; --lid-tilt: -4; }
+:where(.pet--face-grumpy) { --lid: .5; --lid-tilt: 15; }
+:where(.pet--face-excited) .cat-pupil { transform: scale(1.18); }
+:where(.pet--idle.pet--face-grumpy) .cat-ear-left { transform: rotate(-14deg) translateY(3px); }
+:where(.pet--idle.pet--face-grumpy) .cat-ear-right { transform: rotate(14deg) translateY(3px); }
+:where(.pet--idle.pet--face-grumpy) .cat-tail { animation: cat-tail-twitch .45s ease-in-out infinite; }
+:where(.pet--idle.pet--face-excited) .cat-tail { animation: cat-tail-playful 1.1s ease-in-out infinite; }
+:where(.pet--idle.pet--face-drowsy) .pet-body { animation-duration: 7s; }
+/* Feelings shown on and around the head. Text emotes stay readable when the cat faces right. */
+.cat-eyes-squeeze, .cat-blush-strong, .cat-emote { display: none; }
+.cat-emote { transform-box: fill-box; transform-origin: center bottom; }
+.pet--facing-right .cat-emote-question text, .pet--facing-right .cat-zzz { transform: scaleX(-1); transform-box: fill-box; transform-origin: center; }
+.cat-sparkle { transform-box: fill-box; transform-origin: center; animation: cat-sparkle 1.2s ease-in-out infinite; }
+@keyframes emote-pop { 0% { opacity: 0; transform: translateY(4px) scale(.3); } 22% { opacity: 1; transform: translateY(-2px) scale(1.12); } 36%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes cat-sparkle { 0%, 100% { opacity: 0; transform: scale(.3); } 40% { opacity: 1; transform: scale(1) rotate(20deg); } 70% { opacity: .8; transform: scale(.8) rotate(35deg); } }
+@keyframes emote-vein { 0% { opacity: 0; transform: scale(.4); } 18% { opacity: 1; transform: scale(1.15); } 34%, 54%, 74% { transform: scale(.9); } 44%, 64% { transform: scale(1.08); } 88% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes emote-sweat { 0% { opacity: 0; transform: translateY(-3px); } 20% { opacity: 1; transform: none; } 80% { opacity: 1; transform: translateY(2px); } 100% { opacity: 0; transform: translateY(4px); } }
+@keyframes emote-puff { 0%, 40% { opacity: 0; transform: translate(4px, -2px) scale(.4); } 55% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translate(-7px, 3px) scale(1.25); } }
+/* A sigh: a breath in, a slump, and a puff. */
+.pet.pet--act-sigh { --lid: .7; --lid-tilt: -4; }
+.pet.pet--act-sigh .pet-body { animation: cat-sigh 2.4s ease-in-out; }
+.pet.pet--act-sigh .cat-head { animation: cat-sigh-head 2.4s ease-in-out; }
+.pet.pet--act-sigh .cat-emote-puff { display: block; animation: emote-puff 2.4s ease-out; }
+@keyframes cat-sigh { 0%, 100% { transform: none; } 30% { transform: translateY(-1.5px) scale(1.02, 1.035); } 55%, 75% { transform: translateY(2.5px) scale(1.02, .955); } }
+@keyframes cat-sigh-head { 30% { transform: rotate(-2deg) translateY(-1px); } 55%, 80% { transform: rotate(3deg) translateY(3px); } }
+/* A wave hello with the right paw, and a smile. */
+.pet.pet--act-wave .cat-groom-paw { display: block; animation: cat-wave 2s ease-in-out; }
+.pet.pet--act-wave .cat-paw-right { opacity: 0; }
+.pet--cat.pet--act-wave .pet-eyes, .pet--cat.pet--act-wave .pet-mouth { display: none; }
+.pet--cat.pet--act-wave .cat-eyes-happy, .pet--cat.pet--act-wave .cat-smile { display: block; }
+.pet.pet--act-wave .cat-head { animation: cat-wave-head 2s ease-in-out; }
+@keyframes cat-wave { 0%, 100% { transform: none; } 18% { transform: translate(22px, -56px) rotate(-12deg); } 30%, 54% { transform: translate(24px, -58px) rotate(16deg); } 42%, 66% { transform: translate(22px, -57px) rotate(-14deg); } 80% { transform: translate(22px, -56px); } }
+@keyframes cat-wave-head { 20%, 80% { transform: rotate(-5deg); } }
+/* A blep: the tip of the tongue left out, for no reason. */
+.pet.pet--act-blep { --lid: .22; }
+.pet--cat.pet--act-blep .cat-tongue { display: block; transform: scaleY(.5); }
+.pet.pet--act-blep .cat-head { animation: cat-blep-head 3.2s ease-in-out; }
+@keyframes cat-blep-head { 15%, 85% { transform: rotate(4deg); } }
+/* Chasing its own tail: eyes on it, a swipe, and the tail whisks away. */
+.pet.pet--act-tailchase .cat-head { animation: cat-tailchase-head 2.6s ease-in-out; }
+.pet.pet--act-tailchase .cat-look { transform: translate(2.3px, 2px); transition: transform .2s; }
+.pet.pet--act-tailchase .cat-pupil { transform: scale(1.28); }
+.pet.pet--act-tailchase .cat-paw-right { animation: cat-tailchase-paw 2.6s ease-in-out; }
+.pet.pet--act-tailchase .cat-tail { animation: cat-tailchase-tail 2.6s ease-in-out; }
+.pet.pet--act-tailchase .pet-body { animation: cat-tailchase-body 2.6s ease-in-out; }
+@keyframes cat-tailchase-head { 0%, 100% { transform: none; } 15%, 85% { transform: rotate(9deg) translate(3px, 2px); } }
+@keyframes cat-tailchase-paw { 0%, 25%, 48%, 72%, 100% { transform: none; } 34% { transform: translate(9px, -7px) rotate(28deg); } 60% { transform: translate(11px, -5px) rotate(24deg); } }
+@keyframes cat-tailchase-tail { 0%, 100% { transform: none; } 30% { transform: rotate(-4deg); } 38% { transform: rotate(16deg); } 56% { transform: rotate(-6deg); } 64% { transform: rotate(18deg); } 80% { transform: rotate(4deg); } }
+@keyframes cat-tailchase-body { 0%, 100% { transform: none; } 30%, 60% { transform: rotate(3deg) translateX(1px); } 36%, 64% { transform: rotate(5deg) translateX(2px) scale(1.01, .98); } }
+/* A sneeze: a breath in, eyes screwed shut, a jolt and a little puff. */
+.pet--cat.pet--act-sneeze .pet-eyes { display: none; }
+.pet--cat.pet--act-sneeze .cat-eyes-squeeze { display: block; }
+.pet.pet--act-sneeze .cat-head { animation: cat-sneeze 1.3s ease-in-out; }
+.pet.pet--act-sneeze .cat-emote-puff { display: block; animation: emote-puff 1.3s ease-out; }
+@keyframes cat-sneeze { 30% { transform: rotate(-4deg) translateY(-2px); } 45% { transform: rotate(-5deg) translateY(-3px); } 55% { transform: rotate(2deg) translateY(4px) scale(.97); } 70% { transform: translateY(1px); } }
+/* Chattering at a pointer it can't reach, jaw going and eyes huge. */
+.pet--cat.pet--act-chatter .pet-mouth { display: none; }
+.pet--cat.pet--act-chatter .pet-speaking-mouth { display: block; animation: pet-speak .11s infinite; transform-origin: 90px 113px; }
+.pet.pet--act-chatter .cat-pupil { transform: scale(1.32); }
+.pet.pet--act-chatter .cat-ear-left { transform: rotate(7deg); }
+.pet.pet--act-chatter .cat-ear-right { transform: rotate(-7deg); }
+.pet.pet--act-chatter .cat-tail { animation: cat-tail-twitch .3s ease-in-out infinite; }
+.pet.pet--act-chatter .cat-head { animation: cat-chatter-head 2s ease-in-out; }
+@keyframes cat-chatter-head { 10%, 90% { transform: translateY(-1.5px); } }
+/* Bunting: rubbing its head against a hand held still over it (--bunt-dir is the hand's side). */
+.pet--cat.pet--act-bunt .pet-eyes { display: none; }
+.pet--cat.pet--act-bunt .cat-eyes-happy { display: block; }
+.pet.pet--act-bunt .cat-head { animation: cat-bunt 2.6s ease-in-out; }
+.pet.pet--act-bunt .pet-body { animation: cat-bunt-body 2.6s ease-in-out; }
+.pet.pet--act-bunt .cat-tail { animation: cat-tail-big 2.6s ease-in-out; }
+@keyframes cat-bunt { 0%, 100% { transform: none; } 18%, 50%, 82% { transform: rotate(calc(var(--bunt-dir, 1) * 12deg)) translate(calc(var(--bunt-dir, 1) * 4px), -2px); } 34%, 66% { transform: rotate(calc(var(--bunt-dir, 1) * 5deg)) translateX(calc(var(--bunt-dir, 1) * 1px)); } }
+@keyframes cat-bunt-body { 18%, 50%, 82% { transform: rotate(calc(var(--bunt-dir, 1) * 2.5deg)); } }
+/* Enough petting: ears back and one quick swat. */
+.pet.pet--act-swat { --lid: .45; --lid-tilt: 14; }
+.pet.pet--act-swat .cat-paw-left { animation: cat-swat .9s cubic-bezier(.3, 0, .2, 1); }
+.pet.pet--act-swat .cat-ear-left { animation: none; transform: rotate(-18deg) translateY(3px); }
+.pet.pet--act-swat .cat-ear-right { animation: none; transform: rotate(18deg) translateY(3px); }
+.pet.pet--act-swat .pet-body { animation: cat-swat-body .9s ease-out; }
+@keyframes cat-swat { 0%, 100% { transform: none; } 22% { transform: translate(-2px, -18px) rotate(-32deg); } 34% { transform: translate(-7px, -14px) rotate(-50deg); } 60% { transform: translate(-2px, -4px) rotate(-10deg); } }
+@keyframes cat-swat-body { 20% { transform: translateY(-2px) rotate(-2deg); } 40% { transform: rotate(-3deg); } }
+/* Proud of a job done: chest out, eyes shut, sparkles. */
+.pet--cat.pet--act-proud .pet-eyes { display: none; }
+.pet--cat.pet--act-proud .cat-eyes-happy { display: block; }
+.pet.pet--act-proud .pet-body { animation: cat-proud 2.2s ease-in-out; }
+.pet.pet--act-proud .cat-head { animation: cat-proud-head 2.2s ease-in-out; }
+.pet.pet--act-proud .cat-tail { animation: cat-tail-big 2.2s ease-in-out; }
+.pet.pet--act-proud .cat-emote-sparkle { display: block; }
+@keyframes cat-proud { 20%, 80% { transform: translateY(-2px) scale(1.02, 1.035); } }
+@keyframes cat-proud-head { 20%, 80% { transform: rotate(-3deg) translateY(-3px); } }
+/* Bashful at a kind word: a deep blush, head turned away, a paw over the smile. */
+.pet--cat.pet--act-bashful .pet-eyes { display: none; }
+.pet--cat.pet--act-bashful .cat-eyes-happy { display: block; }
+.pet--cat.pet--act-bashful .cat-blush-strong { display: block; animation: fade-in .4s ease-out; }
+.pet.pet--act-bashful .cat-head { animation: cat-bashful-head 2.4s ease-in-out; }
+.pet.pet--act-bashful .cat-groom-paw { display: block; animation: cat-bashful-paw 2.4s ease-in-out; }
+.pet.pet--act-bashful .cat-paw-right { opacity: 0; }
+.pet.pet--act-bashful .cat-tail { animation: cat-tail-big 2.4s ease-in-out; }
+@keyframes cat-bashful-head { 20%, 80% { transform: rotate(-9deg) translate(-2px, 2px); } 50% { transform: rotate(-7deg) translate(-2px, 2px); } }
+@keyframes cat-bashful-paw { 0%, 100% { transform: none; } 22%, 78% { transform: translate(-8px, -38px) rotate(-14deg); } 50% { transform: translate(-8px, -39px) rotate(-10deg); } }
+/* Curious: head tilted, ears forward, pupils wide. */
+.pet.pet--act-curious .cat-head { animation: cat-tilt 2.2s ease-in-out; }
+.pet.pet--act-curious .cat-pupil { transform: scale(1.25); }
+.pet.pet--act-curious .cat-ear-left { animation: none; transform: rotate(6deg); }
+.pet.pet--act-curious .cat-ear-right { animation: none; transform: rotate(-6deg); }
+.pet.pet--act-curious .cat-emote-question { display: block; animation: emote-pop 2.2s ease-out; }
+/* Excited: a wiggle, wide pupils, a quivering tail and sparkles. */
+.pet.pet--act-excited .pet-body { animation: pet-wiggle 1.8s ease-in-out; }
+.pet.pet--act-excited .cat-pupil { transform: scale(1.32); }
+.pet.pet--act-excited .cat-tail { animation: cat-tail-quiver .14s linear infinite; }
+.pet.pet--act-excited .cat-ear-left { animation: none; transform: rotate(-5deg) translateY(-1px); }
+.pet.pet--act-excited .cat-ear-right { animation: none; transform: rotate(5deg) translateY(-1px); }
+.pet.pet--act-excited .cat-emote-sparkle { display: block; }
+@keyframes cat-tail-quiver { 50% { transform: rotate(1.6deg); } }
+/* Startled: a jump straight up, tiny pupils, a pop of surprise. It wakes a sleeping cat. */
+.pet.pet--act-startle .pet-body { animation: cat-startle 1.2s cubic-bezier(.2, .8, .3, 1); }
+.pet.pet--act-startle .pet-shadow { animation: cat-startle-shadow 1.2s ease-out; }
+.pet.pet--act-startle .cat-pupil { transform: scale(.55); transition: transform .08s; }
+.pet.pet--act-startle .cat-ear-left { animation: none; transform: rotate(-10deg) translateY(-2px); transition: transform .08s; }
+.pet.pet--act-startle .cat-ear-right { animation: none; transform: rotate(10deg) translateY(-2px); transition: transform .08s; }
+.pet--cat.pet--act-startle .pet-eyes { display: block; }
+.pet--cat.pet--act-startle .cat-eyes-closed, .pet--cat.pet--act-startle .cat-zzz { display: none; }
+.pet.pet--act-startle .cat-emote-alert { display: block; animation: emote-pop 1.2s ease-out; }
+.pet.pet--act-startle .cat-emote-sweat { display: block; animation: emote-sweat 1.2s ease-out .35s both; }
+@keyframes cat-startle { 12% { transform: translateY(-13px) scale(1.07, 1.05); } 32% { transform: scale(1.06, .95); } 48% { transform: scale(1.04, 1.02); } }
+@keyframes cat-startle-shadow { 12% { transform: scaleX(.7); opacity: .5; } }
+/* Grumpy: flattened ears, narrowed eyes, a lashing tail and a cross little vein. */
+.pet.pet--act-grumpy { --lid: .58; --lid-tilt: 17; }
+.pet.pet--act-grumpy .cat-ear-left { animation: none; transform: rotate(-26deg) translateY(5px); }
+.pet.pet--act-grumpy .cat-ear-right { animation: none; transform: rotate(26deg) translateY(5px); }
+.pet.pet--act-grumpy .cat-tail { animation: cat-tail-lash .5s ease-in-out infinite; }
+.pet.pet--act-grumpy .cat-look { transform: translate(2.2px, .6px); }
+.pet--cat.pet--act-grumpy .pet-mouth { display: none; }
+.pet--cat.pet--act-grumpy .cat-frown { display: block; }
+.pet.pet--act-grumpy .cat-head { animation: cat-grumpy-head 2.6s ease-in-out; }
+.pet.pet--act-grumpy .cat-emote-vein { display: block; animation: emote-vein 2.6s ease-out; }
+@keyframes cat-tail-lash { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(12deg); } }
+@keyframes cat-grumpy-head { 15%, 85% { transform: rotate(4deg) translateY(1px); } }
+/* Picked up: dangling from the scruff, legs hanging. A playful cat loves it; others look worried. */
+.pet--held .pet-body { animation: held-sway 1.6s ease-in-out infinite; transform-origin: 90px 60px; }
+.pet--held .cat-sit { transform: translateY(3px) scale(.96, 1.07); }
+.pet--held .cat-paw { transform: translateY(4px); }
+.pet--held .cat-tail { animation: held-tail 1.6s ease-in-out infinite; }
+.pet--held .pet-shadow { animation: none; opacity: .25; transform: scaleX(.6); }
+.pet--held .cat-yarn { opacity: 0; }
+.pet--held:not(.pet--motion-playful) .cat-pupil { transform: scale(.78); }
+.pet--held:not(.pet--motion-playful) .cat-emote-sweat { display: block; animation: emote-sweat 2s ease-out infinite; }
+.pet--cat.pet--held.pet--motion-playful .pet-eyes { display: none; }
+.pet--cat.pet--held.pet--motion-playful .cat-eyes-happy { display: block; }
+.pet--held.pet--motion-playful .cat-emote-sparkle { display: block; }
+@keyframes held-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes held-tail { 0%, 100% { transform: rotate(18deg); } 50% { transform: rotate(26deg); } }
+/* Dreaming while asleep: an ear flicks, a paw paddles, the tail twitches, the mouth moves. */
+.pet--asleep.pet--act-dream .cat-ear-right { animation: cat-ear-flick .65s ease-in-out .2s; }
+.pet--asleep.pet--act-dream .cat-paw-left { animation: cat-dream-paw 1.4s ease-in-out; }
+.pet--asleep.pet--act-dream .cat-tail { animation: cat-tail-twitch .3s ease-in-out 3; }
+.pet--asleep.pet--act-dream .pet-mouth { transform-box: fill-box; transform-origin: center top; animation: cat-dream-mouth 1.4s ease-in-out; }
+@keyframes cat-dream-paw { 0%, 100% { transform: none; } 20%, 50% { transform: translateY(-2px) rotate(-6deg); } 35%, 65% { transform: translateY(-.5px) rotate(2deg); } }
+@keyframes cat-dream-mouth { 30%, 60% { transform: scaleY(1.35); } }

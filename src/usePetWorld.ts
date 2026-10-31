@@ -8,7 +8,7 @@ import type { PetMotion, PetState } from './types';
 
 type Moving = Move['kind'] | null;
 const ASK_EVERY = 15 * 60_000;
-const reactions: Partial<Record<string, PetAction>> = { welcome: 'happy', break: 'stretch', 'focus-done': 'happy', late: 'yawn', battery: 'sad', cpu: 'tilt' };
+const reactions: Partial<Record<string, PetAction>> = { welcome: 'wave', break: 'stretch', 'focus-done': 'proud', late: 'yawn', battery: 'sad', cpu: 'curious' };
 
 /* Lets the pet live on the desktop: wander along the floor and the user's active window,
    land when dropped, nap while the user is away, vanish during meetings and full screen,
@@ -23,6 +23,9 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   const [facing, setFacing] = useState<-1 | 1>(-1);
   const [landingNow, setLanding] = useState(false);
   const [asleep, setAsleep] = useState(false);
+  // Being dragged across the screen: it dangles until the window stops moving.
+  const [held, setHeld] = useState(false);
+  const heldTimer = useRef(0);
   const [quiet, setQuiet] = useState(false);
   const [nudge, setNudge] = useState<Nudge | null>(null);
   // Sitting on a window, the cat sometimes asks to bat at it; it only does once you say yes.
@@ -34,8 +37,9 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   const perched = useRef(false);
   const pendingPerch = useRef<number | undefined>(undefined);
   const rules = useRef(new NudgeRules());
-  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, ask, react, onAction });
-  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, ask, react, onAction };
+  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction });
+  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction };
+  const putDown = useCallback(() => { window.clearTimeout(heldTimer.current); setHeld(false); }, []);
 
   // Our own position updates can still arrive just after a move ends; they are not drags.
   const echoUntil = useRef(0);
@@ -116,12 +120,13 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     // A move we did not make (a drag, or the window settling after collapsing) ends in a landing.
     let settle = 0;
     const moved = getCurrentWindow().onMoved(() => {
+      if (live.current.held) { window.clearTimeout(heldTimer.current); heldTimer.current = window.setTimeout(putDown, 900); }
       if (movingRef.current || perched.current || live.current.expanded || Date.now() < echoUntil.current) return;
       window.clearTimeout(settle);
       settle = window.setTimeout(() => void land(), 900);
     });
-    return () => { window.clearTimeout(settle); for (const subscription of [...subscriptions, moved]) void subscription.then(off => off()); };
-  }, [enabled, land]);
+    return () => { window.clearTimeout(settle); window.clearTimeout(heldTimer.current); for (const subscription of [...subscriptions, moved]) void subscription.then(off => off()); };
+  }, [enabled, land, putDown]);
 
   // Roaming loop: pause while open, busy, asleep, quiet, talking or already moving.
   useEffect(() => {
@@ -201,7 +206,10 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     perchedOn.current = null;
     setAsk(null);
     void command('pet_stop').catch(() => {});
-  }, []);
+    // Picked up by the scruff, unless it's the open panel being moved. If the window never
+    // moves, it's put straight back down.
+    if (!live.current.expanded) { setHeld(true); window.clearTimeout(heldTimer.current); heldTimer.current = window.setTimeout(putDown, 1500); }
+  }, [putDown]);
 
-  return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, quiet, nudge, act, beforeDrag, ask: !!ask, knock };
+  return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, held, quiet, nudge, act, beforeDrag, ask: !!ask, knock };
 }

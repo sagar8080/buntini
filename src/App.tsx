@@ -6,6 +6,7 @@ import Pet from './Pet';
 import { ApprovalSheet, ResultCards } from './Online';
 import { backendLabel } from './brain.ts';
 import { lookFrom } from './petOptions';
+import { feelingFor } from './petMood';
 import type { PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
@@ -414,6 +415,9 @@ export default function App() {
     let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false, streamError = '', answeredAloud = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
+    // A hello, a thank-you or a kind word shows on the cat's face before the reply comes.
+    const felt = feelingFor(prompt);
+    if (felt) react(felt);
     const provisional: TaskRecord = { id: '', prompt: prompt.trim(), answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] };
     setFocusId(''); setLive(provisional);
     try {
@@ -429,7 +433,7 @@ export default function App() {
         }
         else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || 'Working on it'); }
         else if (event.type === 'error') streamError = event.text || 'The task could not finish.';
-        else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
+        else if (event.type === 'notice' && event.text) { setNotice(event.text); react('curious'); }
       }, approvalId);
       setLive(null);
       setTurns(previous => mergeTurns(previous, [result]));
@@ -931,7 +935,7 @@ export default function App() {
           };
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
-        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} speed={world.speed} /></button>
+        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>
