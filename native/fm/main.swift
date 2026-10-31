@@ -620,7 +620,13 @@ func emptySourceReply(goal: String, guidance: String, steps: [[String: Any]]) ->
     }
     guard let latest = reads.last, empty(latest) == true else { return nil }
     if reads.contains(where: { empty($0) == false }) { return nil }
-    return "That lookup returned no matching records, so I don't have source content to summarize or use for a dependent action. This result cannot support a source-dependent next action. Try a shorter identifying title or keyword, or provide the source text."
+    // A read that says in words what it found ("Nothing on the calendar for Saturday 31
+    // October") is the answer itself.
+    if let evidence = latest["evidence"] as? [String: Any], let text = evidence["text"] as? String,
+       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return text
+    }
+    return "I didn’t find anything that matches, so there’s nothing to go on yet. Try a shorter title or keyword, or paste the text."
 }
 
 #if canImport(FoundationModels)
@@ -700,8 +706,16 @@ func describe(_ error: Error) -> Failure {
 func generate(_ id: String, _ request: [String: Any]) async {
     let messages = request["messages"] as? [[String: Any]] ?? []
     let incomingTools = (request["tools"] as? [[String: Any]] ?? []).map { ($0["function"] as? [String: Any]) ?? $0 }
-    var offered = incomingTools.compactMap { $0["name"] as? String }.filter { toolDefinitions[$0] != nil }
+    // A tool the user added (MCP) is not in the fixed catalog. Buntini already cleaned its
+    // schema to plain fields and quoted its description, and every call it makes is
+    // checked and shown before it runs, so it is offered as Buntini sent it.
+    let added: (String) -> [String: Any]? = { name in
+        name.hasPrefix("mcp_") ? incomingTools.first { $0["name"] as? String == name } : nil
+    }
+    let definitionFor: (String) -> [String: Any]? = { name in toolDefinitions[name] ?? added(name) }
+    var offered = incomingTools.compactMap { $0["name"] as? String }.filter { definitionFor($0) != nil }
     let parametersFor: (String) -> [String: Any]? = { name in
+        if let tool = added(name) { return tool["parameters"] as? [String: Any] }
         guard let fixed = toolDefinitions[name]?["parameters"] as? [String: Any] else { return nil }
         let supplied = incomingTools.first { $0["name"] as? String == name }?["parameters"] as? [String: Any]
         return restrictedParameters(fixed, offered: supplied)
@@ -771,7 +785,7 @@ func generate(_ id: String, _ request: [String: Any]) async {
                 emit(["id": id, "type": "done", "text": empty, "finish_reason": "stop"])
                 return
             }
-            if unresolvedJournal(workflowSteps) { offered.removeAll { effectTools.contains($0) && !($0 == "control_music" && musicReadOnly) } }
+            if unresolvedJournal(workflowSteps) { offered.removeAll { (effectTools.contains($0) || added($0) != nil) && !($0 == "control_music" && musicReadOnly) } }
             routing = try routingPrompt(goal: workflowGoal, guidance: prompt, steps: workflowSteps, nextStep: nextStep)
             prompt = try workflowPrompt(goal: workflowGoal, guidance: prompt, steps: workflowSteps)
         }
@@ -782,7 +796,7 @@ func generate(_ id: String, _ request: [String: Any]) async {
             let routeTranscript = Transcript(entries: [.instructions(Transcript.Instructions(segments: [text(routePolicy)], toolDefinitions: []))] + Array(entries.dropFirst()))
             let decider = LanguageModelSession(model: .default, tools: [], transcript: routeTranscript)
             let menu = offered.map { name in
-                let description = name == "control_music" && musicReadOnly ? "Read the current playing track only. Playback changes are unavailable for this request." : toolDefinitions[name]?["description"] as? String ?? ""
+                let description = name == "control_music" && musicReadOnly ? "Read the current playing track only. Playback changes are unavailable for this request." : definitionFor(name)?["description"] as? String ?? ""
                 return "- \(name): \(description)"
             }.joined(separator: "\n")
             // A small model routes far better from examples than from rules.
@@ -824,7 +838,7 @@ func generate(_ id: String, _ request: [String: Any]) async {
                 let nextData = try JSONSerialization.data(withJSONObject: nextStep ?? [:], options: [.sortedKeys])
                 let pending = String(data: nextData, encoding: .utf8) ?? "{}"
                 let calculationAdvice = name == "calculate" ? "Choose only the quantities relevant to the requested calculation; do not add used items to unused-item savings or combine unrelated prices. Expressions contain ASCII numeric literals and + - * / % parentheses only. Strip currency symbols and units. Convert clock times to minutes (hours*60+minutes); never put a colon in an expression. Use /100 for percentages. Batch up to eight needed expressions and do not repeat already verified expressions." : ""
-                let examples = checklistCount == nil ? argumentExamples(toolDefinitions[name] ?? [:]) : "Example user request: Create a two-item checklist note titled Session prep: test the microphone and verify the slide order.\nExample internal arguments: {\"title\":\"Session prep\",\"checklist_items\":[\"Test the microphone\",\"Verify the slide order\"]}"
+                let examples = checklistCount == nil ? argumentExamples(definitionFor(name) ?? [:]) : "Example user request: Create a two-item checklist note titled Session prep: test the microphone and verify the slide order.\nExample internal arguments: {\"title\":\"Session prep\",\"checklist_items\":[\"Test the microphone\",\"Verify the slide order\"]}"
                 let checklistAdvice = checklistCount.map { "Return title and checklist_items, with \(checklistLimit == $0 ? "exactly \($0)" : "between \($0) and \(checklistLimit)") distinct plain-text items. Retain every requested source fact and all owners, actions, prerequisites and deadlines; do not focus only on the last source clause. Do not put bullet markers or newlines inside items; the app constructs the checkbox body." } ?? ""
                 let fillPrompt = "Tool to fill: \(name)\nFormat examples only; never copy their dates or values:\n\(examples)\n\nReference clock fallback ONLY for relative dates; interpretationDate pins the task day, requestedAt pins its original time: \(clock)\nCurrent observations (not source event times): \(context)\n\n\(queryAdvice) \(scheduling) \(calculationAdvice) \(checklistAdvice)\n\nController's specific pending step: \(pending)\n\n\(taskInput)\n\nFill the pending step's actual user/source fields. Explicit dates and source event times override the reference clock and modification timestamps. Preserve every required argument literally. Never invent an unknown value."
                 emit(["id": id, "type": "model_call", "stage": "arguments"])
@@ -1914,7 +1928,7 @@ func contractSelfTest() async -> Int32 {
         let succeededPrompt = try factualTaskPrompt(goal: "Save facts", guidance: "Use a different title", steps: savedSteps)
         try require(succeededPrompt.contains("approvedArguments") && succeededPrompt.contains("At 9 tomorrow") == false && succeededPrompt.contains("Use a different title"), "Succeeded effect receipts and fresh guidance must remain available")
         let noNotes: [[String: Any]] = [["tool": "find_notes", "state": "succeeded", "effect": false, "evidence": ["records": [[String: Any]]()]]]
-        try require(emptySourceReply(goal: "Summarize source", guidance: "Summarize source", steps: noNotes)?.contains("no matching records") == true, "A zero-record lookup cannot become fabricated source content")
+        try require(emptySourceReply(goal: "Summarize source", guidance: "Summarize source", steps: noNotes)?.contains("didn’t find anything") == true, "A zero-record lookup cannot become fabricated source content")
         let priorUseful: [[String: Any]] = [["tool": "find_notes", "state": "succeeded", "effect": false, "evidence": ["records": [["title": "Facts", "excerpt": "A real observation"]]]]]
         try require(emptySourceReply(goal: "Summarize source", guidance: "Summarize source", steps: priorUseful + noNotes) == nil, "A later empty read must not discard earlier useful evidence from the same source")
         try require(emptySourceReply(goal: "Summarize source", guidance: "Summarize source", steps: savedSteps + noNotes)?.contains("haven't created") == false, "An empty read cannot deny a previously completed effect")

@@ -1120,8 +1120,19 @@ pub fn named<'a>(servers: &'a [McpServer], prompt: &str) -> Vec<&'a McpServer> {
             !name.is_empty()
                 && (addressed == name
                     || (0..words.len().saturating_sub(name.len() - 1)).any(|start| {
+                        // "use GitHub"; with "the" or "my" between, the words must also say it
+                        // is a tool ("use the test server"), or "use the time" would count.
+                        let toolish = |word: Option<&String>| word.is_some_and(|word| ["tool", "server", "mcp"].contains(&word.as_str()));
+                        let lead = match start.checked_sub(1).map(|before| words[before].as_str()) {
+                            Some("the" | "my" | "our")
+                                if toolish(name.last()) || toolish(words.get(start + name.len())) =>
+                            {
+                                start.checked_sub(2)
+                            }
+                            _ => start.checked_sub(1),
+                        };
                         words[start..start + name.len()] == name[..]
-                            && ((start > 0 && LEADS.contains(&words[start - 1].as_str()))
+                            && (lead.is_some_and(|before| LEADS.contains(&words[before].as_str()))
                                 || words.get(start + name.len()).is_some_and(|next| ["tool", "server", "mcp"].contains(&next.as_str())))
                     }))
         })
@@ -2085,6 +2096,13 @@ url = "https://example.com/mcp"
         assert!(names("Use Broken to do it").is_empty(), "a server without usable tools is never routed to");
         assert!(names("remind me to review GitHub issues").is_empty());
         assert_eq!(routed_tools(&named(&servers, "use GitHub")), ["mcp_github_list_issues"]);
+        // "The" or "my" between the hand-off word and the name, as people say it.
+        let test = server("Test server", vec![tool("Test server", "count_words", json!({"type":"object","properties":{}}))]);
+        let tests = vec![test];
+        assert_eq!(named(&tests, "use the test server to count the words in: one two").len(), 1);
+        assert_eq!(names("use my GitHub tool to list issues"), ["GitHub"]);
+        assert!(picked("Use the time wisely").is_empty());
+        assert!(names("use the filesystem settings in Finder").is_empty());
     }
 
     #[test]
