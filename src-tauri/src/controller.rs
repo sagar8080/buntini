@@ -3350,8 +3350,12 @@ where
         if let Some(context) = &flow.context {
             request["context"] = context.clone().into();
         }
-        // Completion guards must run before any final claim reaches chat or speech.
-        let stream_answer = false;
+        // A plain answer streams as it is written. A task with a write waits for the whole
+        // answer: what it did can only be told from the receipt. Streamed text passes the
+        // same grounding check as the final answer, which replaces it when the task ends.
+        let stream_answer = !flow.steps.iter().any(|step| step.effect)
+            && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete");
+        let mut gate = crate::completion::StreamGate::new(&flow.contract.current_request, &flow.steps);
         let patched = bound_task_fields(flow)?;
         let clarified = flow.contract.next_outcome().is_some_and(|o| {
             flow.contract
@@ -3448,11 +3452,18 @@ where
                 .models
                 .generate(settings, request, cancel.clone(), |text| {
                     if stream_answer {
-                        emit(channel, "delta", &task.id, Some(text));
+                        if let Some(ready) = gate.push(&text) {
+                            emit(channel, "delta", &task.id, Some(ready));
+                        }
                     }
                 })
                 .await?
         };
+        if stream_answer && turn.tool.is_none() {
+            if let Some(rest) = gate.finish() {
+                emit(channel, "delta", &task.id, Some(rest));
+            }
+        }
         if cancel.load(Ordering::Relaxed) {
             return Err("Task cancelled.".into());
         }

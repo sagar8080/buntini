@@ -1612,7 +1612,48 @@ impl TaskContract {
         }
         fields.retain(|field, _| after.get(field).is_some());
     }
+    /// A request that names no source, place, app, number or lookup ("three cozy ideas
+    /// for a rainy morning", "hey") is answered straight away. Offering it every read
+    /// tool made the on-device model spend seconds choosing one, and often pick a search
+    /// it didn't need, before the first word appeared.
+    pub fn plain_conversation(&self, steps: &[Step]) -> bool {
+        const CUES: &[&str] = &[
+            // Apps and data on this Mac
+            "calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "agenda", "reminder", "reminders", "remind", "todo", "to-do", "email", "emails", "mail", "inbox", "reply", "note",
+            "notes", "contact", "contacts", "file", "files", "folder", "document", "documents", "pdf", "music", "song",
+            "playing", "playlist", "tab", "tabs", "page", "browser", "shortcut", "shortcuts", "timer", "alarm",
+            // Recall
+            "remember", "recall", "said", "told", "mentioned", "last", "earlier", "forgot", "know", "my",
+            // This Mac
+            "mac", "computer", "laptop", "system", "battery", "memory", "ram", "cpu", "storage", "disk", "space", "slow", "wifi", "volume", "brightness",
+            "dark", "lock", "open", "app",
+            // Online
+            "weather", "forecast", "rain", "raining", "snow", "temperature", "news", "latest", "current", "price",
+            "prices", "cost", "buy", "cheapest", "flight", "flights", "hotel", "exchange", "rate", "convert", "currency",
+            "stock", "score", "near", "nearby", "restaurant", "directions", "search", "look", "find", "online", "web",
+            "website", "http", "https", "www", "wikipedia", "who", "where",
+        ];
+        if !steps.is_empty() || self.connector_request() {
+            return false;
+        }
+        let plain_outcomes = self.outcomes.iter().all(|outcome| {
+            outcome.kind == "answer" && outcome.resources.is_empty() && outcome.accepted_tools.is_empty()
+        });
+        let request = self.current_request.to_lowercase();
+        let arithmetic = request.chars().any(|c| c.is_ascii_digit()) && request.chars().any(|c| "+-*/%×÷=".contains(c));
+        let words: Vec<&str> = request.split(|c: char| !c.is_alphanumeric() && c != '-').filter(|w| !w.is_empty()).collect();
+        // A day on its own is not a cue ("a rainy Saturday morning"); asking what is on it is.
+        const DAYS: &[&str] = &["today", "tomorrow", "tonight", "weekend", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+        let schedule_question = words.iter().any(|word| DAYS.contains(word))
+            && ["what's on", "whats on", "what is on", "do i have", "am i free", "am i busy", "anything on", "plans for", "what's happening"]
+                .iter()
+                .any(|phrase| request.replace('’', "'").contains(phrase));
+        plain_outcomes && !arithmetic && !schedule_question && !words.iter().any(|word| CUES.contains(word))
+    }
     pub fn relevant_tools(&self, steps: &[Step], definitions: &Value) -> Value {
+        if self.plain_conversation(steps) {
+            return Value::Array(Vec::new());
+        }
         let unresolved = steps
             .iter()
             .any(|s| ["failed", "unknown", "running", "waiting"].contains(&s.state.as_str()));
@@ -1942,6 +1983,21 @@ impl TaskContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_talk_and_creative_requests_are_offered_no_tools() {
+        let offered = crate::tools::offer(&["search_memory", "system_info", "look_up_online", "read_calendar", "calculate"]);
+        for goal in ["Give me three cozy ideas for a rainy Saturday morning, a couple of sentences each.", "Hey, Bantini.", "Write a haiku about autumn"] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.refresh(goal, &[]);
+            assert_eq!(contract.relevant_tools(&[], &offered), json!([]), "{goal}");
+        }
+        for goal in ["what's on Saturday?", "am I free tomorrow afternoon", "what's the weather in Porto", "how much memory is free on my mac", "what did Ana say about the lease", "what is 12 * 7", "who won the match last night"] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.refresh(goal, &[]);
+            assert!(contract.relevant_tools(&[], &offered).as_array().is_some_and(|tools| !tools.is_empty()), "{goal}");
+        }
+    }
 
     #[test]
     fn tell_me_and_show_me_ask_for_the_same_pinned_read() {

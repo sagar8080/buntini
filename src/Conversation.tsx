@@ -62,7 +62,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={source.url} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(source.url); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
           {!!item.prices?.length && <div className="product-comparison"><div className="section-label">Published offers</div>{item.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? 'Published range' : 'Published offer'}</span></div>{offer.seller && <small>Seller: {offer.seller}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => onOpen(offer.url)}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}<p>Page-reported offers, observed at retrieval. Seller reliability requires separate evidence.</p></div>}
           {!!item.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {item.research.length} pages</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
-          {working && !!item.answer && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity || 'Still going'}</span></div>}
+          {working && !!item.answer && !!activity && activity !== 'Thinking it over' && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity}</span></div>}
           {item.state === 'cancelled' && !item.answer && <div className="muted-note"><Square size={11} /> Stopped. You’re in control.</div>}
           <ProgressDetails progress={savedProgress} />
           {!working && recovery.canContinue && missing.map(field => <label className="task-clarification" key={field.key}>{field.label}{field.field === 'body'
@@ -98,7 +98,7 @@ function Reply({ text, onOpen }: { text: string; onOpen: (url: string) => void }
     if (block.kind === 'heading') return <p key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></p>;
     if (block.kind === 'list') {
       const items = block.items.map((item, at) => <li key={at}><Spans spans={item} onOpen={onOpen} /></li>);
-      return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
+      return block.ordered ? <ol key={index} start={block.start}>{items}</ol> : <ul key={index}>{items}</ul>;
     }
     return <p key={index}>{block.lines.map((line, at) => <span key={at}>{at > 0 && <br />}<Spans spans={line} onOpen={onOpen} /></span>)}</p>;
   })}</div>;

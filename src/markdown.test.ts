@@ -21,6 +21,8 @@ test('replies split into paragraphs, lists and headings', () => {
   assert.equal(intro.kind === 'paragraph' && intro.lines.length, 1);
   assert.ok(bullets.kind === 'list' && !bullets.ordered && bullets.items.length === 2 && bullets.items[0][0].bold);
   assert.ok(numbers.kind === 'list' && numbers.ordered && numbers.items.length === 2);
+  const split = parse('1. **Tea**\n\nBrew a pot.\n\n2. **Books**\n\nRead a little.').filter(block => block.kind === 'list');
+  assert.deepEqual(split.map(block => block.kind === 'list' ? block.start : 0), [1, 2], 'a split list keeps counting');
   assert.ok(closing.kind === 'paragraph' && closing.lines.length === 2);
   assert.deepEqual(parse('\n\n'), []);
 });

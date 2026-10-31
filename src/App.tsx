@@ -639,9 +639,12 @@ export default function App() {
     afterAnswer: aloud => {
       // Only keep listening while you are still here with the panel in front of you.
       if (!conversation.current || !aloud || !mounted.current || document.hidden || !document.hasFocus()) { conversation.current = false; return; }
-      if (liveWords.current) { void startVoice(true); return; }
-      // Without live words Buntini can't tell its own voice from yours, so it waits.
-      void speechQueue.current?.settled().then(() => { if (conversation.current && !recordHeld.current) void startVoice(true); });
+      // Listening while Buntini talks hears its own voice from the speakers and answers
+      // itself, so the microphone opens only once the reply has finished playing and the
+      // room has had a moment to go quiet. Tapping the mic still interrupts a reply.
+      void speechQueue.current?.settled()
+        .then(() => new Promise(resolve => window.setTimeout(resolve, 600)))
+        .then(() => { if (conversation.current && !recordHeld.current && !speechActive.current) void startVoice(true); });
     },
   };
   useEffect(() => {
@@ -801,7 +804,7 @@ export default function App() {
     <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
-          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong><span className={`header-status ${busy || recording || speaking ? 'is-busy' : ''}`} aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (activity || 'On it…') : speaking ? 'Talking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span></span></button>
+          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong><span className={`header-status ${busy || recording || speaking ? 'is-busy' : ''}`} aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (live?.answer && (!activity || activity === 'Thinking it over') ? 'Writing…' : activity || 'On it…') : speaking ? 'Talking' : data ? idleStatus(data.settings, world.asleep, new Date().getHours()) : 'Right here'}</span></span></button>
           <div className="header-actions">
             <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title="Task history" aria-label="Task history" onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
             <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title="Settings" aria-label="Settings" onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>

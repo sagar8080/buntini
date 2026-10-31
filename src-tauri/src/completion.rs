@@ -991,6 +991,55 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     }
 }
 
+/// Streams an answer to the window a sentence at a time, each one checked the way the
+/// final answer is: a sentence stating unread calendar, reminder or email facts is never
+/// shown or spoken. After the first such sentence nothing more streams; the checked final
+/// answer replaces what was shown when the task finishes.
+pub struct StreamGate {
+    prompt: String,
+    steps: Vec<Step>,
+    held: String,
+    stopped: bool,
+}
+
+impl StreamGate {
+    pub fn new(prompt: &str, steps: &[Step]) -> Self {
+        Self { prompt: prompt.into(), steps: steps.to_vec(), held: String::new(), stopped: false }
+    }
+
+    /// The text ready to show after `token` arrives: whole sentences that pass.
+    pub fn push(&mut self, token: &str) -> Option<String> {
+        if self.stopped {
+            return None;
+        }
+        self.held.push_str(token);
+        let bytes = self.held.as_bytes();
+        let end = (0..bytes.len()).rev().find(|&index| {
+            bytes[index] == b'\n' || (matches!(bytes[index], b'.' | b'!' | b'?') && bytes.get(index + 1) == Some(&b' '))
+        })?;
+        let ready: String = self.held.drain(..=end).collect();
+        self.release(ready)
+    }
+
+    /// Whatever is left once the model has finished.
+    pub fn finish(&mut self) -> Option<String> {
+        let rest = std::mem::take(&mut self.held);
+        if self.stopped || rest.is_empty() { None } else { self.release(rest) }
+    }
+
+    fn release(&mut self, ready: String) -> Option<String> {
+        let mut shown = String::new();
+        for part in sentences(&ready) {
+            if grounded_personal_answer(&self.prompt, part, &self.steps) != part {
+                self.stopped = true;
+                break;
+            }
+            shown.push_str(part);
+        }
+        (!shown.is_empty()).then_some(shown)
+    }
+}
+
 /// Validate a final response, replacing untrusted success narration with actual
 /// action receipts. Err means the goal remains incomplete and must not display a
 /// completed task badge. Read-only answers remain model-generated.
@@ -1137,6 +1186,19 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn answers_stream_by_sentence_and_stop_before_an_unread_schedule() {
+        let mut gate = StreamGate::new("hey", &[]);
+        assert_eq!(gate.push("Hi Sa"), None);
+        assert_eq!(gate.push("gar! How "), Some("Hi Sagar!".into()));
+        assert_eq!(gate.push("are you? Your meeting is at 4:00 PM. "), Some(" How are you?".into()));
+        assert_eq!(gate.push("More text. "), None, "nothing streams after a held-back claim");
+        assert_eq!(gate.finish(), None);
+        let mut plain = StreamGate::new("hey", &[]);
+        assert_eq!(plain.push("Hello there"), None);
+        assert_eq!(plain.finish(), Some("Hello there".into()));
+    }
 
     #[test]
     fn schedules_are_stated_only_from_this_turns_reads() {
