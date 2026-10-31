@@ -415,6 +415,7 @@ fn verified_write(step: &Step) -> bool {
             crate::goals::TOOL,
             "remember",
             "set_timer",
+            crate::mac_settings::TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
@@ -1626,7 +1627,7 @@ impl TaskContract {
             "remember", "recall", "said", "told", "mentioned", "last", "earlier", "forgot", "know", "my",
             // This Mac
             "mac", "computer", "laptop", "system", "battery", "memory", "ram", "cpu", "storage", "disk", "space", "slow", "wifi", "volume", "brightness",
-            "dark", "lock", "open", "app",
+            "dark", "lock", "open", "app", "wallpaper", "dock", "wi-fi", "screensaver", "appearance", "desktop",
             // Online
             "weather", "forecast", "rain", "raining", "snow", "temperature", "news", "latest", "current", "price",
             "prices", "cost", "buy", "cheapest", "flight", "flights", "hotel", "exchange", "rate", "convert", "currency",

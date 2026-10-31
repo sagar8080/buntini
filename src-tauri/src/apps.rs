@@ -30,7 +30,7 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 13] = [
+pub const APPS: [App; 14] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
@@ -44,6 +44,7 @@ pub const APPS: [App; 13] = [
     App { id: "brave", name: "Brave Browser", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
     App { id: "edge", name: "Microsoft Edge", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
     App { id: "arc", name: "Arc", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "mac_settings", name: "System Settings", can: &["Wallpaper", "Dock", "appearance", "Wi-Fi", "Finder"], tools: &["change_mac_setting"], share: None, note: None },
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
@@ -2954,6 +2955,11 @@ pub async fn check_app(
             .await
             .map(|_| "Ready".into()),
         "contacts" => contacts_access(&helper_path).await,
+        // A read through System Events, so macOS asks for Automation access now.
+        "mac_settings" => crate::mac_settings::read("dock_autohide")
+            .await
+            .map(|_| "Ready".into())
+            .or_else(|_| Ok("Allow Buntini under Privacy & Security → Automation".into())),
         // Pressing play on a song you name uses Accessibility; ask for it now.
         "spotify" => Ok(
             if tokio::task::spawn_blocking(|| crate::ax::trusted(true))

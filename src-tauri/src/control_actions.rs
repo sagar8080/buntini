@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-pub const TOOLS: [&str; 4] = ["control_music", "switch_tab", "remember", "set_timer"];
+pub const TOOLS: [&str; 5] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL];
 
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     if matches!(tool, "control_music" | "switch_tab") {
@@ -41,6 +41,9 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         return Ok(out);
     }
     let args = args.as_object().ok_or("Arguments must be an object.")?;
+    if tool == crate::mac_settings::TOOL {
+        return crate::mac_settings::validate(args);
+    }
     let key = match tool {
         "remember" => "fact",
         "set_timer" => "seconds",
@@ -88,6 +91,12 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
             .unwrap_or_default(),
     };
     match tool {
+        crate::mac_settings::TOOL => {
+            let id = args.get("setting").and_then(Value::as_str).unwrap_or_default();
+            let label = crate::mac_settings::setting(id).map(|s| s.label).unwrap_or("Setting");
+            let value = args.get("value").and_then(Value::as_str).unwrap_or_default();
+            (label.into(), vec![Field { key: "value".into(), label: label.into(), kind: "text", value: value.into() }], String::new())
+        }
         "remember" => ("Remember this?".into(), vec![field("fact", "Fact or preference")], "Saved on your Mac for future conversations. Remove it anytime in Settings → Privacy.".into()),
         "set_timer" => ("Set this timer?".into(), vec![field("seconds", "Duration in seconds")], "The timer is saved across restarts. Alerts require Buntini running and your Mac awake; overdue timers appear when it returns. Desktop alerts need notification permission.".into()),
         "control_music" => ("Change music playback?".into(), vec![field("app", "Player (music or spotify)"), field("action", "Action (play, pause, next or previous)"), field("query", "Song or playlist (optional for play)")], "Changes playback in the selected app and reads its resulting state. The player must be allowed in Settings → Apps. Named Spotify search is not supported by this approved workflow.".into()),
@@ -643,6 +652,12 @@ pub async fn execute(
             "Allow the selected app in Settings → Apps before using this control.",
             json!({}),
         );
+    }
+    if tool == crate::mac_settings::TOOL {
+        let roots = state.store.lock().unwrap().roots().unwrap_or_default();
+        return cancellable(&cancel, async { Ok(crate::mac_settings::execute(&args, &roots).await) })
+            .await
+            .unwrap_or_else(|error| failure(tool, ActionOutcome::Unknown, error, json!({})));
     }
     if tool == "switch_tab" {
         let browser = args["browser"].as_str().unwrap();

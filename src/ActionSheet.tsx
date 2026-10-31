@@ -20,7 +20,7 @@ const shown = (value: string) => {
   return value.length > 10 ? `${day}, ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : day;
 };
 // The button says what happens.
-const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', create_saved_search: 'Save', create_price_watch: 'Watch' };
+const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', change_mac_setting: 'Change', create_saved_search: 'Save', create_price_watch: 'Watch' };
 // What an edit changes from, shown struck through beside its new value.
 const before: Record<string, string> = { due: 'was_due', start: 'occurrence' };
 

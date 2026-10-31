@@ -459,6 +459,7 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
         "switch_tab" => "Buntini wants to switch a browser tab and needs your OK.",
         "remember" => "Buntini wants to remember something and needs your OK.",
         "set_timer" => "Buntini wants to set a timer and needs your OK.",
+        "change_mac_setting" => "Buntini wants to change a Mac setting and needs your OK.",
         "create_saved_search" | "create_price_watch" => {
             "Buntini set up a recurring check and needs your OK."
         }

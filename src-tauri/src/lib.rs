@@ -32,6 +32,7 @@ mod indexer;
 mod integrations;
 mod local;
 mod login;
+mod mac_settings;
 mod mcp;
 mod memory_index;
 mod migration;

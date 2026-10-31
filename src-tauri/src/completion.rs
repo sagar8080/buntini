@@ -246,6 +246,24 @@ fn reschedules_reminder(verb: &str, tokens: &[&str]) -> bool {
 }
 
 /// "add milk to my shopping note": adding to an existing note, not writing a new one.
+/// "Hide the Dock", "turn off wifi", "switch to dark mode", "change my wallpaper".
+fn changes_mac_setting(tokens: &[&str]) -> bool {
+    let has = |word: &str| tokens.contains(&word);
+    let pair = |a: &str, b: &str| tokens.windows(2).any(|w| w[0] == a && w[1] == b);
+    has("wallpaper")
+        || has("dock")
+        || has("wifi")
+        || has("screensaver")
+        || pair("wi", "fi")
+        || pair("menu", "bar")
+        || pair("dark", "mode")
+        || pair("light", "mode")
+        || pair("hidden", "files")
+        || pair("desktop", "icons")
+        || pair("desktop", "background")
+        || pair("screen", "saver")
+}
+
 fn appends_to_note(tokens: &[&str]) -> bool {
     let Some(to) = tokens.iter().rposition(|word| *word == "to") else {
         return false;
@@ -373,6 +391,12 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 }
                 "set" | "start" | "create" | "add" if has(&["timer", "timers", "countdown"]) => {
                     Some("set_timer")
+                }
+                "hide" | "show" | "turn" | "switch" | "change" | "set" | "move" | "enable"
+                | "disable" | "make" | "put" | "use"
+                    if changes_mac_setting(&tokens) =>
+                {
+                    Some(crate::mac_settings::TOOL)
                 }
                 "play" | "pause" | "resume" | "skip" | "stop"
                     if !has(&["timer", "task", "search", "watch"]) =>
@@ -1080,6 +1104,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             crate::goals::TOOL,
             "remember",
             "set_timer",
+            crate::mac_settings::TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
@@ -1687,6 +1712,9 @@ mod tests {
         for (goal, tool) in [
             ("Remember my preference", "remember"),
             ("Start a timer for ten minutes", "set_timer"),
+            ("Hide the Dock", "change_mac_setting"),
+            ("Turn off Wi-Fi", "change_mac_setting"),
+            ("Switch to dark mode", "change_mac_setting"),
             ("Pause music and switch to my recipe tab", "control_music"),
         ] {
             assert!(validate_proposal(goal, tool, &[]).is_ok(), "{goal}");
