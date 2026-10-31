@@ -83,6 +83,11 @@ pub(crate) fn request_clause(mut clause: &str) -> &str {
             "i need you to ",
             "help me ",
             "now ",
+            // "Tell me what's on my calendar tomorrow" asks the same as without it.
+            "tell me ",
+            "show me ",
+            "give me ",
+            "let me know ",
         ] {
             if let Some(rest) = clause.strip_prefix(prefix) {
                 clause = rest.trim_start();
@@ -280,6 +285,36 @@ pub(crate) fn joined_edit_lists(text: &str) -> String {
         }
     }
     result
+}
+
+/// A clause cut from lowercased `joined_edit_lists` text, back in the user's own words:
+/// their capitals, and each " &" the joining wrote as the "and" or comma it replaced
+/// wherever `original` says so. "Add oat milk and eggs to my note" then adds "oat milk
+/// and eggs", not "oat milk & eggs".
+pub(crate) fn unjoined(clause: &str, original: &str) -> String {
+    let parts: Vec<&str> = clause.split(" &").collect();
+    let joins = parts.len() - 1;
+    if joins > 6 {
+        return clause.into();
+    }
+    // Lowercasing that changes a text's length can't map a match back to its letters.
+    let lower = original.to_lowercase();
+    let same_length = lower.len() == original.len();
+    for mut choice in 0..3usize.pow(joins as u32) {
+        let mut text = parts[0].to_string();
+        for part in &parts[1..] {
+            text.push_str([" and", ",", " &"][choice % 3]);
+            choice /= 3;
+            text.push_str(part);
+        }
+        if let Some(start) = lower.find(&text.to_lowercase()) {
+            return match same_length && original.is_char_boundary(start) && original.is_char_boundary(start + text.len()) {
+                true => original[start..start + text.len()].to_string(),
+                false => text,
+            };
+        }
+    }
+    clause.into()
 }
 
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {

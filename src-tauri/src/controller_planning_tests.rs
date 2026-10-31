@@ -511,7 +511,7 @@ for line in sys.stdin:
             );
             assert_eq!(reads.load(Ordering::SeqCst), 1);
             assert!(
-                task.answer.contains("failed") && task.answer.contains("stopped"),
+                task.answer.contains("Nothing was changed") && task.answer.contains("Try again"),
                 "{}",
                 task.answer
             );

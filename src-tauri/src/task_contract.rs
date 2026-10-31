@@ -135,7 +135,7 @@ fn clauses(goal: &str) -> Vec<String> {
     let text = completion::joined_edit_lists(&completion::unquoted(
         &goal.replace("Additional details: ", "\n"),
     ));
-    let mut result = Vec::new();
+    let mut result: Vec<String> = Vec::new();
     for sentence in text.split([';', '\n', '.', '!', '?']) {
         let sentence = completion::request_clause(sentence);
         // Explanation/negation scope must be preserved before conjunctions.
@@ -257,7 +257,14 @@ fn clauses(goal: &str) -> Vec<String> {
             }
         }
     }
+    // Text added to a note is written as the user said it; other clauses stay lowercase.
     result
+        .iter()
+        .map(|clause| match completion::requested_actions(clause).0.contains(&"append_to_note") {
+            true => completion::unjoined(clause, goal),
+            false => clause.clone(),
+        })
+        .collect()
 }
 /// "What did Ana say about the lease?", "Did Sam mention the trip?": recalling what
 /// someone said, wherever it was, rather than reading one app now.
@@ -1934,6 +1941,28 @@ impl TaskContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tell_me_and_show_me_ask_for_the_same_pinned_read() {
+        let today = chrono::Local::now().date_naive();
+        let tomorrow = (today + chrono::Days::new(1)).format("%Y-%m-%d").to_string();
+        for goal in ["Tell me what’s on my calendar tomorrow", "show me what's on my calendar tomorrow", "what's on my calendar tomorrow"] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.refresh(goal, &[]);
+            let next = contract.next_outcome().unwrap();
+            assert_eq!(next.tool.as_deref(), Some("read_calendar"), "{goal}");
+            assert_eq!(next.required_arguments["day"], tomorrow.as_str(), "{goal}");
+        }
+    }
+
+    #[test]
+    fn a_note_list_keeps_the_users_own_and_and_commas() {
+        assert_eq!(clauses("add oat milk and eggs to my shopping note"), ["add oat milk and eggs to my shopping note"]);
+        assert_eq!(clauses("Add bread, jam and tea to my Shopping note"), ["Add bread, jam and tea to my Shopping note"]);
+        assert_eq!(clauses("add salt & pepper to my shopping note"), ["add salt & pepper to my shopping note"]);
+        assert_eq!(clauses("Add Ana's number to my Shopping note"), ["Add Ana's number to my Shopping note"]);
+    }
+
     fn step(id: &str, tool: &str, args: Value, effect: bool) -> Step {
         Step {
             id: id.into(),
@@ -2862,3 +2891,4 @@ mod tests {
 #[cfg(test)]
 #[path = "task_contract_eval_tests.rs"]
 mod eval_tests;
+

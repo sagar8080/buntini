@@ -58,6 +58,68 @@ impl Recipe for FirstCalendarEvent {
     }
 }
 
+/// "What's on my calendar tomorrow?": the day in the words of the verified read. On a
+/// real Mac the small on-device model read the records' UTC times as local ones (an event
+/// at 16:00 became "8:00 PM, all day"), while the read's own summary was right.
+struct DayAgenda;
+impl Recipe for DayAgenda {
+    fn id(&self) -> &'static str {
+        "day_agenda"
+    }
+    fn answer(&self, plan: &Plan) -> Result<Option<String>, String> {
+        if !asks_for_a_day(plan.goal) {
+            return Ok(None);
+        }
+        let finished: Vec<&Step> = plan.steps.iter().filter(|step| step.state == "succeeded").collect();
+        let [read] = finished[..] else {
+            return Ok(None);
+        };
+        if read.tool != "read_calendar" || read.effect {
+            return Ok(None);
+        }
+        Ok(read
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence["text"].as_str())
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty()))
+    }
+}
+
+/// A question about one whole day of the calendar and nothing more: "what's on my calendar
+/// tomorrow", "tell me what I have on Friday". "After 3", "free" or "this week" ask more.
+fn asks_for_a_day(goal: &str) -> bool {
+    let text = goal.trim().to_lowercase().replace('’', "'");
+    let mut text = text.trim_end_matches(['?', '.', '!']).trim();
+    for polite in ["please ", "can you ", "could you ", "tell me ", "show me "] {
+        text = text.strip_prefix(polite).unwrap_or(text);
+    }
+    let Some(rest) = [
+        "what's on my calendar",
+        "what is on my calendar",
+        "what's on my schedule",
+        "what is on my schedule",
+        "what do i have on",
+        "what do i have",
+        "what does my calendar look like",
+    ]
+    .iter()
+    .find_map(|question| text.strip_prefix(question)) else {
+        return false;
+    };
+    const DAYS: [&str; 13] = [
+        "today", "tomorrow", "on", "for", "next", "monday", "tuesday", "wednesday", "thursday", "friday",
+        "saturday", "sunday", "this",
+    ];
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    !words.is_empty()
+        && words.iter().all(|word| {
+            DAYS.contains(word)
+                || (word.len() == 10 && chrono::NaiveDate::parse_from_str(word, "%Y-%m-%d").is_ok())
+        })
+        && !(words.contains(&"this") && !words.iter().any(|word| word.ends_with("day")))
+}
+
 /// "Create a note titled X with body Y"
 struct LiteralNote;
 impl Recipe for LiteralNote {
@@ -436,6 +498,7 @@ fn reply_subject(subject: &str) -> String {
 static RECIPES: &[&dyn Recipe] = &[
     &EditItem,
     &FirstCalendarEvent,
+    &DayAgenda,
     &LiteralNote,
     &LiteralReminder,
     &EventPreparation,
@@ -488,6 +551,29 @@ mod tests {
             truncated: false,
             selected: 1,
         })
+    }
+
+    #[test]
+    fn a_calendar_day_is_answered_in_the_reads_own_words() {
+        for goal in ["Tell me what’s on my calendar tomorrow", "what's on my calendar tomorrow?", "What do I have on Friday", "what is on my schedule on 2026-11-02"] {
+            assert!(asks_for_a_day(goal), "{goal}");
+        }
+        for goal in ["what's on my calendar after 3pm tomorrow", "what's on my calendar this week", "what do I have free tomorrow", "what's on my calendar"] {
+            assert!(!asks_for_a_day(goal), "{goal}");
+        }
+        let text = "Calendar for Saturday 31 October:\n- all day: Halloween\n- 16:00–16:45: Planning at Room 4";
+        let read = Step {
+            id: "1".into(), tool: "read_calendar".into(), arguments: json!({"day":"2026-10-31"}), state: "succeeded".into(),
+            effect: false, proposed_at: String::new(), approved_at: None, finished_at: None,
+            evidence: Some(json!({"text": text, "records": []})),
+        };
+        let offered = json!([]);
+        let steps = [read.clone()];
+        let plan = Plan { goal: "Tell me what's on my calendar tomorrow", steps: &steps, offered: &offered };
+        assert_eq!(answer(&plan).unwrap().as_deref(), Some(text));
+        // A question that needs more than the day's list is left to the model.
+        let plan = Plan { goal: "what's on my calendar after 3pm tomorrow", steps: &steps, offered: &offered };
+        assert_eq!(DayAgenda.answer(&plan).unwrap(), None);
     }
 
     #[test]
