@@ -885,6 +885,76 @@ pub fn completed_action_answer(goal: &str, steps: &[Step]) -> Option<String> {
         .filter(|answer| !answer.trim().is_empty())
 }
 
+/// The apps whose contents an answer may only state from this turn's own reads. Earlier
+/// turns may be out of date, and the on-device model has stitched them into a schedule
+/// that was never read ("Buntini test planning: 4:00 PM - 5:00 PM").
+const PERSONAL: [(&str, &[&str], &[&str]); 3] = [
+    (
+        "calendar",
+        &["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments"],
+        &["read_calendar", "add_calendar_event", "update_calendar_event", "search_memory"],
+    ),
+    (
+        "reminders",
+        &["reminder", "reminders", "to-do", "todo", "to-dos"],
+        &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder", "search_memory"],
+    ),
+    (
+        "email",
+        &["email", "emails", "inbox", "mail"],
+        &["read_mail", "reply_email", "draft_email", "search_memory"],
+    ),
+];
+
+/// Clock times written in `text`: "9:00", "4 pm", "16:45", "10am".
+fn clock_times(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let mut times = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != ':');
+        let (number, suffix) = word.split_at(word.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(word.len()));
+        let meridiem = ["am", "pm", "a.m", "p.m"].contains(&suffix.trim_end_matches('.'))
+            || (suffix.is_empty() && words.get(index + 1).is_some_and(|next| ["am", "pm", "a.m.", "p.m."].contains(&next.trim_end_matches(|c: char| c == ',' || c == ')'))));
+        let digits: Vec<&str> = number.split(':').collect();
+        let clock = match digits[..] {
+            [hour, minute] => hour.len() <= 2 && minute.len() == 2 && hour.parse::<u32>().is_ok_and(|h| h < 24) && minute.parse::<u32>().is_ok_and(|m| m < 60),
+            [hour] => meridiem && hour.parse::<u32>().is_ok_and(|h| (1..=12).contains(&h)),
+            _ => false,
+        };
+        if clock && !number.is_empty() {
+            times.push(number.to_string());
+        }
+    }
+    times
+}
+
+/// An answer that states what is in the user's calendar, reminders or email at a given
+/// time, when nothing this turn read that app, is replaced by an offer to look. Times
+/// the user wrote themselves ("my meeting is at 3pm") don't count as claims.
+pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let lower = answer.to_lowercase();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-').collect();
+    let asked = clock_times(prompt);
+    let claimed = clock_times(answer).into_iter().any(|time| !asked.contains(&time));
+    if !claimed {
+        return answer.to_string();
+    }
+    for (app, nouns, reads) in PERSONAL {
+        let mentions = words.iter().any(|word| nouns.contains(word));
+        let read = steps.iter().any(|step| step.state == "succeeded" && reads.contains(&step.tool.as_str()));
+        if mentions && !read {
+            let example = match app {
+                "calendar" => "what’s on my calendar today?",
+                "reminders" => "what are my reminders?",
+                _ => "what needs a reply?",
+            };
+            return format!("I haven’t looked at your {app} for that, so I won’t guess. Ask me something like “{example}” and I’ll check.");
+        }
+    }
+    answer.to_string()
+}
+
 /// Validate a final response, replacing untrusted success narration with actual
 /// action receipts. Err means the goal remains incomplete and must not display a
 /// completed task badge. Read-only answers remain model-generated.
@@ -1031,6 +1101,22 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn schedules_are_stated_only_from_this_turns_reads() {
+        let made_up = "Here's what's on your calendar tomorrow:\n1. Planning: 4:00 PM - 5:00 PM\n2. Dentist: 9:00 AM";
+        let answer = grounded_personal_answer("But rarely collired. Recent times, well.", made_up, &[]);
+        assert!(answer.starts_with("I haven’t looked at your calendar"), "{answer}");
+        let read = Step { id: "1".into(), tool: "read_calendar".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false,
+            proposed_at: String::new(), approved_at: None, finished_at: None, evidence: None };
+        assert_eq!(grounded_personal_answer("what's on tomorrow", made_up, &[read]), made_up);
+        // Times the user gave, and answers with no times, are left alone.
+        let echo = "Your meeting at 3pm is in two hours.";
+        assert_eq!(grounded_personal_answer("my meeting is at 3pm, how long until then?", echo, &[]), echo);
+        assert_eq!(grounded_personal_answer("hi", "Hi! Want me to check your calendar?", &[]), "Hi! Want me to check your calendar?");
+        assert!(grounded_personal_answer("hm", "You have a reminder to call mum at 18:00.", &[]).contains("your reminders"));
+        assert_eq!(clock_times("from 9:00 to 4 pm, or 10am"), ["9:00", "4", "10"]);
+    }
 
     #[test]
     fn a_rewritten_first_person_message_is_quoted_instead_of_claiming_execution() {

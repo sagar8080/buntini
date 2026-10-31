@@ -1869,6 +1869,7 @@ impl TaskContract {
             return connector_answer(text, steps);
         }
         completion::validate_answer(&self.current_request, text, steps)
+            .map(|answer| completion::grounded_personal_answer(&self.current_request, &answer, steps))
     }
     pub fn completed_action_answer(&self, steps: &[Step]) -> Option<String> {
         if self
