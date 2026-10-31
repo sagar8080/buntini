@@ -1523,8 +1523,8 @@ fn parse_receipt(tool: &str, args: &Map<String, Value>, response: &str) -> Actio
             "create_note" => format!("Verified “{}” in Notes.", get("title")),
             "reply_email" => format!("Your reply to {} is saved and open in Mail, in the same thread as their email. I checked its recipient, subject and message; review it before sending.", get("to")),
             "complete_reminder" => format!("Marked “{}” as done in Reminders. I checked it’s done and nothing else about it changed.", get("title")),
-            "reschedule_reminder" => format!("Moved “{}” in Reminders: it’s now due {}. I read it back and nothing else about it changed.", get("title"), get("due")),
-            "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), get("start"), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
+            "reschedule_reminder" => format!("Moved “{}” in Reminders: it’s now due {}. I read it back and nothing else about it changed.", get("title"), crate::edit_targets::pretty(&get("due"))),
+            "update_calendar_event" => format!("Changed “{}” in {}: it’s now “{}” at {}{}. I read it back and nothing else about it changed.", get("was_title"), helper.destination, get("title"), crate::edit_targets::pretty(&get("start")), if get("location").is_empty() { String::new() } else { format!(", {}", get("location")) }),
             "append_to_note" => format!("Added your text to the end of “{}” in Notes. I read the note back and the text that was there is unchanged.", get("title")),
             _ => "Your draft is saved and open in Mail. I checked its recipients, subject and message; review it before sending.".into(),
         };
@@ -2349,7 +2349,7 @@ mod tests {
         let valid = json!({"destinationId":"list-1","identifierScope":"persistent","title":"Dentist","before":before,"after":after});
         let receipt = change_receipt("reschedule_reminder", &args, valid.clone());
         assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
-        assert!(receipt.message.contains("now due 2026-11-06 09:00"));
+        assert!(receipt.message.contains("now due Fri 6 Nov 09:00"), "{}", receipt.message);
         for (side, key, value) in [
             ("after", "due", json!("2026-11-03 09:00")),
             ("after", "completed", json!(true)),

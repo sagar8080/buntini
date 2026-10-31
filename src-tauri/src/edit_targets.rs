@@ -803,7 +803,7 @@ fn field<'a>(record: &'a Value, key: &str) -> &'a str {
 }
 
 /// "2026-11-03 15:00" as "Tue 3 Nov 15:00", and a bare date as "Tue 3 Nov".
-fn pretty(stamp: &str) -> String {
+pub(crate) fn pretty(stamp: &str) -> String {
     NaiveDateTime::parse_from_str(stamp, "%Y-%m-%d %H:%M")
         .map(|at| at.format("%a %-d %b %H:%M").to_string())
         .or_else(|_| {

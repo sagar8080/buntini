@@ -10,6 +10,24 @@ Public distribution additionally requires the [production readiness gates](produ
 
 ## Automated evidence
 
+### In-app device test — October 30, 2026
+
+The debug app was driven end to end on this Mac with Apple Intelligence as the brain, against labelled test items that were removed afterwards. A debug build started with `BUNTINI_TEST_DOCK=1` keeps a Dock icon so UI automation can find it; shipping builds are unchanged.
+
+Passed in the app: the macOS permission prompts (Reminders, Calendar, Notes automation, microphone, notifications); marking a reminder done, with the picker when two match and a refusal until one is picked; Cancel changing nothing; moving a reminder to Monday with its time kept; moving a calendar event to 16:00 with its length and location kept; adding to a note; a daily routine running at its minute and scheduling the next day; a goal with an evening check-in; History → Goals and Routines with Pause, Done and delete; a tool added over MCP running only after its approval sheet; reading a shared Word file; timer alerts from macOS once notifications were allowed; live voice transcription, sending at the end of speech and listening again in conversation mode.
+
+Found and fixed during the run:
+
+- Tools added over MCP were never offered to Apple Intelligence (the helper kept only catalog tools), and "use the test server to …" did not name the server. The model then made up an answer.
+- "Tell me what's on my calendar tomorrow" (and "show me …") had no pinned calendar read, so a routine read the wrong day. A plain day question is now answered from the read's own summary; the model had turned 16:00 into "8:00 PM, all day" from the UTC fields.
+- Text added to a note had "and" changed to "&" and was lowercased; it is now exactly the user's words.
+- "Which shortcuts do I have?" searched for shortcuts named like the question.
+- A file question ("when does the lease renew?") required its question words and punctuation in the file.
+- Timers were handed to macOS before macOS had allowed notifications and then showed nowhere; approving a routine or goal, or turning on heads-ups, now turns notifications on. The permission request waits five minutes, since macOS can leave it unseen in Notification Center. A finished timer's notice stays until dismissed.
+- Copy: raw tool names while working ("Using read reminders"), "Task progress · 2/2 requested results complete", the failed-read and empty-result messages, raw dates in change receipts, and count badges in Privacy and Scheduled work.
+
+Still not verified on a device: threaded Mail replies (no Mail account here), Open at login (needs a Developer ID build), voice recognition accuracy (the Mac's audio went to headphones, so spoken test phrases never reached the microphone), and heads-ups firing before a real meeting. One answer to a misheard voice turn described the calendar from background memory without reading it, with wrong details; chat answers can still state calendar facts without a calendar read.
+
 ### Device checks for changing existing items — October 30, 2026
 
 `src-tauri/src/device_live_tests.rs` (opt-in: `cargo test --manifest-path src-tauri/Cargo.toml device_live -- --ignored --nocapture --test-threads=1`) runs the real Reminders, Calendar and Notes writes on this Mac against items it creates, all named "Buntini device test". The first run found three device-only faults, now fixed:

@@ -38,7 +38,13 @@ const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: strin
   { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather, rates, places, prices, flights or the web…' },
 ];
 // What the activity line says while a skill (skills/ in the Rust app) is working.
-const skillActivity: Record<string, string> = { music: 'Getting your music going', browser: 'Working in your browser', mac: 'Adjusting your Mac' };
+const skillActivity: Record<string, string> = {
+  music: 'Getting your music going', browser: 'Working in your browser', mac: 'Adjusting your Mac',
+  read_reminders: 'Checking your reminders', read_calendar: 'Checking your calendar', read_mail: 'Checking your email',
+  find_notes: 'Looking through your notes', search_files: 'Searching your files', search_memory: 'Thinking back',
+  find_contact: 'Looking in Contacts', list_shortcuts: 'Checking your shortcuts', web_search: 'Searching the web',
+  weather: 'Checking the weather', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
+};
 
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
@@ -318,8 +324,10 @@ export default function App() {
     if (focusId) { document.getElementById(`turn-${focusId}`)?.scrollIntoView({ block: 'start' }); return; }
     element.scrollTo({ top: element.scrollHeight, behavior: live && !stillMotion(data?.settings.reducedMotion) ? 'smooth' : 'instant' });
   }, [page, expanded, focusId, conversationId, live?.answer, activity, turns.at(-1)?.id]);
+  // A finished timer stays until dismissed; a passing notice goes after a few seconds.
+  const lastingNotice = useRef('');
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || notice === lastingNotice.current) return;
     const id = window.setTimeout(() => setNotice(''), 3500);
     return () => window.clearTimeout(id);
   }, [notice]);
@@ -340,7 +348,7 @@ export default function App() {
   // A timer set by asking ("set a timer for 10 minutes") is announced out loud when it ends.
   useEffect(() => {
     if (!desktop) return;
-    const timers = listen<string>('timer-done', event => { setNotice(event.payload); react('happy'); void speak(event.payload); });
+    const timers = listen<string>('timer-done', event => { lastingNotice.current = event.payload; setNotice(event.payload); react('happy'); void speak(event.payload); });
     const updates = ['timer-updated', 'background-updated'].map(name => listen(name, () => { void refresh().catch(e => setError(errorMessage(e))); }));
     return () => { void timers.then(unlisten => unlisten()); for (const pending of updates) void pending.then(unlisten => unlisten()); };
   }, [speak, refresh]);
@@ -382,7 +390,7 @@ export default function App() {
           setLive(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });
           if (useSpeech) { streamedText += event.text || ''; speechQueue.current?.append(event.text || '', speechToken); }
         }
-        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || `Using ${event.tool?.replaceAll('_', ' ') || 'a local tool'}`); }
+        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || 'Working on it'); }
         else if (event.type === 'error') streamError = event.text || 'The task could not finish.';
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('tilt'); }
       }, approvalId);

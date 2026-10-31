@@ -113,8 +113,11 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // Debug builds can keep a Dock icon so UI automation can find the app.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if !(cfg!(debug_assertions) && std::env::var_os("BUNTINI_TEST_DOCK").is_some()) {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let data = app.path().app_data_dir()?;
             let cache = app.path().app_cache_dir()?;
             // Dev builds under a custom CARGO_TARGET_DIR have no resource folder; the

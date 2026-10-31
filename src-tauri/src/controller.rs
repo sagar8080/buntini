@@ -859,6 +859,25 @@ fn finish_workflow(
     state.store.lock().unwrap().checkpoint(flow, task)
 }
 
+/// A routine or goal says it tells the user with a notification when it runs, so
+/// approving one turns Buntini's notifications on. macOS asks once; if the user says no,
+/// results stay in the app as before.
+async fn turn_on_alerts(state: &AppState) {
+    if state.store.lock().unwrap().settings().is_ok_and(|settings| settings.notifications_enabled) {
+        return;
+    }
+    if !crate::notifications::request_notification_permission().await.unwrap_or(false) {
+        return;
+    }
+    let store = state.store.lock().unwrap();
+    if let Ok(mut settings) = store.settings() {
+        settings.notifications_enabled = true;
+        if store.save_settings(&settings).is_ok() {
+            let _ = crate::delivery::sync_os_requests(&store, chrono::Utc::now());
+        }
+    }
+}
+
 async fn run_workflow_action(
     state: &AppState,
     id: &str,
@@ -867,7 +886,13 @@ async fn run_workflow_action(
 ) -> Result<TaskRecord, String> {
     run_workflow_action_using(state, id, args, channel, |tool, args, cancel| async move {
         if crate::monitor_actions::TOOLS.contains(&tool.as_str()) {
-            crate::monitor_actions::execute(&state.store.lock().unwrap(), id, &tool, &args)
+            let receipt = crate::monitor_actions::execute(&state.store.lock().unwrap(), id, &tool, &args);
+            if [crate::routines::TOOL, crate::goals::TOOL].contains(&tool.as_str())
+                && receipt.outcome == crate::actions::ActionOutcome::Succeeded
+            {
+                turn_on_alerts(state).await;
+            }
+            receipt
         } else if crate::control_actions::TOOLS.contains(&tool.as_str()) {
             crate::control_actions::execute(state, id, &tool, &args, cancel).await
         } else if tool == "browse_page" {
@@ -3752,13 +3777,15 @@ where
                 json!({"error":error}),
             ),
         };
+        let failure = evidence["error"].as_str().unwrap_or_default().trim().to_string();
         flow.finish_step(status, evidence)?;
         state.store.lock().unwrap().checkpoint(flow, task)?;
         if status == "unknown" {
-            return Err("A tool’s outcome is unknown. Check its destination before trying again; this task will not repeat the action.".into());
+            return Err("I couldn’t confirm whether that worked. Check the app before asking again; I won’t repeat it.".into());
         }
         if status == "failed" {
-            return Err("A required read failed. Buntini stopped before proposing further actions. Inspect its saved result, restore access if needed, then choose Retry read and continue.".into());
+            // The read's own message says what went wrong (access, a timeout) in plain words.
+            return Err(format!("{failure} Nothing was changed. When that’s sorted, press Try again.").trim_start().to_string());
         }
     }
 }

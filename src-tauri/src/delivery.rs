@@ -35,7 +35,7 @@ pub(crate) fn os() -> &'static dyn OsNotifier {
 
 fn timer_body(seconds: u64) -> String {
     format!(
-        "Your {} timer is done.",
+        "Your timer for {} is done.",
         crate::skills::mac::spoken(seconds)
     )
 }
@@ -598,9 +598,9 @@ pub fn start(app: tauri::AppHandle) {
                 Ok(Some(timer)) => {
                     let length = crate::skills::mac::spoken(timer.seconds);
                     let message = if timer.late_seconds >= 30 {
-                        format!("Your {length} timer finished {} seconds ago. This alert arrived late because Buntini could not deliver it at the scheduled time.", timer.late_seconds)
+                        format!("Your timer for {length} finished {} seconds ago. This alert arrived late because Buntini could not deliver it at the scheduled time.", timer.late_seconds)
                     } else {
-                        format!("Your {length} timer is done.")
+                        format!("Your timer for {length} is done.")
                     };
                     // The claim withdrew macOS's pending copy; one already shown
                     // counts as the desktop alert, so it is not repeated.

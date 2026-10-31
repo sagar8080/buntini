@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, NotebookPen, Play, Plug, AppWindow, Reply } from 'lucide-react';
 import ModalSheet from './ModalSheet';
 
@@ -16,16 +16,19 @@ const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
 /** Shows exactly what an action will do, lets the user fix any detail, and runs only on Allow. */
 export default function ActionSheet({ proposal, running, error, onCancel, onAllow }: { proposal: ActionProposal; running: boolean; error?: string; onCancel: () => void; onAllow: (args: Record<string, string | number>) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(proposal.fields.map(field => [field.key, field.value])));
+  // An error answers the details as they were; it goes once the user changes them.
+  const [shownError, setShownError] = useState(error);
+  useEffect(() => setShownError(error), [error]);
   const Icon = icons[proposal.tool] || (proposal.tool.startsWith('mcp_') ? Plug : Play);
   const sent = new Set(proposal.fields.filter(field => field.kind !== 'fixed').map(field => field.key));
   const allow = () => onAllow(Object.fromEntries(Object.entries(values).filter(([key, value]) => sent.has(key) && value.trim() !== '').map(([key, value]) => [key, key === 'minutes' ? Number(value) : value])));
-  const set = (key: string, value: string) => setValues(previous => ({ ...previous, [key]: value }));
+  const set = (key: string, value: string) => { setShownError(''); setValues(previous => ({ ...previous, [key]: value })); };
   // A pick replaces everything another pick of the same field set, so nothing from the
   // first match (such as its location) stays on the one picked.
-  const pick = (choice: ActionChoice) => setValues(previous => {
+  const pick = (choice: ActionChoice) => { setShownError(''); setValues(previous => {
     const cleared = Object.fromEntries((proposal.choices ?? []).filter(other => other.field === choice.field).flatMap(other => Object.keys(other.also ?? {})).map(key => [key, '']));
     return { ...previous, ...cleared, ...choice.also, [choice.field]: choice.value };
-  });
+  }); };
   const choicesFor = (key: string) => proposal.choices?.filter(choice => choice.field === key) ?? [];
   const picker = (label: string, choices: ActionChoice[], key: string) => <span className="field-choices" role="group" aria-label={`Matching ${label}`}>
     {choices.map(choice => <button key={choice.value} type="button" className="secondary-button" disabled={running} aria-pressed={values[key] === choice.value} onClick={() => pick(choice)}>{choice.label}</button>)}
@@ -50,7 +53,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     {choicesFor('id').length ? <small>More than one matches what you said. Pick the one you mean.</small> : null}
     {choicesFor('message').length ? <small>More than one email could be the one you mean. Pick the one to answer.</small> : null}
     {proposal.note && <small>{proposal.note}</small>}
-    {error && <p role="alert">{error}</p>}
+    {shownError && <p role="alert">{shownError}</p>}
     <div><button className="secondary-button" disabled={running} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : 'Allow'}</button></div>
   </ModalSheet>;
 }

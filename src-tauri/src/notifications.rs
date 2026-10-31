@@ -41,9 +41,10 @@ mod native {
                     &block,
                 );
         }
-        tokio::time::timeout(std::time::Duration::from_secs(60), rx)
+        // macOS may put the question in Notification Center, where it can wait unseen.
+        tokio::time::timeout(std::time::Duration::from_secs(300), rx)
             .await
-            .map_err(|_| "Notification permission request timed out.".to_string())?
+            .map_err(|_| "macOS is still asking whether Buntini may send notifications. Answer it in Notification Center.".to_string())?
             .map_err(|_| "Notification permission response was lost.".into())
     }
     pub async fn status() -> Result<String, String> {

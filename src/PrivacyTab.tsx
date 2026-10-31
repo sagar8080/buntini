@@ -34,12 +34,12 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
       <Toggle label="Notice what I’m doing" detail="App names and times, on this Mac only" checked={draft.petAwareness} onChange={value => update('petAwareness', value)} />
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Folders</h3><span className="count-badge">{roots.length}</span></div>
+      <div className="settings-section-heading"><h3>Folders</h3></div>
       {roots.map(path => <div className="root-item" key={path}><Folder size={14} /><span title={path}>{path}</span><button type="button" aria-label={`Remove access to ${path}`} title="Remove access" onClick={() => void onRemoveFolder(path)}><X size={14} /></button></div>)}
       <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Add folder</button></div>
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Memory</h3><span className="count-badge">{memories.length}</span></div>
+      <div className="settings-section-heading"><h3>Memory</h3></div>
       {memories.length ? memories.map(memory => <div className="root-item" key={memory.id}><span title={memory.fact}>{memory.fact}</span><button type="button" aria-label={`Forget: ${memory.fact}`} title="Forget" onClick={() => void onForget(memory.id)}><X size={14} /></button></div>)
         : <p className="field-help">Ask me to remember something, like “remember I’m vegetarian”.</p>}
     </section>
