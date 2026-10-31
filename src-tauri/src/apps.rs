@@ -932,6 +932,9 @@ async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
     let output = crate::actions::output(command, 90).await.map_err(|error| {
         if error.contains("not-authorized") {
             "macOS hasn’t allowed Buntini to read that. Allow it in System Settings → Privacy & Security → Calendars or Reminders.".to_string()
+        } else if error.starts_with("That took too long") {
+            // A read changes nothing, so the write-oriented "check before repeating" doesn't apply.
+            "Calendar or Reminders didn’t answer in time. If macOS asked whether Buntini may use them, answer that first.".to_string()
         } else {
             error
         }
@@ -1240,7 +1243,18 @@ pub fn shortcut_covers(words: &str, name: &str) -> bool {
 
 /// The user's shortcuts that fit `query` (all of them without one), as source records:
 /// a name here is one the user really has, so a run can be bound to it.
+/// The words shortcuts are matched by. "Which shortcuts do I have?" asks for all of
+/// them, not for ones named like the question.
+fn shortcut_filter(query: &str) -> &str {
+    let lower = query.to_lowercase();
+    let asks_for_all = lower.contains("shortcuts")
+        && lower.split_whitespace().next().is_some_and(|word| ["what", "which", "list", "show"].contains(&word));
+    if asks_for_all { "" } else { query }
+}
+
 pub fn shortcut_evidence(query: &str, names: &[String]) -> Value {
+    let asked = query;
+    let query = shortcut_filter(query);
     let found = if query.is_empty() {
         names.to_vec()
     } else {
@@ -1277,7 +1291,7 @@ pub fn shortcut_evidence(query: &str, names: &[String]) -> Value {
     };
     evidence(
         "shortcuts",
-        json!({"app":"shortcuts","query":query,"matches":"name_words","limit":SHORTCUT_LIMIT}),
+        json!({"app":"shortcuts","query":asked,"matches":"name_words","limit":SHORTCUT_LIMIT}),
         records,
         Some(found.len()),
         found.len() <= SHORTCUT_LIMIT,
@@ -1857,8 +1871,8 @@ pub fn validate_evidence(
             // A saved name must still fit the words it was listed for.
             "shortcuts"
                 if record["name"] != record["id"]
-                    || !query.is_empty()
-                        && matching_shortcuts(query, &[record["name"].as_str().unwrap_or_default().to_string()]).is_empty() =>
+                    || !shortcut_filter(query).is_empty()
+                        && matching_shortcuts(shortcut_filter(query), &[record["name"].as_str().unwrap_or_default().to_string()]).is_empty() =>
             {
                 return Err(invalid())
             }
@@ -3450,6 +3464,9 @@ mod tests {
         let none = shortcut_evidence("turn on the kitchen fan", &names);
         assert_eq!(none["count"], 0);
         assert_eq!(none["text"], "None of your shortcuts fits “turn on the kitchen fan”.");
+        let asked = shortcut_evidence("which shortcuts do I have?", &names);
+        assert_eq!(asked["records"].as_array().map(Vec::len), Some(names.len().min(SHORTCUT_LIMIT)));
+        assert!(validate_evidence("list_shortcuts", &json!({"query":"which shortcuts do I have?"}), &asked, false).is_ok());
         let all = shortcut_evidence("", &names);
         assert_eq!(all["count"], names.len());
         assert!(validate_evidence("list_shortcuts", &json!({}), &all, true).is_ok());

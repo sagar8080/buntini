@@ -241,10 +241,13 @@ fn terms(query: &str) -> Result<Vec<(String, Option<String>)>, String> {
         return Err("Enter a file query of up to 512 characters.".into());
     }
     let mut result = Vec::new();
-    for word in query
+    let all: Vec<&str> = query
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty())
-    {
+        .collect();
+    // A question is matched by its content words, as the live search does.
+    let content: Vec<&str> = all.iter().copied().filter(|word| !local::question_word(word)).collect();
+    for word in if content.is_empty() { all } else { content } {
         let alternative = local::singular_search_term(word);
         let word = word.to_lowercase();
         if !result.iter().any(|(existing, _)| existing == &word) {

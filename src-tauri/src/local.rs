@@ -524,6 +524,29 @@ pub(crate) fn prefer_literal<T>(literal: Vec<T>, fallback: Vec<T>) -> MatchGroup
     }
 }
 
+/// A word that asks rather than names: no file is found by it.
+pub(crate) fn question_word(word: &str) -> bool {
+    const QUESTION: [&str; 28] = [
+        "when", "what", "where", "which", "who", "how", "why", "does", "do", "did", "is", "are",
+        "was", "the", "a", "an", "my", "i", "me", "of", "in", "on", "for", "about", "will", "can",
+        "it", "to",
+    ];
+    QUESTION.contains(&word.to_lowercase().as_str())
+}
+
+/// The words a file must contain. A question ("when does the lease renew?") is searched
+/// by its content words; its question words and punctuation are in no file. A query made
+/// only of such words is searched as written.
+fn search_terms(query: &str) -> Vec<&str> {
+    let all: Vec<&str> = query.split_whitespace().collect();
+    let content: Vec<&str> = all
+        .iter()
+        .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|word| !word.is_empty() && !question_word(word))
+        .collect();
+    if content.is_empty() { all } else { content }
+}
+
 pub(crate) fn search_group(
     roots: &[String],
     query: &str,
@@ -534,10 +557,11 @@ pub(crate) fn search_group(
     if query.is_empty() || query.len() > 512 {
         return Err("Enter a file name or a few search words (up to 512 characters).".into());
     }
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    let alternatives = query
-        .split_whitespace()
-        .map(singular_search_term)
+    let terms = search_terms(query);
+    let words: Vec<String> = terms.iter().map(|term| term.to_lowercase()).collect();
+    let alternatives = terms
+        .iter()
+        .map(|term| singular_search_term(term))
         .collect::<Vec<_>>();
     let mut result = Vec::new();
     let mut fallback = Vec::new();
@@ -802,6 +826,18 @@ mod tests {
         .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].1.name, "visible.txt");
+    }
+    #[test]
+    fn a_question_is_searched_by_its_content_words() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("lease-notes.txt"), "The lease renews on 14 March.").unwrap();
+        fs::write(dir.path().join("other.txt"), "Nothing about it here.").unwrap();
+        let root = dir.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let found = |query: &str| search(&[root.clone()], query, &cancel).unwrap().into_iter().map(|hit| hit.1.name).collect::<Vec<_>>();
+        assert_eq!(found("when does the lease renew?"), ["lease-notes.txt"]);
+        assert_eq!(found("lease"), ["lease-notes.txt"]);
+        assert_eq!(search_terms("what is it?"), ["what", "is", "it?"], "only question words: searched as written");
     }
     #[test]
     fn sibling_prefix_is_not_an_authorized_child() {
@@ -1115,14 +1151,15 @@ printf '%s\n' '{{"text":"Lease renewal total 680","truncated":false}}'"#,
 
         let slow = tempfile::tempdir().unwrap();
         let stalled_runs = slow.path().join("runs");
+        // Long enough for a busy test machine to start the helper before it is stopped.
         let hung = fake_helper(slow.path(), &format!("echo run >> '{}'; sleep 30", stalled_runs.display()));
         let stalled = folder.path().join("slow.docx");
         fs::write(&stalled, "x").unwrap();
         let read = |documents: &Documents| read_text(&mut File::open(&stalled).unwrap(), &stalled, documents);
-        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_search(&hung, &cancel) }), None, "not read, which says nothing about the file");
-        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_search(&hung, &cancel) }), None);
+        assert_eq!(read(&Documents { seconds: 3, ..Documents::for_search(&hung, &cancel) }), None, "not read, which says nothing about the file");
+        assert_eq!(read(&Documents { seconds: 3, ..Documents::for_search(&hung, &cancel) }), None);
         assert_eq!(fs::read_to_string(&stalled_runs).unwrap().lines().count(), 1, "a search doesn't wait on it again");
-        assert_eq!(read(&Documents { seconds: 1, ..Documents::for_index(&hung, &cancel) }), None);
+        assert_eq!(read(&Documents { seconds: 3, ..Documents::for_index(&hung, &cancel) }), None);
         assert_eq!(fs::read_to_string(&stalled_runs).unwrap().lines().count(), 2, "a rebuild tries again");
 
         // The search's deadline bounds a read that has started, not only when it starts.
