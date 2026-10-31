@@ -929,30 +929,66 @@ fn clock_times(text: &str) -> Vec<String> {
     times
 }
 
+/// Sentences and lines of an answer, each with its own punctuation.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    for line in text.split_inclusive('\n') {
+        let mut start = 0;
+        let bytes = line.as_bytes();
+        for (index, byte) in bytes.iter().enumerate() {
+            let ends = matches!(byte, b'.' | b'!' | b'?') && bytes.get(index + 1).is_some_and(|next| *next == b' ');
+            if ends {
+                parts.push(&line[start..=index]);
+                start = index + 1;
+            }
+        }
+        parts.push(&line[start..]);
+    }
+    parts.into_iter().filter(|part| !part.trim().is_empty()).collect()
+}
+
 /// An answer that states what is in the user's calendar, reminders or email at a given
-/// time, when nothing this turn read that app, is replaced by an offer to look. Times
-/// the user wrote themselves ("my meeting is at 3pm") don't count as claims.
+/// time, when nothing this turn read that app, keeps only what it can stand behind. The
+/// sentences with those claims go; what is left (a greeting, a reply to what was asked)
+/// stays. When nothing is left, Buntini offers to look if the user asked about that app,
+/// and otherwise just answers the person. Times the user wrote themselves don't count.
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
-    let lower = answer.to_lowercase();
-    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-').collect();
     let asked = clock_times(prompt);
-    let claimed = clock_times(answer).into_iter().any(|time| !asked.contains(&time));
-    if !claimed {
+    let claims = |text: &str| clock_times(text).into_iter().any(|time| !asked.contains(&time));
+    let mentions = |text: &str, nouns: &[&str]| {
+        text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
+    };
+    let unread: Vec<(&str, &[&str])> = PERSONAL
+        .iter()
+        .filter(|(_, _, reads)| !steps.iter().any(|step| step.state == "succeeded" && reads.contains(&step.tool.as_str())))
+        .map(|(app, nouns, _)| (*app, *nouns))
+        .collect();
+    let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
+    if !claims(answer) || !unsupported(answer) {
         return answer.to_string();
     }
-    for (app, nouns, reads) in PERSONAL {
-        let mentions = words.iter().any(|word| nouns.contains(word));
-        let read = steps.iter().any(|step| step.state == "succeeded" && reads.contains(&step.tool.as_str()));
-        if mentions && !read {
+    // A claim's sentence goes, and so does any sentence about an app that wasn't read
+    // ("Here's what's on your calendar:" would otherwise introduce nothing).
+    let kept: String = sentences(answer)
+        .into_iter()
+        .filter(|part| !claims(part) && !unsupported(part))
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if kept.chars().any(char::is_alphabetic) {
+        return kept;
+    }
+    match unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app) {
+        Some(app) => {
             let example = match app {
                 "calendar" => "what’s on my calendar today?",
                 "reminders" => "what are my reminders?",
                 _ => "what needs a reply?",
             };
-            return format!("I haven’t looked at your {app} for that, so I won’t guess. Ask me something like “{example}” and I’ll check.");
+            format!("I haven’t looked at your {app} for that, so I won’t guess. Ask me something like “{example}” and I’ll check.")
         }
+        None => "I’m here. What can I do for you?".into(),
     }
-    answer.to_string()
 }
 
 /// Validate a final response, replacing untrusted success narration with actual
@@ -1105,7 +1141,12 @@ mod tests {
     #[test]
     fn schedules_are_stated_only_from_this_turns_reads() {
         let made_up = "Here's what's on your calendar tomorrow:\n1. Planning: 4:00 PM - 5:00 PM\n2. Dentist: 9:00 AM";
-        let answer = grounded_personal_answer("But rarely collired. Recent times, well.", made_up, &[]);
+        // A greeting gets a greeting, not a lecture about the calendar.
+        assert_eq!(grounded_personal_answer("Hey, Bantini.", made_up, &[]), "I’m here. What can I do for you?");
+        let greeted = "Hi Sagar! Your planning meeting is at 4:00 PM tomorrow. How can I help?";
+        assert_eq!(grounded_personal_answer("Hey, Bantini.", greeted, &[]), "Hi Sagar! How can I help?");
+        // Asked about the calendar with no read: offer to look.
+        let answer = grounded_personal_answer("anything on my calendar tomorrow?", made_up, &[]);
         assert!(answer.starts_with("I haven’t looked at your calendar"), "{answer}");
         let read = Step { id: "1".into(), tool: "read_calendar".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false,
             proposed_at: String::new(), approved_at: None, finished_at: None, evidence: None };
@@ -1114,9 +1155,10 @@ mod tests {
         let echo = "Your meeting at 3pm is in two hours.";
         assert_eq!(grounded_personal_answer("my meeting is at 3pm, how long until then?", echo, &[]), echo);
         assert_eq!(grounded_personal_answer("hi", "Hi! Want me to check your calendar?", &[]), "Hi! Want me to check your calendar?");
-        assert!(grounded_personal_answer("hm", "You have a reminder to call mum at 18:00.", &[]).contains("your reminders"));
+        assert_eq!(grounded_personal_answer("hm", "You have a reminder to call mum at 18:00.", &[]), "I’m here. What can I do for you?");
         assert_eq!(clock_times("from 9:00 to 4 pm, or 10am"), ["9:00", "4", "10"]);
     }
+
 
     #[test]
     fn a_rewritten_first_person_message_is_quoted_instead_of_claiming_execution() {

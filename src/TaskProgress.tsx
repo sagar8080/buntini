@@ -30,7 +30,8 @@ const steps: Record<string, string> = {
 export const stepLabel = (tool: string) => tool.startsWith('mcp_') ? 'Use a tool you added' : steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));
 
 export function ProgressDetails({ progress }: { progress?: TaskProgress }) {
-  if (!progress || (!progress.steps.length && !progress.contract?.outcomes.length)) return null;
+  // A plain chat reply did nothing worth showing; details appear once a tool ran.
+  if (!progress || !progress.steps.length) return null;
   const contract = progress.contract;
   return <details className="research-evidence task-progress"><summary>{(contract?.outcomes.length ? contract.outcomes.every(outcome => outcome.status === 'complete') : progress.steps.every(step => step.state === 'succeeded' || step.state === 'superseded')) ? 'How I did this' : 'What’s still open'}</summary>
     {!!contract?.outcomes.length && <><p>Requested results</p><ol>{contract.outcomes.map(outcome => <li key={outcome.id}><strong>{outcome.description}</strong><span> · {labels[outcome.status] || (outcome.status === 'pending' ? 'Still to do' : outcome.status.replaceAll('_', ' '))}</span></li>)}</ol></>}
