@@ -60,6 +60,7 @@
           "pet_move",
           "pet_stop",
           "pet_perch",
+          "pet_knock",
           "pet_sample",
           "approve_web_approval",
           "request_notification_permission",

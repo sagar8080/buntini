@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { desktop } from './bridge';
-import { actionDuration, gazeToward, Hunter, isToyAction, nextBlinkDelay, nextHabitDelay, pickIdleAction, randomGlance, toyPlay, type PetAction } from './petLife';
+import { actionDuration, ASK_GAP, gazeToward, Hunter, isToyAction, nextBlinkDelay, nextHabit, nextHabitDelay, randomGlance, toyPlay, type PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
 export interface PetReaction { kind: PetAction; id: number }
@@ -22,6 +22,9 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const glance = useRef<{ x: number; y: number } | null>(null);
   const hunter = useRef(new Hunter());
   const lastTyping = useRef(0);
+  const lastStretch = useRef(performance.now());
+  // The first request for a pet comes a few minutes in, not straight away.
+  const lastAsk = useRef(performance.now() - ASK_GAP + 4 * 60_000);
   const live = useRef({ state, motion, cat });
   live.current = { state, motion, cat };
 
@@ -48,13 +51,16 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     current.current = next;
     setAction(next);
     if (next === 'look') { glance.current = randomGlance(); applyGaze(); }
+    if (next === 'stretch') lastStretch.current = performance.now();
+    if (next === 'askpet') lastAsk.current = performance.now();
     // Each play with the ball has its own strength, read by the toy animations.
     if (isToyAction(next) && ref.current) {
       const { roll, lift } = next === 'mischief' ? { roll: 2.4, lift: 1.2 } : toyPlay();
       ref.current.style.setProperty('--toy-roll', roll.toFixed(2));
       ref.current.style.setProperty('--toy-lift', lift.toFixed(2));
     }
-    endTimer.current = window.setTimeout(stop, actionDuration[next]);
+    // Asked for a pet and got none: a little flick of the ear, and it lets it go.
+    endTimer.current = window.setTimeout(next === 'askpet' ? () => play('ear') : stop, actionDuration[next]);
   }, [applyGaze, ref, stop]);
 
   useEffect(() => () => window.clearTimeout(endTimer.current), []);
@@ -93,7 +99,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
         if (cancelled) return;
         played = null;
         if (!document.hidden && !stillPreferred() && !current.current) {
-          played = pickIdleAction(motion, cat);
+          const now = performance.now();
+          played = nextHabit(motion, cat, { stretch: now - lastStretch.current, ask: now - lastAsk.current, userAround: now - lastMove.current < 60_000 });
           play(played);
         }
         schedule();
@@ -189,6 +196,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       last = { x: event.clientX, y: event.clientY };
       // A few seconds of steady petting and it starts making biscuits.
       if (current.current === 'knead') return;
+      // The pet it asked for.
+      if (current.current === 'askpet') { play('love'); return; }
       if (current.current === 'purr' || travel > 140) {
         if (!purringSince) purringSince = now;
         if (now - purringSince > 3000 && live.current.cat) { purringSince = 0; play('knead'); return; }

@@ -7,6 +7,7 @@ import type { PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
 type Moving = Move['kind'] | null;
+const ASK_EVERY = 15 * 60_000;
 const reactions: Partial<Record<string, PetAction>> = { welcome: 'happy', break: 'stretch', 'focus-done': 'happy', late: 'yawn', battery: 'sad', cpu: 'tilt' };
 
 /* Lets the pet live on the desktop: wander along the floor and the user's active window,
@@ -24,13 +25,17 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   const [asleep, setAsleep] = useState(false);
   const [quiet, setQuiet] = useState(false);
   const [nudge, setNudge] = useState<Nudge | null>(null);
+  // Sitting on a window, the cat sometimes asks to bat at it; it only does once you say yes.
+  const [ask, setAsk] = useState<{ number: number } | null>(null);
+  const perchedOn = useRef<number | null>(null);
+  const lastAsk = useRef(Date.now());
   const world = useRef<World | null>(null);
   const movingRef = useRef(false);
   const perched = useRef(false);
   const pendingPerch = useRef<number | undefined>(undefined);
   const rules = useRef(new NudgeRules());
-  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, react, onAction });
-  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, react, onAction };
+  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, ask, react, onAction });
+  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, quiet, nudge, ask, react, onAction };
 
   // Our own position updates can still arrive just after a move ends; they are not drags.
   const echoUntil = useRef(0);
@@ -43,6 +48,8 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     if (!move || movingRef.current) return;
     movingRef.current = true;
     perched.current = false;
+    perchedOn.current = null;
+    setAsk(null);
     pendingPerch.current = move.perch;
     // Turn and get up first, then travel: the pose change plays before the window moves.
     const from = world.current?.pet.x;
@@ -100,11 +107,11 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
         if (phase === 'end') {
           if (kind !== 'walk') { setLanding(true); window.setTimeout(() => setLanding(false), 380); }
           const number = pendingPerch.current;
-          if (number !== undefined) void command('pet_perch', { number }).then(() => { perched.current = true; }).catch(() => void land());
+          if (number !== undefined) void command('pet_perch', { number }).then(() => { perched.current = true; perchedOn.current = number; }).catch(() => void land());
         }
         pendingPerch.current = undefined;
       }),
-      listen('pet-perch-lost', () => { perched.current = false; void land(); }),
+      listen('pet-perch-lost', () => { perched.current = false; perchedOn.current = null; setAsk(null); void land(); }),
     ];
     // A move we did not make (a drag, or the window settling after collapsing) ends in a landing.
     let settle = 0;
@@ -122,7 +129,14 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     let timer = 0;
     const tick = async () => {
       const state = live.current;
-      if (world.current && !state.expanded && !state.quiet && !state.asleep && !state.nudge && state.petState === 'idle' && !movingRef.current && !document.hidden) {
+      if (world.current && !state.expanded && !state.quiet && !state.asleep && !state.nudge && !state.ask && state.petState === 'idle' && !movingRef.current && !document.hidden) {
+        const number = perchedOn.current;
+        if (number !== null && state.motion !== 'sleepy' && Date.now() - lastAsk.current > ASK_EVERY && Math.random() < (state.motion === 'playful' ? .3 : .12)) {
+          lastAsk.current = Date.now();
+          setAsk({ number });
+          timer = window.setTimeout(tick, nextRoamDelay(live.current.motion));
+          return;
+        }
         const current = await fresh();
         let cursorX: number | undefined;
         if (state.motion === 'playful') cursorX = await cursorPosition().then(point => point.x / (window.devicePixelRatio || 1)).catch(() => undefined);
@@ -136,7 +150,7 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
 
   useEffect(() => {
     if (!enabled) return;
-    if (expanded) { movingRef.current = false; perched.current = false; void command('pet_stop').catch(() => {}); setNudge(null); }
+    if (expanded) { movingRef.current = false; perched.current = false; perchedOn.current = null; void command('pet_stop').catch(() => {}); setNudge(null); setAsk(null); }
   }, [enabled, expanded]);
 
   // Invisible and click-through while the user presents, meets or works full screen.
@@ -145,6 +159,27 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     void getCurrentWindow().setIgnoreCursorEvents(quiet).catch(() => {});
     if (quiet) setNudge(null);
   }, [enabled, quiet]);
+
+  // Unanswered, the question goes away on its own.
+  useEffect(() => {
+    if (!ask) return;
+    const timer = window.setTimeout(() => setAsk(current => current === ask ? null : current), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [ask]);
+
+  // Yes: a swipe of the paw, and the window gives a little jiggle and settles back where it
+  // was. macOS asks for Accessibility the first time; without it the swipe is all there is.
+  const knock = useCallback(() => {
+    const asked = live.current.ask;
+    setAsk(null);
+    if (!asked) return;
+    live.current.react('bat');
+    window.setTimeout(() => {
+      void command('pet_knock', { number: asked.number })
+        .then(() => window.setTimeout(() => live.current.react('happy'), 1900))
+        .catch(error => { if (String(error) === 'moved') live.current.react('sad'); else if (String(error) === 'access') live.current.react('tilt'); });
+    }, 300);
+  }, []);
 
   useEffect(() => {
     if (!nudge) return;
@@ -163,8 +198,10 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   const beforeDrag = useCallback(() => {
     movingRef.current = false;
     perched.current = false;
+    perchedOn.current = null;
+    setAsk(null);
     void command('pet_stop').catch(() => {});
   }, []);
 
-  return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, quiet, nudge, act, beforeDrag };
+  return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, quiet, nudge, act, beforeDrag, ask: !!ask, knock };
 }

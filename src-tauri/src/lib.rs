@@ -304,6 +304,7 @@ pub fn run() {
             world::pet_move,
             world::pet_stop,
             world::pet_perch,
+            world::pet_knock,
             world::pet_sample,
             approvals::approve_web_approval,
             notifications::request_notification_permission,

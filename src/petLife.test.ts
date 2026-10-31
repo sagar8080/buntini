@@ -2,14 +2,14 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { actionDuration, gazeToward, Hunter, isToyAction, nextBlinkDelay, nextHabitDelay, nextIdleDelay, pickIdleAction, randomGlance, toyPlay, toyActions } from './petLife.ts';
+import { actionDuration, ASK_GAP, gazeToward, Hunter, isToyAction, nextBlinkDelay, nextHabit, nextHabitDelay, nextIdleDelay, pickIdleAction, randomGlance, STRETCH_EVERY, toyPlay, toyActions } from './petLife.ts';
 
 const sequence = (...values: number[]) => () => values.shift() ?? 0;
 
 test('idle actions follow the personality and the character', () => {
   const seen = new Set<string>();
   for (let index = 0; index < 200; index++) seen.add(pickIdleAction('sleepy', true, sequence(index / 200)));
-  assert.deepEqual([...seen].sort(), ['ear', 'loaf', 'nod', 'nudge', 'tailcurl', 'yawn']);
+  assert.deepEqual([...seen].sort(), ['ear', 'lick', 'loaf', 'nod', 'nudge', 'tailcurl', 'yawn']);
   for (let index = 0; index < 200; index++) {
     const action = pickIdleAction('playful', false, sequence(index / 200));
     assert.ok(['tilt', 'wiggle', 'stretch', 'slowblink'].includes(action), action);
@@ -82,4 +82,19 @@ test('a pointer that darts about nearby and then freezes gets pounced on, not on
   const far = new Hunter();
   for (let at = 0, side = 1; at < 600; at += 100, side = -side) far.moved(-600 + side * 40, -20, at);
   assert.equal(far.ready(1200, 'playful'), null, 'too far away to bother');
+});
+
+test('a cat stretches every so often and asks for a pet only while you are around', () => {
+  const fresh = { stretch: 0, ask: 0, userAround: true };
+  assert.equal(nextHabit('calm', true, { ...fresh, stretch: STRETCH_EVERY }, sequence(.9, 0)), 'stretch');
+  assert.notEqual(nextHabit('calm', true, fresh, sequence(0, 0)), 'stretch');
+  const due = { stretch: 0, ask: ASK_GAP, userAround: true };
+  assert.equal(nextHabit('playful', true, due, sequence(0)), 'askpet');
+  assert.notEqual(nextHabit('playful', true, { ...due, userAround: false }, sequence(0, 0)), 'askpet', 'nobody to ask');
+  assert.notEqual(nextHabit('sleepy', true, due, sequence(0, 0)), 'askpet', 'a sleepy cat can’t be bothered');
+  assert.notEqual(nextHabit('playful', false, due, sequence(0, 0)), 'askpet', 'only the cat asks');
+  assert.notEqual(nextHabit('playful', true, { ...due, ask: ASK_GAP - 1 }, sequence(0, 0)), 'askpet', 'not too often');
+  const seen = new Set<string>();
+  for (let index = 0; index < 400; index++) seen.add(nextHabit('playful', true, fresh, sequence(index / 400)));
+  for (const habit of ['wink', 'smile', 'lick', 'stretch']) assert.ok(seen.has(habit), habit);
 });

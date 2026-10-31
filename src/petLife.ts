@@ -4,13 +4,15 @@ export type PetAction =
   | 'look' | 'slowblink' | 'tilt' | 'ear' | 'tailcurl' | 'groom' | 'stretch' | 'yawn' | 'wiggle' | 'nod'
   | 'bat' | 'pounce' | 'nudge' | 'mischief'
   | 'stalk' | 'hunt' | 'knead' | 'loaf'
+  | 'wink' | 'smile' | 'lick' | 'askpet'
   | 'love' | 'purr' | 'happy' | 'sad';
 
 /** How long each one-shot action class stays on the pet, in ms. Purr is held while petting. */
 export const actionDuration: Record<PetAction, number> = {
-  look: 2600, slowblink: 1800, tilt: 1600, ear: 650, tailcurl: 1400, groom: 2600, stretch: 1900,
+  look: 2600, slowblink: 1800, tilt: 1600, ear: 650, tailcurl: 1400, groom: 2600, stretch: 2600,
   yawn: 2000, wiggle: 1500, nod: 2400, bat: 2200, pounce: 1700, nudge: 1300, love: 1600, purr: 900, happy: 1400, sad: 1800,
   mischief: 2800, stalk: 1500, hunt: 900, knead: 2800, loaf: 7000,
+  wink: 1100, smile: 2000, lick: 2600, askpet: 9000,
 };
 
 /** Ways of playing with the ball of wool: two swipes, a pounce, a lazy nudge. */
@@ -25,12 +27,12 @@ export function toyPlay(random = Math.random): { roll: number; lift: number } {
 
 type Weights = Partial<Record<PetAction, number>>;
 const catIdle: Record<PetMotion, Weights> = {
-  calm: { look: 4, slowblink: 3, tilt: 2, ear: 2, nudge: 2, loaf: 2, tailcurl: 1, groom: 1, stretch: 1, bat: 1, yawn: 1 },
+  calm: { look: 4, slowblink: 3, tilt: 2, ear: 2, nudge: 2, loaf: 2, smile: 2, tailcurl: 1, groom: 1, lick: 1, wink: 1, stretch: 1, bat: 1, yawn: 1 },
   // A playful cat keeps going back to its ball of wool, a different way each time.
   // Now and then it knocks the ball far away and looks straight at you.
-  playful: { bat: 3, look: 3, wiggle: 3, pounce: 2, nudge: 2, tilt: 2, tailcurl: 2, ear: 2, mischief: 1, groom: 1, stretch: 1, slowblink: 1 },
+  playful: { bat: 3, look: 3, wiggle: 3, pounce: 2, nudge: 2, tilt: 2, tailcurl: 2, ear: 2, wink: 2, mischief: 1, smile: 1, groom: 1, lick: 1, stretch: 1, slowblink: 1 },
   // A sleepy cat is dozing while idle, so it only stirs, and now and then paws at the ball.
-  sleepy: { nod: 3, loaf: 3, ear: 2, yawn: 2, tailcurl: 1, nudge: 1 },
+  sleepy: { nod: 3, loaf: 3, ear: 2, yawn: 2, tailcurl: 1, nudge: 1, lick: 1 },
 };
 // Other characters have no ears, paws or pupils to animate separately.
 const otherIdle: Record<PetMotion, Weights> = {
@@ -48,6 +50,20 @@ export function pickIdleAction(motion: PetMotion, cat: boolean, random = Math.ra
     if (roll < 0) return action;
   }
   return weights[weights.length - 1][0];
+}
+
+const MINUTE = 60_000;
+/** A cat stretches every so often whatever else it's doing. */
+export const STRETCH_EVERY = 10 * MINUTE;
+/** And asks to be petted now and then, not more than this often. */
+export const ASK_GAP = 12 * MINUTE;
+
+/** The next habit: a stretch when one is due, sometimes a request for a pet while you're
+    around (never from a sleepy cat), otherwise one picked by its personality. */
+export function nextHabit(motion: PetMotion, cat: boolean, since: { stretch: number; ask: number; userAround: boolean }, random = Math.random): PetAction {
+  if (cat && motion !== 'sleepy' && since.userAround && since.ask >= ASK_GAP && random() < .3) return 'askpet';
+  if (since.stretch >= STRETCH_EVERY) return 'stretch';
+  return pickIdleAction(motion, cat, random);
 }
 
 /** The wait before the next habit. Right after playing, a cat often comes back for more

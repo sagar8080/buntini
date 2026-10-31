@@ -175,6 +175,9 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <path className="pet-speaking-mouth" d="M86 113C88 112 92 112 94 113C94 118 92 120 90 120C88 120 86 118 86 113Z" fill="#7A3B4A" />
       <path className="cat-frown" d="M85 116Q90 112 95 116" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.7" strokeLinecap="round" />
       <g className="cat-yawn"><ellipse cx="90" cy="117" rx="5.2" ry="6.8" fill="#7A3B4A" /><ellipse cx="90" cy="120.6" rx="3.2" ry="2.4" fill="#F08A98" /></g>
+      <path className="cat-wink" d="M97 95Q106 100.5 115 95" stroke={look.coat === 'black' || look.coat === 'tuxedo' ? '#F4E9DA' : look.coat === 'siamese' ? '#2E1F18' : coat.outline} strokeWidth="2.6" strokeLinecap="round" />
+      <path className="cat-smile" d="M83.5 112C85 119.5 95 119.5 96.5 112C93 113.6 87 113.6 83.5 112Z" fill="#7A3B4A" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.4" strokeLinejoin="round" />
+      <path className="cat-tongue" d="M87.4 113C87.4 119.4 92.6 119.4 92.6 113Z" fill="#F08A98" stroke="#C9606F" strokeWidth=".8" />
       <path d="M58 106L42 103M58 110L41 111M59 114L45 118M122 106L138 103M122 110L139 111M121 114L135 118" stroke={coat.whisker} strokeWidth="1.1" strokeLinecap="round" strokeOpacity=".75" />
       </g>
 
@@ -236,6 +239,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       </g>
     </g>
     <g className="cat-hearts" fill="#FF7A93">{[[124, 68], [137, 54], [113, 50]].map(([x, y], index) => <g key={index} transform={`translate(${x} ${y})`}><path className="cat-heart" style={{ animationDelay: `${index * .28}s` }} d="M0 3C-1.5 0-6-.5-6 3C-6 6.5-1.5 8.5 0 10C1.5 8.5 6 6.5 6 3C6-.5 1.5 0 0 3Z" /></g>)}</g>
+    <g className="cat-ask"><path d="M146 18H166C171 18 174 21 174 26V34C174 39 171 42 166 42H155L149 48L150 42H146C141 42 138 39 138 34V26C138 21 141 18 146 18Z" fill="#FFFDF8" stroke={coat.outline} strokeOpacity=".45" strokeWidth="1.2" strokeLinejoin="round" /><path className="cat-ask-heart" d="M156 27C154.4 24 149.5 24.4 149.5 28.4C149.5 32 154 34.6 156 36.4C158 34.6 162.5 32 162.5 28.4C162.5 24.4 157.6 24 156 27Z" fill="#FF7A93" /></g>
     <g className="cat-zzz" fill="#8C7FA6" fontFamily="-apple-system, system-ui, sans-serif" fontWeight="800"><text x="128" y="60" fontSize="12">z</text><text x="137" y="48" fontSize="9">z</text><text x="144" y="38" fontSize="7">z</text></g>
   </svg>;
 }

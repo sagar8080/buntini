@@ -915,6 +915,7 @@ export default function App() {
       </section>}
 
       <div className="pet-dock">
+        {!expanded && !nudging && world.ask && <button className="pet-ask" aria-label={`Let ${assistantName} paw at this window`} onClick={world.knock}><svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="12" cy="16" rx="5.2" ry="4.4" /><ellipse cx="5.6" cy="10.6" rx="2.1" ry="2.6" /><ellipse cx="9.4" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="14.6" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="18.4" cy="10.6" rx="2.1" ry="2.6" /></svg></button>}
         {nudging && world.nudge && <div className="nudge-bubble" role="status" aria-live="polite"><p>{world.nudge.text}</p><div>{world.nudge.actions.map(item => <button key={item.label} onClick={() => world.act(item.action)}>{item.label}</button>)}</div></div>}
         {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? 'All ears.' : petState === 'thinking' ? 'A little thinking…' : petState === 'working' ? 'On it, one moment.' : petState === 'speaking' ? 'Something to say.' : 'Here when you need me.'}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
         <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {

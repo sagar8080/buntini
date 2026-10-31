@@ -666,6 +666,30 @@ fn stop() {
     *PERCH.lock().unwrap() = None;
 }
 
+/// The cat pawing at the window it sits on, after the user said yes (`ax::knock_window`).
+/// Only an ordinary window of another app, still on screen where it was.
+#[tauri::command]
+pub async fn pet_knock(number: u32) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || {
+            let window = mac::windows().into_iter().find(|w| w.number == number).ok_or("gone")?;
+            if window.layer != 0 || window.pid == std::process::id() as i32 {
+                return Err("gone".to_string());
+            }
+            let Rect { x, y, width, height } = window.rect;
+            crate::ax::knock_window(window.pid, (x, y, width, height))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = number;
+        Err("gone".into())
+    }
+}
+
 #[tauri::command]
 pub fn pet_stop() {
     stop();
