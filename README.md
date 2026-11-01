@@ -30,7 +30,7 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 
 Buntini needs an Apple silicon Mac with macOS 13 or later. Apple Intelligence needs macOS 26.
 
-**Public rollout is pending.** Release builds must pass signing, notarization and device acceptance before publication. See the [production readiness checklist](docs/production-readiness.md). Earlier ad-hoc builds are development previews.
+The latest release is **v0.2.0**, Developer ID signed and notarized by CI. Some features still await testing on more Macs and with cloud brains; see the [production readiness checklist](docs/production-readiness.md). Earlier ad-hoc builds are development previews.
 
 1. Download **Buntini-macOS-arm64.dmg** from the [latest release](https://github.com/sagar8080/buntini/releases).
 2. Open it and drag **Buntini** to **Applications**.
