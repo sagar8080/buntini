@@ -3187,6 +3187,15 @@ fn structured_math_answer(flow: &Workflow) -> Option<String> {
     (!answer.trim().is_empty()).then_some(answer)
 }
 
+/// An answer worked out in Rust (worked.rs) once every read the request needs is done.
+fn worked_answer(flow: &Workflow) -> Option<String> {
+    if flow.contract.next_outcome()?.kind != "answer" {
+        return None;
+    }
+    let today = chrono::NaiveDate::parse_from_str(&flow.contract.interpretation_date, "%Y-%m-%d").ok()?;
+    crate::worked::answer(&flow.goal, &flow.steps, today)
+}
+
 /// The app-read boundary is injectable so complete planning/approval journeys can
 /// run against controlled observations without reading personal accounts.
 async fn continue_workflow_using<F, Fut>(
@@ -3244,7 +3253,7 @@ where
         }
         let finished_answer = match flow.contract.completed_action_answer(&flow.steps) {
             Some(answer) => Some(answer),
-            None => match flow.contract.terminal_receipt_answer(&flow.steps).or_else(||structured_math_answer(flow)) {
+            None => match flow.contract.terminal_receipt_answer(&flow.steps).or_else(||structured_math_answer(flow)).or_else(||worked_answer(flow)) {
                 Some(answer) => Some(answer),
                 None => crate::recipes::answer(&crate::recipes::Plan {
                     goal: &flow.goal,
@@ -3473,6 +3482,13 @@ where
             }
             let answer = crate::writing_context::normalize(&flow.goal,&turn.text,&settings.assistant_name,&settings.user_name);
             let answer = crate::writing_context::without_filler(&flow.goal, &answer, &settings.assistant_name);
+            // What this answer could know about the user: the conversation before this
+            // message, the screen and saved memories.
+            let mut known = flow.messages.iter().filter(|m| m["role"] != "system").map(|m| m["content"].as_str().unwrap_or_default()).collect::<Vec<_>>();
+            known.pop();
+            let memories = state.store.lock().unwrap().memories()?.into_iter().map(|memory| memory.fact).collect::<Vec<_>>();
+            let known = format!("{}\n{}\n{}", known.join("\n"), flow.context.as_deref().unwrap_or_default(), memories.join("\n"));
+            let answer = crate::completion::unknown_personal_fact(&flow.goal, &known, &flow.steps).unwrap_or(answer);
             task.answer = flow.contract.validate_answer(&answer, &flow.steps)?;
             if flow.steps.iter().any(|step| step.state == "failed") {
                 return Err(format!("Some steps could not be verified. Review their results before relying on this task.\n\n{}", task.answer));
@@ -3566,6 +3582,14 @@ where
         let is_action = action_call(&name, &args);
         if is_action {
             args = Value::Object(validate_action(&name, &args)?);
+            // A checklist made from a note keeps only what the request or the note says.
+            if name == "create_note"
+                && !flow.contract.next_outcome().is_some_and(|o| o.required_arguments.get("body").is_some())
+            {
+                if let Some(body) = crate::source_fields::grounded_checklist(&flow.goal, &flow.steps, args["body"].as_str().unwrap_or_default())? {
+                    args["body"] = json!(body);
+                }
+            }
             if name != "browse_page" {
                 flow.contract.validate_proposal(&name, &args, &flow.steps)?;
             } else {

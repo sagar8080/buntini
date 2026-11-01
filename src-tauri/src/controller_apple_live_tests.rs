@@ -1,19 +1,21 @@
 //! Opt-in, real Apple Intelligence workflows over disposable state and sources.
-//! A case cannot pass without an actual Foundation Models SDK invocation.
+//! A case passes on its checks alone. One that made no Foundation Models call, because
+//! Rust completed it, is marked `completedInRust` and counted separately.
 use super::*;
 use std::{io::Write, path::Path, time::Instant};
 
 #[path = "controller_writing_checks.rs"]
 mod writing_checks;
 
-pub(super) fn record_live_case(row: Value) -> Value {
+pub(super) fn record_live_case(mut row: Value) -> Value {
+    row["completedInRust"] = json!(row["apple_calls"].as_u64() == Some(0));
     let path = std::env::var("BUNTINI_APPLE_WORKFLOW_REPORT").unwrap();
     let mut out = std::fs::OpenOptions::new().append(true).open(path).unwrap();
     writeln!(out, "{row}").unwrap();
     out.flush().unwrap();
     eprintln!(
         "BUNTINI_REAL_WORKFLOW {}",
-        json!({"id":row["id"],"passed":row["passed"],"apple_calls":row["apple_calls"]})
+        json!({"id":row["id"],"passed":row["passed"],"apple_calls":row["apple_calls"],"completedInRust":row["completedInRust"]})
     );
     row
 }
@@ -132,7 +134,7 @@ pub(super) async fn approve_live_action(state: &AppState, id: &str, args: Value)
 
 fn case(id: &str, title: &str, turn: &LiveTurn, checks: Vec<(&str, bool)>) -> Value {
     let passed =
-        turn.apple_calls > 0 && turn.task.state == "completed" && checks.iter().all(|(_, ok)| *ok);
+        turn.task.state == "completed" && checks.iter().all(|(_, ok)| *ok);
     json!({"id":id,"title":title,"passed":passed,"apple_calls":turn.apple_calls,
         "checks":checks.into_iter().map(|(name,passed)|json!({"name":name,"passed":passed})).collect::<Vec<_>>(),
         "observation":turn,"source_kind":"user-provided synthetic text in a real production controller request","real_app_writes":0})
@@ -274,7 +276,11 @@ async fn live_apple_day_to_day_workflows() {
         all.len(),
         "Each counted workflow must have a distinct goal ID"
     );
-    let summary = json!({"kind":"summary","attempted":all.len(),"passed":passed,"failed":all.len()-passed,"successful_user_workflows":user_passed,"successful_boundary_checks":passed-user_passed,"actual_apple_model_calls":all.iter().filter_map(|r|r["apple_calls"].as_u64()).sum::<u64>(),"entry":"production controller backend; UI not exercised","model":"Apple Foundation Models system default","real_app_receipts":"only explicitly enabled app group; file/text cases use real disposable files/stores"});
+    let in_rust = all
+        .iter()
+        .filter(|row| row["passed"] == true && row["completedInRust"] == true)
+        .count();
+    let summary = json!({"kind":"summary","attempted":all.len(),"passed":passed,"failed":all.len()-passed,"successful_user_workflows":user_passed,"successful_boundary_checks":passed-user_passed,"passed_without_a_model_call":in_rust,"actual_apple_model_calls":all.iter().filter_map(|r|r["apple_calls"].as_u64()).sum::<u64>(),"entry":"production controller backend; UI not exercised","model":"Apple Foundation Models system default","real_app_receipts":"only explicitly enabled app group; file/text cases use real disposable files/stores"});
     writeln!(out, "{}", summary).unwrap();
     eprintln!("BUNTINI_REAL_SUMMARY {summary}");
     if group == "all" {

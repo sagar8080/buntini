@@ -194,7 +194,6 @@ pub(super) async fn public_workflows() -> Vec<Value> {
         let checks = json!({"realProviderCards":!cards.is_empty(),"actualAppleSummary":actual_summary,"validSourceCitations":citations,"requiredSources":required_sources,"persistedTaskAndCards":persisted,"facts":facts.iter().map(|(name,passed)|json!({"name":name,"passed":passed})).collect::<Vec<_>>()});
         let passed = turn.error.is_none()
             && turn.task.state == "completed"
-            && turn.apple_calls > 0
             && !cards.is_empty()
             && actual_summary
             && citations
