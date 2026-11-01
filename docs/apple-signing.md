@@ -56,7 +56,21 @@ The protected GitHub `release` environment uses these six fields:
 | `APPLE_ID` | Authorized Apple account email | Still needed for hosted CI |
 | `APPLE_PASSWORD` | App-specific password for that account | Still needed for hosted CI |
 
-Add the four remaining values through the repository's **Settings → Environments → release → Environment secrets** interface, or run these commands yourself with an authenticated GitHub CLI. These commands change the environment secrets; none should be pasted with real values into chat:
+`scripts/setup-release-secrets.sh` sets all six in one go. Run it yourself in Terminal with an authenticated GitHub CLI. It:
+
+1. Finds the Developer ID identity and team ID in your Keychain.
+2. Exports that identity alone as a `.p12` under a new random password. macOS asks you to allow the export.
+3. Asks for your Apple ID, then the app-specific password without echoing it.
+4. Asks you to confirm, then pipes all six values into the `release` environment.
+
+Nothing is printed, passed as a command argument or kept on disk. `--dry-run` checks everything without setting anything, and `--p12 PATH` uses a `.p12` you exported from Keychain Access instead.
+
+```sh
+sh scripts/setup-release-secrets.sh --dry-run
+sh scripts/setup-release-secrets.sh
+```
+
+To set them by hand instead, use the repository's **Settings → Environments → release → Environment secrets** interface, or run these commands yourself with an authenticated GitHub CLI. These commands change the environment secrets; none should be pasted with real values into chat:
 
 ```sh
 base64 -i /absolute/private/path/DeveloperID.p12 | tr -d '\r\n' | \
