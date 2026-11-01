@@ -1,5 +1,6 @@
-//! Approved, idempotent creation of recurring searches and public price watches.
-//! Creation is local SQLite work. Only the scheduler performs future network work.
+//! Approved, idempotent creation of recurring searches, public price watches and
+//! routines (`routines.rs`). Creation is local SQLite work. Only the scheduler performs
+//! future work.
 use crate::{
     actions::{ActionOutcome, ActionReceipt, Field},
     store::Store,
@@ -8,7 +9,7 @@ use crate::{
 use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
 
-pub const TOOLS: [&str; 2] = ["create_saved_search", "create_price_watch"];
+pub const TOOLS: [&str; 4] = ["create_saved_search", "create_price_watch", crate::routines::TOOL, crate::goals::TOOL];
 
 fn text(args: &Map<String, Value>, key: &str, max: usize) -> Result<String, String> {
     let value = args
@@ -22,6 +23,12 @@ fn text(args: &Map<String, Value>, key: &str, max: usize) -> Result<String, Stri
     Ok(value.into())
 }
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
+    if tool == crate::routines::TOOL {
+        return crate::routines::validate(args);
+    }
+    if tool == crate::goals::TOOL {
+        return crate::goals::validate(args);
+    }
     let args = args.as_object().ok_or("Arguments must be an object.")?;
     let allowed = match tool {
         "create_saved_search" => &["query", "interval_minutes"][..],
@@ -67,6 +74,12 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     Ok(out)
 }
 pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, String) {
+    if tool == crate::routines::TOOL {
+        return crate::routines::describe(args);
+    }
+    if tool == crate::goals::TOOL {
+        return crate::goals::describe(args);
+    }
     let field = |key: &str, label: &str| Field {
         key: key.into(),
         label: label.into(),
@@ -120,6 +133,12 @@ pub fn execute(
     tool: &str,
     raw: &Map<String, Value>,
 ) -> ActionReceipt {
+    if tool == crate::routines::TOOL {
+        return crate::routines::execute(store, intent_id, raw);
+    }
+    if tool == crate::goals::TOOL {
+        return crate::goals::execute(store, intent_id, raw);
+    }
     let args = match validate(tool, &Value::Object(raw.clone())) {
         Ok(args) => args,
         Err(error) => return failure(tool, ActionOutcome::Failed, error),

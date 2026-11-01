@@ -1,5 +1,6 @@
 //! eBay Browse API listing search with the user's own developer app keys.
 use super::*;
+use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -16,8 +17,18 @@ pub const MARKETPLACES: [(&str, &str); 8] = [
     ("EBAY_CA", "CAD"),
 ];
 
-/// Application tokens are cached per client id until shortly before they expire.
-static TOKEN: Mutex<Option<(String, String, Instant)>> = Mutex::new(None);
+/// Key cache entries to both credential fields, so rotating a secret cannot reuse
+/// an old token. Retain a digest rather than another plaintext credential copy.
+static TOKEN: Mutex<Option<([u8; 32], String, Instant)>> = Mutex::new(None);
+
+fn credential_fingerprint(id: &str, secret: &str) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(id.len().to_le_bytes());
+    digest.update(id.as_bytes());
+    digest.update(secret.len().to_le_bytes());
+    digest.update(secret.as_bytes());
+    digest.finalize().into()
+}
 
 pub fn validate(args: &Value) -> Result<Value, String> {
     let map = object(args, &["query", "max_price", "condition", "sort"])?;
@@ -90,8 +101,9 @@ fn host(client_id: &str) -> &'static str {
 }
 
 async fn token(client: &reqwest::Client, id: &str, secret: &str) -> Result<String, String> {
-    if let Some((cached_id, token, until)) = TOKEN.lock().unwrap().clone() {
-        if cached_id == id && Instant::now() < until {
+    let fingerprint = credential_fingerprint(id, secret);
+    if let Some((cached_credentials, token, until)) = TOKEN.lock().unwrap().clone() {
+        if cached_credentials == fingerprint && Instant::now() < until {
             return Ok(token);
         }
     }
@@ -118,9 +130,10 @@ async fn token(client: &reqwest::Client, id: &str, secret: &str) -> Result<Strin
         .get("expires_in")
         .and_then(Value::as_u64)
         .unwrap_or(3600)
-        .saturating_sub(120);
+        .saturating_sub(120)
+        .min(86_400);
     *TOKEN.lock().unwrap() = Some((
-        id.into(),
+        fingerprint,
         token.clone(),
         Instant::now() + Duration::from_secs(lifetime),
     ));
@@ -241,7 +254,24 @@ pub(crate) fn parse_listings(data: &Value) -> Vec<ResultCard> {
                 .filter(|url| {
                     reqwest::Url::parse(url)
                         .ok()
-                        .and_then(|url| url.host_str().map(|host| host.contains("ebay.")))
+                        .and_then(|url| {
+                            url.host_str().map(|host| {
+                                [
+                                    "ebay.com",
+                                    "ebay.co.uk",
+                                    "ebay.de",
+                                    "ebay.fr",
+                                    "ebay.it",
+                                    "ebay.es",
+                                    "ebay.com.au",
+                                    "ebay.ca",
+                                ]
+                                .iter()
+                                .any(|domain| {
+                                    host == *domain || host.ends_with(&format!(".{domain}"))
+                                })
+                            })
+                        })
                         .unwrap_or(false)
                 });
             Some(card(
@@ -296,6 +326,43 @@ mod tests {
         assert!(credentials(r#"{"clientId":"x"}"#).is_err());
         assert_eq!(host("Me-App-SBX-1"), "https://api.sandbox.ebay.com");
         assert_eq!(host("Me-App-PRD-1"), "https://api.ebay.com");
+    }
+
+    #[test]
+    fn token_cache_identity_changes_with_either_credential_field() {
+        assert_eq!(
+            credential_fingerprint("id", "secret"),
+            credential_fingerprint("id", "secret")
+        );
+        assert_ne!(
+            credential_fingerprint("id", "secret"),
+            credential_fingerprint("id", "rotated")
+        );
+        assert_ne!(
+            credential_fingerprint("id", "secret"),
+            credential_fingerprint("other", "secret")
+        );
+        assert_ne!(
+            credential_fingerprint("ab", "c"),
+            credential_fingerprint("a", "bc")
+        );
+    }
+
+    #[test]
+    fn listing_links_require_an_actual_ebay_domain() {
+        for (url, accepted) in [
+            ("https://www.ebay.com/itm/1", true),
+            ("https://www.ebay.co.uk/itm/1", true),
+            ("https://www.sandbox.ebay.com/itm/1", true),
+            ("https://ebay.evil.com/itm/1", false),
+            ("https://notebay.com/itm/1", false),
+            ("https://ebay.com.evil.com/itm/1", false),
+            ("https://www.ebay.com@evil.example/itm/1", false),
+        ] {
+            let data = json!({"itemSummaries":[{"title":"Listing", "price":{"value":"1", "currency":"USD"}, "itemWebUrl":url}]});
+            let cards = parse_listings(&data);
+            assert_eq!(cards[0].url.is_some(), accepted, "{url}");
+        }
     }
 
     #[test]

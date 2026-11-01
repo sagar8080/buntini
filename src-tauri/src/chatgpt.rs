@@ -6,11 +6,12 @@
 //! registers itself on first sign-in (no client secret); the issued client ID and this
 //! Mac's host ID are kept so later sign-ins reuse them.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -74,8 +75,8 @@ fn save(session: &Session) -> Result<(), String> {
         &serde_json::to_string(session).map_err(|e| e.to_string())?,
     )
 }
-fn forget() {
-    let _ = crate::web::set_credential(KEYCHAIN_ID, "");
+fn forget() -> Result<(), String> {
+    crate::web::set_credential(KEYCHAIN_ID, "")
 }
 
 /// The claims Buntini relies on from the ID token. It arrives straight from the token
@@ -101,8 +102,15 @@ pub fn verify_id_token(
         serde_json::Value::Array(list) => list.iter().any(|aud| aud == client_id),
         _ => false,
     };
+    let authorized_party_ok = match claims.get("azp") {
+        Some(party) => party.as_str() == Some(client_id),
+        None => claims["aud"]
+            .as_array()
+            .is_none_or(|audiences| audiences.len() == 1),
+    };
     if claims["iss"] != ISSUER
         || !audience_ok
+        || !authorized_party_ok
         || claims["nonce"] != nonce
         || claims["exp"].as_i64().unwrap_or(0) <= now()
     {
@@ -128,28 +136,51 @@ pub struct Callback {
 
 /// Reads the first line of the browser's request: `GET /auth/callback?… HTTP/1.1`.
 pub fn parse_callback(request_line: &str) -> Option<Callback> {
-    let target = request_line
-        .strip_prefix("GET ")?
-        .split_whitespace()
-        .next()?;
+    let mut parts = request_line.split_whitespace();
+    if parts.next()? != "GET" {
+        return None;
+    }
+    let target = parts.next()?;
+    if !matches!(parts.next()?, "HTTP/1.0" | "HTTP/1.1")
+        || parts.next().is_some()
+        || !target.starts_with('/')
+        || target.starts_with("//")
+    {
+        return None;
+    }
     let url = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
     if url.path() != CALLBACK_PATH {
         return None;
     }
+    // Reject ambiguous query parameters rather than choosing one interpretation.
+    let pairs: Vec<_> = url.query_pairs().collect();
+    for key in ["code", "state", "client_id", "error"] {
+        if pairs.iter().filter(|(name, _)| name == key).count() > 1 {
+            return None;
+        }
+    }
     let get = |key: &str| {
-        url.query_pairs()
+        pairs
+            .iter()
             .find(|(name, _)| name == key)
-            .map(|(_, value)| value.into_owned())
+            .map(|(_, value)| value.to_string())
     };
+    let state = get("state").filter(|value| !value.is_empty())?;
+    let code = get("code").filter(|value| !value.is_empty());
+    let error = get("error").filter(|value| !value.is_empty());
+    if code.is_some() == error.is_some() {
+        return None;
+    }
     Some(Callback {
-        code: get("code"),
-        state: get("state")?,
+        code,
+        state,
         client_id: get("client_id"),
-        error: get("error"),
+        error,
     })
 }
 
 static CANCEL: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
+static SESSION_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub fn cancel_sign_in() {
     if let Some(flag) = CANCEL.lock().unwrap().as_ref() {
@@ -164,6 +195,7 @@ const PAGE: &str = "<!doctype html><meta charset=utf-8><title>Buntini</title><bo
 async fn wait_for_callback(
     listener: tokio::net::TcpListener,
     cancel: Arc<AtomicBool>,
+    expected_state: &str,
 ) -> Result<Callback, String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
     loop {
@@ -186,33 +218,52 @@ async fn wait_for_callback(
             .unwrap_or(0);
         let text = String::from_utf8_lossy(&buffer[..read]).to_string();
         match parse_callback(text.lines().next().unwrap_or("")) {
-            Some(callback) => {
+            Some(callback) if callback.state == expected_state => {
                 let message = if callback.error.is_some() {
                     "Sign-in was cancelled. You can close this tab."
                 } else {
                     "You’re signed in to Buntini. You can close this tab."
                 };
                 let body = PAGE.replace("{message}", message);
-                let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    stream.write_all(reply.as_bytes()),
+                )
+                .await;
                 return Ok(callback);
             }
-            None => {
-                let _ = stream
-                    .write_all(
+            _ => {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    stream.write_all(
                         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    )
-                    .await;
+                    ),
+                )
+                .await;
             }
         }
     }
 }
 
 fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+    crate::web::private_client_builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|_| "Cannot prepare a secure connection.".to_string())
+}
+
+async fn token_body(response: reqwest::Response) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "ChatGPT’s sign-in response was interrupted.".to_string())?;
+        if bytes.len().saturating_add(chunk.len()) > 65_536 {
+            return Err("ChatGPT’s sign-in response exceeded the safe size limit.".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|_| "ChatGPT returned an unreadable sign-in.".into())
 }
 
 fn token_error(body: &str) -> String {
@@ -233,6 +284,7 @@ fn session_from(
 ) -> Result<Session, String> {
     let access_token = response["access_token"]
         .as_str()
+        .filter(|value| !value.is_empty())
         .ok_or("ChatGPT didn’t return a sign-in token.")?
         .to_string();
     let refresh_token = response["refresh_token"]
@@ -240,6 +292,9 @@ fn session_from(
         .map(str::to_string)
         .or_else(|| previous.map(|session| session.refresh_token.clone()))
         .ok_or("ChatGPT didn’t return a refresh token.")?;
+    if refresh_token.is_empty() {
+        return Err("ChatGPT didn’t return a refresh token.".into());
+    }
     let id_token = response["id_token"]
         .as_str()
         .map(str::to_string)
@@ -255,11 +310,16 @@ fn session_from(
         .map(|scope| scope.split_whitespace().map(str::to_string).collect())
         .or_else(|| previous.map(|session| session.scopes.clone()))
         .unwrap_or_default();
+    let current_time = now();
+    let expires_at = current_time
+        .checked_add(response["expires_in"].as_i64().unwrap_or(3600))
+        .filter(|expiry| *expiry > current_time)
+        .ok_or("ChatGPT returned an invalid sign-in expiry.")?;
     Ok(Session {
         client_id: client_id.into(),
         access_token,
         refresh_token,
-        expires_at: now() + response["expires_in"].as_i64().unwrap_or(3600),
+        expires_at,
         id_token,
         sub,
         email,
@@ -269,6 +329,7 @@ fn session_from(
 
 /// Opens ChatGPT's sign-in in the browser and waits for the user to finish.
 pub async fn sign_in(host_id: &str, saved_client_id: Option<String>) -> Result<Session, String> {
+    let generation = SESSION_GENERATION.load(Ordering::SeqCst);
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:1455").await {
         Ok(listener) => listener,
         Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -304,7 +365,7 @@ pub async fn sign_in(host_id: &str, saved_client_id: Option<String>) -> Result<S
         .arg(url.as_str())
         .status()
         .map_err(|_| "Couldn’t open your browser.".to_string())?;
-    let callback = wait_for_callback(listener, cancel).await;
+    let callback = wait_for_callback(listener, cancel, &state).await;
     *CANCEL.lock().unwrap() = None;
     let callback = callback?;
     if callback.state != state {
@@ -340,7 +401,7 @@ pub async fn sign_in(host_id: &str, saved_client_id: Option<String>) -> Result<S
         .await
         .map_err(|_| "Couldn’t reach ChatGPT. Check your internet connection.".to_string())?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = token_body(response).await?;
     if !status.is_success() {
         return Err(if token_error(&body) == "invalid_grant" {
             "That sign-in expired. Please try again.".into()
@@ -354,6 +415,10 @@ pub async fn sign_in(host_id: &str, saved_client_id: Option<String>) -> Result<S
         Some(&nonce),
         None,
     )?;
+    let _guard = REFRESHING.lock().await;
+    if SESSION_GENERATION.load(Ordering::SeqCst) != generation {
+        return Err("Sign-in was cancelled.".into());
+    }
     save(&session)?;
     Ok(session)
 }
@@ -384,7 +449,7 @@ pub async fn access_token() -> Result<String, String> {
         .await
         .map_err(|_| "Couldn’t reach ChatGPT. Check your internet connection.".to_string())?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = token_body(response).await?;
     if !status.is_success() {
         let code = token_error(&body);
         if [
@@ -397,7 +462,7 @@ pub async fn access_token() -> Result<String, String> {
         ]
         .contains(&code.as_str())
         {
-            forget();
+            forget()?;
             return Err(
                 "Your ChatGPT sign-in has ended. Sign in again in Settings → Brain.".into(),
             );
@@ -416,21 +481,29 @@ pub async fn access_token() -> Result<String, String> {
     Ok(refreshed.access_token)
 }
 
-/// Revokes the refresh token, then forgets the session. Returns whether revocation was
-/// confirmed; the local sign-in is removed either way.
-pub async fn sign_out() -> bool {
-    let Some(session) = load() else { return true };
+/// Removes the local session and attempts remote refresh-token revocation. Returns
+/// an error if local removal fails, otherwise whether revocation was confirmed.
+pub async fn sign_out() -> Result<bool, String> {
+    SESSION_GENERATION.fetch_add(1, Ordering::SeqCst);
+    cancel_sign_in();
+    // Serialize with token refresh, so an in-flight refresh cannot restore a
+    // session after sign-out or Delete everything has removed it.
+    let _guard = REFRESHING.lock().await;
+    let session = load();
+    forget()?;
+    *MODELS.lock().unwrap() = None;
+    let Some(session) = session else {
+        return Ok(true);
+    };
     let confirmed = async {
-        let discovery: serde_json::Value = client()
-            .ok()?
-            .get(DISCOVERY)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let endpoint = discovery["revocation_endpoint"].as_str()?.to_string();
+        let discovery = crate::integrations::json_response(
+            client().ok()?.get(DISCOVERY).send().await,
+            "ChatGPT",
+            65_536,
+        )
+        .await
+        .ok()?;
+        let endpoint = revocation_endpoint(discovery["revocation_endpoint"].as_str()?)?;
         let response = client()
             .ok()?
             .post(endpoint)
@@ -446,8 +519,20 @@ pub async fn sign_out() -> bool {
     }
     .await
     .unwrap_or(false);
-    forget();
-    confirmed
+    Ok(confirmed)
+}
+
+/// Discovery may describe endpoints, but it cannot change the origin to which
+/// this app discloses a refresh token (or downgrade transport to plain HTTP).
+fn revocation_endpoint(raw: &str) -> Option<reqwest::Url> {
+    let endpoint = reqwest::Url::parse(raw).ok()?;
+    (endpoint.scheme() == "https"
+        && endpoint.host_str() == Some("auth.openai.com")
+        && endpoint.port_or_known_default() == Some(443)
+        && endpoint.username().is_empty()
+        && endpoint.password().is_none()
+        && endpoint.fragment().is_none())
+    .then_some(endpoint)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -497,10 +582,7 @@ pub async fn models() -> Result<Vec<ModelInfo>, String> {
         ));
     }
     let list = listed_models(
-        &response
-            .json()
-            .await
-            .map_err(|_| "ChatGPT sent an unreadable model list.")?,
+        &crate::integrations::json_response(Ok(response), "ChatGPT", 1_048_576).await?,
     );
     *MODELS.lock().unwrap() = Some((session, list.clone()));
     Ok(list)
@@ -560,7 +642,7 @@ pub fn chatgpt_cancel_sign_in() {
 pub async fn chatgpt_sign_out(
     state: tauri::State<'_, crate::controller::AppState>,
 ) -> Result<bool, String> {
-    let confirmed = sign_out().await;
+    let confirmed = sign_out().await?;
     state.audit(
         "chatgpt.signed_out",
         if confirmed {
@@ -570,11 +652,6 @@ pub async fn chatgpt_sign_out(
         },
     );
     Ok(confirmed)
-}
-
-#[tauri::command]
-pub async fn chatgpt_models() -> Result<Vec<ModelInfo>, String> {
-    models().await
 }
 
 #[cfg(test)]
@@ -632,6 +709,60 @@ mod tests {
     }
 
     #[test]
+    fn callbacks_reject_ambiguous_or_incomplete_credentials() {
+        for line in [
+            "GET //auth/callback?code=a&state=s HTTP/1.1",
+            "GET /auth/callback?code=a&state=s",
+            "GET /auth/callback?code=a&state=s HTTP/1.1 extra",
+            "GET /auth/callback?code=a&state=s&state=other HTTP/1.1",
+            "GET /auth/callback?code=a&code=b&state=s HTTP/1.1",
+            "GET /auth/callback?code=a&error=denied&state=s HTTP/1.1",
+            "GET /auth/callback?code=&state=s HTTP/1.1",
+            "GET /auth/callback?code=a&state= HTTP/1.1",
+        ] {
+            assert!(parse_callback(line).is_none(), "{line}");
+        }
+    }
+
+    #[tokio::test]
+    async fn foreign_callback_cannot_consume_the_pending_sign_in() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let pending = tokio::spawn(wait_for_callback(
+            listener,
+            Arc::new(AtomicBool::new(false)),
+            "expected",
+        ));
+        for state in ["foreign", "expected"] {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(format!("GET /auth/callback?code=abc&state={state} HTTP/1.1\r\nHost: {address}\r\n\r\n").as_bytes()).await.unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).await.unwrap();
+            assert!(reply.starts_with(if state == "expected" {
+                "HTTP/1.1 200"
+            } else {
+                "HTTP/1.1 404"
+            }));
+        }
+        assert_eq!(pending.await.unwrap().unwrap().state, "expected");
+    }
+
+    #[test]
+    fn revocation_cannot_send_refresh_tokens_to_another_origin() {
+        assert!(revocation_endpoint("https://auth.openai.com/oauth/revoke").is_some());
+        for endpoint in [
+            "http://auth.openai.com/oauth/revoke",
+            "https://evil.example/revoke",
+            "https://auth.openai.com.evil.example/revoke",
+            "https://auth.openai.com:8443/revoke",
+            "https://user@auth.openai.com/revoke",
+            "https://auth.openai.com/revoke#fragment",
+        ] {
+            assert!(revocation_endpoint(endpoint).is_none(), "{endpoint}");
+        }
+    }
+
+    #[test]
     fn id_tokens_must_match_this_sign_in() {
         let good = jwt(
             serde_json::json!({"iss": ISSUER, "aud": "oaiapp_1", "nonce": "n1", "exp": now() + 600, "sub": "user-1", "email": "sam@example.com"}),
@@ -659,6 +790,12 @@ mod tests {
             verify_id_token(&foreign, "oaiapp_1", "n1").is_err(),
             "issuer"
         );
+        let mut claims = serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1", "other-app"], "nonce": "n1", "exp": now() + 600, "sub": "u"});
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        claims["azp"] = "other-app".into();
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        claims["azp"] = "oaiapp_1".into();
+        assert!(verify_id_token(&jwt(claims), "oaiapp_1", "n1").is_ok());
     }
 
     #[test]
@@ -689,6 +826,20 @@ mod tests {
             ("a2", "r2", "user-1")
         );
         assert!(refreshed.expires_at > now() + 3500 && refreshed.plan_allowed());
+        for expiry in [i64::MAX, 0, -1] {
+            assert!(session_from(
+                &serde_json::json!({"access_token": "a2", "expires_in": expiry}),
+                "oaiapp_1",
+                None,
+                Some(&first)
+            )
+            .is_err());
+        }
+        for field in ["access_token", "refresh_token"] {
+            let mut response = serde_json::json!({"access_token": "a2", "refresh_token": "r2"});
+            response[field] = "".into();
+            assert!(session_from(&response, "oaiapp_1", None, Some(&first)).is_err());
+        }
         let without_plan = Session {
             scopes: vec!["openid".into()],
             ..first

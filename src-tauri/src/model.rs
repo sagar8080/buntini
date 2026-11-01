@@ -14,7 +14,10 @@ use crate::{
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,8 +277,8 @@ impl ModelHub {
             return Ok(());
         }
         match self.apple_status() {
-            Some((false, reason)) if reason == "unsupported" || reason == "missing" => Err("Voice needs macOS 26 for Apple speech recognition, or a local MLX Whisper model folder in Settings.".into()),
-            _ if !self.apple_helper.is_file() => Err("Voice needs a local MLX Whisper model folder in Settings.".into()),
+            Some((false, reason)) if reason == "unsupported" || reason == "missing" => Err("Voice needs macOS 26, which has Apple’s speech recognition.".into()),
+            _ if !self.apple_helper.is_file() => Err("Voice needs Buntini’s Apple helper, which this copy of Buntini doesn’t include. Reinstall Buntini to use voice.".into()),
             _ => Ok(()),
         }
     }
@@ -286,6 +289,9 @@ impl ModelHub {
         audio_path: &Path,
         cancel: Arc<AtomicBool>,
     ) -> Result<String, String> {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Task cancelled.".into());
+        }
         let request = if self.apple_speech(settings) {
             self.apple
                 .request(
@@ -313,6 +319,9 @@ impl ModelHub {
     where
         F: FnMut(String) + Send,
     {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Task cancelled.".into());
+        }
         self.ready(settings)?;
         payload["type"] = "generate".into();
         match backend(settings) {
@@ -374,7 +383,7 @@ impl ModelHub {
             .get()
             .ok_or("Cloud spending can’t be tracked right now, so the cloud model is paused.")?;
         let key = crate::web::credential(provider.id)?;
-        let (input_price, output_price) = (settings.cloud_input_price, settings.cloud_output_price);
+        let (input_price, output_price) = settings.cloud_prices();
         let estimate = cloud::price(cloud::estimate(&payload), input_price, output_price);
         let account = cloud::ledger_key(provider.id);
         let reservation = ledger
@@ -459,6 +468,47 @@ mod tests {
             whisper_model: String::new(),
             ..Settings::default()
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_generation_stops_before_credentials_or_model_preflight() {
+        let hub = ModelHub::new(PathBuf::new(), PathBuf::new());
+        for backend in ["apple", "mlx", "cloud"] {
+            for provider in ["anthropic", "openai", "gemini", "chatgpt"] {
+                let mut settings = settings(backend);
+                settings.cloud_provider = provider.into();
+                let error = hub
+                    .generate(
+                        &settings,
+                        serde_json::json!({"messages":[]}),
+                        Arc::new(AtomicBool::new(true)),
+                        |_| panic!("cancelled work cannot emit tokens"),
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(error, "Task cancelled.", "{backend}/{provider}");
+            }
+        }
+        assert!(hub.apple.status.lock().unwrap().starts_with("Not started"));
+        assert!(hub.mlx.status.lock().unwrap().starts_with("Not started"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_transcription_never_opens_a_model_or_audio_file() {
+        let hub = ModelHub::new(PathBuf::new(), PathBuf::new());
+        for backend in ["apple", "mlx"] {
+            let error = hub
+                .transcribe(
+                    &settings(backend),
+                    Path::new("/nonexistent/private-audio.wav"),
+                    Arc::new(AtomicBool::new(true)),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error, "Task cancelled.");
+        }
+        assert!(hub.apple.status.lock().unwrap().starts_with("Not started"));
+        assert!(hub.mlx.status.lock().unwrap().starts_with("Not started"));
     }
 
     #[test]

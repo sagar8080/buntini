@@ -1,0 +1,110 @@
+{
+  "externalNavigationBlocked": true,
+  "kind": "disposable_companion_startup_smoke",
+  "main": {
+    "appleWorkflow": {
+      "entry": "real bundled WebView IPC to production run_task; not a visual chat-button test",
+      "events": [
+        {
+          "state": "planning",
+          "taskId": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+          "type": "state"
+        },
+        {
+          "state": "thinking",
+          "taskId": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+          "type": "state"
+        },
+        {
+          "taskId": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+          "text": "Hello,\n\nThe office will be closing at 3 pm on November 12. Please submit your expenses by noon on November 11. If you need emergency support, you can reach out to extension 204.\n\nBest regards,\n[Your Name]",
+          "type": "delta"
+        },
+        {
+          "task": {
+            "answer": "Hello,\n\nThe office will be closing at 3 pm on November 12. Please submit your expenses by noon on November 11. If you need emergency support, you can reach out to extension 204.\n\nBest regards,\n[Your Name]",
+            "backend": "apple",
+            "cards": [],
+            "createdAt": "2026-10-29T21:29:33.827835+00:00",
+            "files": [],
+            "id": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+            "prices": [],
+            "prompt": "Rewrite this announcement in a warm concise tone without changing facts: The office closes at 3pm on November 12. Submit expenses by noon November 11. Emergency support is extension 204.",
+            "research": [],
+            "sources": [],
+            "state": "completed",
+            "touched": [
+              "activity"
+            ]
+          },
+          "taskId": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+          "type": "done"
+        }
+      ],
+      "passed": true,
+      "task": {
+        "answer": "Hello,\n\nThe office will be closing at 3 pm on November 12. Please submit your expenses by noon on November 11. If you need emergency support, you can reach out to extension 204.\n\nBest regards,\n[Your Name]",
+        "backend": "apple",
+        "cards": [],
+        "createdAt": "2026-10-29T21:29:33.827835+00:00",
+        "files": [],
+        "id": "33dcdc02-d5ed-40c7-b31f-2fb141a9dee9",
+        "prices": [],
+        "prompt": "Rewrite this announcement in a warm concise tone without changing facts: The office closes at 3pm on November 12. Submit expenses by noon November 11. Emergency support is extension 204.",
+        "research": [],
+        "sources": [],
+        "state": "completed",
+        "touched": [
+          "activity"
+        ]
+      }
+    },
+    "bootstrap": true,
+    "denialReason": "window.set_title not allowed. Permissions associated with this command: core:window:allow-set-title",
+    "emptyProfile": true,
+    "frontendMounted": true,
+    "location": "tauri://localhost",
+    "onboardingVisible": true,
+    "passed": true,
+    "personalAppAccess": false,
+    "state": "done",
+    "ungrantedWindowOperationDenied": true,
+    "windowReadsAndMutations": true
+  },
+  "nativeUrlAfterNavigationAttempt": "tauri://localhost",
+  "passed": true,
+  "popupsBlocked": true,
+  "untrustedView": {
+    "denied": "bootstrap not allowed on window \"smoke-untrusted\", webview \"smoke-untrusted\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: main, permission: companion-ui",
+    "passed": true,
+    "state": "done"
+  },
+  "process_exit_code": 0,
+  "disposable_identifier": "app.buntini.smoke.fdba12a556704365a52131ce08d598b8",
+  "binary_sha256": "85432da286ea2c41fd4e89b48a75edfeecedcdc4b0b6600b03d91d51016bb37e",
+  "production_security_source_sha256": "e665239d4d9d5f03de9797aab6171ea409d534dbd4cc51be59b1d11664168af9",
+  "production_capability_sha256": "15ccf9f4d3a0bc2a148e5aed8e2c871948e9740a41353f78fbb67322ce3b6df5",
+  "production_permission_manifest_sha256": "26edac30969e4953d94067ab9d4be9834e1ce96e9a93a81af085f266238b3525",
+  "bundled_apple_helper_sha256": "728185d4b2a126d612fa7c1a8a99db9b26491dac55025cb65af139750377c904",
+  "bundled_apple_helper_source_sha256": "fefa86d4cd5dcd1a497a309b888ffbf353c74387a0e678e53bd30fdef9c0d5b3",
+  "isolation": [
+    "Separate source tree, Cargo target and app bundle",
+    "Unique compile-time Keychain/migration namespaces",
+    "Temporary data/cache",
+    "Desktop awareness/roaming disabled",
+    "Nonpersistent WebViews",
+    "No microphone, personal apps, paid providers or outbound API calls; Apple Foundation Models used locally"
+  ],
+  "unchanged_boundaries": [
+    "Production IPC command handlers",
+    "Production explicit app-command permission allowlist",
+    "Production main capability",
+    "Production main navigation/popup/download guards",
+    "Bundled frontend production assets"
+  ],
+  "limitations": [
+    "Separate debug binary with custom-protocol; not the signed release candidate",
+    "Observer and storage isolation are injected only into the disposable copy",
+    "Does not establish fresh-Mac permissions, notarization or Gatekeeper acceptance"
+  ]
+}

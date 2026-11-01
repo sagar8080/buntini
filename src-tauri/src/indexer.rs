@@ -6,8 +6,6 @@ use crate::{local, types::FileHit};
 use rusqlite::{params, Connection};
 use std::{
     collections::HashSet,
-    fs::File,
-    io::Read,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -46,6 +44,12 @@ pub struct IndexCandidate {
     pub path: String,
 }
 
+/// How often a paused rebuild looks again whether it may carry on.
+#[cfg(not(test))]
+const PAUSE_STEP: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(test)]
+const PAUSE_STEP: std::time::Duration = std::time::Duration::from_millis(20);
+
 fn check_cancel(cancel: &Arc<AtomicBool>) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("Task cancelled.".into())
@@ -58,60 +62,31 @@ fn visible(entry: &DirEntry) -> bool {
     entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
 }
 
-fn text_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-        "txt"
-            | "md"
-            | "markdown"
-            | "csv"
-            | "tsv"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "log"
-            | "rs"
-            | "py"
-            | "js"
-            | "ts"
-            | "tsx"
-            | "jsx"
-            | "html"
-            | "css"
-    )
-}
-
 fn current_root(root: &Path) -> bool {
     root.is_absolute() && root.canonicalize().ok().as_deref() == Some(root)
 }
 
-/// Unsupported, binary, invalid UTF-8, or oversized files remain searchable by
-/// filename, but their contents are never read beyond the fixed size limit.
-fn read_content(file: &mut File, path: &Path, length: u64) -> String {
-    if !text_file(path) || length > local::MAX_READ {
-        return String::new();
-    }
-    let mut bytes = Vec::with_capacity(length as usize);
-    if file
-        .take(local::MAX_READ + 1)
-        .read_to_end(&mut bytes)
-        .is_err()
-        || bytes.len() > local::MAX_READ as usize
-        || bytes.contains(&0)
-    {
-        return String::new();
-    }
-    String::from_utf8(bytes).unwrap_or_default()
+/// Collection is pure filesystem work and belongs in spawn_blocking, without holding
+/// the DB lock. Documents are read through the Apple helper (`local::read_content`);
+/// text past `local::MAX_READ` is cut there, so every document fits the same per-file
+/// limit.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn rebuild(
+    roots: &[String],
+    documents: &local::Documents,
+    cancel: &Arc<AtomicBool>,
+) -> Result<IndexBuild, String> {
+    rebuild_yielding(roots, documents, cancel, &|| false)
 }
 
-/// Run only after the user explicitly requests a rebuild. Collection is pure
-/// filesystem work and belongs in spawn_blocking, without holding the DB lock.
-pub fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild, String> {
+/// Like `rebuild`, waiting before each file while `pause` says the user needs the Mac
+/// (a chat running, or on battery): background work steps aside, then carries on.
+pub fn rebuild_yielding(
+    roots: &[String],
+    documents: &local::Documents,
+    cancel: &Arc<AtomicBool>,
+    pause: &dyn Fn() -> bool,
+) -> Result<IndexBuild, String> {
     let mut build = IndexBuild {
         docs: Vec::new(),
         scanned_entries: 0,
@@ -137,6 +112,9 @@ pub fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild,
             .into_iter()
             .filter_entry(visible)
         {
+            while pause() && !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(PAUSE_STEP);
+            }
             check_cancel(cancel)?;
             if build.scanned_entries >= MAX_ENTRIES || build.docs.len() >= MAX_DOCUMENTS {
                 build.truncated = true;
@@ -171,14 +149,7 @@ pub fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild,
                     continue;
                 }
             };
-            let metadata = match file.metadata() {
-                Ok(metadata) => metadata,
-                Err(_) => {
-                    build.skipped += 1;
-                    continue;
-                }
-            };
-            let content = read_content(&mut file, entry.path(), metadata.len());
+            let content = local::read_content(&mut file, entry.path(), documents);
             if build.content_bytes.saturating_add(content.len()) > MAX_CONTENT_BYTES {
                 build.truncated = true;
                 break 'roots;
@@ -265,18 +236,22 @@ pub fn replace_index(
         .len())
 }
 
-fn terms(query: &str) -> Result<Vec<String>, String> {
+fn terms(query: &str) -> Result<Vec<(String, Option<String>)>, String> {
     if query.trim().is_empty() || query.len() > 512 {
         return Err("Enter a file query of up to 512 characters.".into());
     }
     let mut result = Vec::new();
-    for word in query
+    let all: Vec<&str> = query
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty())
-    {
+        .collect();
+    // A question is matched by its content words, as the live search does.
+    let content: Vec<&str> = all.iter().copied().filter(|word| !local::question_word(word)).collect();
+    for word in if content.is_empty() { all } else { content } {
+        let alternative = local::singular_search_term(word);
         let word = word.to_lowercase();
-        if !result.contains(&word) {
-            result.push(word);
+        if !result.iter().any(|(existing, _)| existing == &word) {
+            result.push((word, alternative));
         }
         if result.len() > 32 {
             return Err("Use up to 32 search words for the file index.".into());
@@ -288,15 +263,24 @@ fn terms(query: &str) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
-fn matches_terms(name: &str, content: &str, words: &[String]) -> bool {
+fn matches_terms(
+    name: &str,
+    content: &str,
+    words: &[(String, Option<String>)],
+    allow_alternatives: bool,
+) -> bool {
     let name = name.to_lowercase();
     let content = content.to_lowercase();
-    words.iter().all(|term| {
-        name.split(|c: char| !c.is_alphanumeric())
-            .any(|word| word.starts_with(term))
-            || content
-                .split(|c: char| !c.is_alphanumeric())
-                .any(|word| word.starts_with(term))
+    words.iter().all(|(term, alternative)| {
+        let matches = |word: &str| {
+            word.starts_with(term)
+                || (allow_alternatives
+                    && alternative
+                        .as_ref()
+                        .is_some_and(|term| word.starts_with(term)))
+        };
+        name.split(|c: char| !c.is_alphanumeric()).any(matches)
+            || content.split(|c: char| !c.is_alphanumeric()).any(matches)
     })
 }
 
@@ -310,7 +294,13 @@ pub fn indexed_candidates(
     let words = terms(query)?;
     let expression = words
         .iter()
-        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+        .map(|(term, alternative)| {
+            let literal = format!("\"{}\"*", term.replace('"', "\"\""));
+            match alternative {
+                Some(alternative) => format!("({literal} OR \"{alternative}\"*)"),
+                None => literal,
+            }
+        })
         .collect::<Vec<_>>()
         .join(" AND ");
     let approved = roots.iter().map(String::as_str).collect::<HashSet<_>>();
@@ -340,12 +330,30 @@ pub fn verify_candidates(
     roots: &[String],
     candidates: &[IndexCandidate],
     query: &str,
+    documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
+    verify_candidate_group(roots, candidates, query, documents, &|_| None, cancel).map(|group| group.hits)
+}
+
+/// Candidates are reread now, so a document's excerpt is its current text, not what
+/// the index stored. Unchanged documents come from `local::read_content`'s memory.
+///
+/// A document this search had no time to read again is matched on the text the index
+/// stored (`stored`), with no excerpt, rather than dropped as if it didn't match.
+pub(crate) fn verify_candidate_group(
+    roots: &[String],
+    candidates: &[IndexCandidate],
+    query: &str,
+    documents: &local::Documents,
+    stored: &dyn Fn(&IndexCandidate) -> Option<String>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<local::MatchGroup<FileHit>, String> {
     let words = terms(query)?;
     let approved = roots.iter().map(String::as_str).collect::<HashSet<_>>();
     let mut paths = HashSet::new();
     let mut hits = Vec::new();
+    let mut fallback = Vec::new();
     for candidate in candidates.iter().take(MAX_DOCUMENTS) {
         check_cancel(cancel)?;
         if !approved.contains(candidate.root.as_str()) || !paths.insert(candidate.path.as_str()) {
@@ -367,18 +375,34 @@ pub fn verify_candidates(
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let content = read_content(&mut file, path, metadata.len());
-        if !matches_terms(name, &content, &words) {
+        let (content, unread) = match local::read_text(&mut file, path, documents) {
+            Some(content) => (content, None),
+            None if documents.reads_documents() => (String::new(), stored(candidate)),
+            None => (String::new(), None),
+        };
+        let matched = unread.as_deref().unwrap_or(&content);
+        let exact = matches_terms(name, matched, &words, false);
+        if !exact
+            && (!hits.is_empty()
+                || fallback.len() >= MAX_HITS
+                || !matches_terms(name, matched, &words, true))
+        {
             continue;
         }
         let mut excerpt = content
             .lines()
             .filter(|line| {
-                matches_terms("", line, &words)
-                    || words.iter().any(|term| {
+                matches_terms("", line, &words, !exact)
+                    || words.iter().any(|(term, alternative)| {
                         line.to_lowercase()
                             .split(|c: char| !c.is_alphanumeric())
-                            .any(|word| word.starts_with(term))
+                            .any(|word| {
+                                word.starts_with(term)
+                                    || (!exact
+                                        && alternative
+                                            .as_ref()
+                                            .is_some_and(|term| word.starts_with(term)))
+                            })
                     })
             })
             .take(3)
@@ -398,7 +422,7 @@ pub fn verify_candidates(
                 .take(600)
                 .collect();
         }
-        hits.push(FileHit {
+        let hit = FileHit {
             name: name.into(),
             path: candidate.path.clone(),
             size: metadata.len(),
@@ -409,31 +433,78 @@ pub fn verify_candidates(
                 .map(|time| time.to_rfc3339())
                 .unwrap_or_default(),
             excerpt: (!excerpt.is_empty()).then_some(excerpt),
-        });
+        };
+        if exact {
+            fallback.clear();
+            hits.push(hit);
+        } else {
+            fallback.push(hit);
+        }
         if hits.len() == MAX_HITS {
             break;
         }
     }
     check_cancel(cancel)?;
-    Ok(hits)
+    Ok(local::prefer_literal(hits, fallback))
 }
 
 pub fn query_index(
     db: &Connection,
     roots: &[String],
     query: &str,
+    documents: &local::Documents,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<FileHit>, String> {
     check_cancel(cancel)?;
     let candidates = indexed_candidates(db, roots, query)?;
-    verify_candidates(roots, &candidates, query, cancel)
+    verify_candidates(roots, &candidates, query, documents, cancel)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Plain-text index tests; document tests pass their own reader.
+    fn rebuild(roots: &[String], cancel: &Arc<AtomicBool>) -> Result<IndexBuild, String> {
+        super::rebuild(roots, &local::Documents::none(), cancel)
+    }
+    fn verify_candidates(
+        roots: &[String],
+        candidates: &[IndexCandidate],
+        query: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Vec<FileHit>, String> {
+        super::verify_candidates(roots, candidates, query, &local::Documents::none(), cancel)
+    }
+    fn query_index(
+        db: &Connection,
+        roots: &[String],
+        query: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Vec<FileHit>, String> {
+        super::query_index(db, roots, query, &local::Documents::none(), cancel)
+    }
     fn token() -> Arc<AtomicBool> {
         Arc::new(AtomicBool::new(false))
+    }
+    #[test]
+    fn a_background_rebuild_waits_while_the_user_needs_the_mac() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("a.txt"), "alpha").unwrap();
+        let roots = vec![root(folder.path())];
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        // Busy for the first few looks, then free.
+        let pause = || asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 3;
+        let build = super::rebuild_yielding(&roots, &local::Documents::none(), &token(), &pause).unwrap();
+        assert_eq!(build.docs.len(), 1);
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst) > 3, "it waited, then carried on");
+        // Stopping it while it waits ends it.
+        let cancel = token();
+        let stopping = cancel.clone();
+        let busy = move || {
+            stopping.store(true, std::sync::atomic::Ordering::SeqCst);
+            true
+        };
+        assert!(super::rebuild_yielding(&roots, &local::Documents::none(), &cancel, &busy).is_err());
     }
     fn database() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -486,6 +557,90 @@ mod tests {
     }
 
     #[test]
+    fn plural_candidates_are_fresh_and_exact_results_take_precedence() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("offer.txt"),
+            "ACME-6279 quote total 680 including assembly",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.path().join("name.txt"),
+            "Atlas Polaris BUS AcmeOps ACME-6279s",
+        )
+        .unwrap();
+        let roots = vec![root(folder.path())];
+        let build = rebuild(&roots, &token()).unwrap();
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let hits = query_index(&db, &roots, "ACME-6279 Quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0]
+            .excerpt
+            .as_deref()
+            .unwrap()
+            .contains("680 including assembly"));
+        assert!(query_index(&db, &roots, "ACME-6280 Quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &[], "quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &roots, "quotes", &Arc::new(AtomicBool::new(true))).is_err());
+        for name in ["Atlas", "Polaris", "BUS", "AcmeOps", "ACME-6279s"] {
+            let hits = query_index(&db, &roots, name, &token()).unwrap();
+            assert_eq!(hits.len(), 1, "{name}");
+            assert_eq!(hits[0].name, "name.txt");
+        }
+        // Reopening rejects a stale singular match, even though it is still
+        // eligible in the stored FTS candidate set.
+        std::fs::write(folder.path().join("offer.txt"), "unrelated replacement").unwrap();
+        assert!(query_index(&db, &roots, "quotes", &token())
+            .unwrap()
+            .is_empty());
+        assert!(query_index(&db, &[], "quotes", &token())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn exact_candidates_after_forty_plural_alternatives_are_not_discarded() {
+        let folder = tempfile::tempdir().unwrap();
+        let roots = vec![root(folder.path())];
+        let mut candidates = Vec::new();
+        for index in 0..MAX_HITS + 5 {
+            let path = Path::new(&roots[0]).join(format!("offer-{index}.txt"));
+            std::fs::write(&path, "vendor quote total 680").unwrap();
+            candidates.push(IndexCandidate {
+                root: roots[0].clone(),
+                path: path.to_string_lossy().into_owned(),
+            });
+        }
+        assert_eq!(
+            verify_candidates(&roots, &candidates, "quotes", &token())
+                .unwrap()
+                .len(),
+            MAX_HITS
+        );
+        let path = Path::new(&roots[0]).join("literal.txt");
+        std::fs::write(&path, "vendor quotes total 745").unwrap();
+        candidates.push(IndexCandidate {
+            root: roots[0].clone(),
+            path: path.to_string_lossy().into_owned(),
+        });
+        let hits = verify_candidates(&roots, &candidates, "quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "literal.txt");
+
+        let build = rebuild(&roots, &token()).unwrap();
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let hits = query_index(&db, &roots, "quotes", &token()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "literal.txt");
+    }
+
+    #[test]
     fn revoked_deleted_and_changed_files_never_return_stored_private_text() {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("notes.txt");
@@ -533,13 +688,17 @@ mod tests {
             folder.path().join("visible.txt"),
         )
         .unwrap();
-        assert!(query_index(&db, &roots, "needle", &token())
-            .unwrap()
-            .is_empty());
+        for query in ["needle", "needles"] {
+            assert!(query_index(&db, &roots, query, &token())
+                .unwrap()
+                .is_empty());
+        }
         db.execute("INSERT INTO file_index(root,path,name,content) VALUES(?1,?2,'private.txt','needle outside')", params![roots[0], outside.path().join("private.txt").to_str().unwrap()]).unwrap();
-        assert!(query_index(&db, &roots, "needle", &token())
-            .unwrap()
-            .is_empty());
+        for query in ["needle", "needles"] {
+            assert!(query_index(&db, &roots, query, &token())
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
@@ -606,6 +765,49 @@ mod tests {
         let build = rebuild(&[root(nested.path())], &token()).unwrap();
         assert!(build.truncated);
         assert!(build.docs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn documents_are_indexed_by_their_text_and_reread_when_found() {
+        use std::os::unix::fs::PermissionsExt;
+        let tools = tempfile::tempdir().unwrap();
+        let helper = tools.path().join("buntini-fm");
+        // Answers with the piped bytes as the document's text.
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nbody=$(cat)\nprintf '{\"text\":\"%s\",\"truncated\":false}\\n' \"$body\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let pdf = folder.path().join("statement.pdf");
+        std::fs::write(&pdf, "Deposit returned 1200").unwrap();
+        let roots = vec![root(folder.path())];
+        let documents = local::Documents::for_index(&helper, &token());
+        let build = super::rebuild(&roots, &documents, &token()).unwrap();
+        assert_eq!(build.docs[0].content, "Deposit returned 1200");
+        let mut db = database();
+        replace_index(&mut db, &roots, &build.docs).unwrap();
+        let search = local::Documents::for_search(&helper, &token());
+        let hits = super::query_index(&db, &roots, "deposit", &search, &token()).unwrap();
+        assert_eq!(hits[0].excerpt.as_deref(), Some("Deposit returned 1200"));
+        // The stored text only picks candidates: without a fresh read there is no match.
+        assert!(query_index(&db, &roots, "deposit", &token()).unwrap().is_empty());
+        std::fs::write(&pdf, "Deposit withheld 300").unwrap();
+        let hits = super::query_index(&db, &roots, "deposit", &search, &token()).unwrap();
+        assert_eq!(hits[0].excerpt.as_deref(), Some("Deposit withheld 300"));
+        // A search with no reads left still finds it by the text the index stored, and
+        // shows no excerpt it didn't read.
+        std::fs::write(&pdf, "Deposit returned 1200 again").unwrap();
+        let candidates = indexed_candidates(&db, &roots, "deposit").unwrap();
+        let spent = local::Documents::spent(&helper, &token());
+        let stored = |candidate: &IndexCandidate| {
+            db.query_row("SELECT content FROM file_index WHERE path=?1", [&candidate.path], |row| row.get(0)).ok()
+        };
+        let found = verify_candidate_group(&roots, &candidates, "deposit", &spent, &stored, &token()).unwrap();
+        assert_eq!(found.hits.len(), 1);
+        assert!(found.hits[0].excerpt.is_none());
     }
 
     #[test]

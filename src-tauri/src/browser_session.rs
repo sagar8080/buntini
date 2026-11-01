@@ -166,7 +166,7 @@ fn cancelled(cancel: &AtomicBool, did_read: bool, navigated: bool) -> Result<(),
 }
 
 pub fn search_url(query: &str) -> Result<reqwest::Url, String> {
-    if query.trim().is_empty() || query.len() > 2000 || query.chars().any(char::is_control) {
+    if query.trim().is_empty() || query.chars().count() > 2000 || query.chars().any(char::is_control) {
         return Err("Enter a web query of up to 2,000 characters.".into());
     }
     let mut url = reqwest::Url::parse("https://www.google.com/search").unwrap();
@@ -388,20 +388,16 @@ async fn control(
     destination: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<ControlReply, String> {
-    let mut cmd = tokio::process::Command::new("/usr/bin/osascript");
-    cmd.arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(CONTROL)
-        .args([
-            mode,
-            &target.bundle_id,
-            window,
-            tab,
-            expected,
-            destination,
-            if mode == "snapshot" { READ_DOM } else { "" },
-        ]);
+    let mut cmd = crate::actions::osascript_command("JavaScript", CONTROL);
+    cmd.args([
+        mode,
+        &target.bundle_id,
+        window,
+        tab,
+        expected,
+        destination,
+        if mode == "snapshot" { READ_DOM } else { "" },
+    ]);
     // A cold browser launch or the initial macOS Automation prompt needs more
     // time than an already-owned tab operation. Cancellation still kills the
     // helper, and an unknown creation outcome is never retried automatically.
@@ -882,6 +878,8 @@ mod tests {
         );
         assert!(search_url("bad\nquery").is_err());
         assert!(search_url(&"x".repeat(2001)).is_err());
+        // The limit is in characters, as the lookup's validation and approval count them.
+        assert!(search_url(&"検索".repeat(450)).is_ok());
     }
     #[test]
     fn stable_identity_and_expected_selected_url_are_required() {

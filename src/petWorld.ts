@@ -16,7 +16,8 @@ export interface World {
   perched: boolean;
 }
 export interface Surface { y: number; minX: number; maxX: number; perch?: number }
-export interface Move { kind: 'walk' | 'jump' | 'fall'; x: number; y: number; perch?: number }
+/** `dash`: a burst of zoomies, three times the usual speed. */
+export interface Move { kind: 'walk' | 'jump' | 'fall'; x: number; y: number; perch?: number; dash?: boolean }
 
 /** Space between the window's bottom edge and the pet's paws. */
 export const footGap = (scale: number) => 16 * scale;
@@ -91,6 +92,11 @@ export function chooseMove(world: World, scale: number, motion: PetMotion, rando
     return Math.abs(x - world.pet.x) > 40 ? { kind: 'walk', x, y: floor.y } : { kind: 'jump', x, y: top.y, perch: top.perch };
   }]);
   if (place === 'window') options.push([1.5, () => ({ kind: 'jump', x: clamp(world.pet.x + (random() < .5 ? -120 : 120), floor.minX, floor.maxX), y: floor.y })]);
+  // Zoomies: now and then a playful cat sprints the length of where it stands.
+  if (motion === 'playful') options.push([.7, () => {
+    const far = world.pet.x - surface.minX > surface.maxX - world.pet.x ? surface.minX : surface.maxX;
+    return { kind: 'walk', x: clamp(far + (random() - .5) * 80, surface.minX, surface.maxX), y: surface.y, perch: surface.perch, dash: true };
+  }]);
   if (motion === 'playful' && cursorX !== undefined) options.push([2, () => ({ kind: 'walk', x: clamp(cursorX - world.pet.width / 2, surface.minX, surface.maxX), y: surface.y, perch: surface.perch })]);
   const total = options.reduce((sum, [weight]) => sum + weight, 0);
   let roll = random() * total;

@@ -1,0 +1,47 @@
+{
+  "kind": "packaged_apple_helper_smoke",
+  "bundle": "/Users/sagar/.cargo-target/release/bundle/macos/Buntini.app",
+  "helper_sha256": "52244e25b35b7e7e5aac60da7051fbbaac773de3d5a9332fa443c6f7599c143d",
+  "tool_catalog_sha256": "42500f2536fab1043ccaf9c4a53e11a81b9c8eb489f34e76d343302c50a1ae3f",
+  "scope": "Local Apple model only; proposed tool is never executed; no personal apps, microphone or Keychain access.",
+  "contracts": {
+    "exit_code": 0,
+    "stdout": "{\"check\":\"contracts\",\"ok\":true,\"assertions\":75}"
+  },
+  "ready": {
+    "backend": "apple",
+    "type": "ready",
+    "model_loaded": true,
+    "id": null,
+    "protocol": 1
+  },
+  "ping": {
+    "reason": "available",
+    "id": "smoke-ping",
+    "protocol": 1,
+    "backend": "apple",
+    "model_loaded": true,
+    "available": true,
+    "type": "pong"
+  },
+  "routing": {
+    "passed": true,
+    "tool": {
+      "id": "smoke-route",
+      "arguments": {},
+      "name": "system_info",
+      "type": "tool_call"
+    },
+    "executed": false
+  },
+  "streaming": {
+    "passed": true,
+    "text": "Hello, I'm here to assist you. How can I help you today?",
+    "token_events": 2
+  },
+  "passed": true,
+  "evidence_recorded_at": "2026-10-29T17:18:51.319840+00:00",
+  "smoke_tooling_sha256": {
+    "scripts/smoke_packaged_helper.py": "3bfde5ea330dfca41ad7a7030c6d9ab6eb5675a6bb713831f717ded896525a45"
+  }
+}

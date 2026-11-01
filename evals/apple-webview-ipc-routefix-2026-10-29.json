@@ -1,0 +1,110 @@
+{
+  "externalNavigationBlocked": true,
+  "kind": "disposable_companion_startup_smoke",
+  "main": {
+    "appleWorkflow": {
+      "entry": "real bundled WebView IPC to production run_task; not a visual chat-button test",
+      "events": [
+        {
+          "state": "planning",
+          "taskId": "213657eb-f076-4320-978a-8c7975859e72",
+          "type": "state"
+        },
+        {
+          "state": "thinking",
+          "taskId": "213657eb-f076-4320-978a-8c7975859e72",
+          "type": "state"
+        },
+        {
+          "taskId": "213657eb-f076-4320-978a-8c7975859e72",
+          "text": "**Here is the announcement rewritten in a warm and concise tone:**\n\nGood morning team,\n\nAs we near the end of October, I wanted to remind you that the office will be closing at 3 pm on November 12. Please make sure to submit all your expenses by noon on November 11. If you need any emergency assistance, don't hesitate to reach out to extension 204.\n\nThank you for your hard work and dedication.\n\nBest regards,\n\n[Your Name]",
+          "type": "delta"
+        },
+        {
+          "task": {
+            "answer": "**Here is the announcement rewritten in a warm and concise tone:**\n\nGood morning team,\n\nAs we near the end of October, I wanted to remind you that the office will be closing at 3 pm on November 12. Please make sure to submit all your expenses by noon on November 11. If you need any emergency assistance, don't hesitate to reach out to extension 204.\n\nThank you for your hard work and dedication.\n\nBest regards,\n\n[Your Name]",
+            "backend": "apple",
+            "cards": [],
+            "createdAt": "2026-10-29T19:04:51.759469+00:00",
+            "files": [],
+            "id": "213657eb-f076-4320-978a-8c7975859e72",
+            "prices": [],
+            "prompt": "Rewrite this announcement in a warm concise tone without changing facts: The office closes at 3pm on November 12. Submit expenses by noon November 11. Emergency support is extension 204.",
+            "research": [],
+            "sources": [],
+            "state": "completed",
+            "touched": [
+              "activity"
+            ]
+          },
+          "taskId": "213657eb-f076-4320-978a-8c7975859e72",
+          "type": "done"
+        }
+      ],
+      "passed": true,
+      "task": {
+        "answer": "**Here is the announcement rewritten in a warm and concise tone:**\n\nGood morning team,\n\nAs we near the end of October, I wanted to remind you that the office will be closing at 3 pm on November 12. Please make sure to submit all your expenses by noon on November 11. If you need any emergency assistance, don't hesitate to reach out to extension 204.\n\nThank you for your hard work and dedication.\n\nBest regards,\n\n[Your Name]",
+        "backend": "apple",
+        "cards": [],
+        "createdAt": "2026-10-29T19:04:51.759469+00:00",
+        "files": [],
+        "id": "213657eb-f076-4320-978a-8c7975859e72",
+        "prices": [],
+        "prompt": "Rewrite this announcement in a warm concise tone without changing facts: The office closes at 3pm on November 12. Submit expenses by noon November 11. Emergency support is extension 204.",
+        "research": [],
+        "sources": [],
+        "state": "completed",
+        "touched": [
+          "activity"
+        ]
+      }
+    },
+    "bootstrap": true,
+    "denialReason": "window.set_title not allowed. Permissions associated with this command: core:window:allow-set-title",
+    "emptyProfile": true,
+    "frontendMounted": true,
+    "location": "tauri://localhost",
+    "onboardingVisible": true,
+    "passed": true,
+    "personalAppAccess": false,
+    "state": "done",
+    "ungrantedWindowOperationDenied": true,
+    "windowReadsAndMutations": true
+  },
+  "nativeUrlAfterNavigationAttempt": "tauri://localhost",
+  "passed": true,
+  "popupsBlocked": true,
+  "untrustedView": {
+    "denied": "bootstrap not allowed on window \"smoke-untrusted\", webview \"smoke-untrusted\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: main, permission: companion-ui",
+    "passed": true,
+    "state": "done"
+  },
+  "process_exit_code": 0,
+  "disposable_identifier": "app.buntini.smoke.6eff1c7eed0440119d14f58ac7f4a4a2",
+  "binary_sha256": "c72c610c54ce8c5f1e5a4cb934d917b9a68835f16431c7bdd99a519ba5d9760e",
+  "production_security_source_sha256": "e665239d4d9d5f03de9797aab6171ea409d534dbd4cc51be59b1d11664168af9",
+  "production_capability_sha256": "15ccf9f4d3a0bc2a148e5aed8e2c871948e9740a41353f78fbb67322ce3b6df5",
+  "production_permission_manifest_sha256": "26edac30969e4953d94067ab9d4be9834e1ce96e9a93a81af085f266238b3525",
+  "bundled_apple_helper_sha256": "7a51656a21b547e4de2c4da61cbe841f507cedfee5b4bdd42eed3aed1dada618",
+  "bundled_apple_helper_source_sha256": "9f7071c8a1a43ebb2e07159f731d231d3fe27fdbca8338e66070616e4c512bc5",
+  "isolation": [
+    "Separate source tree, Cargo target and app bundle",
+    "Unique compile-time Keychain/migration namespaces",
+    "Temporary data/cache",
+    "Desktop awareness/roaming disabled",
+    "Nonpersistent WebViews",
+    "No microphone, personal apps, paid providers or outbound API calls; Apple Foundation Models used locally"
+  ],
+  "unchanged_boundaries": [
+    "Production IPC command handlers",
+    "Production explicit app-command permission allowlist",
+    "Production main capability",
+    "Production main navigation/popup/download guards",
+    "Bundled frontend production assets"
+  ],
+  "limitations": [
+    "Separate debug binary with custom-protocol; not the signed release candidate",
+    "Observer and storage isolation are injected only into the disposable copy",
+    "Does not establish fresh-Mac permissions, notarization or Gatekeeper acceptance"
+  ]
+}

@@ -217,6 +217,37 @@ mod tests {
     }
 
     #[test]
+    fn a_my_day_turn_is_not_shared_without_calendar_permission() {
+        let touched: Vec<&str> = crate::skills::day::shares(
+            &crate::brief::Day {
+                events: Some(vec![("09:00".into(), "Dentist".into())]),
+                reminders: None,
+                calendar_allowed: true,
+                reminders_allowed: false,
+                calendar_coverage: None,
+                reminders_coverage: None,
+                mail: Some(Default::default()),
+                mail_allowed: true,
+                mail_skipped: false,
+            },
+            false,
+        )
+        .into_iter()
+        .map(Share::id)
+        .collect();
+        assert_eq!(touched, ["calendar", "mail"]);
+        let day = turn("1", "2026-10-21T08:00:00Z", "my day", "Dentist at 9.", &touched);
+        let mut settings = Settings {
+            external_shares: vec!["history".into(), "mail".into()],
+            ..Settings::default()
+        };
+        assert!(!shareable(&day, Locality::External, &settings));
+        assert!(history(&[day.clone()], None, 100, Locality::External, &settings).is_empty());
+        settings.external_shares.push("calendar".into());
+        assert!(shareable(&day, Locality::External, &settings));
+    }
+
+    #[test]
     fn history_inherits_only_the_categories_of_included_turns() {
         let turns = vec![
             turn(

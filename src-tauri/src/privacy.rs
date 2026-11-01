@@ -35,10 +35,18 @@ pub enum Share {
     Music,
     /// Open browser tabs and the page showing in Safari.
     Browser,
+    /// Text selected and the window in front when Buntini opens ("this").
+    Selection,
+    /// Names, emails and phone numbers from Contacts.
+    Contacts,
+    /// The names of the user's shortcuts in the Shortcuts app.
+    Shortcuts,
+    /// What tools the user added (local MCP servers) return. Untrusted evidence.
+    Connectors,
 }
 
 impl Share {
-    pub const ALL: [Share; 10] = [
+    pub const ALL: [Share; 14] = [
         Share::Activity,
         Share::System,
         Share::Files,
@@ -49,6 +57,10 @@ impl Share {
         Share::Notes,
         Share::Music,
         Share::Browser,
+        Share::Selection,
+        Share::Contacts,
+        Share::Shortcuts,
+        Share::Connectors,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -62,6 +74,10 @@ impl Share {
             Share::Notes => "notes",
             Share::Music => "music",
             Share::Browser => "browser",
+            Share::Selection => "selection",
+            Share::Contacts => "contacts",
+            Share::Shortcuts => "shortcuts",
+            Share::Connectors => "tools",
         }
     }
 }
@@ -76,7 +92,7 @@ pub fn allows(locality: Locality, settings: &Settings, share: Share) -> bool {
 pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     for (index, id) in shares.iter().enumerate() {
         if !Share::ALL.iter().any(|share| share.id() == id) || shares[..index].contains(id) {
-            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music or browser at most once each.".into());
+            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, browser, selection, contacts, shortcuts or tools at most once each.".into());
         }
     }
     Ok(())
@@ -319,6 +335,23 @@ mod tests {
         assert!(validate_shares(&["files".into(), "history".into()]).is_ok());
         assert!(validate_shares(&["files".into(), "files".into()]).is_err());
         assert!(validate_shares(&["passwords".into()]).is_err());
+        assert!(validate_shares(&["contacts".into()]).is_ok());
+    }
+
+    #[test]
+    fn contacts_need_their_own_external_share() {
+        let mut settings = Settings::default();
+        assert!(allows(Locality::OnDevice, &settings, Share::Contacts));
+        // Allowing mail, history and everything else still keeps the address book here.
+        settings.external_shares = Share::ALL
+            .iter()
+            .filter(|share| **share != Share::Contacts)
+            .map(|share| share.id().to_string())
+            .collect();
+        assert!(allows(Locality::External, &settings, Share::Mail));
+        assert!(!allows(Locality::External, &settings, Share::Contacts));
+        settings.external_shares.push("contacts".into());
+        assert!(allows(Locality::External, &settings, Share::Contacts));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Offline voice setup
 
-Voice uses push-to-talk: capture ends when you release the microphone control. The local native helper writes a bounded 16 kHz mono PCM16 WAV, the worker optionally checks speech presence with Silero ONNX, and MLX Whisper transcribes it. Audio stays on this Mac. The app never installs packages or downloads models.
+This page covers the Whisper fallback. On macOS 26 Buntini first uses Apple's live on-device recognition, which needs none of this; Whisper is used when that isn't available and a local Whisper model is configured. In the fallback, capture ends when you release the microphone control or, after a tap, when you go quiet after speaking. The local native helper writes a bounded 16 kHz mono PCM16 WAV, the worker optionally checks speech presence with Silero ONNX, and MLX Whisper transcribes it. Audio stays on this Mac. The app never installs packages or downloads models.
 
 The approved project setup uses:
 
@@ -44,7 +44,7 @@ If you deliberately choose to install voice into an **existing** MLX environment
 
 The installer pins every already-installed package to its current version. A compatibility conflict stops resolution instead of downgrading MLX, NumPy, Transformers, or other shared packages. A new isolated environment is preferable when a shared environment cannot satisfy those constraints. Whisper's published dependencies include Torch and Numba; the setup may download those packages too. Silero filtering itself uses CPU ONNX Runtime and does not import Torch.
 
-Model downloads are optional, separate operations. `--install` alone never downloads weights. To use existing weights, skip download flags and select their absolute local paths in Settings. To explicitly fetch models later, use the download flags and a new destination without `--install`.
+Model downloads are optional, separate operations. `--install` alone never downloads weights. To use existing weights, skip download flags and choose the chat model folder in Settings → Brain; for Whisper and Silero, set `BUNTINI_WHISPER_MODEL_PATH` and `BUNTINI_VAD_MODEL_PATH` before the first launch (Settings no longer asks for them, and folders saved by an earlier version keep working). To explicitly fetch models later, use the download flags and a new destination without `--install`.
 
 Sources: the [Whisper tiny.en MLX model card](https://huggingface.co/mlx-community/whisper-tiny.en-mlx), [official MLX Whisper package](https://github.com/ml-explore/mlx-examples/tree/main/whisper), [official Silero VAD implementation](https://github.com/snakers4/silero-vad), and [ONNX Runtime's CPU guidance for macOS](https://onnxruntime.ai/docs/get-started/with-python.html).
 
@@ -52,7 +52,7 @@ Sources: the [Whisper tiny.en MLX model card](https://huggingface.co/mlx-communi
 
 Silero VAD is optional. Leave its setting empty to use push-to-talk with Whisper's own `no_speech_threshold=0.6`. When configured, the selected local `.onnx` file must implement the Silero v5/v6 `input`, `state`, and `sr` contract. The worker reads a bounded model file, uses one CPU thread, and resets recurrent state for every recording. Three consecutive 32 ms windows above probability 0.5 indicate speech. Silence and isolated noise produce a recoverable “No speech was detected” message before Whisper is imported or run. The recording is not trimmed, so the filter does not cut leading or trailing words.
 
-This is speech filtering after a bounded push-to-talk capture. It does not add continuous microphone listening, automatic silence-based recording completion, a wake word, or live partial transcripts. The worker checks cancellation between VAD windows; the controller can terminate a blocked native transcription call. Temporary recordings are deleted by the controller after success, error, or cancellation.
+This is speech filtering after a bounded push-to-talk capture. It does not add continuous microphone listening, a wake word, or live partial transcripts; the app ends a tapped recording on quiet using the helper's loudness readings, not this filter. The worker checks cancellation between VAD windows; the controller can terminate a blocked native transcription call. Temporary recordings are deleted by the controller after success, error, or cancellation.
 
 ## Diagnostics and checks
 

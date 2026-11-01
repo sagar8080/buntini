@@ -1,16 +1,20 @@
 use crate::types::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Store {
     pub db: Connection,
+    /// Moves on whenever indexed data is deleted or revoked, so a memory refresh that
+    /// read before the change can tell and never writes the old data back.
+    index_epoch: AtomicU64,
 }
 impl Store {
     pub fn open(path: &Path) -> Result<Self, String> {
         let db = Connection::open(path).map_err(|e| e.to_string())?;
         db.busy_timeout(std::time::Duration::from_secs(3))
             .map_err(|e| e.to_string())?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;
           CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY);
           CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, fact TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
@@ -25,10 +29,15 @@ impl Store {
           CREATE VIRTUAL TABLE IF NOT EXISTS file_index USING fts5(path UNINDEXED, root UNINDEXED, name, content);")
             .map_err(|e| format!("Cannot initialize local database: {e}"))?;
         // A prior interruption is recoverable and never silently shown as still running.
-        let store = Self { db };
+        let store = Self { db, index_epoch: AtomicU64::new(0) };
         crate::workflows::initialize(&store.db)?;
         crate::delivery::initialize(&store.db)?;
         crate::chat_threads::initialize(&store)?;
+        crate::memory_index::initialize(&store.db)?;
+        crate::routines::initialize(&store)?;
+        crate::mcp::initialize(&store.db)?;
+        crate::nudges::initialize(&store.db)?;
+        crate::goals::initialize(&store)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -92,6 +101,18 @@ impl Store {
         if settings.avatar == "fox" || settings.avatar == "kyuubi" {
             settings.avatar = "cat".into();
         }
+        // Settings no longer show the Whisper folder or speech filter. One that has since
+        // moved or been deleted can't be cleared by the user, so it is forgotten here
+        // instead of failing every later save; voice then uses Apple's speech.
+        if !settings.whisper_model.is_empty() && !Path::new(&settings.whisper_model).is_dir() {
+            settings.whisper_model.clear();
+        }
+        let vad = Path::new(&settings.vad_model_path);
+        if !settings.vad_model_path.is_empty() && !(vad.is_absolute() && vad.is_file()) {
+            settings.vad_model_path.clear();
+        }
+        // The status line has no setting any more either; Buntini words it itself.
+        settings.status_text.clear();
         if needs_backend {
             settings.model_backend = if crate::model::mlx_model_present(&settings.model_path) {
                 "mlx"
@@ -132,7 +153,18 @@ impl Store {
         }
         Ok(settings)
     }
+    /// Which deletion or revocation the memory index has seen; see `index_epoch`.
+    pub fn index_epoch(&self) -> u64 {
+        self.index_epoch.load(Ordering::SeqCst)
+    }
+    fn bump_index(&self) {
+        self.index_epoch.fetch_add(1, Ordering::SeqCst);
+    }
     pub fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        // An app switched off in Settings → Apps takes its records out of the memory index.
+        if crate::memory_index::purge_disallowed(&self.db, settings)? {
+            self.bump_index();
+        }
         settings.validate()?;
         let raw = serde_json::to_string(settings).map_err(|e| e.to_string())?;
         self.db
@@ -141,7 +173,8 @@ impl Store {
                 [raw],
             )
             .map_err(|e| e.to_string())?;
-        Ok(())
+        // The built-in morning brief routine is on exactly when its setting is.
+        crate::routines::follow_setting(self, settings.morning_brief)
     }
     pub fn roots(&self) -> Result<Vec<String>, String> {
         let mut stmt = self
@@ -166,6 +199,8 @@ impl Store {
         self.db
             .execute("DELETE FROM file_index WHERE root=?1", [root])
             .map_err(|e| e.to_string())?;
+        crate::memory_index::purge(&self.db, "files", Some(root))?;
+        self.bump_index();
         self.audit("folder.revoked", root)
     }
     /// Remembers a fact; repeating one already known changes nothing. Keeps at most 200.
@@ -173,6 +208,17 @@ impl Store {
         let fact = fact.split_whitespace().collect::<Vec<_>>().join(" ");
         if fact.chars().count() < 3 || fact.chars().count() > 300 {
             return Err("Memories are 3–300 characters.".into());
+        }
+        let exists: bool = self
+            .db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM memories WHERE fact=?1)",
+                [&fact],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if exists {
+            return Ok(false);
         }
         let count: i64 = self
             .db
@@ -209,8 +255,10 @@ impl Store {
     pub fn forget(&self, id: i64) -> Result<(), String> {
         self.db
             .execute("DELETE FROM memories WHERE id=?1", [id])
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        crate::memory_index::purge_record(&self.db, "memory", &id.to_string())?;
+        self.bump_index();
+        Ok(())
     }
     pub fn preference(&self, key: &str) -> Result<Option<String>, String> {
         self.db
@@ -235,8 +283,21 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.db
             .execute("DELETE FROM conversation_turns WHERE task_id=?1", [id])
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // The emails a "What needs a reply?" turn listed go with that turn.
+        self.db
+            .execute(
+                "DELETE FROM preferences WHERE key=?1 AND json_extract(value,'$.taskId')=?2",
+                [crate::triage::LISTING, id],
+            )
+            .map_err(|e| e.to_string())?;
+        // So does the heads-up that turn was opened from, which repeats what it said.
+        self.db
+            .execute("DELETE FROM nudges WHERE json_extract(data,'$.taskId')=?1", [id])
+            .map_err(|e| e.to_string())?;
+        crate::memory_index::purge_record(&self.db, "history", id)?;
+        self.bump_index();
+        Ok(())
     }
     pub fn save_task(&self, task: &TaskRecord) -> Result<(), String> {
         self.active_conversation_id()?;
@@ -265,6 +326,29 @@ impl Store {
                 .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
         })
         .collect()
+    }
+    /// The newest finished conversation turns worth remembering (at most `limit`), for
+    /// the memory index. Unlike `tasks`, this isn't capped at the 100 shown in the app.
+    pub fn history_for_index(&self, limit: usize) -> Result<Vec<TaskRecord>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM tasks ORDER BY created_at DESC LIMIT ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([(limit * 2) as i64], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut turns = Vec::new();
+        for row in rows {
+            let task: TaskRecord = serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            if crate::memory_index::remembered_turn(&task) {
+                turns.push(task);
+            }
+            if turns.len() == limit {
+                break;
+            }
+        }
+        Ok(turns)
     }
     pub fn conversation_start(&self) -> Result<Option<String>, String> {
         self.db
@@ -406,6 +490,50 @@ impl Store {
             .map_err(|e| e.to_string())?;
         self.audit("price_watch.deleted", id)
     }
+    /// The built-in morning brief first, then routines in the order they were made.
+    pub fn routines(&self) -> Result<Vec<Routine>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM routines ORDER BY json_extract(data,'$.builtIn') DESC, created_at, id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.map(|row| {
+            serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        })
+        .collect()
+    }
+    pub fn routine(&self, id: &str) -> Result<Option<Routine>, String> {
+        let data: Option<String> = self
+            .db
+            .query_row("SELECT data FROM routines WHERE id=?1", [id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        data.map(|data| serde_json::from_str(&data).map_err(|e| e.to_string()))
+            .transpose()
+    }
+    pub fn save_routine(&self, routine: &Routine) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO routines(id,data,next_run_at,enabled,created_at) VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    routine.id,
+                    serde_json::to_string(routine).map_err(|e| e.to_string())?,
+                    routine.next_run_at,
+                    routine.enabled,
+                    routine.created_at
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    pub fn delete_routine(&self, id: &str) -> Result<(), String> {
+        self.db
+            .execute("DELETE FROM routines WHERE id=?1", [id])
+            .map_err(|e| e.to_string())?;
+        self.audit("routine.deleted", id)
+    }
     /// Everything Buntini keeps about you, for "Export my data". Keys stay in the Keychain
     /// and are never included.
     pub fn export_snapshot(&self) -> Result<serde_json::Value, String> {
@@ -430,6 +558,10 @@ impl Store {
             "activeConversationId": self.preference("active-conversation")?,
             "savedSearches": rows("SELECT data FROM saved_searches")?,
             "priceWatches": rows("SELECT data FROM price_watches")?,
+            "routines": rows("SELECT data FROM routines ORDER BY created_at")?,
+            "toolsYouAdded": self.mcp_export()?,
+            "headsUps": rows("SELECT data FROM nudges ORDER BY created_at")?,
+            "goals": rows("SELECT data FROM goals ORDER BY created_at")?,
             "memories": self.memories()?,
             "workflows": self.workflows()?,
             "timers": rows("SELECT data FROM timers")?,
@@ -441,23 +573,58 @@ impl Store {
     }
     /// "Delete everything": every table back to empty, as on a fresh install.
     pub fn erase_everything(&self) -> Result<(), String> {
+        // Tokens of the tools the user added live in the Keychain, not in these tables.
+        let tool_servers = self.mcp_server_ids()?;
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx
             .execute_batch(
-                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches;
-                 DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
-                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;",
+                "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines; DELETE FROM goals;
+                 DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
+                 DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
+                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent;",
             )
             .map_err(|e| e.to_string())?;
+        self.bump_index();
+        crate::triage::forget_cache();
         // The empty database already uses the new thread schema. A task saved before
         // the next restart must not be mistaken for an unmigrated legacy turn.
         self.set_preference("conversation-migration-v1", "1")?;
         self.set_onboarded(false)?;
-        tx.commit().map_err(|e| e.to_string())
+        // The morning brief comes back as on a fresh install: there, but off.
+        crate::routines::initialize(self)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        crate::mcp::forget_secrets(&tool_servers)?;
+        // DELETE alone leaves private text in free pages and older WAL frames.
+        // Rebuild the emptied database and truncate the WAL before reporting
+        // successful erasure. This is logical removal, not disk sanitization.
+        self.db
+            .execute_batch("VACUUM;")
+            .map_err(|e| e.to_string())?;
+        let (busy, _, _): (i64, i64, i64) = self
+            .db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| e.to_string())?;
+        if busy != 0 {
+            return Err("Data was removed, but a database reader prevented final cleanup. Close and reopen Buntini, then delete everything again.".into());
+        }
+        Ok(())
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start');").map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
+            UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');
+            DELETE FROM nudges;
+            DELETE FROM goals WHERE json_extract(data,'$.state') IN ('done','ended');
+            UPDATE goals SET data=json_remove(data,'$.lastTaskId','$.note');").map_err(|e| e.to_string())?;
+        // Heads-ups name events, reminders and emails, so they go with the history. What
+        // was already said (hashed keys and send times, no text) stays, so none repeats.
+        crate::triage::forget_cache();
+        // Earlier conversations and folder text leave the memory index with them.
+        crate::memory_index::purge(&tx, "history", None)?;
+        crate::memory_index::purge(&tx, "files", None)?;
+        self.bump_index();
         self.active_conversation_id()?;
         self.audit("history.cleared", "Task history and file index cleared")?;
         tx.commit().map_err(|e| e.to_string())
@@ -487,6 +654,12 @@ impl Store {
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+    /// The text the file index holds for one file, if it has it.
+    pub fn indexed_content(&self, root: &str, path: &str) -> Option<String> {
+        self.db
+            .query_row("SELECT content FROM file_index WHERE path=?1 AND root=?2", params![path, root], |row| row.get(0))
+            .ok()
     }
     pub fn index_file(&self, root: &str, hit: &FileHit, content: &str) -> Result<(), String> {
         self.db
@@ -574,13 +747,13 @@ impl Store {
         let transaction = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         let usage = self.usage(provider)?;
         if usage.today >= limits.daily {
-            return Err(format!("Today’s limit of {} online lookups is used up. It resets at midnight, or you can raise it in Settings.", limits.daily));
+            return Err(format!("Today’s limit of {} online lookups is used up. It resets at midnight.", limits.daily));
         }
         if usage.month >= limits.monthly {
-            return Err(format!("This month’s limit of {} lookups for this service is used up. Review the limits in Settings to search again.", limits.monthly));
+            return Err(format!("This month’s limit of {} lookups for this service is used up. It resets next month.", limits.monthly));
         }
         if usage.spend + limits.unit_cost > limits.budget_usd + 0.000000001 {
-            return Err(format!("This month’s estimated {} budget of ${:.2} is used up. Review the limits in Settings, or wait for next month.", crate::budget::display_name(provider), limits.budget_usd));
+            return Err(format!("This month’s estimated {} budget of ${:.2} is used up. You can raise it in Settings, or wait for next month.", crate::budget::display_name(provider), limits.budget_usd));
         }
         transaction
             .execute(
@@ -700,6 +873,132 @@ impl Store {
     }
 }
 
+/// One proposal waiting for the person, as the approval inbox lists it. The
+/// description names the kind of work only, never the proposal's field values.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApprovalSummary {
+    pub task_id: String,
+    pub approval_id: String,
+    pub tool: String,
+    pub description: String,
+    /// The person's own request, shown in Buntini only.
+    pub goal: String,
+    pub created_at: String,
+}
+
+impl Store {
+    /// Proposals waiting for approval, newest first and one per task. They are
+    /// journal rows, not memory, so they survive a restart; the in-memory
+    /// approval map only ever held the older one-shot sheets.
+    /// The id of every saved proposal still waiting, with no limit, so their alerts can
+    /// be withdrawn when they are cleared.
+    pub fn waiting_approval_ids(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM workflows WHERE state IN ('waiting_action','waiting_online')")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut ids = vec![];
+        for row in rows {
+            let flow: crate::workflows::Workflow =
+                serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            if let Some(step) = flow.steps.last().filter(|step| step.state == "waiting") {
+                ids.push(step.id.clone());
+            }
+        }
+        Ok(ids)
+    }
+    pub fn pending_approvals(&self) -> Result<Vec<PendingApprovalSummary>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT data FROM workflows WHERE state IN ('waiting_action','waiting_online') ORDER BY rowid DESC LIMIT 20")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut pending = vec![];
+        for row in rows {
+            let flow: crate::workflows::Workflow =
+                serde_json::from_str(&row.map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            // Only the last step can be waiting; anything else is already used.
+            let Some(step) = flow.steps.last().filter(|step| step.state == "waiting") else {
+                continue;
+            };
+            pending.push(PendingApprovalSummary {
+                task_id: flow.id.clone(),
+                approval_id: step.id.clone(),
+                tool: step.tool.clone(),
+                description: crate::notifications::approval_body(&step.tool).into(),
+                goal: flow.goal.clone(),
+                created_at: step.proposed_at.clone(),
+            });
+        }
+        Ok(pending)
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pending_approvals_lists_paused_proposals_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("test.db")).unwrap();
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"inbox","prompt":"Email Ana the plan","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        let mut flow = crate::workflows::Workflow::new(
+            &task,
+            "auto",
+            &Settings::default(),
+            vec![json!({"role":"user","content":task.prompt})],
+            None,
+            &["draft_email"],
+        );
+        let args = json!({"to":"ana@example.com","subject":"Plan","body":"Secret details"});
+        let id = flow
+            .begin(
+                "draft_email",
+                args.clone(),
+                json!({"role":"assistant"}),
+                true,
+                true,
+            )
+            .unwrap();
+        task.state = "waiting_action".into();
+        // Saved twice, as a proposal is when the turn and journal both commit.
+        store.checkpoint(&mut flow, &task).unwrap();
+        store.checkpoint(&mut flow, &task).unwrap();
+        drop(store);
+        let store = Store::open(&dir.path().join("test.db")).unwrap();
+        let pending = store.pending_approvals().unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "one entry per waiting task, after a restart"
+        );
+        assert_eq!(pending[0].approval_id, id);
+        assert_eq!(pending[0].task_id, "inbox");
+        assert_eq!(pending[0].tool, "draft_email");
+        for value in ["ana@example.com", "Plan", "Secret details"] {
+            assert!(!pending[0].description.contains(value));
+        }
+        let mut flow = store.workflow(&id).unwrap().unwrap();
+        flow.approve(&id, args).unwrap();
+        task.state = "running".into();
+        store.checkpoint(&mut flow, &task).unwrap();
+        assert!(
+            store.pending_approvals().unwrap().is_empty(),
+            "a used approval leaves the inbox"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -711,6 +1010,34 @@ mod tests {
             unit_cost,
         }
     }
+    #[test]
+    fn settings_no_screen_shows_any_more_never_block_a_save() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut settings = s.settings().unwrap();
+        settings.whisper_model = folder.path().join("whisper").to_string_lossy().into();
+        settings.vad_model_path = folder.path().join("silero.onnx").to_string_lossy().into();
+        settings.status_text = "On vacation".into();
+        // Saved by an earlier version, when the files were there.
+        s.db.execute(
+            "INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)",
+            [serde_json::to_string(&settings).unwrap()],
+        )
+        .unwrap();
+        let loaded = s.settings().unwrap();
+        assert!(loaded.whisper_model.is_empty() && loaded.vad_model_path.is_empty());
+        assert!(loaded.status_text.is_empty());
+        s.save_settings(&loaded).unwrap();
+        // A Whisper folder that is still there is kept.
+        std::fs::create_dir(folder.path().join("whisper")).unwrap();
+        s.db.execute(
+            "INSERT OR REPLACE INTO preferences(key,value) VALUES('settings',?1)",
+            [serde_json::to_string(&settings).unwrap()],
+        )
+        .unwrap();
+        assert_eq!(s.settings().unwrap().whisper_model, settings.whisper_model);
+    }
+
     #[test]
     fn daily_monthly_and_spend_limits_are_enforced_per_provider() {
         let s = Store::open(Path::new(":memory:")).unwrap();
@@ -763,6 +1090,187 @@ mod tests {
         assert_eq!(s.settings().unwrap().assistant_name, "Buntini");
         assert!(!s.onboarded().unwrap(), "setup runs again after erasing");
     }
+
+    #[test]
+    fn deleting_everything_removes_text_from_database_and_wal_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("private.sqlite3");
+        let store = Store::open(&path).unwrap();
+        let secret = "private-sentinel-erasure-test";
+        store.remember(secret).unwrap();
+        store
+            .save_routine(&Routine {
+                id: "action-routine".into(),
+                task: format!("Tell me about {secret}-routine"),
+                days: "weekdays".into(),
+                time: "08:00".into(),
+                enabled: true,
+                built_in: false,
+                created_at: now(),
+                next_run_at: now(),
+                last_run_at: Some(now()),
+                last_task_id: Some(format!("{secret}-run")),
+                last_error: Some(format!("{secret}-error")),
+            })
+            .unwrap();
+        let goal = |id: &str, state: &str| -> crate::goals::Goal {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "aim": format!("Prepare for {secret}-trip"), "checkIn": format!("Help me prepare for {secret}-trip"),
+                "style": "run", "days": "every_day", "time": "09:00", "until": "2026-11-06", "doneWhen": "reply",
+                "person": format!("{secret}-person"), "state": state, "createdAt": now(),
+                "outcome": format!("{secret}-outcome"), "lastTaskId": format!("{secret}-check-in"), "note": format!("{secret}-note"),
+            }))
+            .unwrap()
+        };
+        crate::goals::save(&store, &goal("goal-sentinel", "active")).unwrap();
+        crate::goals::save(&store, &goal("goal-ended", "done")).unwrap();
+        store
+            .db
+            .execute(
+                "INSERT INTO file_index(path,root,name,content) VALUES(?1,?1,?1,?1)",
+                [secret],
+            )
+            .unwrap();
+        // A tool the user added, with the token they gave it.
+        store
+            .save_mcp_server(&crate::mcp::McpServer {
+                id: "tool".into(),
+                name: "GitHub".into(),
+                program: "npx".into(),
+                env: [("GITHUB_TOKEN".to_string(), format!("{secret}-token"))].into(),
+                created_at: now(),
+                ..Default::default()
+            })
+            .unwrap();
+        // A heads-up names the event it is about.
+        store
+            .db
+            .execute(
+                "INSERT INTO nudges(id,data,created_at,expires_at,state) VALUES('n1',?1,?2,?2,'new')",
+                params![format!("{{\"title\":\"{secret}-meeting\"}}"), now()],
+            )
+            .unwrap();
+        let mut db = Connection::open(&path).unwrap();
+        crate::memory_index::replace_source(
+            &mut db,
+            "notes",
+            &[crate::memory_index::Record {
+                source: "notes",
+                source_id: "n1".into(),
+                scope: String::new(),
+                shares: vec![crate::privacy::Share::Notes],
+                title: format!("{secret}-title"),
+                text: format!("{secret}-note"),
+                observed_at: "2026-10-29 09:00".into(),
+            }],
+        )
+        .unwrap();
+        drop(db);
+        store
+            .db
+            .execute_batch("PRAGMA wal_checkpoint(FULL)")
+            .unwrap();
+        let contains = |bytes: &[u8]| {
+            bytes
+                .windows(secret.len())
+                .any(|part| part == secret.as_bytes())
+        };
+        assert!(contains(&std::fs::read(&path).unwrap()));
+        store.erase_everything().unwrap();
+        assert!(!contains(&std::fs::read(&path).unwrap()));
+        assert!(crate::goals::all(&store).unwrap().is_empty());
+        // Only the built-in morning brief is left, off, as on a fresh install.
+        let routines = store.routines().unwrap();
+        assert_eq!(routines.len(), 1);
+        assert!(routines[0].built_in && !routines[0].enabled);
+        let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
+        if wal.exists() {
+            assert_eq!(std::fs::metadata(wal).unwrap().len(), 0);
+        }
+    }
+    #[test]
+    fn clearing_history_keeps_routines_but_not_their_results() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let routine = Routine {
+            id: "action-brief".into(),
+            task: "Brief me".into(),
+            days: "weekdays".into(),
+            time: "08:00".into(),
+            enabled: true,
+            built_in: false,
+            created_at: now(),
+            next_run_at: now(),
+            last_run_at: Some(now()),
+            last_task_id: Some("run".into()),
+            last_error: Some("The last run didn’t finish.".into()),
+        };
+        s.save_routine(&routine).unwrap();
+        assert_eq!(s.export_snapshot().unwrap()["routines"].as_array().unwrap().len(), 2);
+        s.clear_history().unwrap();
+        let kept = s.routine("action-brief").unwrap().unwrap();
+        assert_eq!(kept.task, "Brief me");
+        assert!(kept.enabled);
+        assert_eq!(kept.last_task_id, None);
+        assert_eq!(kept.last_error, None);
+        assert_eq!(kept.last_run_at, routine.last_run_at);
+    }
+    #[test]
+    fn clearing_history_keeps_open_goals_but_not_their_results_or_finished_goals() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let goal = |id: &str, state: &str| -> crate::goals::Goal {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "aim": "Follow up with Ana", "checkIn": "Draft a short follow-up email to Ana", "style": "run",
+                "days": "weekdays", "time": "09:00", "until": "2026-11-13", "doneWhen": "reply", "person": "Ana",
+                "state": state, "createdAt": now(), "outcome": "An email from Ana arrived.", "lastTaskId": "run",
+                "note": "Mail wasn’t open, so I couldn’t check for a reply from Ana.",
+            }))
+            .unwrap()
+        };
+        crate::goals::save(&s, &goal("goal-open", "active")).unwrap();
+        crate::goals::save(&s, &goal("goal-done", "done")).unwrap();
+        assert_eq!(s.export_snapshot().unwrap()["goals"].as_array().unwrap().len(), 2);
+        s.clear_history().unwrap();
+        let kept = crate::goals::all(&s).unwrap();
+        assert_eq!(kept.len(), 1, "a finished goal is only history");
+        assert_eq!((kept[0].id.as_str(), kept[0].person.as_deref()), ("goal-open", Some("Ana")));
+        assert_eq!((kept[0].last_task_id.as_deref(), kept[0].note.as_deref()), (None, None));
+    }
+    #[test]
+    fn memory_history_source_reads_up_to_history_turns() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        for n in 0..150 {
+            let task: TaskRecord = serde_json::from_value(serde_json::json!({
+                "id":format!("t{n}"),"prompt":format!("Question {n}"),"answer":format!("Answer {n}"),
+                "state":"completed","createdAt":format!("2026-10-01T09:{:02}:{:02}Z", n / 60, n % 60),
+                "backend":"apple","sources":[],"files":[]
+            }))
+            .unwrap();
+            s.save_task(&task).unwrap();
+        }
+        assert_eq!(s.tasks().unwrap().len(), 100, "the app shows the newest 100");
+        let turns = s.history_for_index(crate::memory_index::HISTORY_TURNS).unwrap();
+        assert_eq!(turns.len(), 150);
+        assert_eq!(turns[0].id, "t149", "newest first");
+        assert_eq!(s.history_for_index(10).unwrap().len(), 10);
+        let history = |s: &Store| {
+            crate::memory_index::counts(&s.db)
+                .unwrap()
+                .into_iter()
+                .find(|(source, _)| source == "history")
+                .map_or(0, |(_, n)| n)
+        };
+        crate::memory_index::apply(&s, s.index_epoch(), vec![]).unwrap();
+        assert_eq!(history(&s), 150);
+        for (id, _) in crate::memory_index::unembedded(&s.db, 200).unwrap() {
+            crate::memory_index::set_vector(&s.db, id, Some(&[1, 2, 3])).unwrap();
+        }
+        crate::memory_index::apply(&s, s.index_epoch(), vec![]).unwrap();
+        assert_eq!(history(&s), 150, "older turns aren't dropped on the next refresh");
+        assert!(
+            crate::memory_index::unembedded(&s.db, 200).unwrap().is_empty(),
+            "and keep their vectors"
+        );
+    }
     #[test]
     fn memories_are_kept_once_and_can_be_forgotten() {
         let s = Store::open(Path::new(":memory:")).unwrap();
@@ -777,6 +1285,22 @@ mod tests {
         s.forget(saved[0].id).unwrap();
         assert!(s.memories().unwrap().is_empty());
         assert!(s.remember("no").is_err());
+    }
+
+    #[test]
+    fn repeating_a_saved_memory_is_idempotent_even_when_capacity_is_full() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        for number in 0..200 {
+            assert!(store
+                .remember(&format!("Preference number {number}"))
+                .unwrap());
+        }
+        assert!(!store.remember("Preference   number 0").unwrap());
+        assert_eq!(store.memories().unwrap().len(), 200);
+        assert!(store
+            .remember("A new preference")
+            .unwrap_err()
+            .contains("Memory is full"));
     }
     #[test]
     fn onboarding_is_needed_once_unless_asked_again() {

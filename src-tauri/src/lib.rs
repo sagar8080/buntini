@@ -1,4 +1,6 @@
 mod actions;
+#[cfg(debug_assertions)]
+pub mod acceptance_apps;
 mod advisor;
 mod approvals;
 mod apps;
@@ -7,6 +9,12 @@ mod brief;
 mod browser_workspace;
 mod browser_session;
 mod budget;
+mod calculation;
+mod structured_math;
+mod writing_context;
+mod source_fields;
+mod edit_targets;
+mod location_fields;
 mod chat_threads;
 mod chatgpt;
 mod cloud;
@@ -16,19 +24,29 @@ mod controller;
 mod conversation;
 mod data;
 mod delivery;
+mod embedding;
 mod explicit_fields;
+mod focus;
+mod goals;
 mod indexer;
 mod integrations;
 mod local;
+mod login;
+mod mac_settings;
+mod mcp;
+mod memory_index;
 mod migration;
 mod model;
 mod monitor_actions;
 mod notifications;
+mod nudges;
 mod overlay;
 mod planning;
 mod pricing;
 mod privacy;
+mod recipes;
 mod research;
+mod routines;
 mod search_intent;
 #[cfg(test)]
 mod search_intent_tests;
@@ -38,11 +56,13 @@ mod search_pipeline_tests;
 #[cfg(test)]
 mod scenario_evals;
 mod scheduler;
+mod security;
 mod skills;
 mod store;
 mod support;
 mod task_contract;
 mod tools;
+mod triage;
 mod types;
 mod voice;
 mod watches;
@@ -50,6 +70,9 @@ mod web;
 mod worker;
 mod workflows;
 mod world;
+
+#[cfg(all(test, debug_assertions))]
+mod device_live_tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
@@ -67,6 +90,8 @@ pub fn run_public_desktop_browser_smoke() {
 }
 
 fn show_companion(app: &tauri::AppHandle) {
+    // Before Buntini takes focus: what "this" means is whatever the user was just in.
+    focus::capture();
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -89,8 +114,11 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // Debug builds can keep a Dock icon so UI automation can find the app.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if !(cfg!(debug_assertions) && std::env::var_os("BUNTINI_TEST_DOCK").is_some()) {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let data = app.path().app_data_dir()?;
             let cache = app.path().app_cache_dir()?;
             // Dev builds under a custom CARGO_TARGET_DIR have no resource folder; the
@@ -100,6 +128,20 @@ pub fn run() {
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
+            // Construct the privileged UI with navigation guards in place before
+            // it loads. External pages belong in the isolated browser workspace.
+            let main = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .ok_or_else(|| std::io::Error::other("Missing main window configuration"))?;
+            tauri::WebviewWindowBuilder::from_config(app, main)?
+                .on_navigation(|url| security::ui_navigation_allowed(url, cfg!(dev)))
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .on_download(|_, _| false)
+                .build()?;
             let notices = app.handle().clone();
             app.state::<controller::AppState>()
                 .models
@@ -146,6 +188,11 @@ pub fn run() {
             }
             overlay::start_hit_testing(app.handle().clone());
             world::start(app.handle().clone());
+            focus::start();
+            memory_index::start(app.handle().clone());
+            // Before any timer or approval alert can be answered.
+            notifications::install(app.handle());
+            scheduler::observe_wake();
             scheduler::start(app.handle().clone());
             if let Err(error) = app
                 .global_shortcut()
@@ -204,6 +251,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             controller::bootstrap,
+            focus::capture_focus,
             controller::save_settings,
             controller::set_api_key,
             controller::pick_folder,
@@ -215,6 +263,8 @@ pub fn run() {
             controller::run_action,
             controller::resume_task,
             controller::task_progress,
+            controller::pending_approvals,
+            controller::open_approval,
             controller::plan_task_online,
             controller::continue_task_online,
             delivery::background_status,
@@ -229,8 +279,9 @@ pub fn run() {
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
-            chatgpt::chatgpt_models,
-            controller::morning_brief,
+            brief::morning_brief,
+            brief::day_glance,
+            brief::usual_requests,
             controller::forget_memory,
             controller::cancel_action,
             data::export_data,
@@ -248,18 +299,17 @@ pub fn run() {
             controller::stop_recording,
             controller::cancel_recording,
             controller::open_source,
-            controller::file_index_status,
-            controller::refresh_file_index,
-            controller::cancel_file_index,
             approvals::plan_online_request,
             world::pet_world,
             world::pet_move,
             world::pet_stop,
             world::pet_perch,
+            world::pet_knock,
             world::pet_sample,
             approvals::approve_web_approval,
             notifications::request_notification_permission,
             notifications::notification_permission_status,
+            notifications::take_review_request,
             support::list_voices,
             support::preview_voice,
             support::worker_diagnostics,
@@ -271,7 +321,22 @@ pub fn run() {
             watches::save_price_watch,
             watches::update_price_watch,
             watches::delete_price_watch,
-            watches::run_price_watch
+            watches::run_price_watch,
+            routines::update_routine,
+            routines::delete_routine,
+            mcp::added_tools,
+            mcp::add_tool_server,
+            mcp::pick_tool_config,
+            mcp::add_tool_server_from_config,
+            mcp::remove_tool_server,
+            mcp::reconnect_tool_server,
+            mcp::set_tool_safe,
+            nudges::heads_ups,
+            nudges::open_heads_up,
+            nudges::dismiss_heads_up,
+            notifications::take_heads_up_request,
+            goals::update_goal,
+            goals::delete_goal
         ])
         .build(app_context())
         .expect("Buntini could not start")
@@ -305,6 +370,7 @@ pub fn run() {
                         }
                         state.voice.shutdown().await;
                         state.models.shutdown().await;
+                        mcp::stop_all();
                         app.exit(0);
                     });
                 }

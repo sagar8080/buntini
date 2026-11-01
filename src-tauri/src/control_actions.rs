@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-pub const TOOLS: [&str; 4] = ["control_music", "switch_tab", "remember", "set_timer"];
+pub const TOOLS: [&str; 5] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL];
 
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     if matches!(tool, "control_music" | "switch_tab") {
@@ -41,6 +41,9 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         return Ok(out);
     }
     let args = args.as_object().ok_or("Arguments must be an object.")?;
+    if tool == crate::mac_settings::TOOL {
+        return crate::mac_settings::validate(args);
+    }
     let key = match tool {
         "remember" => "fact",
         "set_timer" => "seconds",
@@ -88,6 +91,12 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
             .unwrap_or_default(),
     };
     match tool {
+        crate::mac_settings::TOOL => {
+            let id = args.get("setting").and_then(Value::as_str).unwrap_or_default();
+            let label = crate::mac_settings::setting(id).map(|s| s.label).unwrap_or("Setting");
+            let value = args.get("value").and_then(Value::as_str).unwrap_or_default();
+            (label.into(), vec![Field { key: "value".into(), label: label.into(), kind: "text", value: value.into() }], String::new())
+        }
         "remember" => ("Remember this?".into(), vec![field("fact", "Fact or preference")], "Saved on your Mac for future conversations. Remove it anytime in Settings → Privacy.".into()),
         "set_timer" => ("Set this timer?".into(), vec![field("seconds", "Duration in seconds")], "The timer is saved across restarts. Alerts require Buntini running and your Mac awake; overdue timers appear when it returns. Desktop alerts need notification permission.".into()),
         "control_music" => ("Change music playback?".into(), vec![field("app", "Player (music or spotify)"), field("action", "Action (play, pause, next or previous)"), field("query", "Song or playlist (optional for play)")], "Changes playback in the selected app and reads its resulting state. The player must be allowed in Settings → Apps. Named Spotify search is not supported by this approved workflow.".into()),
@@ -170,6 +179,7 @@ fn local_execute(
         Ok(tx) => tx,
         Err(error) => return failure(tool, ActionOutcome::Failed, error.to_string(), json!({})),
     };
+    let mut created = None;
     let result = (|| -> Result<ActionReceipt, String> {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled before saving.".into());
@@ -237,7 +247,10 @@ fn local_execute(
             let timer = if let Some((_, _, id)) = &previous {
                 crate::delivery::timer(store, id)?.ok_or("This timer was already created and later removed. The old approval cannot recreate it.")?
             } else {
-                crate::delivery::schedule(store, seconds, chrono::Utc::now())?
+                // macOS hears about it only once this transaction commits.
+                let timer = crate::delivery::save_timer(store, seconds, chrono::Utc::now())?;
+                created = Some(timer.clone());
+                timer
             };
             if timer.seconds != seconds {
                 return Err("The saved timer does not match the approved duration.".into());
@@ -264,7 +277,12 @@ fn local_execute(
         Err(error) => return failure(tool, ActionOutcome::Failed, error, json!({})),
     };
     match transaction.commit() {
-        Ok(()) => receipt,
+        Ok(()) => {
+            if let Some(timer) = &created {
+                crate::delivery::register_os(timer);
+            }
+            receipt
+        }
         Err(error) => failure(
             tool,
             ActionOutcome::Unknown,
@@ -363,11 +381,9 @@ fn music_verified(action: &str, query: &str, before: &MusicState, after: &MusicS
     }
 }
 async fn script(source: &str, args: &[String], cancel: &Arc<AtomicBool>) -> Result<String, String> {
-    let mut command = tokio::process::Command::new("/usr/bin/osascript");
-    command
-        .arg("-e")
-        .arg(format!("{JSON_HELPER}{source}"))
-        .args(args);
+    let mut command =
+        crate::actions::osascript_command("AppleScript", &format!("{JSON_HELPER}{source}"));
+    command.args(args);
     cancellable(cancel, crate::actions::output(command, 20)).await
 }
 async fn music_state(app: &str, cancel: &Arc<AtomicBool>) -> Result<MusicState, String> {
@@ -636,6 +652,12 @@ pub async fn execute(
             "Allow the selected app in Settings → Apps before using this control.",
             json!({}),
         );
+    }
+    if tool == crate::mac_settings::TOOL {
+        let roots = state.store.lock().unwrap().roots().unwrap_or_default();
+        return cancellable(&cancel, async { Ok(crate::mac_settings::execute(&args, &roots).await) })
+            .await
+            .unwrap_or_else(|error| failure(tool, ActionOutcome::Unknown, error, json!({})));
     }
     if tool == "switch_tab" {
         let browser = args["browser"].as_str().unwrap();

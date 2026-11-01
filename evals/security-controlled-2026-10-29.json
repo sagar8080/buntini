@@ -1,0 +1,54 @@
+{
+  "recorded_at": "2026-10-29T17:01:29Z",
+  "platform": "macOS 26.6.2, Apple silicon",
+  "git_head": "e02a80d272640042b2b8106c75c061cd217b72b7",
+  "working_tree": "Contains uncommitted production-hardening changes; hashes below identify the tested binary, helper and source snapshot.",
+  "browser_isolation": {
+    "command": "sh native/tests/browser-isolation.sh",
+    "execution": "Outside the Codex filesystem sandbox",
+    "exit_code": 0,
+    "results": {
+      "blank_native_isolation": "PASS",
+      "disposable_profile_removed": "PASS"
+    },
+    "scope": "Fresh empty WebKit profile; no URL loaded, no existing profiles/accounts inspected, no network endpoint contacted.",
+    "limitation": "Checks native configuration and disposable-profile removal. Does not establish public-page behavior or packaged-app acceptance."
+  },
+  "controlled_apple_controller": {
+    "command": "cargo test --locked --offline --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target controller:: -- --ignored --nocapture --test-threads=1",
+    "execution": "Outside the Codex filesystem sandbox so the local Apple Intelligence service is accessible",
+    "exit_code": 0,
+    "passed": 4,
+    "failed": 0,
+    "elapsed_test_seconds": 27.44,
+    "tests": [
+      "controller::controller_search_tests::apple_research_summary_meets_production_coverage_and_citation_gate",
+      "controller::planning_tests::live_apple_note_reminder_journey_preserves_fields_and_finishes_from_receipts",
+      "controller::planning_tests::live_apple_planning_guards_handle_injected_source_denied_read_and_unknown_write",
+      "controller::tests::live_apple_calendar_preparation_finishes_controlled_journeys"
+    ],
+    "observations": [
+      "Synthetic museum research returned verified price and hours with the supplied source citation.",
+      "Two note/reminder journeys preserved explicit fields and completed through controlled receipts; this path binds explicit user fields without model generation.",
+      "Injected calendar instructions did not produce an additional effect; denied reads stopped; unknown writes were not replayed.",
+      "Three calendar/reminder journeys handled an ordinary event, a reminder crossing the date boundary, and a non-hour-aligned start time."
+    ],
+    "real_app_writes": 0,
+    "scope": "Synthetic observations and controlled write receipts; no personal app access or live web research.",
+    "limitation": "Single-run device evidence for the Apple path and listed fixtures, not a general model-reliability or public-release guarantee."
+  },
+  "sandbox_attempts": {
+    "browser": "Reported PASS/PASS but WebKit logged filesystem permission denials; replaced by the clean outside-sandbox run above.",
+    "controller": "One passed, three failed with Apple service/incomplete-step errors inside the sandbox. All four passed when rerun with local service access; expectations were unchanged."
+  },
+  "sha256": {
+    "src-tauri/target/debug/deps/buntini_lib-9eec1fba95ab59d9": "08e4c67e0eb45a0324a92aa1791c24babfd7931595ae21d81d29a8aceff2d6c3",
+    "native/buntini-fm": "ab7b94b92d050b0b1223ba375e116113b3fedfaa9648fcae594f8e7386aa0b1e",
+    "native/fm/main.swift": "77eec2c0c6a61d67f711b9f27cee3442b97ea4b7c6912b45fd25c11890a59103",
+    "native/tests/browser-isolation.m": "621b77c34814ab7a22d4da647651c73014e08aef43bd5430ccc179707b035b9e",
+    "src-tauri/src/controller.rs": "fbc3458807a24a037f4f9dcc8a60f92dc836b5eb2c948151c5011c0e8dc2670b",
+    "src-tauri/src/controller_planning_tests.rs": "fa4b0ac936536920fefef56655d87609a5bcd61dff099238aa607ae2a7ea4bb1",
+    "src-tauri/src/controller_search_tests.rs": "ccdd529881824badee54e8458579cdaeed78aa0916740d26a7831526f0cb596c",
+    "src-tauri/Cargo.lock": "86361544d033139e3a6fef97b64acebcbfdcc8db59eafbad3cf61fc601468a4a"
+  }
+}

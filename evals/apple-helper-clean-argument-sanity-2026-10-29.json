@@ -1,0 +1,151 @@
+{
+  "scope": "Actual local Apple helper diagnostic; no tool dispatch or app writes; not completed production workflows.",
+  "helper_sha256": "4e4316928b7855beeda4a45154965d1d1c8cd6904ba36c33963f453a9f32838b",
+  "results": [
+    {
+      "id": "calculate-format",
+      "request": {
+        "id": "argument-sanity:calculate-format",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Compute53plus28, and split360plus72 equally between six people."
+          }
+        ],
+        "tools": [
+          {
+            "name": "calculate"
+          }
+        ],
+        "workflow_goal": "Compute53plus28, and split360plus72 equally between six people.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "stage": "route",
+          "id": "argument-sanity:calculate-format",
+          "type": "model_call"
+        },
+        {
+          "stage": "answer",
+          "type": "model_call",
+          "id": "argument-sanity:calculate-format"
+        },
+        {
+          "text": "Compute53plus28 equals 81. Split360plus72 equally between six people equals 63.",
+          "finish_reason": "stop",
+          "id": "argument-sanity:calculate-format",
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "id": "notes-query",
+      "request": {
+        "id": "argument-sanity:notes-query",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Find my note titled Birch Project Brief and summarize it."
+          }
+        ],
+        "tools": [
+          {
+            "name": "find_notes"
+          }
+        ],
+        "workflow_goal": "Find my note titled Birch Project Brief and summarize it.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "type": "model_call",
+          "stage": "route",
+          "id": "argument-sanity:notes-query"
+        },
+        {
+          "stage": "arguments",
+          "type": "model_call",
+          "id": "argument-sanity:notes-query"
+        },
+        {
+          "name": "find_notes",
+          "arguments": {
+            "query": "Birch Project Brief"
+          },
+          "id": "argument-sanity:notes-query",
+          "type": "tool_call"
+        },
+        {
+          "text": "",
+          "finish_reason": "tool_call",
+          "id": "argument-sanity:notes-query",
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "id": "file-query",
+      "request": {
+        "id": "argument-sanity:file-query",
+        "type": "generate",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are Buntini. Use only supplied tools. Today is2026-10-29."
+          },
+          {
+            "role": "user",
+            "content": "Find my Seabright itinerary file and tell me train departure and hotel location."
+          }
+        ],
+        "tools": [
+          {
+            "name": "search_files"
+          }
+        ],
+        "workflow_goal": "Find my Seabright itinerary file and tell me train departure and hotel location.",
+        "workflow_steps": [],
+        "context": "Time:2026-10-29 15:00."
+      },
+      "events": [
+        {
+          "type": "model_call",
+          "stage": "route",
+          "id": "argument-sanity:file-query"
+        },
+        {
+          "stage": "arguments",
+          "type": "model_call",
+          "id": "argument-sanity:file-query"
+        },
+        {
+          "name": "search_files",
+          "arguments": {
+            "query": "Seabright"
+          },
+          "id": "argument-sanity:file-query",
+          "type": "tool_call"
+        },
+        {
+          "text": "",
+          "finish_reason": "tool_call",
+          "id": "argument-sanity:file-query",
+          "type": "done"
+        }
+      ]
+    }
+  ]
+}

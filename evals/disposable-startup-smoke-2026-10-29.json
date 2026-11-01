@@ -1,0 +1,57 @@
+{
+  "externalNavigationBlocked": true,
+  "kind": "disposable_companion_startup_smoke",
+  "main": {
+    "bootstrap": true,
+    "denialReason": "window.set_title not allowed. Permissions associated with this command: core:window:allow-set-title",
+    "emptyProfile": true,
+    "frontendMounted": true,
+    "location": "tauri://localhost",
+    "onboardingVisible": true,
+    "passed": true,
+    "personalAppAccess": false,
+    "state": "done",
+    "ungrantedWindowOperationDenied": true,
+    "windowReadsAndMutations": true
+  },
+  "nativeUrlAfterNavigationAttempt": "tauri://localhost",
+  "passed": true,
+  "popupsBlocked": true,
+  "untrustedView": {
+    "denied": "bootstrap not allowed on window \"smoke-untrusted\", webview \"smoke-untrusted\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: main, permission: companion-ui",
+    "passed": true,
+    "state": "done"
+  },
+  "process_exit_code": 0,
+  "disposable_identifier": "app.buntini.smoke.928ad46d63fa4755934ea10317f504d4",
+  "binary_sha256": "16f3f0bfe3355df6126853bafd5a29bd5593bd97a7e3e17738de13850a40a63e",
+  "production_security_source_sha256": "e665239d4d9d5f03de9797aab6171ea409d534dbd4cc51be59b1d11664168af9",
+  "production_capability_sha256": "15ccf9f4d3a0bc2a148e5aed8e2c871948e9740a41353f78fbb67322ce3b6df5",
+  "production_permission_manifest_sha256": "26edac30969e4953d94067ab9d4be9834e1ce96e9a93a81af085f266238b3525",
+  "isolation": [
+    "Separate source tree, Cargo target and app bundle",
+    "Unique compile-time Keychain/migration namespaces",
+    "Temporary data/cache",
+    "Desktop awareness/roaming disabled",
+    "Nonpersistent WebViews",
+    "No microphone, TCC prompts, personal apps or provider calls requested"
+  ],
+  "unchanged_boundaries": [
+    "Production IPC command handlers",
+    "Production explicit app-command permission allowlist",
+    "Production main capability",
+    "Production main navigation/popup/download guards",
+    "Bundled frontend production assets"
+  ],
+  "limitations": [
+    "Separate debug binary with custom-protocol; not the signed release candidate",
+    "Observer and storage isolation are injected only into the disposable copy",
+    "Does not establish fresh-Mac permissions, notarization or Gatekeeper acceptance"
+  ],
+  "evidence_recorded_at": "2026-10-29T17:18:51.319840+00:00",
+  "smoke_tooling_sha256": {
+    "scripts/smoke_companion_startup.py": "e0a8bd9d85eb79fbf9a95a75ce46657eb7ee027ef0f980704331fd44c1f5374f",
+    "scripts/smoke_startup_observer.rs": "dd7219164e9fc5c8f13cdcc66e652b9f4bf7b37fe78d39a485dd171f2a6e3e5b",
+    "scripts/smoke_startup_checks.js": "8be15f9fd0edf285956b32526e62dc256e67e856fd312c14da9a47c0bfc441ea"
+  }
+}

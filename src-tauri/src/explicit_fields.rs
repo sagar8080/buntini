@@ -134,6 +134,423 @@ fn instruction(clause: &str) -> &str {
     text
 }
 
+fn begins_request(text: &str) -> bool {
+    let text = instruction(text);
+    [
+        "read",
+        "find",
+        "search",
+        "review",
+        "check",
+        "open",
+        "summarize",
+        "summarise",
+        "extract",
+        "tell",
+        "give",
+        "create",
+        "save",
+        "write",
+        "add",
+        "make",
+        "take",
+        "set",
+        "schedule",
+        "remind me",
+        "do not",
+        "don't",
+        "never",
+        "explain",
+        "show me how",
+    ]
+    .iter()
+    .any(|prefix| word(text, prefix).is_some())
+}
+
+/// Keep quoted fields intact, and scope negation/explanation over coordinated
+/// clauses. Only the original user goal enters this parser, never tool text.
+fn literal_sentences(goal: &str) -> Option<Vec<&str>> {
+    let mut sentences = Vec::new();
+    let mut begin = 0;
+    for index in outside(goal).ok()? {
+        let tail = &goal[index..];
+        let character = tail.chars().next()?;
+        let period = character == '.' && tail[1..].chars().next().is_none_or(char::is_whitespace);
+        if [';', '\n', '!', '?'].contains(&character) || period {
+            sentences.push(goal[begin..index].trim());
+            begin = index + character.len_utf8();
+        }
+    }
+    sentences.push(goal[begin..].trim());
+    Some(sentences)
+}
+
+fn literal_requests(goal: &str) -> Option<Vec<&str>> {
+    let mut requests = Vec::new();
+    for sentence in literal_sentences(goal)? {
+        let plain = crate::completion::unquoted(sentence);
+        if crate::completion::non_action(crate::completion::request_clause(&plain))
+            || !begins_request(sentence)
+        {
+            continue;
+        }
+        let mut begin = 0;
+        let mut parts = Vec::new();
+        for index in outside(sentence).ok()? {
+            if index < begin {
+                continue;
+            }
+            let tail = &sentence[index..];
+            if let Some(separator) = [
+                ", then ",
+                " and then ",
+                " then ",
+                ", and ",
+                " and ",
+                " also ",
+                ", ",
+            ]
+            .iter()
+            .find(|separator| starts(tail, separator) && begins_request(&tail[separator.len()..]))
+            {
+                parts.push(sentence[begin..index].trim());
+                begin = index + separator.len();
+            }
+        }
+        parts.push(sentence[begin..].trim());
+        for part in parts {
+            let plain = crate::completion::unquoted(part);
+            if crate::completion::non_action(crate::completion::request_clause(&plain)) {
+                break;
+            }
+            requests.push(part);
+        }
+    }
+    Some(requests)
+}
+
+fn is_word_at(text: &str, index: usize, keyword: &str) -> bool {
+    (index == 0 || text[..index].ends_with(char::is_whitespace))
+        && literal_word(&text[index..], keyword).is_some()
+}
+
+// Literal fields may be followed immediately by a clause delimiter. Keep this
+// separate from the executable-field grammar's whitespace-only `word` helper:
+// a filename such as "note.txt" or a word such as "notebook" is not a delimiter.
+fn literal_word<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
+    if !starts(text, keyword) {
+        return None;
+    }
+    let tail = &text[keyword.len()..];
+    let boundary = tail.is_empty()
+        || tail.starts_with(char::is_whitespace)
+        || tail.starts_with([',', ';', ':', '!', '?'])
+        || (tail.starts_with('.') && tail[1..].chars().next().is_none_or(char::is_whitespace));
+    boundary.then(|| tail.trim_start())
+}
+
+fn title_marker<'a>(text: &'a str, kind: Option<&str>) -> Option<&'a str> {
+    let mut text = text.trim();
+    for prefix in ["with", "using", "use"] {
+        if let Some(rest) = word(text, prefix) {
+            text = rest;
+            break;
+        }
+    }
+    if let Some(rest) = word(text, "exactly") {
+        text = rest;
+    }
+    if let Some(rest) = word(text, "the") {
+        text = rest;
+    }
+    if let Some(kind) = kind {
+        if let Some(rest) = word(text, kind) {
+            text = rest;
+        }
+    }
+    let mut value = ["titled", "named", "called", "title"]
+        .iter()
+        .find_map(|marker| word(text, marker))?;
+    if let Some(rest) = word(value, "is") {
+        value = rest;
+    }
+    if let Some(rest) = word(value, "exactly") {
+        value = rest;
+    }
+    Some(value)
+}
+
+fn field_prefix(text: &str, max: usize, read: bool) -> Option<String> {
+    let text = text.trim();
+    let first = text.chars().next()?;
+    if let Some(end) = quote_end(first, None) {
+        let finish = text
+            .char_indices()
+            .skip(1)
+            .find_map(|(index, ch)| (ch == end).then_some(index))?;
+        let value = literal(&text[..finish + end.len_utf8()]).ok()?;
+        let rest = text[finish + end.len_utf8()..].trim_start();
+        if rest.starts_with(['"', '“', '‘', '`', '\'']) {
+            return None;
+        }
+        return (!value.trim().is_empty()
+            && value.chars().count() <= max
+            && !value.chars().any(|ch| ch.is_control()))
+        .then_some(value);
+    }
+    let mut finish = text.len();
+    for index in outside(text).ok()? {
+        let tail = &text[index..];
+        let character = tail.chars().next()?;
+        let punctuation = [',', ';', '\n', '!', '?'].contains(&character)
+            || (character == '.' && tail[1..].chars().next().is_none_or(char::is_whitespace));
+        let metadata = [
+            "with body",
+            "with the body",
+            "whose body",
+            "that summarizes",
+            "that summarises",
+            "which summarizes",
+            "which summarises",
+            "using the",
+            "using that",
+            "based on",
+            "from that",
+            "from the",
+            "with exactly",
+            "with the title",
+            "with title",
+            "due",
+            "starting",
+            "lasting",
+            "at the time",
+            "on the date",
+            "at its",
+            "on its",
+            "with location",
+            "in the same",
+        ]
+        .iter()
+        .any(|marker| is_word_at(text, index, marker));
+        let dated = ["on ", "at ", "for "].iter().any(|prefix| {
+            starts(tail, prefix)
+                && (index == 0 || text[..index].ends_with(char::is_whitespace))
+                && tail[prefix.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_digit())
+        });
+        let coordinated = [" and ", " then ", " also "].iter().any(|prefix| {
+            starts(tail, prefix)
+                && (read
+                    || begins_request(&tail[prefix.len()..])
+                    || ["body", "due", "start", "location", "duration"]
+                        .iter()
+                        .any(|field| word(&tail[prefix.len()..], field).is_some()))
+        });
+        let read_scope = read
+            && [
+                "in notes",
+                "in my notes",
+                "in the notes app",
+                "in apple notes",
+                "from notes",
+            ]
+            .iter()
+            .any(|scope| is_word_at(text, index, scope));
+        if punctuation || metadata || dated || coordinated || read_scope {
+            finish = index;
+            break;
+        }
+    }
+    let value = text[..finish].trim().trim_end_matches('.').trim();
+    (!value.is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control))
+        .then(|| value.to_string())
+}
+
+fn without_article(mut text: &str) -> &str {
+    loop {
+        if let Some(rest) = ["a", "an", "the", "my", "this", "new", "existing", "another"]
+            .iter()
+            .find_map(|article| word(text, article))
+        {
+            text = rest;
+        } else {
+            return text;
+        }
+    }
+}
+
+/// An exact user-supplied note identifier/title, suitable for pinning a read
+/// query. This is not a request executor, a source lookup or permission grant.
+pub(crate) fn read_query(goal: &str) -> Option<String> {
+    let mut queries = Vec::new();
+    let mut note_reads = 0;
+    for request in literal_requests(goal)? {
+        let text = instruction(request);
+        let Some(rest) = [
+            "read",
+            "find",
+            "search",
+            "review",
+            "check",
+            "open",
+            "summarize",
+            "summarise",
+        ]
+        .iter()
+        .find_map(|verb| word(text, verb)) else {
+            continue;
+        };
+        let rest = word(rest, "for").unwrap_or(rest);
+        let mut prefix = without_article(rest);
+        if let Some(tail) = word(prefix, "note").or_else(|| word(prefix, "notes")) {
+            note_reads += 1;
+            let value = [
+                "mentioning",
+                "containing",
+                "that mentions",
+                "which mentions",
+            ]
+            .iter()
+            .find_map(|marker| word(tail, marker))
+            .or_else(|| title_marker(tail, None));
+            if let Some(value) = value {
+                if let Some(query) =
+                    field_prefix(value, 500, true).filter(|query| query.len() <= 500)
+                {
+                    queries.push(query);
+                }
+            }
+            continue;
+        }
+        // "my <literal title> note" is distinct from a later new-note title.
+        if word(rest, "my").is_some() {
+            prefix = word(rest, "my").unwrap();
+            if let Some(index) = outside(prefix)
+                .ok()?
+                .into_iter()
+                .find(|index| is_word_at(prefix, *index, "note"))
+            {
+                note_reads += 1;
+                let tail = literal_word(&prefix[index..], "note")?;
+                let identified = ["mentioning", "containing", "that mentions"]
+                    .iter()
+                    .find_map(|marker| word(tail, marker));
+                let query = if let Some(value) = identified {
+                    field_prefix(value, 500, true)
+                } else {
+                    literal(prefix[..index].trim()).ok()
+                };
+                if let Some(query) = query.filter(|query| !query.is_empty() && query.len() <= 500) {
+                    queries.push(query);
+                }
+            }
+        }
+    }
+    (note_reads == 1 && queries.len() == 1).then(|| queries.remove(0))
+}
+
+fn action_tail<'a>(clause: &'a str, tool: &str) -> Option<&'a str> {
+    let text = instruction(clause);
+    let verbs: &[&str] = match tool {
+        "create_note" => &["create", "save", "write", "add", "make", "take"],
+        "add_reminder" => &["add", "create", "set", "make"],
+        "add_calendar_event" => &["add", "create", "make", "schedule"],
+        _ => return None,
+    };
+    let rest = without_article(verbs.iter().find_map(|verb| word(text, verb))?);
+    match tool {
+        "create_note" => word(rest, "note"),
+        "add_reminder" => word(rest, "reminder"),
+        "add_calendar_event" => word(rest, "calendar event")
+            .or_else(|| word(rest, "event"))
+            .or_else(|| word(rest, "meeting")),
+        _ => None,
+    }
+}
+
+/// Bind only a positively requested write's explicit title. Body, due time,
+/// event start and every execution/approval decision remain with the caller.
+pub(crate) fn action_title(goal: &str, tool: &str) -> Option<String> {
+    let kind = match tool {
+        "create_note" => "note",
+        "add_reminder" => "reminder",
+        "add_calendar_event" => "event",
+        _ => return None,
+    };
+    let mut actions = Vec::new();
+    let mut total_writes = 0;
+    let mut titles = Vec::new();
+    for request in literal_requests(goal)? {
+        let anchored = ["create_note", "add_reminder", "add_calendar_event"]
+            .into_iter()
+            .find(|candidate| action_tail(request, candidate).is_some());
+        let (requested, unsupported) = if let Some(anchored) = anchored {
+            (vec![anchored], false)
+        } else {
+            crate::completion::requested_actions(request)
+        };
+        total_writes += requested.len() + usize::from(unsupported);
+        if requested == [tool] {
+            actions.push(request);
+            let value = if let Some(tail) = action_tail(request, tool) {
+                title_marker(tail, Some(kind))
+            } else {
+                // Noun aliases such as "add that workshop to my calendar"
+                // rely on the same positive-action classifier as the task
+                // contract. Only an explicit exact-title marker is pinned.
+                outside(request).ok()?.into_iter().find_map(|index| {
+                    [
+                        "using exactly the title",
+                        "with exactly the title",
+                        "using exactly the reminder title",
+                        "with exactly reminder title",
+                    ]
+                    .iter()
+                    .any(|marker| is_word_at(request, index, marker))
+                    .then(|| title_marker(&request[index..], Some(kind)))
+                    .flatten()
+                })
+            };
+            if let Some(value) = value.and_then(|value| field_prefix(value, 200, false)) {
+                titles.push(value);
+            }
+        }
+    }
+    if actions.len() != 1 {
+        return None;
+    }
+    if total_writes == 1 {
+        let action_offset = actions[0].as_ptr() as usize - goal.as_ptr() as usize;
+        for sentence in literal_sentences(goal)? {
+            if sentence.as_ptr() as usize - goal.as_ptr() as usize <= action_offset {
+                continue;
+            }
+            let text = instruction(sentence);
+            if [
+                "use exactly",
+                "use the title exactly",
+                "use the reminder title exactly",
+                "use the note title exactly",
+                "use the event title exactly",
+            ]
+            .iter()
+            .any(|prefix| word(text, prefix).is_some())
+            {
+                if let Some(value) =
+                    title_marker(text, Some(kind)).and_then(|value| field_prefix(value, 200, false))
+                {
+                    titles.push(value);
+                }
+            }
+        }
+    }
+    titles.sort();
+    titles.dedup();
+    (titles.len() == 1).then(|| titles.remove(0))
+}
+
 fn reminder_instruction(clause: &str) -> bool {
     let text = instruction(clause);
     if word(text, "remind me").is_some() {
@@ -376,6 +793,143 @@ pub fn explicit_note(goal: &str, steps: &[Step]) -> Result<Option<BoundAction>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_queries_preserve_full_arbitrary_identifiers_and_quoted_titles() {
+        for (goal,expected) in [
+            ("Find the note mentioning OrchardLedger-7f4c8d91 and summarize it.","OrchardLedger-7f4c8d91"),
+            ("Please read the note containing Café.v2_91cd-48ef, then tell me the amount.","Café.v2_91cd-48ef"),
+            ("Search for a note mentioning Fleet-62ee713a in Notes and summarize it.","Fleet-62ee713a"),
+            ("Read the note titled ‘Travel & receipts; M-82c’, then create a note titled Summary using that source.","Travel & receipts; M-82c"),
+            ("Read my Harbor-9a8c note and tell me the departure.","Harbor-9a8c"),
+            ("Read my \"Mum's garden; then flowers\" note, then summarize it.","Mum's garden; then flowers"),
+        ] {
+            assert_eq!(read_query(goal).as_deref(),Some(expected),"{goal}");
+        }
+    }
+
+    #[test]
+    fn possessive_note_titles_end_at_clause_punctuation_without_losing_identifiers() {
+        for title in [
+            "ACME-f231dd67b5aa4535 Quotes",
+            "ACME-73be Handoff",
+            "Cedar-915c Literal",
+        ] {
+            let goal = format!("Read my {title} note, calculate both total prices, and recommend one using my stated rule.");
+            assert_eq!(read_query(&goal).as_deref(), Some(title), "{goal}");
+        }
+        assert_eq!(
+            read_query("Read my \"ACME-73be; Quotes\" note, calculate the total.").as_deref(),
+            Some("ACME-73be; Quotes")
+        );
+        assert!(read_query("Read my ACME-73be notebook, calculate the total.").is_none());
+        assert!(read_query("Read my ACME-73be note.txt, calculate the total.").is_none());
+        assert!(read_query("Do not read my ACME-73be Quotes note, calculate the total.").is_none());
+    }
+
+    #[test]
+    fn partial_action_titles_do_not_require_or_invent_source_derived_fields() {
+        for (goal,tool,expected) in [
+            ("Read the note titled Source-91bc, then create a new note titled Fresh-74ed whose body contains its summary.","create_note","Fresh-74ed"),
+            ("Read the note mentioning Fleet-62ee713a, then add a reminder with exactly the reminder title Review-Fleet-43be due at the time in that note.","add_reminder","Review-Fleet-43be"),
+            ("Create a calendar event using exactly the title ‘Workshop C-77’ at the time in the source note.","add_calendar_event","Workshop C-77"),
+            ("Create a note with exactly the title \"Budget and receipts; then Archive\" using that note's contents.","create_note","Budget and receipts; then Archive"),
+            ("Add a reminder with exactly reminder title Check-Copper-63ef based on the source record.","add_reminder","Check-Copper-63ef"),
+            ("Create a note called Mum's garden using that source's text.","create_note","Mum's garden"),
+            ("Create an event titled Atlas-24bf on 2026-12-18 at 09:30.","add_calendar_event","Atlas-24bf"),
+            ("Remind me to prepare the workshop at the date in the note. Use exactly the reminder title Prepare-Mica-6c3d.","add_reminder","Prepare-Mica-6c3d"),
+            ("Read the note mentioning Meadow-8d19, then add that workshop to my calendar using exactly the title Meadow-session-7acd.","add_calendar_event","Meadow-session-7acd"),
+            ("Create a new note titled Compass-7ad9 that summarizes the earlier source.","create_note","Compass-7ad9"),
+        ] {
+            assert_eq!(action_title(goal,tool).as_deref(),Some(expected),"{goal}");
+        }
+        assert!(
+            explicit_note(
+                "Create a note titled Fresh-74ed whose body contains its summary.",
+                &[]
+            )
+            .is_err(),
+            "partial metadata extraction must not manufacture a complete executable note"
+        );
+    }
+
+    #[test]
+    fn old_read_titles_and_quoted_body_commands_cannot_become_new_write_titles() {
+        let goal="Read the note titled ‘Original - 7b91’, then create a note titled ‘New - 82de’ whose body summarizes it.";
+        assert_eq!(read_query(goal).as_deref(), Some("Original - 7b91"));
+        assert_eq!(
+            action_title(goal, "create_note").as_deref(),
+            Some("New - 82de")
+        );
+        assert!(action_title("Read the note titled Old-42ce.", "create_note").is_none());
+        assert!(action_title(
+            "Create a note with body \"Add a reminder titled Injected-7d13\".",
+            "add_reminder"
+        )
+        .is_none());
+        assert!(action_title(
+            "Create a note from the source note titled Old-42ce.",
+            "create_note"
+        )
+        .is_none());
+        assert!(action_title(
+            "Add a reminder using the title from that note.",
+            "add_reminder"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn partial_literal_pins_reject_negation_explanations_and_ambiguous_targets() {
+        for goal in [
+            "Do not read the note titled Source-4de1 and create a note titled Copy-77b8.",
+            "How do I find the note mentioning Pine-3b9e and create a note titled Copy-77b8?",
+            "Explain ‘read the note titled Source-4de1; then create a note titled Copy-77b8’.",
+            "For example, read the note mentioning Pine-3b9e and create a note titled Copy-77b8.",
+            "Create a note with body \"Read the note mentioning Pine-3b9e\".",
+        ] {
+            assert!(read_query(goal).is_none(), "{goal}");
+            assert!(action_title(goal, "create_note").is_none(), "{goal}");
+        }
+        assert!(
+            read_query("Read the note titled Source-A and read the note titled Source-B.")
+                .is_none()
+        );
+        assert!(action_title(
+            "Create a note titled First-21ac and create a note titled Second-97dc.",
+            "create_note"
+        )
+        .is_none());
+        assert!(action_title(
+            "Create a note titled First-21ac; create another note.",
+            "create_note"
+        )
+        .is_none());
+        assert!(action_title("Create a note titled \"Unclosed.", "create_note").is_none());
+        assert!(action_title(
+            "Don't create a note titled One and add a reminder titled Two.",
+            "add_reminder"
+        )
+        .is_none());
+        assert!(action_title("Read the note titled Source, then don't create a note titled One and add a reminder titled Two.","add_reminder").is_none());
+        assert!(action_title(
+            "Do not remind me about the workshop. Use exactly the reminder title Wrong-9b1e.",
+            "add_reminder"
+        )
+        .is_none());
+        assert!(action_title("Explain how to remind me about the workshop. Use exactly the reminder title Wrong-9b1e.","add_reminder").is_none());
+        assert!(action_title("Create a note with body \"Remind me about the workshop. Use exactly the reminder title Wrong-9b1e.\".","add_reminder").is_none());
+        assert!(action_title(
+            "Create a note, then add a reminder. Use exactly the title Ambiguous-4da2.",
+            "add_reminder"
+        )
+        .is_none());
+        assert!(action_title(
+            "Create a note titled First-4bc1. Use exactly the note title Other-9ef3.",
+            "create_note"
+        )
+        .is_none());
+    }
 
     #[test]
     fn separates_explicit_fields_after_note_without_model_inference() {

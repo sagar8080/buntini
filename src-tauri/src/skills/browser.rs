@@ -236,7 +236,7 @@ fn open_address(address: &str) -> Option<Command> {
     } else {
         format!("https://{address}")
     };
-    let parsed = reqwest::Url::parse(&url).ok()?;
+    let parsed = crate::actions::public_web_url(&url).ok()?;
     if parsed.scheme() != "https"
         || !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -307,10 +307,18 @@ fn current_browser(context: &Context) -> Result<&'static crate::apps::App, Strin
         .iter()
         .filter(|app| crate::apps::BROWSERS.contains(&app.id) && crate::apps::installed(app))
         .collect();
+    // The snapshot taken as Buntini opened knows the browser even after a quick visit.
     let front = context
-        .front_app
-        .as_deref()
-        .and_then(|name| browsers.iter().find(|app| app.name == name))
+        .focus
+        .as_ref()
+        .and_then(crate::focus::Snapshot::browser)
+        .and_then(|id| browsers.iter().find(|app| app.id == id))
+        .or_else(|| {
+            context
+                .front_app
+                .as_deref()
+                .and_then(|name| browsers.iter().find(|app| app.name == name))
+        })
         .copied();
     let chosen = front
         .or_else(|| {
@@ -339,7 +347,9 @@ async fn open(target: &str) -> Result<(), String> {
 }
 
 pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, String> {
-    let done = |answer: String, share: Option<Share>| Ok(Outcome::Done { answer, share });
+    let done = |answer: String, share: Option<Share>| {
+        Ok(Outcome::Done { answer, shares: share.into_iter().collect() })
+    };
     match command {
         Command::OpenSite { name, url } => {
             open(&url).await?;
@@ -420,8 +430,10 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
                     .await?
                     .ok_or("No page is open in Safari.")?;
                 return Ok(Outcome::Page {
+                    kind: "web page",
                     title: format!("{title} ({address})"),
                     text,
+                    share: Share::Browser,
                 });
             }
             crate::apps::ensure_public_window(browser).await?;
@@ -438,8 +450,10 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
             .map_err(|_| "The browser couldn’t be read.".to_string())??;
             let (title, text) = page.split_once('\n').unwrap_or(("", &page));
             Ok(Outcome::Page {
+                kind: "web page",
                 title: title.to_string(),
                 text: text.to_string(),
+                share: Share::Browser,
             })
         }
     }
@@ -479,6 +493,10 @@ mod tests {
             "open http://example.com/path",
             "open https://user:password@example.com/path",
             "open file:///tmp/private",
+            "open https://127.0.0.1/admin",
+            "open https://192.168.1.1/",
+            "open https://tauri.localhost/",
+            "open https://example.com:8443/",
         ] {
             assert_eq!(ask(prompt), None, "{prompt}");
         }

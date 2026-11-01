@@ -36,6 +36,8 @@ export interface Settings {
   voiceRate: number;
   notificationsEnabled: boolean;
   morningBrief: boolean;
+  headsUps: boolean;
+  openAtLogin: boolean;
   monthlyBudgetUsd: number;
   costPerSearchUsd: number;
   vadModelPath: string;
@@ -104,6 +106,10 @@ export interface Diagnostics {
   chatgptAccount?: string | null;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
+/** Something done on its own at a set time; the morning brief is the built-in one. */
+export interface Routine { id: string; task: string; days: string; time: string; enabled: boolean; builtIn?: boolean; createdAt: string; nextRunAt: string; lastRunAt?: string; lastTaskId?: string; lastError?: string }
+/** An aim that takes days, with check-ins until its last day or the end the user named. */
+export interface Goal { id: string; aim: string; checkIn: string; style: 'run' | 'remind'; days: string; time: string; until: string; doneWhen: 'date' | 'reply' | 'you'; person?: string; state: 'active' | 'paused' | 'done' | 'ended'; createdAt: string; endedAt?: string; outcome?: string; lastTaskId?: string; note?: string }
 export interface SavedSearch { id: string; query: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastResultTaskId?: string; lastError?: string }
 export interface PricePoint { price: string; currency: string; observedAt: string; url: string }
 export interface PriceWatch { id: string; url: string; label: string; currency: string; threshold: string; intervalMinutes: number; enabled: boolean; createdAt: string; nextRunAt: string; lastCheckedAt?: string; lastPrice?: string; lastError?: string; history: PricePoint[] }
@@ -112,7 +118,7 @@ export interface WebApproval { id: string; prompt: string; provider: string; exp
 export interface ConversationSummary { id: string; title: string; createdAt: string; updatedAt: string; legacy: boolean; turnCount: number }
 export interface ConversationPage { conversation: ConversationSummary; turns: TaskRecord[]; nextCursor: string | null }
 export interface ConversationList { items: ConversationSummary[]; nextCursor: string | null }
-export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
+export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
 export interface Memory { id: number; fact: string; createdAt: string }
@@ -122,4 +128,10 @@ export interface FieldProvenance { value: unknown; origin: string; sourceStepId?
 export interface TaskContract { version: number; originalRequest: string; currentRequest: string; revision: number; intentStatus: string; outcomes: TaskOutcome[]; unresolvedFields: { outcomeId: string; field: string; reason: string; status: string }[]; constraints: unknown[]; provenance: Record<string, Record<string, FieldProvenance>>; revisions: unknown[] }
 export interface TaskFieldUpdate { outcomeId: string; fields: Record<string, string> }
 export interface TaskProgress { id: string; goal: string; state: string; updatedAt: string; error?: string; canResume?: boolean; contract?: TaskContract; steps: { id: string; tool: string; arguments: Record<string, unknown>; state: string; approvedAt?: string; finishedAt?: string; evidence?: unknown }[] }
-export interface BackgroundStatus { executionMode: string; limitation: string; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
+/** What macOS reports for Open at login. */
+export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'notFound' | 'unavailable';
+/** A saved proposal waiting for the person; `description` never holds field values. */
+/** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
+export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
+export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
+export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }

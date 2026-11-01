@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { greeting, mergeTurns, mergeConversationTurns, threadItems } from './thread.ts';
+import { greeting, invitation, mergeTurns, mergeConversationTurns, threadItems } from './thread.ts';
 import type { ConversationPage, TaskRecord } from './types';
 
 const turn = (id: string, createdAt: string, answer = ''): TaskRecord => ({ id, prompt: id, answer, state: 'completed', createdAt, sources: [], files: [] });
@@ -30,6 +30,9 @@ test('greetings follow the time of day', () => {
   assert.equal(greeting(at(14)), 'Good afternoon.');
   assert.equal(greeting(at(19), '  '), 'Good evening.');
   assert.equal(greeting(at(2)), 'Up late.');
+  assert.equal(invitation(at(8)), 'Ready when you are.');
+  assert.equal(invitation(at(19)), 'Winding down? I’m all ears.');
+  assert.equal(invitation(at(23)), 'I’m here if you need me.');
 });
 
 test('opening a saved conversation replaces the current thread and refresh keeps older pages', () => {

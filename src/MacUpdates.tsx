@@ -18,7 +18,7 @@ export default function MacUpdates({ onError }: { onError: (error: string) => vo
   return <section className="settings-section">
     <div className="settings-section-heading"><h3>macOS updates</h3></div>
     {!confirming && <button type="button" className="secondary-button" onClick={() => setConfirming(true)}><ShieldCheck size={14} /> Check for updates</button>}
-    {confirming && <div className="inline-approval"><p>Ask Apple’s Software Update service what’s available? Nothing gets installed.</p><div><button type="button" className="text-button" disabled={checking} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="secondary-button" disabled={checking} onClick={() => void check()}>{checking ? <LoaderCircle size={13} className="spin" /> : null}{checking ? 'Checking…' : 'Check now'}</button></div></div>}
+    {confirming && <div className="inline-approval"><p>Ask Apple what’s available?</p><div><button type="button" className="text-button" disabled={checking} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="secondary-button" disabled={checking} onClick={() => void check()}>{checking ? <LoaderCircle size={13} className="spin" /> : null}{checking ? 'Checking…' : 'Check now'}</button></div></div>}
     {result && <div className="update-results"><strong>{result.summary}</strong><small>Checked {new Date(result.checkedAt).toLocaleString()}</small>{result.updates.map((update, index) => <p key={index}>{update}</p>)}</div>}
   </section>;
 }

@@ -1,0 +1,3 @@
+{"stage": "automation_version_probe", "app": "Notes", "bundle": "com.apple.Notes", "returncode": 0, "version": "4.13", "error": null, "personalContentRead": false, "observedUnixTime": 1793299502.873047}
+{"stage": "automation_version_probe", "app": "Calendar", "bundle": "com.apple.iCal", "returncode": 0, "version": "16.0", "error": null, "personalContentRead": false, "observedUnixTime": 1793299502.935797}
+{"stage": "automation_version_probe", "app": "Reminders", "bundle": "com.apple.reminders", "returncode": 0, "version": "7.0", "error": null, "personalContentRead": false, "observedUnixTime": 1793299502.9973602}

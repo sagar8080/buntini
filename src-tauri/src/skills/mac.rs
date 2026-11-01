@@ -376,7 +376,14 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
                 .map_err(|error| error.to_string())?
                 .with_timezone(&chrono::Local);
             let _ = tauri::Emitter::emit(app, "timer-updated", &timer);
-            format!("Timer saved for {} ({}). I’ll alert you while Buntini is running and your Mac is awake. If you quit or sleep, I’ll show it when you return.", spoken(seconds), at.format("%-H:%M"))
+            // Only a timer macOS will really show can promise an alert while Buntini is closed.
+            let macos = timer.os_request
+                && crate::notifications::notification_permission_status().await.is_ok_and(|status| status == "authorized");
+            if macos {
+                format!("Timer saved for {} ({}). macOS will alert you, even if Buntini is closed.", spoken(seconds), at.format("%-H:%M"))
+            } else {
+                format!("Timer saved for {} ({}). I’ll alert you while Buntini is running and your Mac is awake. If you quit or sleep, I’ll show it when you return.", spoken(seconds), at.format("%-H:%M"))
+            }
         }
         command @ (Command::CancelTimers | Command::CancelAllTimers) => {
             let app = APP
@@ -407,7 +414,7 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
     };
     Ok(Outcome::Done {
         answer,
-        share: None,
+        shares: Vec::new(),
     })
 }
 

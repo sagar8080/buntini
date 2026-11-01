@@ -511,18 +511,18 @@ fn sample(window: &tauri::WebviewWindow) -> Option<World> {
     })
 }
 
-fn health() -> Health {
+/// None when macOS doesn't report system information.
+fn health() -> Option<Health> {
     use sysinfo::{Disks, System};
-    let mut system = System::new();
+    let mut system = System::new().ok()?;
     system.refresh_cpu_usage();
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     system.refresh_cpu_usage();
-    let disks = Disks::new_with_refreshed_list();
+    let disks = Disks::new_with_refreshed_list().ok()?;
     let root = disks
-        .list()
         .iter()
         .find(|disk| disk.mount_point() == std::path::Path::new("/"))
-        .or_else(|| disks.list().first());
+        .or_else(|| disks.first());
     let disk_free_percent = root
         .filter(|disk| disk.total_space() > 0)
         .map(|disk| disk.available_space() as f32 / disk.total_space() as f32 * 100.0)
@@ -532,12 +532,12 @@ fn health() -> Health {
         .output()
         .ok()
         .and_then(|output| parse_battery(&String::from_utf8_lossy(&output.stdout)));
-    Health {
+    Some(Health {
         battery_percent: battery.map(|(percent, _)| percent),
         charging: battery.is_none_or(|(_, charging)| charging),
         cpu_percent: system.global_cpu_usage(),
         disk_free_percent,
-    }
+    })
 }
 
 /// Samples the world once a second while roaming or awareness is on, glues the pet to
@@ -561,7 +561,7 @@ pub fn start(app: tauri::AppHandle) {
                 follow_perch(&glue, &window);
             }
             if aware && (ticks == 1 || ticks % 600 == 0) {
-                tauri::async_runtime::spawn_blocking(|| *HEALTH.lock().unwrap() = Some(health()));
+                tauri::async_runtime::spawn_blocking(|| *HEALTH.lock().unwrap() = health());
             }
             if ticks % 10 == 0 {
                 if let Some(world) = sample(&window) {
@@ -664,6 +664,30 @@ fn stop() {
     MOTION.fetch_add(1, Ordering::SeqCst);
     MOVING.store(false, Ordering::Relaxed);
     *PERCH.lock().unwrap() = None;
+}
+
+/// The cat pawing at the window it sits on, after the user said yes (`ax::knock_window`).
+/// Only an ordinary window of another app, still on screen where it was.
+#[tauri::command]
+pub async fn pet_knock(number: u32) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || {
+            let window = mac::windows().into_iter().find(|w| w.number == number).ok_or("gone")?;
+            if window.layer != 0 || window.pid == std::process::id() as i32 {
+                return Err("gone".to_string());
+            }
+            let Rect { x, y, width, height } = window.rect;
+            crate::ax::knock_window(window.pid, (x, y, width, height))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = number;
+        Err("gone".into())
+    }
 }
 
 #[tauri::command]
@@ -830,6 +854,19 @@ mod tests {
         assert_eq!(parse_battery("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true"), Some((100, true)));
         assert_eq!(parse_battery("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t42%; charging; 1:10 remaining"), Some((42, true)));
         assert_eq!(parse_battery("Now drawing from 'AC Power'"), None);
+    }
+
+    /// The sysinfo paths health uses (CPU, the root disk) on the Mac running the tests.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn health_reads_root_disk() {
+        let health = health().expect("health of this Mac");
+        assert!(
+            health.disk_free_percent > 0.0 && health.disk_free_percent < 100.0,
+            "the root disk has a real size and is neither empty nor full: {health:?}"
+        );
+        assert!((0.0..=100.0 * 64.0).contains(&health.cpu_percent));
+        assert!(health.battery_percent.is_none_or(|percent| percent <= 100));
     }
 
     #[test]

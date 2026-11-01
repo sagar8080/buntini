@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Globe2, KeyRound, LoaderCircle, Plane, ShoppingBag } from 'lucide-react';
 import SearchBudget from './SearchBudget';
+import AddedTools from './AddedTools';
 import { errorMessage } from './bridge';
 import type { Diagnostics, KeyProvider, Settings } from './types';
 
@@ -20,7 +21,7 @@ function KeyField({ label, placeholder, secret = true, value, onChange }: { labe
   return <div className="key-input"><KeyRound size={14} /><input type={secret ? 'password' : 'text'} autoComplete="off" spellCheck={false} aria-label={label} placeholder={placeholder} value={value} onChange={event => onChange(event.target.value)} /></div>;
 }
 
-/** The Connections tab: web search, eBay and flights, and lookup usage. */
+/** The Connections tab: web search, eBay, flights and tools you added. Search usage shows once a key is in. */
 export default function Connections({ draft, update, diagnostics, onKey, onError }: Props) {
   const [searchKey, setSearchKey] = useState('');
   const [clientId, setClientId] = useState('');
@@ -38,11 +39,11 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
   </div>;
   return <>
     <section className="settings-section">
-      <Service icon={<Globe2 size={18} />} name="Search API fallback" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
+      <Service icon={<Globe2 size={18} />} name="Web search" detail={draft.searchProvider === 'brave' ? 'Brave Search' : 'Tavily'} connected={searchSaved}>
         <div className="chip-row" role="radiogroup" aria-label="Fallback search provider">{(['brave', 'tavily'] as const).map(id => <button type="button" key={id} role="radio" aria-checked={draft.searchProvider === id} className={draft.searchProvider === id ? 'active' : ''} onClick={() => { update('searchProvider', id); setSearchKey(''); }}>{id === 'brave' ? 'Brave Search' : 'Tavily'}</button>)}</div>
-        <p className="field-help">Chat research searches in the browser first. This optional key is used when browser research is insufficient, and for saved searches.</p>
-        <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved · paste to replace' : 'API key'} value={searchKey} onChange={setSearchKey} />
+        <KeyField label="Search API key" placeholder={searchSaved ? 'Key saved' : 'API key'} value={searchKey} onChange={setSearchKey} />
         {actions(draft.searchProvider, !!searchKey.trim(), searchKey.trim(), () => setSearchKey(''), searchSaved)}
+        {searchSaved && <SearchBudget draft={draft} update={update} diagnostics={diagnostics} />}
       </Service>
       <Service icon={<ShoppingBag size={18} />} name="eBay" detail="Listings and prices" connected={!!diagnostics.ebayConfigured}>
         <KeyField label="eBay client ID" secret={false} placeholder="Client ID (App ID)" value={clientId} onChange={setClientId} />
@@ -51,14 +52,10 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
         {actions('ebay', !!clientId.trim() && !!clientSecret.trim(), JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim() }), () => { setClientId(''); setClientSecret(''); }, !!diagnostics.ebayConfigured)}
       </Service>
       <Service icon={<Plane size={18} />} name="Flights" detail="Duffel · search only" connected={!!diagnostics.duffelConfigured}>
-        <KeyField label="Duffel access token" placeholder="duffel_test_… or duffel_live_…" value={token} onChange={setToken} />
+        <KeyField label="Duffel access token" placeholder="duffel_live_…" value={token} onChange={setToken} />
         {actions('duffel', !!token.trim(), token.trim(), () => setToken(''), !!diagnostics.duffelConfigured)}
       </Service>
-      <p className="field-help">Weather, exchange rates, Wikipedia and places work without a key. Buntini asks before every request.</p>
     </section>
-    <section className="settings-section">
-      <div className="settings-section-heading"><h3>Usage</h3></div>
-      <SearchBudget draft={draft} update={update} diagnostics={diagnostics} />
-    </section>
+    <AddedTools onError={onError} />
   </>;
 }

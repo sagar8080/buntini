@@ -8,6 +8,12 @@ pub mod duffel;
 pub mod ebay;
 pub mod everyday;
 pub mod places;
+mod summary;
+mod weather_advice;
+pub use summary::render_card_summary;
+#[cfg(all(test, debug_assertions))]
+pub(crate) use weather_advice::has_walk_advice;
+pub use weather_advice::with_walk_advice;
 
 use crate::{controller::AppState, types::*, web};
 use futures_util::StreamExt;
@@ -360,15 +366,7 @@ pub(crate) fn card(
 
 /// Only plain public HTTPS links become clickable.
 pub(crate) fn safe_link(url: &str) -> bool {
-    reqwest::Url::parse(url)
-        .map(|parsed| {
-            parsed.scheme() == "https"
-                && parsed.host_str().is_some()
-                && parsed.username().is_empty()
-                && parsed.password().is_none()
-                && url.len() <= 2048
-        })
-        .unwrap_or(false)
+    url.len() <= 2048 && crate::research::validate_public_url(url).is_ok()
 }
 
 pub(crate) fn clip(text: &str, limit: usize) -> String {
@@ -534,6 +532,24 @@ mod tests {
         assert!(text(&map, "b", 20).is_err());
         assert_eq!(text(&map, "c", 20).unwrap(), None);
         assert!(required(&map, "c", 20).is_err());
+    }
+
+    #[test]
+    fn result_links_reject_private_destinations_and_nonstandard_ports() {
+        for url in [
+            "https://127.0.0.1/admin",
+            "https://[::1]/admin",
+            "https://192.168.1.1/",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://localhost/",
+            "https://office.local/",
+            "https://tauri.localhost/",
+            "https://example.com:8443/",
+            "https://name:password@example.com/",
+        ] {
+            assert!(!safe_link(url), "{url}");
+        }
+        assert!(safe_link("https://example.com/article?topic=rust#section"));
     }
 
     #[test]

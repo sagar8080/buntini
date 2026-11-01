@@ -1,0 +1,37 @@
+{
+  "kind": "live_free_public_api_smoke",
+  "observed_at": "2026-10-29T17:15:04.511195+00:00",
+  "command": [
+    "src-tauri/target/debug/deps/buntini_lib-9eec1fba95ab59d9",
+    "integrations::tests::live_keyless_lookups",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "passed": true,
+  "fixed_queries": [
+    "Lisbon, Portugal weather",
+    "100 USD to EUR,GBP",
+    "Alan Turing on Wikipedia",
+    "cafes within 600m of Baixa, Lisbon"
+  ],
+  "providers": [
+    "Open-Meteo",
+    "Frankfurter/ECB",
+    "Wikipedia",
+    "Nominatim/OpenStreetMap"
+  ],
+  "credentials_used": false,
+  "personal_data_sent": false,
+  "scope": "Fixed public read-only queries only; no saved keys, user locations, account or paid provider calls",
+  "binary_sha256_before": "d3cb52d296e882f6700cdb03ac99be6836fa6716e65432891a59dcb27fe63e1f",
+  "binary_sha256_after": "d3cb52d296e882f6700cdb03ac99be6836fa6716e65432891a59dcb27fe63e1f",
+  "source_sha256": {
+    "src-tauri/src/integrations/mod.rs": "1a45dda81cb600c0694cf78ebacd6275272635aeda09f3d03ae3fc18dcfca1f5",
+    "src-tauri/src/integrations/everyday.rs": "5411a666fa57edb73f122b5969352f639f6c6b76ffc6f3718c1b68036f64ec25",
+    "src-tauri/src/integrations/places.rs": "2e163bf4c87270dd83c4797ce6a9323e5b2f8fb686f8584f59987944110f8eb9"
+  },
+  "stdout": "\nrunning 1 test\ntest integrations::tests::live_keyless_lookups ... --- weather\n[1] Now in Lisbon, Lisbon District, Portugal \u2014 Clear sky\nTemperature: 25\u00b0C (feels like 24\u00b0C)\nHumidity: 34%\nWind: 3 km/h\nLocal time: 2026-10-29 17:15\n\n[2] 7-day forecast \u2014 Lisbon, Lisbon District, Portugal\nThu 29 Oct: Mainly clear \u00b7 13\u201326\u00b0C \u00b7 0% chance of rain\nFri 30 Oct: Overcast \u00b7 15\u201326\u00b0C \u00b7 0% chance of rain\nSat 31 Oct: Mainly clear \u00b7 14\u201326\u00b0C \u00b7 0% chance of rain\nSun 1 Nov: Clear sky \u00b7 13\u201325\u00b0C \u00b7 0% chance of rain\nMon 2 Nov: Clear sky \u00b7 13\u201326\u00b0C \u00b7 0% chance of rain\nTue 3 Nov: Overcast \u00b7 10\u201324\u00b0C \u00b7 5% chance of rain\nWed 4 Nov: Overcast \u00b7 11\u201323\u00b0C \u00b7 17% chance of rain\n--- currency\n[1] 100 USD = 89.85 EUR \u2014 ECB reference rate for 2026-10-29\nRate: 1 USD = 0.8985 EUR\nInverse: 1 EUR = 1.113 USD\n\n[2] 100 USD = 75.09 GBP \u2014 ECB reference rate for 2026-10-29\nRate: 1 USD = 0.75094 GBP\nInverse: 1 GBP = 1.3317 USD\n--- wikipedia\n[1] Alan Turing \u2014 English computer scientist (1912\u20131954)\nSummary: Alan Mathison Turing was an English mathematician and logician widely regarded as the father of theoretical computer science. He formalised the concepts of algorithm and computation with the Turing machine, a model of a general-purpose computer, and his contributions to cryptanalysis helped the Allies of World War II decipher messages encrypted by the German Enigma machine. He also contributed the Turing test to philosophy of artificial intelligence and the Turing pattern concept to mathematical and theoretical biology.\nLast edited: 2026-10-27 20:23:26\n\n[2] Alan Turing: The Enigma \u2014 Biography by Andrew Hodges\n\n[3] Alan Turing law \u2014 2017 British law pardoning formerly illegal sex acts\n\n[4] Turing Award \u2014 American annual computer science prize\n--- places\n[1] Campesina \u2014 Caf\u00e9 \u00b7 20 m away\nAddress: Rua de S\u00e3o Nicolau, Santa Maria Maior\n\n[2] The Coffee \u2014 Caf\u00e9 \u00b7 140 m away\nAddress: Rua dos Douradores 96, Santa Maria Maior\n\n[3] Martinho da Arcada \u2014 Caf\u00e9 \u00b7 190 m away\nAddress: Pra\u00e7a do Com\u00e9rcio 3, Santa Maria Maior\nHours: Mo-Sa 07:00-23:00\nPhone: +351 21 887 9259\n\n[4] Gong Cha \u2014 Caf\u00e9 \u00b7 200 m away\nAddress: Rua Nova do Almada 90, Santa Maria Maior\n\n[5] Portela \u2014 Caf\u00e9 \u00b7 230 m away\nAddress: Rua dos Bacalhoeiros, Alfama\n\n[6] Flor de S\u00e3o Mamede \u2014 Caf\u00e9 \u00b7 250 m away\nAddress: Travessa da Mata, Alfama\n\n[7] P\u00e3o Santo \u2014 Caf\u00e9 \u00b7 260 m away\nAddress: Largo de Santo Ant\u00f3nio da S\u00e9 22, Alfama\n\n[8] Espresso Lab \u2014 Caf\u00e9 \u00b7 280 m away\nAddress: Rua de Santa Justa, Baixa\n\n[9] Copenhagen Coffee Lab \u2014 Caf\u00e9 \u00b7 300 m away\nAddress: Rua de Santa Justa 14, Baixa\nHours: Mo-Su 07:30-18:00\nWebsite: https://copenhagencoffeelab.com/\n\n[10] F\u00e1brica da Nata \u2014 Caf\u00e9 \u00b7 310 m away\nAddress: Rua Augusta 271, Santa Maria Maior\nHours: 08:00-23:00\nWebsite: https://fabricadanata.pt/\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 386 filtered out; finished in 2.54s\n\n",
+  "stderr": ""
+}

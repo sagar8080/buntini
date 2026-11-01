@@ -1,0 +1,254 @@
+{
+  "kind": "independent_semantic_review_of_frozen_final_outputs",
+  "recordedAt": "2026-10-29T21:31:42.763774+00:00",
+  "reviewer": "Codex direct inspection of requests, actual source records, generated fields/answers, production receipts and cleanup",
+  "scope": "Opt-in debug controller acceptance. Every counted workflow includes actual Apple Foundation Models SDK inference; app creations additionally use real production OS executors, exact readback and cleanup. Not signed-bundle/TCC-identity or release certification. No additional model calls/actions were made by this review. Original reports remain unchanged.",
+  "reports": [
+    {
+      "path": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "testBinarySha256": "9092ead4a947391f0e91102a539a173dbca89ac304e892fe66242155008a3c32",
+      "helperSha256": "831afca5ec749151f098aa871db241204c9259a3a6e7f5694a2a5cf2cc622e98"
+    },
+    {
+      "path": "evals/apple-workflows-public-final-2026-10-29.jsonl",
+      "sha256": "f0fb7ded8d07a5fabe98d4a51e963a30831e7abd5613058ef6b74dfd142e9946",
+      "testBinarySha256": "9092ead4a947391f0e91102a539a173dbca89ac304e892fe66242155008a3c32",
+      "helperSha256": "831afca5ec749151f098aa871db241204c9259a3a6e7f5694a2a5cf2cc622e98"
+    }
+  ],
+  "results": [
+    {
+      "id": "notes-grocery-summary",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "580ba0750e51d5d452c4a2f4a1a7e810f7ec2fbca386ee7ea66e9fa89f43700d",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 3,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Correct missing ingredients and $25 budget from actual scoped note, with pantry rice correctly excluded. Source read and exact seed cleanup verified."
+    },
+    {
+      "id": "notes-compare-quotes",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "6882633cd8d1d691b0995285ecd4d73d5643c01a2d65513a602997fc69dac9f9",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 4,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Actual scoped source and verified75+40=$115 calculation, but recommends A instead of B. The given <=$5 difference rule selects earlier Wednesday B. No recommendation compliance."
+    },
+    {
+      "id": "notes-handoff-summary",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "97f9c3dd213e782df4eb9ba7ec7ca9f28b4ba7798f89ff2f3d5827e6c474ee86",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 3,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Reply lists only Alex and Mina as owners, omits user as third owner and does not preserve explicit owner-task associations. Correct deadlines alone do not fulfill the requested three-owner checklist."
+    },
+    {
+      "id": "notes-literal-text",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "8f7b17e1f9bdfa3c88c3dc04cf70d8001e0e819859ddb9fe8ba5caed427aff01",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 3,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Correct42-dollar amount and exact coffee symbol ☕ from actual source. Real scoped read and exact seed cleanup verified."
+    },
+    {
+      "id": "notes-project-next-step",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "c1a4df76587b2e1d99535c1dff06b23ab6cd92de593f46d00c180be99d450d4f",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 2,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Model-generated checklist adds unsupported slide-order and microphone tasks, omits owner. Exact acceptance gate blocks write; only real seed is cleaned."
+    },
+    {
+      "id": "notes-travel-checklist",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "d51d72a4ebdd25a25289d7bc42617fdb297f69a65cb4babdc977e374d79fdea9",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 3,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Correct07:25 derived due time but reminder title drops explicitly required namespace. Exact gate blocks write; seed cleaned."
+    },
+    {
+      "id": "notes-to-calendar-workshop",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "757ada7e03b7fb213216a9a1d71d1f6f0ef7be65e9f2d2f1e7e76b3f6b9d2fe4",
+      "automatedPassed": false,
+      "manualSemanticCompleted": false,
+      "actualAppleCalls": 3,
+      "verifiedRealActions": [],
+      "cleanupVerified": true,
+      "reason": "Correct45-minute duration but proposes2026 rather than source2031 and omits Study Room. Exact gate blocks Calendar write; seed cleaned."
+    },
+    {
+      "id": "create-meeting-followup-note",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "1519b7382ee7dac17387968c90b48f1a20e62ba869e5d3a6418432452142ee30",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 4,
+      "verifiedRealActions": [
+        {
+          "tool": "create_note",
+          "objectId": "x-coredata://A9A8FDBB-2821-4FD5-9B5C-1772AF111ECB/ICNote/p112",
+          "receipt": {
+            "destination": "Notes",
+            "error": null,
+            "evidence": {
+              "destinationId": "x-coredata://A9A8FDBB-2821-4FD5-9B5C-1772AF111ECB/ICFolder/p2",
+              "identifierScope": "persistent",
+              "plaintext": "BuntiniQA-e7367dd1197c4b74 Meeting follow-up\n- [ ] Accessibility review belongs to Mina\n- [ ] Screenshots are Alex's responsibility and due Monday\n",
+              "title": "BuntiniQA-e7367dd1197c4b74 Meeting follow-up"
+            },
+            "message": "Verified “BuntiniQA-e7367dd1197c4b74 Meeting follow-up” in Notes.",
+            "objectId": "x-coredata://A9A8FDBB-2821-4FD5-9B5C-1772AF111ECB/ICNote/p112",
+            "outcome": "succeeded",
+            "tool": "create_note"
+          }
+        }
+      ],
+      "cleanupVerified": true,
+      "reason": "Actual Apple-generated two-item checklist preserves Mina/accessibility and Alex/screenshots/Monday, exact requested title, real Notes create/readback and exact-ID cleanup. Final answer accurately describes saved content."
+    },
+    {
+      "id": "create-library-return-reminder",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "c234bff0e7ffbf61f7181744cd02a817d71defefb400907f6d6af5eb48f40f18",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 2,
+      "verifiedRealActions": [
+        {
+          "tool": "add_reminder",
+          "objectId": "x-apple-reminder://BF2B267B-CAA0-40E5-818D-88EF3E489340",
+          "receipt": {
+            "destination": "Reminders",
+            "error": null,
+            "evidence": {
+              "completed": false,
+              "destinationId": "65055B43-812B-4773-80BA-DB0E24C33BCB",
+              "due": "2031-05-21 17:45",
+              "dueSecond": 0,
+              "identifierScope": "persistent",
+              "remindAt": "2031-05-21 17:45",
+              "remindSecond": 0,
+              "title": "BuntiniQA-da08583c6b794865 Return library books"
+            },
+            "message": "Verified “BuntiniQA-da08583c6b794865 Return library books” in Reminders for 2031-05-21 17:45.",
+            "objectId": "x-apple-reminder://BF2B267B-CAA0-40E5-818D-88EF3E489340",
+            "outcome": "succeeded",
+            "tool": "add_reminder"
+          }
+        }
+      ],
+      "cleanupVerified": true,
+      "reason": "Actual Apple derives17:45 from18:00 minus15minutes, creates real Reminder with verified exact title/due/alarm and cleanup. Trusted final receipt accurately confirms17:45 without invented extra notification offset."
+    },
+    {
+      "id": "create-training-calendar-event",
+      "sourceReport": "evals/apple-workflows-apps-final-2026-10-29.jsonl",
+      "sourceReportSha256": "af95fd8c821c245880c8af9718318bc2eef04fe5ae4bf13c93243fbdbe1bd8b4",
+      "sourceRecordSha256ExcludingLineTerminator": "d897a995416abcc8d93878e0f8136f5f6292cacbaa52562a6ea4fb6509214445",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 2,
+      "verifiedRealActions": [
+        {
+          "tool": "add_calendar_event",
+          "objectId": "5B7B9714-61E4-4595-B91D-09504322EB53",
+          "receipt": {
+            "destination": "Home",
+            "error": null,
+            "evidence": {
+              "destinationId": "19243F3F-8370-4287-95A3-DBEA2B742BF4",
+              "durationSeconds": 2100,
+              "end": "2031-05-21 14:50",
+              "endSecond": 0,
+              "identifierScope": "persistent",
+              "location": "Training Room",
+              "start": "2031-05-21 14:15",
+              "startSecond": 0,
+              "title": "BuntiniQA-4a0375b43dbc48cd Training session"
+            },
+            "message": "Verified “BuntiniQA-4a0375b43dbc48cd Training session” in Home at 2031-05-21 14:15.",
+            "objectId": "5B7B9714-61E4-4595-B91D-09504322EB53",
+            "outcome": "succeeded",
+            "tool": "add_calendar_event"
+          }
+        }
+      ],
+      "cleanupVerified": true,
+      "reason": "Actual Apple derives35 minutes from14:15–14:50. Exact2031-05-21 start/title/Training Room, real persistent CalendarID/eventUID readback and exact-ID cleanup. Trusted final receipt accurately confirms interval and location."
+    },
+    {
+      "id": "public-seattle-walk-weather",
+      "sourceReport": "evals/apple-workflows-public-final-2026-10-29.jsonl",
+      "sourceReportSha256": "f0fb7ded8d07a5fabe98d4a51e963a30831e7abd5613058ef6b74dfd142e9946",
+      "sourceRecordSha256ExcludingLineTerminator": "d292e3d59d96a56be6c785a0a2dc6d37630834d1d39d6c948ae70a71ce6160a3",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 1,
+      "verifiedRealActions": [],
+      "cleanupVerified": null,
+      "reason": "Actual Open-Meteo cards support11°C and7km/h; actual Apple claims cite source1. Clearly labeled deterministic walking suggestion derives jacket from verified11°C, also cites1; truthful retrieval statement and persisted cards/answer. No invented rain."
+    },
+    {
+      "id": "public-space-needle-background",
+      "sourceReport": "evals/apple-workflows-public-final-2026-10-29.jsonl",
+      "sourceReportSha256": "f0fb7ded8d07a5fabe98d4a51e963a30831e7abd5613058ef6b74dfd142e9946",
+      "sourceRecordSha256ExcludingLineTerminator": "22d03151e04a774b792f9388998de7ed5bda1aa217ce786c1c6e70b150ad5bad",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 1,
+      "verifiedRealActions": [],
+      "cleanupVerified": null,
+      "reason": "Actual article source1 supports observation tower, Seattle/Washington, city icon and designated landmark. Concise Apple claims cite actual card1; full cards and final answer persisted."
+    },
+    {
+      "id": "public-pike-place-cafes",
+      "sourceReport": "evals/apple-workflows-public-final-2026-10-29.jsonl",
+      "sourceReportSha256": "f0fb7ded8d07a5fabe98d4a51e963a30831e7abd5613058ef6b74dfd142e9946",
+      "sourceRecordSha256ExcludingLineTerminator": "48919a5c351b5163d128493699219634a9cd3870056745f557b467ef299db2d8",
+      "automatedPassed": true,
+      "manualSemanticCompleted": true,
+      "actualAppleCalls": 1,
+      "verifiedRealActions": [],
+      "cleanupVerified": null,
+      "reason": "Actual first two provider names and full addresses correctly paired with their own source1/source2. Apple claims add no unrequested ratings, hours, availability or directions. Full cards and final answer persisted."
+    }
+  ],
+  "summary": {
+    "attempted": 13,
+    "manuallyCompleted": 8,
+    "originalAutomatedPassed": 8,
+    "actualAppleCalls": 32,
+    "verifiedRealAppCreations": 3,
+    "allCreatedAppRecordsCleaned": true,
+    "fullRequestOverstatements": [],
+    "notesCleanup": "Removed from original active folder; Notes may retain Recently Deleted copies. No trash purge was performed."
+  }
+}

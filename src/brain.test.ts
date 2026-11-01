@@ -11,8 +11,8 @@ test('chosen folders read as names, not paths', () => {
 });
 
 test('worker status reads plainly', () => {
-  assert.equal(friendlyStatus('Not started · local tools are ready', true, 'mlx'), 'Ready. The model loads the first time you chat.');
-  assert.equal(friendlyStatus('Not started · local tools are ready', false, 'mlx'), 'Not set up yet.');
+  assert.equal(friendlyStatus('Not started · local tools are ready', true, 'mlx'), 'Ready');
+  assert.equal(friendlyStatus('Not started · local tools are ready', false, 'mlx'), 'Not set up');
   assert.equal(friendlyStatus('Ready · Apple Intelligence on this Mac', true, 'apple'), 'Ready · Apple Intelligence on this Mac');
 });
 

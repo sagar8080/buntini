@@ -7,8 +7,10 @@
 //! pdf", "stop reminding me…") falls through to the model. The phrase tests in each skill
 //! are the contract.
 pub mod browser;
+pub mod day;
 pub mod mac;
 pub mod music;
+pub mod this;
 
 use crate::{privacy::Share, types::Settings};
 
@@ -17,16 +19,32 @@ pub enum Skill {
     Music(music::Command),
     Browser(browser::Command),
     Mac(mac::Command),
+    This(this::Command),
+    Day(day::Command),
 }
 
 pub enum Outcome {
-    /// Done: what to tell the user, and the kind of data the reply shows.
+    /// Done: what to tell the user, and every kind of data the reply shows, so an
+    /// external brain is never replayed a turn it may not see.
     Done {
         answer: String,
-        share: Option<Share>,
+        shares: Vec<Share>,
     },
-    /// A web page to summarise or answer from; the model writes the reply.
-    Page { title: String, text: String },
+    /// Text to summarise or answer from (a web page, a selection, an email); the model
+    /// writes the reply. `kind` names it for the model; `share` is the data it shows.
+    Page {
+        kind: &'static str,
+        title: String,
+        text: String,
+        share: Share,
+    },
+    /// Done, naming emails by number. The controller saves them with the turn, so a
+    /// follow-up ("reply to the second one") answers exactly that email.
+    Listed {
+        answer: String,
+        shares: Vec<Share>,
+        emails: Vec<crate::triage::Listed>,
+    },
 }
 
 pub struct Context<'a> {
@@ -34,6 +52,10 @@ pub struct Context<'a> {
     pub prompt: &'a str,
     /// The app that was in front before Buntini opened, if known.
     pub front_app: Option<String>,
+    /// What was in front when Buntini opened, for requests about "this".
+    pub focus: Option<crate::focus::Snapshot>,
+    /// The Apple helper, which reads Calendar and Reminders.
+    pub helper: &'a std::path::Path,
 }
 
 /// A request in lowercase words. Apostrophes, dots, percent signs and numeric signs
@@ -271,6 +293,8 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
     music::recognise(&text, &recent)
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
+        .or_else(|| this::recognise(&text, &recent).map(Skill::This))
+        .or_else(|| day::recognise(&text).map(Skill::Day))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }
 
@@ -280,6 +304,8 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::Music(_) => "music",
         Skill::Browser(_) => "browser",
         Skill::Mac(_) => "mac",
+        Skill::This(_) => "this",
+        Skill::Day(_) => "day",
     }
 }
 
@@ -288,13 +314,15 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::Music(command) => music::run(command, context).await,
         Skill::Browser(command) => browser::run(command, context).await,
         Skill::Mac(command) => mac::run(command).await,
+        Skill::This(command) => this::run(command, context).await,
+        Skill::Day(command) => day::run(command, context).await,
     }
 }
 
 /// Runs an AppleScript with values passed as arguments (never as script text).
 pub(crate) async fn osascript(source: &str, argv: &[&str], seconds: u64) -> Result<String, String> {
-    let mut command = tokio::process::Command::new("/usr/bin/osascript");
-    command.arg("-e").arg(source).args(argv);
+    let mut command = crate::actions::osascript_command("AppleScript", source);
+    command.args(argv);
     crate::actions::output(command, seconds)
         .await
         .map(|output| output.trim().to_string())

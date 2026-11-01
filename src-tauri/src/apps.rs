@@ -1,11 +1,13 @@
 //! Apps on this Mac that Buntini can work with, each only after the user allows it in
 //! Settings → Apps. No accounts and nothing online: Buntini talks to the apps already
 //! here, through AppleScript (values always passed as arguments, never as script text)
-//! and, for Calendar and Reminders, EventKit in the `buntini-fm` helper so repeating
-//! events are included. macOS still asks once per app before the first use.
+//! and, for Calendar, Reminders and Contacts, the `buntini-fm` helper (EventKit, so
+//! repeating events are included, and CNContactStore). macOS still asks once per app
+//! before the first use.
 //!
-//! Reading (email, the day's events, open reminders, notes, what's playing, open browser
-//! tabs and the Safari page) plus playback controls and switching tabs run straight away
+//! Reading (email, the day's events, open reminders, notes, people in Contacts, what's
+//! playing, open browser tabs and the Safari page) plus playback controls and switching
+//! tabs run straight away
 //! for an allowed app; anything that adds or writes goes through the approval sheet in
 //! `actions.rs`. Private and incognito browser windows are skipped wherever the browser
 //! says which they are.
@@ -28,30 +30,34 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 12] = [
-    App { id: "mail", name: "Mail", can: &["Read and search your recent email", "Draft replies for you to send"], tools: &["read_mail", "draft_email"], share: Some(Share::Mail), note: None },
-    App { id: "calendar", name: "Calendar", can: &["See what’s on any day", "Add events you approve"], tools: &["read_calendar", "add_calendar_event"], share: Some(Share::Calendar), note: None },
-    App { id: "reminders", name: "Reminders", can: &["See your open reminders", "Add reminders you approve"], tools: &["read_reminders", "add_reminder"], share: Some(Share::Calendar), note: None },
-    App { id: "notes", name: "Notes", can: &["Find your notes", "Write notes you approve"], tools: &["find_notes", "create_note"], share: Some(Share::Notes), note: None },
-    App { id: "music", name: "Music", can: &["See what’s playing", "Play, pause and skip", "Play songs and playlists from your library"], tools: &["control_music"], share: Some(Share::Music), note: None },
-    App { id: "spotify", name: "Spotify", can: &["See what’s playing", "Play, pause and skip", "Play a song you name"], tools: &["control_music"], share: Some(Share::Music), note: Some("To play a song you name, Buntini opens Spotify’s search and presses play on the best match, so macOS asks you to allow Buntini under Accessibility.") },
-    App { id: "shortcuts", name: "Shortcuts", can: &["Run your shortcuts after you approve"], tools: &["run_shortcut"], share: None, note: None },
-    App { id: "safari", name: "Safari", can: &["List and find your open tabs", "Switch to a tab", "Read the page you’re on"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.") },
-    App { id: "chrome", name: "Google Chrome", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "brave", name: "Brave Browser", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "edge", name: "Microsoft Edge", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "arc", name: "Arc", can: &["List and find your open tabs", "Switch to a tab"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+pub const APPS: [App; 14] = [
+    App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
+    App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
+    App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
+    App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
+    App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
+    App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
+    App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
+    App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "brave", name: "Brave Browser", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "arc", name: "Arc", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "mac_settings", name: "System Settings", can: &["Wallpaper", "Dock", "appearance", "Wi-Fi", "Finder"], tools: &["change_mac_setting"], share: None, note: None },
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
 
 /// App read/control schemas. The workflow controller requires durable approval
 /// for playback mutations and tab switching; now_playing remains a read.
-pub const READ_TOOLS: [&str; 8] = [
+pub const READ_TOOLS: [&str; 10] = [
     "read_mail",
     "read_calendar",
     "read_reminders",
     "find_notes",
+    "find_contact",
+    "list_shortcuts",
     "control_music",
     "browser_tabs",
     "switch_tab",
@@ -190,6 +196,8 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "read_calendar" => &["day"],
         "read_reminders" => &[],
         "find_notes" => &["query"],
+        "find_contact" => &["name"],
+        "list_shortcuts" => &["query"],
         "control_music" => &["app", "action", "query"],
         "browser_tabs" => &["browser", "query"],
         "switch_tab" => &["browser", "query"],
@@ -239,6 +247,19 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                     .ok_or("Say what to look for in your notes.")?
                     .into(),
             );
+        }
+        "find_contact" => {
+            let name = text(args, "name", 100)?.ok_or("Say whose contact to find.")?;
+            // The helper takes the name as its last argument; it is never an option.
+            if name.starts_with('-') {
+                return Err("Say whose contact to find, by name or email address.".into());
+            }
+            out.insert("name".into(), name.into());
+        }
+        "list_shortcuts" => {
+            if let Some(query) = text(args, "query", 100)? {
+                out.insert("query".into(), query.into());
+            }
         }
         "control_music" => {
             let selected = text(args, "app", 10)?;
@@ -352,13 +373,44 @@ const NOTES_FIND: &str = r#"on run argv
   set q to item 1 of argv
   set out to {}
   tell application "Notes"
-    set found to (notes whose name contains q or plaintext contains q)
+    -- Notes titled with the words first, then notes that only mention them.
+    set found to (notes whose name contains q) & (notes whose name does not contain q and plaintext contains q)
+    -- Notes can refuse `container of` a note, so deleted notes are known by the
+    -- Recently Deleted folders' own lists instead.
+    set deletedIDs to {}
+    repeat with f in (folders whose name is "Recently Deleted")
+      set deletedIDs to deletedIDs & (id of notes of f)
+    end repeat
+    repeat with n in found
+      -- A deleted note is not one to read or add to. It still counts as found, so the
+      -- result says it is partial rather than that nothing else matched.
+      if deletedIDs does not contain (id of n) then
+        set t to plaintext of n
+        set originalLength to length of t
+        if originalLength > 400 then set t to text 1 thru 400 of t
+        set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t) & tab & (originalLength as text)
+      end if
+      if (count of out) ≥ 6 then exit repeat
+    end repeat
+  end tell
+  set end of out to "__buntini_summary__" & tab & (count of found as text) & tab & (count of out as text) & tab & "true"
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+// Notes changed in the last N days, for the memory index: modified time, ID, title and
+// the first 1,500 characters of plain text (at most 300 notes).
+const NOTES_RECENT: &str = r#"on run argv
+  set cutoff to (current date) - ((item 1 of argv) as integer) * days
+  set out to {}
+  tell application "Notes"
+    set found to (notes whose modification date > cutoff)
     repeat with n in found
       set t to plaintext of n
-      set originalLength to length of t
-      if originalLength > 400 then set t to text 1 thru 400 of t
-      set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t) & tab & (originalLength as text)
-      if (count of out) ≥ 6 then exit repeat
+      if t is missing value then set t to ""
+      if length of t > 1500 then set t to text 1 thru 1500 of t
+      set end of out to my stamp(modification date of n) & tab & my clean(id of n) & tab & my clean(name of n) & tab & my clean(t)
+      if (count of out) ≥ 300 then exit repeat
     end repeat
   end tell
   set end of out to "__buntini_summary__" & tab & (count of found as text) & tab & (count of out as text) & tab & "true"
@@ -637,12 +689,140 @@ const SAFARI_PAGE: &str = r#"on run argv
 end run
 "#;
 
+// Unreplied inbox messages from the last N days, newest 60 first by Mail's order: time,
+// Mail-local numeric ID, read, flagged, whether a To recipient is one of the user's own
+// account addresses, how many To recipients, sender, subject, Message-ID (so a reply to
+// one of them can be checked against the same email later). Then a count summary.
+const MAIL_TRIAGE: &str = r#"on run argv
+  set cutoff to (current date) - ((item 1 of argv) as integer) * days
+  set out to {}
+  tell application "Mail"
+    set mine to {}
+    repeat with a in accounts
+      try
+        set mine to mine & (email addresses of a)
+      end try
+    end repeat
+    set found to (messages of inbox whose date received > cutoff and was replied to is false)
+    set total to count of found
+    repeat with m in found
+      set toMe to "unknown"
+      set toCount to 0
+      try
+        set recipientsTo to to recipients of m
+        set toCount to count of recipientsTo
+        if (count of mine) > 0 then
+          set toMe to "false"
+          repeat with r in recipientsTo
+            if (address of r) is in mine then set toMe to "true"
+          end repeat
+        end if
+      end try
+      set end of out to my stamp(date received of m) & tab & my clean(id of m) & tab & (read status of m as text) & tab & (flagged status of m as text) & tab & toMe & tab & (toCount as text) & tab & my clean(sender of m) & tab & my clean(subject of m) & tab & my clean(message id of m)
+      if (count of out) ≥ 60 then exit repeat
+    end repeat
+  end tell
+  set end of out to "__buntini_summary__" & tab & (total as text) & tab & (count of out as text) & tab & "true"
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+// The message selected in Mail's front viewer: time, message ID, sender, subject, Mail-local
+// numeric ID, body length and how many are selected, then the opening of its body.
+const MAIL_SELECTED: &str = r#"on run argv
+  if application "Mail" is not running then return "closed"
+  tell application "Mail"
+    set picked to selection
+    if (count of picked) is 0 then return "none"
+    set m to item 1 of picked
+    set c to content of m
+    if c is missing value then set c to ""
+    set originalLength to length of c
+    if originalLength > 4000 then set c to text 1 thru 4000 of c
+    return my stamp(date received of m) & tab & my clean(message id of m) & tab & my clean(sender of m) & tab & my clean(subject of m) & tab & my clean(id of m) & tab & (originalLength as text) & tab & ((count of picked) as text) & linefeed & c
+  end tell
+end run
+"#;
+// The items selected in Finder's front window, as POSIX paths, one per line (at most 20).
+const FINDER_SELECTED: &str = r#"on run argv
+  if application "Finder" is not running then return ""
+  tell application "Finder" to set picked to selection
+  set out to {}
+  repeat with f in picked
+    set end of out to POSIX path of (f as alias)
+    if (count of out) ≥ 20 then exit repeat
+  end repeat
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+"#;
+
+/// Whether a read may open its app. Background work (the memory index, the automatic
+/// morning brief) uses `IfRunning`, so Mail and Notes never open or start syncing unless
+/// the user asked for something that needs them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Launch {
+    IfRunning,
+    Allow,
+}
+
+impl Launch {
+    /// What a read for the request under way may do. A routine's run (nobody at the
+    /// window, `controller::headless`) leaves a closed Mail or Notes closed; a request the
+    /// user just made may open the app it asked about.
+    pub fn for_request() -> Self {
+        if crate::controller::headless() {
+            Launch::IfRunning
+        } else {
+            Launch::Allow
+        }
+    }
+}
+
+/// What a guarded script returns when its app is closed.
+const NOT_RUNNING_SENTINEL: &str = "__buntini_not_running__";
+/// The end of the error a guarded read gives when its app is closed.
+pub const NOT_RUNNING: &str = "isn’t open, so I left it closed.";
+
+/// Whether a read failed only because its app was closed and was left that way.
+pub fn is_not_running(error: &str) -> bool {
+    error.ends_with(NOT_RUNNING)
+}
+
+/// The script as `launch` allows: `IfRunning` returns the sentinel before any `tell`
+/// could open a closed app.
+fn guarded(source: &'static str, app: &str, launch: Launch) -> std::borrow::Cow<'static, str> {
+    match launch {
+        Launch::Allow => source.into(),
+        Launch::IfRunning => source
+            .replacen(
+                "on run argv\n",
+                &format!("on run argv\n  if application \"{app}\" is not running then return \"{NOT_RUNNING_SENTINEL}\"\n"),
+                1,
+            )
+            .into(),
+    }
+}
+
+/// Runs a script that `guarded` may stop early, as an `Err` naming the closed app.
+async fn osascript_if(
+    source: &'static str,
+    app: &str,
+    launch: Launch,
+    argv: &[String],
+    seconds: u64,
+) -> Result<String, String> {
+    let output = osascript(&guarded(source, app, launch), argv, seconds).await?;
+    if output.trim() == NOT_RUNNING_SENTINEL {
+        return Err(format!("{app} {NOT_RUNNING}"));
+    }
+    Ok(output)
+}
+
 async fn osascript(source: &str, argv: &[String], seconds: u64) -> Result<String, String> {
-    let mut command = Command::new("/usr/bin/osascript");
-    command
-        .arg("-e")
-        .arg(format!("{HELPERS}{source}"))
-        .args(argv);
+    let mut command =
+        crate::actions::osascript_command("AppleScript", &format!("{HELPERS}{source}"));
+    command.args(argv);
     crate::actions::output(command, seconds).await
 }
 
@@ -697,6 +877,13 @@ pub struct Event {
     pub all_day: bool,
     pub title: String,
     pub location: String,
+    /// Whether it repeats, so a change can say it touches one occurrence. Older helpers
+    /// leave it out.
+    #[serde(default)]
+    pub recurring: Option<bool>,
+    /// Who else is invited, by name. Older helpers leave it out.
+    #[serde(default)]
+    pub attendees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -730,6 +917,10 @@ impl<T> Agenda<T> {
 }
 
 async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Agenda<T>, String> {
+    parse_helper_rows(&helper_output(helper, args).await?)
+}
+
+async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
     if !helper.is_file() {
         return Err(
             "Reading Calendar and Reminders needs Buntini’s Apple helper, which isn’t on this Mac."
@@ -742,14 +933,26 @@ async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Age
     let output = crate::actions::output(command, 90).await.map_err(|error| {
         if error.contains("not-authorized") {
             "macOS hasn’t allowed Buntini to read that. Allow it in System Settings → Privacy & Security → Calendars or Reminders.".to_string()
+        } else if error.starts_with("That took too long") {
+            // A read changes nothing, so the write-oriented "check before repeating" doesn't apply.
+            "Calendar or Reminders didn’t answer in time. If macOS asked whether Buntini may use them, answer that first.".to_string()
         } else {
             error
         }
     })?;
-    parse_helper_rows(&output)
+    Ok(output)
 }
 
 fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, String> {
+    parse_helper_range(output, None)
+}
+
+/// Rows and their summary. A ranged read's summary echoes its first and last day, so an
+/// older helper that read only the first day is refused rather than taken as the range.
+fn parse_helper_range<T: DeserializeOwned>(
+    output: &str,
+    range: Option<(&str, &str)>,
+) -> Result<Agenda<T>, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Summary {
@@ -758,6 +961,10 @@ fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, Str
         total: usize,
         returned: usize,
         complete: bool,
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        to: Option<String>,
     }
     let invalid = || {
         "Calendar or Reminders returned incomplete data. Please try again with the current Apple helper.".to_string()
@@ -775,6 +982,7 @@ fn parse_helper_rows<T: DeserializeOwned>(output: &str) -> Result<Agenda<T>, Str
                 || counts.returned != items.len()
                 || counts.total < counts.returned
                 || counts.complete != (counts.total == counts.returned)
+                || (counts.from.as_deref(), counts.to.as_deref()) != range.unzip()
             {
                 return Err(invalid());
             }
@@ -795,9 +1003,322 @@ pub async fn events(helper_path: &Path, day: &str) -> Result<Agenda<Event>, Stri
     helper(helper_path, &["--events", day]).await
 }
 
+/// Every event from the start of `from` to the end of `to` (YYYY-MM-DD, at most 400 days
+/// apart), repeating ones included, in start order, read with one helper call.
+pub async fn events_between(helper_path: &Path, from: &str, to: &str) -> Result<Agenda<Event>, String> {
+    parse_helper_range(&helper_output(helper_path, &["--events", from, to]).await?, Some((from, to)))
+}
+
 /// Open reminders, soonest due first; undated ones last.
 pub async fn reminders(helper_path: &Path) -> Result<Agenda<Reminder>, String> {
     helper(helper_path, &["--reminders"]).await
+}
+
+/// At most this many people per lookup, each with at most this many addresses and numbers.
+const CONTACT_LIMIT: usize = 5;
+const CONTACT_DETAILS: usize = 5;
+
+const CONTACTS_DENIED: &str = "macOS hasn’t allowed Buntini to read Contacts. Allow it in System Settings → Privacy & Security → Contacts.";
+const CONTACTS_HELPER: &str =
+    "Finding people in Contacts needs Buntini’s Apple helper, which isn’t on this Mac.";
+
+/// One person from Contacts, as the helper read them.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Contact {
+    pub id: Option<String>,
+    pub name: String,
+    pub emails: Vec<String>,
+    pub phones: Vec<String>,
+}
+
+/// One plain address a draft could go to: no display name, list or placeholder.
+pub fn plain_address(address: &str) -> bool {
+    address.split_once('@').is_some_and(|(user, domain)| {
+        !user.is_empty()
+            && domain.contains('.')
+            && !domain.starts_with('.')
+            && !domain.ends_with('.')
+    }) && address.chars().count() <= 254
+        && !address.contains(char::is_whitespace)
+        && !address.contains([',', ';', '<', '>', '[', ']', '"'])
+}
+
+/// The helper's answer, checked for a dropped or inconsistent count. Addresses that
+/// could not address a draft are dropped here, so records and display text agree.
+fn parse_contacts(output: &str) -> Result<Agenda<Contact>, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Found {
+        contacts: Vec<Contact>,
+        total: usize,
+        returned: usize,
+        complete: bool,
+    }
+    let invalid = || {
+        "Contacts returned incomplete data. Please try again with the current Apple helper."
+            .to_string()
+    };
+    let value: Value = serde_json::from_str(output.trim()).map_err(|_| invalid())?;
+    if value == json!({"error":"denied"}) {
+        return Err(CONTACTS_DENIED.into());
+    }
+    let found: Found = serde_json::from_value(value).map_err(|_| invalid())?;
+    if found.returned != found.contacts.len()
+        || found.returned > CONTACT_LIMIT
+        || found.total < found.returned
+        || found.complete != (found.total == found.returned)
+        || found.contacts.iter().any(|contact| {
+            contact.emails.len() > CONTACT_DETAILS || contact.phones.len() > CONTACT_DETAILS
+        })
+    {
+        return Err(invalid());
+    }
+    let items = found
+        .contacts
+        .into_iter()
+        .map(|mut contact| {
+            contact.emails.retain(|address| plain_address(address));
+            contact.phones.retain(|phone| !phone.trim().is_empty());
+            contact
+        })
+        .collect();
+    Ok(Agenda {
+        items,
+        total: found.total,
+    })
+}
+
+pub fn describe_contacts(name: &str, found: &Agenda<Contact>) -> String {
+    if found.total == 0 {
+        return format!("No one in Contacts matches “{name}”.");
+    }
+    let lines = found.items.iter().map(|contact| {
+        let who = if contact.name.is_empty() {
+            "(no name)"
+        } else {
+            &contact.name
+        };
+        let details: Vec<&str> = contact
+            .emails
+            .iter()
+            .chain(&contact.phones)
+            .map(String::as_str)
+            .collect();
+        if details.is_empty() {
+            format!("- {who}: no email address or phone number")
+        } else {
+            format!("- {who}: {}", details.join(", "))
+        }
+    });
+    let coverage = if found.complete() {
+        String::new()
+    } else {
+        format!(
+            "\nShowing the first {} of {} people who match. A fuller name narrows it down.",
+            found.items.len(),
+            found.total
+        )
+    };
+    format!(
+        "People in Contacts matching “{name}”:\n{}{coverage}",
+        lines.collect::<Vec<_>>().join("\n")
+    )
+}
+
+/// Contacts' own identifiers and details beside the display text. Several matches or a
+/// partial list stay as they are: choosing one is the user's call, never the model's.
+pub fn contact_evidence(name: &str, found: &Agenda<Contact>) -> Value {
+    let records = found
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, contact)| {
+            json!({"id":contact.id.as_deref().and_then(nonempty),
+                "reference":source_reference("contacts", contact.id.as_deref(), index),
+                "name":contact.name, "emails":contact.emails, "phones":contact.phones})
+        })
+        .collect();
+    evidence(
+        "contacts",
+        json!({"app":"contacts","name":name,"matches":"name_or_email","limit":CONTACT_LIMIT}),
+        records,
+        Some(found.total),
+        found.complete(),
+        describe_contacts(name, found),
+    )
+}
+
+/// People in Contacts matching a name or address, read with the Apple helper.
+pub async fn find_contact(helper_path: &Path, name: &str) -> Result<Value, String> {
+    if !helper_path.is_file() {
+        return Err(CONTACTS_HELPER.into());
+    }
+    let mut command = Command::new(helper_path);
+    command.args(["--find-contact", name]);
+    // The first use waits for the macOS permission prompt, so allow time to answer it.
+    let output = crate::actions::output(command, 90).await?;
+    Ok(contact_evidence(name, &parse_contacts(&output)?))
+}
+
+/// At most this many shortcuts per read; a request rarely fits more than a few.
+const SHORTCUT_LIMIT: usize = 32;
+/// The list is read again after this long, so a shortcut made a moment ago shows up.
+const SHORTCUTS_FRESH: std::time::Duration = std::time::Duration::from_secs(30);
+static SHORTCUTS: std::sync::Mutex<Option<(std::time::Instant, Vec<String>)>> =
+    std::sync::Mutex::new(None);
+
+/// The names of the user's shortcuts, as `shortcuts list` prints them (one per line),
+/// kept briefly so a request and its follow-up don't each run the command.
+pub async fn shortcut_names() -> Result<Vec<String>, String> {
+    if let Some((at, names)) = SHORTCUTS.lock().unwrap().as_ref() {
+        if at.elapsed() < SHORTCUTS_FRESH {
+            return Ok(names.clone());
+        }
+    }
+    let mut command = Command::new("/usr/bin/shortcuts");
+    command.arg("list");
+    let names = parse_shortcuts(&crate::actions::output(command, 15).await?);
+    *SHORTCUTS.lock().unwrap() = Some((std::time::Instant::now(), names.clone()));
+    Ok(names)
+}
+
+fn parse_shortcuts(output: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for name in output.lines().map(str::trim) {
+        if !name.is_empty() && name.chars().count() <= 100 && !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Words that only frame a request ("please run my … shortcut", "turn on the …"), so a
+/// shortcut name needs none of them and a request's own words don't count them.
+const SHORTCUT_FILLER: [&str; 30] = [
+    "a", "all", "an", "and", "buntini", "can", "could", "for", "hey", "hi", "i", "in", "it",
+    "just", "like", "me", "my", "now", "of", "please", "run", "shortcut", "shortcuts", "switch",
+    "the", "to", "turn", "want", "will", "would",
+];
+
+/// Lowercase words, with a plural "s" dropped so "lights" and "Light" compare equal.
+fn shortcut_words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| match word.strip_suffix('s') {
+            Some(stem) if stem.chars().count() >= 3 && !stem.ends_with('s') => stem.to_string(),
+            _ => word.to_string(),
+        })
+        .collect()
+}
+
+/// The user's shortcuts whose every word is in `words`, most specific first: for
+/// "turn on the living room lights", "Living Room Lights On" before "Lights On", and
+/// never "Lights Off". A name made only of framing words never fits.
+pub fn matching_shortcuts(words: &str, names: &[String]) -> Vec<String> {
+    let said = shortcut_words(words);
+    let mut found: Vec<(usize, &String)> = names
+        .iter()
+        .filter_map(|name| {
+            let have = shortcut_words(name);
+            (have.iter().any(|word| !SHORTCUT_FILLER.contains(&word.as_str()))
+                && have.iter().all(|word| said.contains(word)))
+            .then_some((have.len(), name))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().map(|(_, name)| name.clone()).collect()
+}
+
+/// Whether a shortcut's name covers everything `words` asks for beyond framing words, so
+/// it is plainly the one meant: "Living Room Lights On" for "turn on the living room
+/// lights", but not "Lights On", which leaves out the room.
+pub fn shortcut_covers(words: &str, name: &str) -> bool {
+    let have = shortcut_words(name);
+    shortcut_words(words)
+        .iter()
+        .filter(|word| !SHORTCUT_FILLER.contains(&word.as_str()))
+        .all(|word| have.contains(word))
+}
+
+/// The user's shortcuts that fit `query` (all of them without one), as source records:
+/// a name here is one the user really has, so a run can be bound to it.
+/// The words shortcuts are matched by. "Which shortcuts do I have?" asks for all of
+/// them, not for ones named like the question.
+fn shortcut_filter(query: &str) -> &str {
+    let lower = query.to_lowercase();
+    let asks_for_all = lower.contains("shortcuts")
+        && lower.split_whitespace().next().is_some_and(|word| ["what", "which", "list", "show"].contains(&word));
+    if asks_for_all { "" } else { query }
+}
+
+pub fn shortcut_evidence(query: &str, names: &[String]) -> Value {
+    let asked = query;
+    let query = shortcut_filter(query);
+    let found = if query.is_empty() {
+        names.to_vec()
+    } else {
+        matching_shortcuts(query, names)
+    };
+    let shown = &found[..found.len().min(SHORTCUT_LIMIT)];
+    let records = shown
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            json!({"id":name, "reference":source_reference("shortcuts", Some(name), index), "name":name})
+        })
+        .collect();
+    let display = if found.is_empty() && query.is_empty() {
+        "You don’t have any shortcuts yet.".to_string()
+    } else if found.is_empty() {
+        format!("None of your shortcuts fits “{query}”.")
+    } else {
+        let listed = shown
+            .iter()
+            .map(|name| format!("“{name}”"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = if shown.len() < found.len() {
+            format!(" and {} more", found.len() - shown.len())
+        } else {
+            String::new()
+        };
+        if query.is_empty() {
+            format!("Your shortcuts: {listed}{more}.")
+        } else {
+            format!("Your shortcuts that fit “{query}”: {listed}{more}.")
+        }
+    };
+    evidence(
+        "shortcuts",
+        json!({"app":"shortcuts","query":asked,"matches":"name_words","limit":SHORTCUT_LIMIT}),
+        records,
+        Some(found.len()),
+        found.len() <= SHORTCUT_LIMIT,
+        display,
+    )
+}
+
+/// Asks macOS for Contacts right after the user allows it, so the prompt shows in Settings.
+async fn contacts_access(helper_path: &Path) -> Result<String, String> {
+    if !helper_path.is_file() {
+        return Err(CONTACTS_HELPER.into());
+    }
+    let mut command = Command::new(helper_path);
+    command.arg("--contacts-access");
+    let output = crate::actions::output(command, 90).await?;
+    match serde_json::from_str::<Value>(output.trim())
+        .ok()
+        .and_then(|value| value["granted"].as_bool())
+    {
+        Some(true) => Ok("Ready".into()),
+        Some(false) => Err(CONTACTS_DENIED.into()),
+        None => Err(
+            "Contacts returned incomplete data. Please try again with the current Apple helper."
+                .into(),
+        ),
+    }
 }
 
 pub fn describe_events(day: &str, events: &Agenda<Event>) -> String {
@@ -885,7 +1406,9 @@ pub fn calendar_evidence(day: &str, events: &Agenda<Event>) -> Value {
         "modifiedAt":event.modified_at.as_deref().and_then(|at| source_timestamp(Some(at), "")),
         "start":source_timestamp(event.start_at.as_deref(), &event.start),
         "end":source_timestamp(event.end_at.as_deref(), &event.end), "all_day":event.all_day,
-        "title":event.title, "location":event.location
+        // The wall-clock times as read, which is how a change names its occurrence.
+        "startLocal":nonempty(&event.start), "endLocal":nonempty(&event.end),
+        "recurring":event.recurring, "title":event.title, "location":event.location
     })).collect();
     let mut result = evidence(
         "calendar",
@@ -921,11 +1444,16 @@ pub fn reminder_evidence(reminders: &Agenda<Reminder>) -> Value {
     )
 }
 
+/// A model's or recipe's read, as typed evidence. `launch` says whether Mail and Notes
+/// may be opened for it. Calendar, Reminders and Contacts are read through EventKit and
+/// the Contacts framework, which never open their apps, and browser and music reads
+/// already leave a closed app closed.
 pub async fn run_evidence(
     tool: &str,
     args: &Map<String, Value>,
     helper_path: &Path,
     settings: &Settings,
+    launch: Launch,
 ) -> Result<Value, String> {
     let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
     match tool {
@@ -942,10 +1470,13 @@ pub async fn run_evidence(
                 get("query"),
                 args.get("unread").and_then(Value::as_bool).unwrap_or(false),
                 args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize,
+                launch,
             )
             .await
         }
-        "find_notes" => find_notes_evidence(get("query")).await,
+        "find_notes" => find_notes_evidence(get("query"), launch).await,
+        "find_contact" => find_contact(helper_path, get("name")).await,
+        "list_shortcuts" => Ok(shortcut_evidence(get("query"), &shortcut_names().await?)),
         "control_music" if get("action") == "now_playing" => {
             let selected = if get("app").is_empty() {
                 "music"
@@ -997,6 +1528,8 @@ pub fn model_evidence(value: &Value) -> Value {
                 "browser_tabs",
                 "browser_page",
                 "music",
+                "contacts",
+                "shortcuts",
             ]
             .contains(&kind)
         })
@@ -1025,6 +1558,8 @@ pub fn validate_evidence(
         "read_reminders" => "reminders",
         "read_mail" => "mail",
         "find_notes" => "notes",
+        "find_contact" => "contacts",
+        "list_shortcuts" => "shortcuts",
         "browser_tabs" => "browser_tabs",
         "read_page" => "browser_page",
         "control_music" if args["action"] == "now_playing" => "music",
@@ -1069,6 +1604,8 @@ pub fn validate_evidence(
         "reminders" => "reminders",
         "mail" => "mail",
         "notes" => "notes",
+        "contacts" => "contacts",
+        "shortcuts" => "shortcuts",
         "browser_page" => "safari",
         "music" => args["app"].as_str().unwrap_or("music"),
         _ => "",
@@ -1143,6 +1680,23 @@ pub fn validate_evidence(
         }
         "browser_page"
             if scope["surface"] != "front_document" || scope["textLimit"] != 2500 || count > 1 =>
+        {
+            return Err(invalid())
+        }
+        "contacts"
+            if args["name"].as_str().is_none_or(str::is_empty)
+                || scope["name"] != args["name"]
+                || scope["matches"] != "name_or_email"
+                || scope["limit"] != CONTACT_LIMIT as u64
+                || count > CONTACT_LIMIT as u64 =>
+        {
+            return Err(invalid())
+        }
+        "shortcuts"
+            if scope["query"] != query
+                || scope["matches"] != "name_words"
+                || scope["limit"] != SHORTCUT_LIMIT as u64
+                || count > SHORTCUT_LIMIT as u64 =>
         {
             return Err(invalid())
         }
@@ -1301,6 +1855,28 @@ pub fn validate_evidence(
                     return Err(invalid());
                 }
             }
+            "contacts" => {
+                let listed = |key: &str, valid: fn(&str) -> bool| {
+                    record[key].as_array().is_some_and(|items| {
+                        items.len() <= CONTACT_DETAILS
+                            && items.iter().all(|item| item.as_str().is_some_and(valid))
+                    })
+                };
+                if !record["name"].is_string()
+                    || !listed("emails", plain_address)
+                    || !listed("phones", |phone| !phone.trim().is_empty())
+                {
+                    return Err(invalid());
+                }
+            }
+            // A saved name must still fit the words it was listed for.
+            "shortcuts"
+                if record["name"] != record["id"]
+                    || !shortcut_filter(query).is_empty()
+                        && matching_shortcuts(shortcut_filter(query), &[record["name"].as_str().unwrap_or_default().to_string()]).is_empty() =>
+            {
+                return Err(invalid())
+            }
             "music"
                 if !record["title"].is_string()
                     || !record["artist"].is_string()
@@ -1371,10 +1947,12 @@ pub fn describe_reminders(reminders: &Agenda<Reminder>) -> String {
 }
 
 /// Recent inbox metadata, with explicitly bounded excerpts and search coverage.
-async fn read_mail_evidence(query: &str, unread: bool, limit: usize) -> Result<Value, String> {
+async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Launch) -> Result<Value, String> {
     let days = if query.is_empty() { "14" } else { "120" };
-    let output = osascript(
+    let output = osascript_if(
         MAIL_LIST,
+        "Mail",
+        launch,
         &[
             query.into(),
             if unread { "1" } else { "0" }.into(),
@@ -1392,7 +1970,7 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize) -> Result<V
     let openings = if ids.is_empty() {
         Ok(String::new())
     } else {
-        osascript(MAIL_TEXT, &ids, 40).await
+        osascript_if(MAIL_TEXT, "Mail", launch, &ids, 40).await
     };
     mail_evidence(query, unread, limit, found, openings.as_deref().ok())
 }
@@ -1494,8 +2072,20 @@ fn mail_evidence(
     ))
 }
 
+/// An inbox search as `read_mail` returns it, for tests of what is bound from one:
+/// (received, Message-ID, sender, subject, Mail id) rows, of `total` that matched.
+#[cfg(test)]
+pub(crate) fn mail_fixture(query: &str, rows: &[[&str; 5]], total: usize) -> Value {
+    let mut output: Vec<String> = rows
+        .iter()
+        .map(|[at, message_id, sender, subject, id]| format!("{at}\t{message_id}\tfalse\t{sender}\t{subject}\t{id}"))
+        .collect();
+    output.push(format!("__buntini_summary__\t{total}\t{}\ttrue", rows.len()));
+    mail_evidence(query, false, 8, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some("")).unwrap()
+}
+
 async fn read_mail(query: &str, unread: bool, limit: usize) -> Result<String, String> {
-    Ok(read_mail_evidence(query, unread, limit).await?["text"]
+    Ok(read_mail_evidence(query, unread, limit, Launch::Allow).await?["text"]
         .as_str()
         .unwrap_or("")
         .to_string())
@@ -1510,11 +2100,43 @@ fn mail_rows(output: &str, unread: bool, limit: usize) -> Vec<Vec<String>> {
     found
 }
 
-async fn find_notes_evidence(query: &str) -> Result<Value, String> {
-    notes_evidence(query, &osascript(NOTES_FIND, &[query.into()], 40).await?)
+async fn find_notes_evidence(query: &str, launch: Launch) -> Result<Value, String> {
+    let exact = notes_evidence(query, &osascript_if(NOTES_FIND, "Notes", launch, &[query.into()], 40).await?)?;
+    if exact["count"] != 0 {
+        return Ok(exact);
+    }
+    let Some(fallback) = notes_query_fallback(query) else {
+        return Ok(exact);
+    };
+    let output = osascript_if(NOTES_FIND, "Notes", launch, &[fallback.clone()], 40).await?;
+    notes_fallback_evidence(query, &fallback, &output)
 }
 
-fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
+/// Models sometimes include the generic noun in "my Groceries note". Preserve
+/// every identifying word and try removing only that trailing noun, and only
+/// after the exact phrase produced zero matches. Never shorten arbitrary text.
+fn notes_query_fallback(query: &str) -> Option<String> {
+    let query = query.trim();
+    let lower = query.to_ascii_lowercase();
+    for suffix in [" notes", " note"] {
+        if lower.ends_with(suffix) {
+            let candidate = query[..query.len() - suffix.len()].trim();
+            return (candidate.chars().count() >= 3).then(|| candidate.to_string());
+        }
+    }
+    None
+}
+
+fn notes_fallback_evidence(query: &str, effective: &str, output: &str) -> Result<Value, String> {
+    let mut result = notes_evidence(effective, output)?;
+    result["scope"]["query"] = json!(query);
+    result["scope"]["effectiveQuery"] = json!(effective);
+    result["scope"]["queryStrategy"] = json!("exact_phrase_then_generic_note_suffix");
+    result["scope"]["exactPhraseMatches"] = json!(0);
+    Ok(result)
+}
+
+pub(crate) fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
     let found = counted_rows(output, 5, "Notes")?;
     let mut records = Vec::new();
     let mut lines = Vec::new();
@@ -1556,7 +2178,7 @@ fn notes_evidence(query: &str, output: &str) -> Result<Value, String> {
 }
 
 async fn find_notes(query: &str) -> Result<String, String> {
-    Ok(find_notes_evidence(query).await?["text"]
+    Ok(find_notes_evidence(query, Launch::Allow).await?["text"]
         .as_str()
         .unwrap_or("")
         .to_string())
@@ -1959,6 +2581,186 @@ pub(crate) async fn safari_page() -> Result<Option<(String, String, String)>, St
         .map(|page| (page.title, page.url, page.text)))
 }
 
+/// The email selected in Mail, for "this". Mail must be allowed in Settings → Apps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedMail {
+    pub id: String,
+    pub message_id: String,
+    pub received: String,
+    pub sender: String,
+    pub subject: String,
+    pub text: String,
+    pub truncated: bool,
+    pub selected: usize,
+}
+
+pub(crate) async fn selected_mail() -> Result<Option<SelectedMail>, String> {
+    parse_selected_mail(&osascript(MAIL_SELECTED, &[], 10).await?)
+}
+
+fn parse_selected_mail(output: &str) -> Result<Option<SelectedMail>, String> {
+    if ["closed", "none", ""].contains(&output.trim()) {
+        return Ok(None);
+    }
+    let (head, body) = output.split_once('\n').unwrap_or((output, ""));
+    let parts: Vec<&str> = head.split('\t').map(str::trim).collect();
+    let [received, message_id, sender, subject, id, length, selected] = parts[..] else {
+        return Err("Mail returned incomplete message data.".into());
+    };
+    let length: usize = length
+        .parse()
+        .map_err(|_| "Mail returned an invalid message length.")?;
+    let text: String = body.trim().chars().take(4000).collect();
+    Ok(Some(SelectedMail {
+        id: id.into(),
+        message_id: message_id.into(),
+        received: received.into(),
+        sender: sender.into(),
+        subject: subject.into(),
+        truncated: length > text.chars().count(),
+        text,
+        selected: selected.parse().unwrap_or(1),
+    }))
+}
+
+/// An unreplied inbox message, for "what needs a reply?".
+#[derive(Debug, Clone, PartialEq)]
+pub struct MailHeader {
+    pub received: String,
+    pub id: String,
+    pub read: bool,
+    pub flagged: bool,
+    /// Whether a To recipient is one of the user's account addresses; None if unknown.
+    pub to_me: Option<bool>,
+    pub to_count: usize,
+    pub sender: String,
+    pub subject: String,
+    /// The Message-ID header, which a reply to this email must answer.
+    pub message_id: String,
+}
+
+/// Unreplied inbox messages from the last `days` days (at most 60), and how many there were.
+pub(crate) async fn unreplied_mail(days: u32, launch: Launch) -> Result<(Vec<MailHeader>, usize), String> {
+    parse_unreplied(&osascript_if(MAIL_TRIAGE, "Mail", launch, &[days.to_string()], 60).await?)
+}
+
+fn parse_unreplied(output: &str) -> Result<(Vec<MailHeader>, usize), String> {
+    let found = counted_rows(output, 9, "Mail")?;
+    let flag = |value: &str| match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err("Mail returned an invalid message status. Please try again.".to_string()),
+    };
+    let mut headers = Vec::new();
+    for row in &found.rows {
+        headers.push(MailHeader {
+            received: row[0].clone(),
+            id: nonempty(&row[1]).ok_or("Mail returned a message without an ID.")?.into(),
+            read: flag(&row[2])?,
+            flagged: flag(&row[3])?,
+            to_me: if row[4] == "unknown" { None } else { Some(flag(&row[4])?) },
+            to_count: row[5].parse().unwrap_or(0),
+            sender: row[6].clone(),
+            subject: row[7].clone(),
+            message_id: row[8].clone(),
+        });
+    }
+    headers.sort_by(|a, b| b.received.cmp(&a.received));
+    Ok((headers, found.total))
+}
+
+/// The opening (up to 500 characters) of each message by Mail-local ID.
+pub(crate) async fn mail_openings(
+    ids: &[String],
+    launch: Launch,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    if ids.is_empty() {
+        return Ok(Default::default());
+    }
+    Ok(rows(&osascript_if(MAIL_TEXT, "Mail", launch, ids, 40).await?)
+        .into_iter()
+        .filter(|row| row.len() >= 2)
+        .map(|row| (row[0].clone(), row[1].clone()))
+        .collect())
+}
+
+/// Who sent inbox messages from the last `days` days whose sender or subject contains
+/// `query`, newest first, as (received, sender, subject). Headers only, never message
+/// text: a goal waiting on someone's reply only needs to know one arrived, and that it
+/// isn't an automatic one.
+pub(crate) async fn inbox_senders(query: &str, days: u32, launch: Launch) -> Result<Vec<(String, String, String)>, String> {
+    let output = osascript_if(MAIL_LIST, "Mail", launch, &[query.into(), "0".into(), days.to_string()], 60).await?;
+    let mut rows = counted_rows(&output, 6, "Mail")?.rows;
+    rows.sort_by(|a, b| b[0].cmp(&a[0]));
+    Ok(rows.into_iter().map(|row| (row[0].clone(), row[3].clone(), row[4].clone())).collect())
+}
+
+/// A record for the memory index: (time, ID, title, text).
+pub type Recent = (String, String, String, String);
+
+/// Notes changed in the last `days` days (at most 300). Notes must be allowed.
+pub(crate) async fn recent_notes(days: u32, launch: Launch) -> Result<Vec<Recent>, String> {
+    let output = osascript_if(NOTES_RECENT, "Notes", launch, &[days.to_string()], 120).await?;
+    let found = counted_rows(&output, 4, "Notes")?;
+    Ok(found
+        .rows
+        .into_iter()
+        .map(|row| (row[0].clone(), row[1].clone(), row[2].clone(), row[3].clone()))
+        .collect())
+}
+
+/// Inbox messages from the last `days` days, newest `limit` with their openings, as
+/// (received, Mail ID, "subject — from sender", opening). Mail must be allowed.
+///
+/// Openings are read 40 at a time. When a batch fails (Mail timed out), its messages are
+/// left out and the error comes back beside the rest, so the index keeps what it had for
+/// them instead of losing the whole inbox.
+pub(crate) async fn recent_mail(
+    days: u32,
+    limit: usize,
+    launch: Launch,
+) -> Result<(Vec<Recent>, Option<String>), String> {
+    let output = osascript_if(MAIL_LIST, "Mail", launch, &["".into(), "0".into(), days.to_string()], 120).await?;
+    let mut rows = counted_rows(&output, 6, "Mail")?.rows;
+    rows.sort_by(|a, b| b[0].cmp(&a[0]));
+    rows.truncate(limit);
+    let ids: Vec<String> = rows.iter().filter_map(|row| nonempty(&row[5]).map(str::to_string)).collect();
+    let mut openings = std::collections::HashMap::new();
+    let mut missed = std::collections::HashSet::new();
+    let mut failed = None;
+    for batch in ids.chunks(40) {
+        match mail_openings(batch, launch).await {
+            Ok(found) => openings.extend(found),
+            // Mail was quit part-way through; reading on would open it again.
+            Err(error) if is_not_running(&error) => return Err(error),
+            Err(error) => {
+                missed.extend(batch.iter().cloned());
+                failed = Some(error);
+            }
+        }
+    }
+    let read = rows
+        .into_iter()
+        .filter(|row| !row[5].is_empty() && !missed.contains(&row[5]))
+        .map(|row| {
+            let opening = openings.get(&row[5]).cloned().unwrap_or_default();
+            (row[0].clone(), row[5].clone(), format!("{} — from {}", row[4], row[3]), opening)
+        })
+        .collect();
+    Ok((read, failed))
+}
+
+/// The paths selected in Finder, for "this". macOS asks once before Buntini may see them.
+pub(crate) async fn selected_finder_items() -> Result<Vec<String>, String> {
+    Ok(osascript(FINDER_SELECTED, &[], 10)
+        .await?
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('/'))
+        .map(str::to_string)
+        .collect())
+}
+
 fn page_evidence(output: &str) -> Result<Value, String> {
     let mut records = Vec::new();
     let display = match parse_page(output)? {
@@ -2038,6 +2840,14 @@ pub async fn run(
         )),
         "read_reminders" => Ok(describe_reminders(&reminders(helper_path).await?)),
         "find_notes" => find_notes(&get("query")).await,
+        "find_contact" => Ok(find_contact(helper_path, &get("name")).await?["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()),
+        "list_shortcuts" => Ok(shortcut_evidence(&get("query"), &shortcut_names().await?)["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()),
         "control_music" => control_music(&get("app"), &get("action"), &get("query"), false).await,
         "browser_tabs" => browser_tabs(&browsers_for(settings, args), &get("query")).await,
         "switch_tab" => switch_tab(&browsers_for(settings, args), &get("query")).await,
@@ -2140,35 +2950,94 @@ pub async fn check_app(
             &chrono::Local::now().format("%Y-%m-%d").to_string(),
         )
         .await
-        .map(|_| "Calendar is ready.".into()),
+        .map(|_| "Ready".into()),
         "reminders" => reminders(&helper_path)
             .await
-            .map(|_| "Reminders is ready.".into()),
+            .map(|_| "Ready".into()),
+        "contacts" => contacts_access(&helper_path).await,
+        // A read through System Events, so macOS asks for Automation access now.
+        "mac_settings" => crate::mac_settings::read("dock_autohide")
+            .await
+            .map(|_| "Ready".into())
+            .or_else(|_| Ok("Allow Buntini under Privacy & Security → Automation".into())),
         // Pressing play on a song you name uses Accessibility; ask for it now.
         "spotify" => Ok(
             if tokio::task::spawn_blocking(|| crate::ax::trusted(true))
                 .await
                 .unwrap_or(false)
             {
-                "Spotify is ready, including playing songs you name.".into()
+                "Ready".into()
             } else {
-                "To play songs you name, allow Buntini under System Settings → Privacy & Security → Accessibility. Play, pause and skip work without it.".into()
+                "Songs by name need Accessibility".into()
             },
         ),
-        _ => Ok(app(&id)
-            .map(|app| {
-                format!(
-                    "macOS will ask you once, the first time Buntini uses {}.",
-                    app.name
-                )
-            })
-            .unwrap_or_default()),
+        _ => Ok(String::new()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreplied_mail_rows_are_typed_and_sorted_newest_first() {
+        let output = "2026-10-27 08:00\t11\ttrue\tfalse\ttrue\t1\tAna <ana@x.com>\tLease\tl-1@x.com\n2026-10-28 10:00\t12\tfalse\ttrue\tunknown\t3\tnoreply@shop.com\tYour order\t\n__buntini_summary__\t5\t2\ttrue";
+        let (headers, total) = parse_unreplied(output).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(headers[0].id, "12");
+        assert_eq!(headers[0].to_me, None);
+        assert!(headers[0].flagged && !headers[0].read);
+        assert_eq!(headers[1].to_me, Some(true));
+        assert_eq!(headers[1].message_id, "l-1@x.com");
+        assert_eq!(headers[0].message_id, "");
+        assert!(parse_unreplied("2026-10-27 08:00\t11\tmaybe\tfalse\ttrue\t1\tA\tB\tC\n__buntini_summary__\t1\t1\ttrue").is_err());
+        assert!(parse_unreplied("__buntini_summary__\t1\t0\ttrue").unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn the_selected_email_is_parsed_or_refused_never_guessed() {
+        assert_eq!(parse_selected_mail("none").unwrap(), None);
+        assert_eq!(parse_selected_mail("closed\n").unwrap(), None);
+        let found = parse_selected_mail(
+            "2026-10-29 09:15\t<a@b>\tAna Silva <ana@example.com>\tLease renewal\t42\t5000\t2\nCan you sign\nby Friday?",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(found.subject, "Lease renewal");
+        assert_eq!(found.id, "42");
+        assert_eq!(found.selected, 2);
+        assert_eq!(found.text, "Can you sign\nby Friday?");
+        assert!(found.truncated);
+        assert!(parse_selected_mail("2026-10-29 09:15\t<a@b>\tAna").is_err());
+        assert!(parse_selected_mail("a\tb\tc\td\te\tlots\t1\nbody").is_err());
+    }
+
+    #[test]
+    fn notes_suffix_fallback_preserves_identifiers_and_reports_its_actual_query() {
+        let literal = "BuntiniQA-01234567-0123-4567-8901-012345678901 Handoff";
+        let original = format!("{literal} note");
+        assert_eq!(notes_query_fallback(&original).as_deref(), Some(literal));
+        assert_eq!(
+            notes_query_fallback("Project Notes").as_deref(),
+            Some("Project")
+        );
+        for query in [
+            "note",
+            "notes",
+            "Footnotes",
+            "Notebook",
+            "Do not shorten other words",
+            "x note",
+        ] {
+            assert_eq!(notes_query_fallback(query), None, "{query}");
+        }
+        let output = format!("2026-10-29 15:00\towned-note-id\t{literal}\tAlex owns the draft.\t20\n__buntini_summary__\t1\t1\ttrue");
+        let found = notes_fallback_evidence(&original, literal, &output).unwrap();
+        assert_eq!(found["scope"]["query"], original);
+        assert_eq!(found["scope"]["effectiveQuery"], literal);
+        assert_eq!(found["records"][0]["id"], "owned-note-id");
+        assert!(validate_evidence("find_notes", &json!({"query":original}), &found, true).is_ok());
+    }
 
     #[test]
     fn typed_calendar_preserves_source_ids_and_exact_dst_instants() {
@@ -2557,6 +3426,108 @@ mod tests {
     }
 
     #[test]
+    fn shortcuts_fit_by_the_users_words_and_records_are_checked() {
+        let names = parse_shortcuts(
+            "Lights On\nLiving Room Lights On\nLiving Room Lights Off\n  \nLock Front Door\nStart work\nLights On\nRun\n",
+        );
+        assert_eq!(names, ["Lights On", "Living Room Lights On", "Living Room Lights Off", "Lock Front Door", "Start work", "Run"]);
+        let request = "Turn on the living room lights";
+        // Most specific first, never the opposite switch, never a name of framing words.
+        assert_eq!(matching_shortcuts(request, &names), ["Living Room Lights On", "Lights On"]);
+        assert!(shortcut_covers(request, "Living Room Lights On"));
+        assert!(!shortcut_covers(request, "Lights On"), "leaves out the room");
+        assert_eq!(matching_shortcuts("please run my Start Work shortcut", &names), ["Start work"]);
+        assert_eq!(matching_shortcuts("lock the front door", &names), ["Lock Front Door"]);
+        assert!(matching_shortcuts("turn on the kitchen fan", &names).is_empty());
+        assert!(matching_shortcuts("run it", &names).is_empty());
+
+        assert_eq!(validate("list_shortcuts", &json!({})).unwrap(), Map::new());
+        assert_eq!(validate("list_shortcuts", &json!({"query":" lights on "})).unwrap()["query"], "lights on");
+        for invalid in [json!({"query":"a".repeat(101)}), json!({"name":"Lights On"}), json!({"query":7})] {
+            assert!(validate("list_shortcuts", &invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(for_call("list_shortcuts", &Map::new()).unwrap().id, "shortcuts");
+        assert_eq!(for_call("run_shortcut", &Map::new()).unwrap().id, "shortcuts");
+
+        let args = json!({"query":request});
+        let evidence = shortcut_evidence(request, &names);
+        assert_eq!(evidence["count"], 2);
+        assert_eq!(evidence["records"][0]["name"], "Living Room Lights On");
+        assert!(evidence["text"].as_str().unwrap().contains("“Living Room Lights On”"));
+        assert!(validate_evidence("list_shortcuts", &args, &evidence, true).is_ok());
+        // A record that doesn't fit the words, or a read for other words, is refused.
+        let mut smuggled = evidence.clone();
+        smuggled["records"][1] = json!({"id":"Unlock Front Door","reference":source_reference("shortcuts", Some("Unlock Front Door"), 1),"name":"Unlock Front Door"});
+        assert!(validate_evidence("list_shortcuts", &args, &smuggled, false).is_err());
+        assert!(validate_evidence("list_shortcuts", &json!({"query":"lock the front door"}), &evidence, false).is_err());
+        let none = shortcut_evidence("turn on the kitchen fan", &names);
+        assert_eq!(none["count"], 0);
+        assert_eq!(none["text"], "None of your shortcuts fits “turn on the kitchen fan”.");
+        let asked = shortcut_evidence("which shortcuts do I have?", &names);
+        assert_eq!(asked["records"].as_array().map(Vec::len), Some(names.len().min(SHORTCUT_LIMIT)));
+        assert!(validate_evidence("list_shortcuts", &json!({"query":"which shortcuts do I have?"}), &asked, false).is_ok());
+        let all = shortcut_evidence("", &names);
+        assert_eq!(all["count"], names.len());
+        assert!(validate_evidence("list_shortcuts", &json!({}), &all, true).is_ok());
+        let many: Vec<String> = (0..40).map(|n| format!("Scene {n}")).collect();
+        let partial = shortcut_evidence("", &many);
+        assert_eq!((partial["count"].as_u64(), partial["complete"].as_bool()), (Some(32), Some(false)));
+        assert!(partial["text"].as_str().unwrap().ends_with("and 8 more."));
+        assert!(validate_evidence("list_shortcuts", &json!({}), &partial, true).is_err());
+        assert!(model_evidence(&evidence).get("text").is_none());
+    }
+
+    #[test]
+    fn contact_lookups_are_typed_bounded_and_checked() {
+        assert_eq!(validate("find_contact", &json!({"name":" Ana Silva "})).unwrap()["name"], "Ana Silva");
+        for invalid in [json!({}), json!({"name":""}), json!({"name":"--events"}), json!({"name":"a".repeat(101)}), json!({"name":"Ana","limit":3})] {
+            assert!(validate("find_contact", &invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(for_call("find_contact", &Map::new()).unwrap().id, "contacts");
+        assert_eq!(app("contacts").unwrap().share, Some(Share::Contacts));
+        // Addresses that could not address a draft are dropped, so records and text agree.
+        let output = json!({"contacts":[
+            {"id":"c-1","name":"Ana Silva","emails":["ana@example.com","Ana Silva <ana@x.com>","nobody"],"phones":["+1 555 0100",""]},
+            {"id":null,"name":"Ana Costa","emails":[],"phones":[]}
+        ],"total":2,"returned":2,"complete":true}).to_string();
+        let found = parse_contacts(&output).unwrap();
+        assert_eq!(found.items[0].emails, ["ana@example.com"]);
+        assert_eq!(found.items[0].phones, ["+1 555 0100"]);
+        let args = json!({"name":"Ana"});
+        let evidence = contact_evidence("Ana", &found);
+        assert!(validate_evidence("find_contact", &args, &evidence, true).is_ok());
+        assert_eq!(evidence["records"][1]["reference"]["kind"], "snapshot");
+        assert!(evidence["text"].as_str().unwrap().contains("Ana Silva: ana@example.com, +1 555 0100"));
+        assert!(model_evidence(&evidence).get("text").is_none());
+        // A read for another name, a smuggled address or a hidden extra person is refused.
+        assert!(validate_evidence("find_contact", &json!({"name":"Eve"}), &evidence, false).is_err());
+        let mut smuggled = evidence.clone();
+        smuggled["records"][0]["emails"] = json!(["Ana <eve@example.com>"]);
+        assert!(validate_evidence("find_contact", &args, &smuggled, false).is_err());
+        let mut uncounted = evidence.clone();
+        uncounted["count"] = json!(1);
+        assert!(validate_evidence("find_contact", &args, &uncounted, false).is_err());
+        // More people matched than were read: the read says so and is never complete.
+        let five: Vec<Value> = (0..5).map(|i| json!({"id":format!("c-{i}"),"name":"Ana","emails":[],"phones":[]})).collect();
+        let partial = parse_contacts(&json!({"contacts":five,"total":6,"returned":5,"complete":false}).to_string()).unwrap();
+        assert!(!partial.complete());
+        let read = contact_evidence("Ana", &partial);
+        assert!(validate_evidence("find_contact", &args, &read, false).is_ok());
+        assert!(validate_evidence("find_contact", &args, &read, true).is_err());
+        assert!(read["text"].as_str().unwrap().contains("first 5 of 6 people"));
+        assert!(parse_contacts(&json!({"contacts":five,"total":6,"returned":5,"complete":true}).to_string()).is_err(), "a missing person cannot be called complete");
+        let six: Vec<Value> = (0..6).map(|i| json!({"id":format!("c-{i}"),"name":"Ana","emails":[],"phones":[]})).collect();
+        assert!(parse_contacts(&json!({"contacts":six,"total":6,"returned":6,"complete":true}).to_string()).is_err(), "at most five people per read");
+        for broken in ["", "[]", "{\"contacts\":[],\"total\":1,\"returned\":0,\"complete\":true}", "{\"contacts\":[],\"total\":0,\"returned\":0,\"complete\":true,\"extra\":1}"] {
+            assert!(parse_contacts(broken).is_err(), "{broken}");
+        }
+        assert_eq!(parse_contacts("{\"error\":\"denied\"}").unwrap_err(), CONTACTS_DENIED);
+        let nobody = parse_contacts("{\"contacts\":[],\"total\":0,\"returned\":0,\"complete\":true}").unwrap();
+        assert_eq!(describe_contacts("Zed", &nobody), "No one in Contacts matches “Zed”.");
+        assert!(validate_evidence("find_contact", &json!({"name":"Zed"}), &contact_evidence("Zed", &nobody), true).is_ok());
+    }
+
+    #[test]
     fn only_allowed_apps_are_usable() {
         let mut settings = Settings::default();
         let args = Map::new();
@@ -2665,6 +3636,27 @@ mod tests {
             "Open reminders:\n- Bins (due Thu 22 Oct 19:00) [Home]"
         );
         assert_eq!(percent("lo-fi beats"), "lo%2Dfi%20beats");
+    }
+
+    #[tokio::test]
+    async fn a_calendar_range_is_one_helper_call_that_must_echo_its_days() {
+        let row = json!({"start":"2026-10-22 09:00", "end":"2026-10-22 10:00", "allDay":false, "title":"Standup", "location":""});
+        let ranged = format!("{row}\n{}", json!({"type":"agenda_summary","returned":1,"total":1,"complete":true,"from":"2026-10-01","to":"2026-12-29"}));
+        let events: Agenda<Event> = parse_helper_range(&ranged, Some(("2026-10-01", "2026-12-29"))).unwrap();
+        assert_eq!(events.items[0].title, "Standup");
+        // An older helper answers a range with the first day alone, and no echo.
+        let one_day = format!("{row}\n{}", json!({"type":"agenda_summary","returned":1,"total":1,"complete":true}));
+        assert!(parse_helper_range::<Event>(&one_day, Some(("2026-10-01", "2026-12-29"))).is_err());
+        assert!(parse_helper_range::<Event>(&ranged, Some(("2026-10-02", "2026-12-29"))).is_err());
+        assert!(parse_helper_rows::<Event>(&ranged).is_err(), "a day read never takes a ranged answer");
+        // The helper is started once, with both days as its last arguments.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("buntini-fm");
+        std::fs::write(&fake, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\necho '{row}'\necho '{{\"type\":\"agenda_summary\",\"returned\":1,\"total\":1,\"complete\":true,\"from\":\"'$2'\",\"to\":\"'$3'\"}}'\n", dir.path().join("calls").display())).unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let read = events_between(&fake, "2026-10-01", "2026-12-29").await.unwrap();
+        assert_eq!(read.total, 1);
+        assert_eq!(std::fs::read_to_string(dir.path().join("calls")).unwrap(), "--events 2026-10-01 2026-12-29\n");
     }
 
     #[test]
@@ -2783,6 +3775,22 @@ mod tests {
             window_privacy_script(app("safari").unwrap()).is_none(),
             "Safari does not expose private mode"
         );
+    }
+
+    #[test]
+    fn background_scripts_check_the_app_is_running() {
+        for (source, app) in [(NOTES_RECENT, "Notes"), (NOTES_FIND, "Notes"), (MAIL_LIST, "Mail"), (MAIL_TEXT, "Mail"), (MAIL_TRIAGE, "Mail")] {
+            let background = guarded(source, app, Launch::IfRunning);
+            let check = format!("on run argv\n  if application \"{app}\" is not running then return \"{NOT_RUNNING_SENTINEL}\"\n");
+            assert!(background.starts_with(&check), "{app}: the check comes before any tell");
+            assert_eq!(background.matches("is not running").count(), 1);
+            assert!(background.ends_with(source.split_once('\n').unwrap().1));
+            // An explicit request may open the app.
+            assert_eq!(guarded(source, app, Launch::Allow), source);
+            assert!(!source.contains("is not running"));
+        }
+        assert!(is_not_running(&format!("Mail {NOT_RUNNING}")));
+        assert!(!is_not_running("Mail returned incomplete data. Please try again."));
     }
 
     #[test]

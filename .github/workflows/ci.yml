@@ -17,88 +17,216 @@ concurrency:
 jobs:
   check:
     name: Tests
-    # macOS 26 runners ship the SDK with Apple's Foundation Models, so the Apple
-    # Intelligence helper is built and tested (it skips when the runner can't run it).
+    # macOS 26 includes the SDK needed to build Foundation Models contracts.
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
       - run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
       - run: ./scripts/check.sh
+        env:
+          BUNTINI_REQUIRE_FM: '1'
 
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-      - name: npm packages
-        # One retry: npm's audit service sometimes errors; real advisories fail both runs.
-        run: npm audit --omit=dev --audit-level=high || { sleep 30; npm audit --omit=dev --audit-level=high; }
-      - name: Rust crates
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+      - name: Audit npm, including the build toolchain
+        run: npm audit --audit-level=high
+      - name: Audit Rust crates
+        # RUSTSEC-2026-0367, -0368 and -0369 affect zip's archive extraction to disk.
+        # zip 8 comes only from candle-core (memory search), which uses it to read
+        # .npz tensors; Buntini loads safetensors and never extracts archives.
+        # Remove these exceptions once candle moves to zip 9.
         run: |
-          cargo install cargo-audit --locked
-          cargo audit --file src-tauri/Cargo.lock
+          cargo install cargo-audit --version 0.22.1 --locked
+          cargo audit --file src-tauri/Cargo.lock \
+            --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
+
+  python-audit:
+    name: Optional MLX and voice dependency audit
+    # Resolve on the shipping platform so arm64/macOS markers aren't skipped.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install 'pip-audit==2.10.1'
+      - run: python3 -m pip_audit -r worker/requirements.txt -r worker/requirements-vad.txt
 
   build:
-    name: Build Buntini.app
+    name: Development bundle
     needs: check
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: macos-26
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
       - run: npm ci
-      # Ad-hoc signed (signingIdentity "-"), not notarized: see "Install" in the README.
-      - run: npm run tauri -- build --bundles app,dmg
-      - name: Collect the app and disk image
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
+      - name: Build an ad-hoc development app
+        run: npm run tauri -- build --ci --bundles app -- --locked
+        env:
+          BUNTINI_REQUIRE_FM: '1'
+      - name: Archive development app
+        run: ditto -c -k --keepParent src-tauri/target/release/bundle/macos/Buntini.app Buntini-development-macOS-arm64.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: Buntini-development-macOS-arm64
+          path: Buntini-development-macOS-arm64.zip
+          retention-days: 14
+          if-no-files-found: error
+
+  release-build:
+    name: Signed and notarized release bundle
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, audit, python-audit]
+    runs-on: macos-26
+    timeout-minutes: 90
+    # Configure required reviewers and protected tag rules for this environment.
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      # The memory search model is bundled; fetch it at its pinned revision and hashes.
+      - run: ./scripts/fetch-models.sh
+      - name: Require matching versions, Developer ID and notarization
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: python3 scripts/release_preflight.py --tag "$RELEASE_TAG" --require-signing
+      - name: Build and notarize
+        env:
+          BUNTINI_REQUIRE_FM: '1'
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          umask 077
+          config_dir=$(mktemp -d "$RUNNER_TEMP/buntini-release.XXXXXX")
+          config="$config_dir/release.json"
+          trap 'rm -f "$config" "$config_dir/notarization.json"; rmdir "$config_dir"' EXIT
+          python3 -c 'import json, os, sys; json.dump({"bundle": {"macOS": {"signingIdentity": os.environ["APPLE_SIGNING_IDENTITY"], "hardenedRuntime": True}}}, open(sys.argv[1], "w"))' "$config"
+          npm run tauri -- build --ci --config "$config" --bundles app,dmg -- --locked
+          # Tauri notarizes/staples the app and signs the DMG. Submit the final
+          # disk image separately so the downloadable container is stapled too.
+          images=(src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          xcrun notarytool submit "${images[0]}" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json > "$config_dir/notarization.json"
+          python3 scripts/release_notary_result.py "$config_dir/notarization.json"
+          xcrun stapler staple "${images[0]}"
+      - name: Verify and collect final distribution artifacts
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p dist-release
           bundle=src-tauri/target/release/bundle
+          images=("$bundle"/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          sh scripts/verify-release.sh "$bundle/macos/Buntini.app" "${images[0]}"
           ditto -c -k --keepParent "$bundle/macos/Buntini.app" dist-release/Buntini-macOS-arm64.zip
-          cp "$bundle"/dmg/*.dmg dist-release/Buntini-macOS-arm64.dmg
-          (cd dist-release && shasum -a 256 * > SHA256SUMS.txt)
-      - uses: actions/upload-artifact@v7
+          cp "${images[0]}" dist-release/Buntini-macOS-arm64.dmg
+          python3 -c 'import json, os; json.dump({"tag": os.environ["RELEASE_TAG"], "commit": os.environ["RELEASE_COMMIT"], "signing": "Developer ID Application", "notarization": "staple and Gatekeeper verified"}, open("dist-release/BUILD-INFO.json", "w"), indent=2)'
+          (cd dist-release && shasum -a 256 Buntini-macOS-arm64.zip Buntini-macOS-arm64.dmg BUILD-INFO.json > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: Buntini-macOS-arm64
           path: dist-release/
           retention-days: 30
+          if-no-files-found: error
 
   release:
-    name: Publish release
+    name: Prepare draft release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, audit]
+    needs: release-build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: Buntini-macOS-arm64
           path: dist-release
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: dist-release/*
-          # Tags like v0.1.0-beta.1 are published as pre-releases.
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          body: |
-            Download **Buntini-macOS-arm64.dmg**, open it and drag Buntini to Applications.
-            This build isn't notarized by Apple yet. The first time, open it from Finder and choose
-            **System Settings → Privacy & Security → Open Anyway**. Checksums are in SHA256SUMS.txt.
+      - name: Verify archive checksums
+        working-directory: dist-release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Create a draft for final device acceptance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=()
+          case "$RELEASE_TAG" in *-*) prerelease=(--prerelease);; esac
+          gh release create "$RELEASE_TAG" dist-release/* --draft --verify-tag --generate-notes --title "$RELEASE_TAG" "${prerelease[@]}"

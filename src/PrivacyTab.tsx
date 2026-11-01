@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { ChevronRight, Folder, FolderPlus, ShieldCheck, X } from 'lucide-react';
 import Toggle from './Toggle';
-import FileIndexSettings from './FileIndexSettings';
 import MacUpdates from './MacUpdates';
 import type { Memory, Settings } from './types';
 
@@ -16,6 +15,10 @@ const shares: { id: string; label: string }[] = [
   { id: 'notes', label: 'Your notes' },
   { id: 'music', label: 'What’s playing' },
   { id: 'browser', label: 'Browser tabs' },
+  { id: 'selection', label: 'What you select' },
+  { id: 'contacts', label: 'People in Contacts' },
+  { id: 'shortcuts', label: 'Your shortcuts' },
+  { id: 'tools', label: 'Tools you added' },
 ];
 type Props = {
   draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; roots: string[];
@@ -31,19 +34,18 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
       <Toggle label="Notice what I’m doing" detail="App names and times, on this Mac only" checked={draft.petAwareness} onChange={value => update('petAwareness', value)} />
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Folders</h3><span className="count-badge">{roots.length}</span></div>
+      <div className="settings-section-heading"><h3>Folders</h3></div>
       {roots.map(path => <div className="root-item" key={path}><Folder size={14} /><span title={path}>{path}</span><button type="button" aria-label={`Remove access to ${path}`} title="Remove access" onClick={() => void onRemoveFolder(path)}><X size={14} /></button></div>)}
-      <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Add folder</button><FileIndexSettings roots={roots} onError={onError} /></div>
+      <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void onAddFolder()}><FolderPlus size={14} /> Add folder</button></div>
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Memory</h3><span className="count-badge">{memories.length}</span></div>
+      <div className="settings-section-heading"><h3>Memory</h3></div>
       {memories.length ? memories.map(memory => <div className="root-item" key={memory.id}><span title={memory.fact}>{memory.fact}</span><button type="button" aria-label={`Forget: ${memory.fact}`} title="Forget" onClick={() => void onForget(memory.id)}><X size={14} /></button></div>)
-        : <p className="field-help">Ask me to remember something, like “remember I’m vegetarian”.</p>}
+        : <p className="field-help">Nothing yet</p>}
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Cloud models may see</h3></div>
       {shares.map(item => <Toggle key={item.id} label={item.label} checked={draft.externalShares.includes(item.id)} onChange={value => toggle(item.id, value)} />)}
-      <p className="field-help">Your messages always go to a cloud model. Everything else stays here unless you turn it on.</p>
     </section>
     {children}
     <MacUpdates onError={onError} />

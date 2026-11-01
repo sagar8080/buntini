@@ -83,6 +83,11 @@ pub(crate) fn request_clause(mut clause: &str) -> &str {
             "i need you to ",
             "help me ",
             "now ",
+            // "Tell me what's on my calendar tomorrow" asks the same as without it.
+            "tell me ",
+            "show me ",
+            "give me ",
+            "let me know ",
         ] {
             if let Some(rest) = clause.strip_prefix(prefix) {
                 clause = rest.trim_start();
@@ -102,8 +107,245 @@ pub(crate) fn non_action(clause: &str) -> bool {
             .any(|s| clause.starts_with(s))
 }
 
+/// Words after "reply to this" that make it a question for Buntini to answer in chat
+/// ("respond to this question in one sentence"), not a person or an email.
+pub(crate) const ANSWERED_IN_CHAT: &[&str] = &[
+    "question", "questions", "prompt", "following", "text", "sentence", "statement",
+    "paragraph", "quiz", "riddle", "puzzle", "query", "above", "below", "poem", "joke",
+];
+
+/// Whether the words after "reply to" are something to answer in chat: "the following",
+/// "this question", but not "her question", which is still a person's email.
+pub(crate) fn answered_in_chat(object: &[&str]) -> bool {
+    match object {
+        [first, ..] if ANSWERED_IN_CHAT.contains(first) => true,
+        ["the" | "this" | "that" | "these" | "those" | "my" | "your", noun, ..] => {
+            ANSWERED_IN_CHAT.contains(noun)
+        }
+        _ => false,
+    }
+}
+
+/// Whether "reply …", "respond …" or "write back …" is addressed to a person or an email,
+/// so it needs a Mail draft. "Reply in French", "respond with one word" and "reply to the
+/// following in a friendly tone" are about Buntini's own answer.
+fn addressed_reply(tokens: &[&str]) -> bool {
+    let mut rest = &tokens[1..];
+    if rest.first() == Some(&"back") {
+        rest = &rest[1..];
+    } else if tokens[0] == "write" {
+        return false;
+    }
+    let Some((&"to", object)) = rest.split_first() else {
+        // "write back saying yes" still answers whoever wrote; "reply with an email" too.
+        return tokens.get(1) == Some(&"back")
+            || rest.iter().any(|word| ["email", "mail", "message"].contains(word));
+    };
+    !object.is_empty() && !answered_in_chat(object)
+}
+
+/// "Draft a reply to this email", "write a response to the second one": the same form
+/// `focus::reply_object` reads the target from.
+fn noun_reply(tokens: &[&str]) -> bool {
+    let mut rest = &tokens[1..];
+    if rest.first().is_some_and(|word| ["a", "an", "my"].contains(word)) {
+        rest = &rest[1..];
+    }
+    match rest {
+        [noun, "to", object @ ..] if ["reply", "response"].contains(noun) => !object.is_empty() && !answered_in_chat(object),
+        _ => false,
+    }
+}
+
+/// Whether a clause asks to change a home device ("turn on the living room lights", "lock
+/// the front door", "set the thermostat to 20"), which Buntini does with one of the
+/// user's shortcuts. Mac settings ("turn on dark mode") are not devices.
+fn home_device(verb: &str, tokens: &[&str]) -> bool {
+    const DEVICES: &[&str] = &[
+        "light", "lights", "lamp", "lamps", "fan", "fans", "heater", "heating", "thermostat",
+        "aircon", "tv", "plug", "plugs", "blinds", "curtains", "kettle", "sprinklers", "purifier",
+        "humidifier", "garage", "door", "doors", "gate",
+    ];
+    let has = |set: &[&str]| tokens.iter().any(|token| set.contains(token));
+    // A later or repeated change ("at 7", "every night") is not something to run now.
+    if !has(DEVICES)
+        || has(&[
+            "mode", "timer", "reminder", "volume", "at", "tomorrow", "tonight", "later", "every",
+            "when", "minutes", "hours",
+        ])
+    {
+        return false;
+    }
+    match verb {
+        "turn" | "switch" => has(&["on", "off"]),
+        "dim" | "brighten" => has(&["light", "lights", "lamp", "lamps"]),
+        "lock" | "unlock" => has(&["door", "doors", "garage", "gate"]),
+        _ => has(&["thermostat", "heating", "aircon"]),
+    }
+}
+
+/// Event words that make "move", "rename" or "change" about the calendar.
+const EVENT_WORDS: &[&str] = &[
+    "event", "events", "meeting", "meetings", "appointment", "appointments", "calendar",
+];
+
+/// A day or time of day, as in "to Friday", "to 4", "to 4:30pm", "to tomorrow".
+fn temporal(word: &str) -> bool {
+    let digits = word.trim_end_matches("pm").trim_end_matches("am");
+    [
+        "today", "tonight", "tomorrow", "noon", "midday", "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday", "am", "pm",
+    ]
+    .contains(&word)
+        || (!digits.is_empty() && digits.len() <= 4 && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// "move my 3pm to 4", "push the dentist to Friday", "rename my 10:30 to Planning":
+/// changing an existing event. Other things can be moved too (tabs, files, money), so
+/// "move" needs an event word or a day or time to move it to.
+fn edits_event(verb: &str, tokens: &[&str]) -> bool {
+    let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
+    let destination = tokens
+        .iter()
+        .rposition(|word| *word == "to" || *word == "for")
+        .map(|at| &tokens[at + 1..])
+        .unwrap_or(&[]);
+    if has(&["tab", "tabs", "file", "files", "folder", "folders", "money", "email", "emails", "mail", "reminder", "reminders", "note", "notes"]) {
+        return false;
+    }
+    match verb {
+        "reschedule" | "postpone" => true,
+        // "push my 3pm back by an hour", "move lunch 30 minutes later"
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" | "bring" if crate::edit_targets::shift(tokens).is_some() => true,
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" => {
+            tokens.contains(&"to") && (has(EVENT_WORDS) || destination.iter().any(|word| temporal(word)))
+        }
+        "rename" => tokens.contains(&"to") && (has(EVENT_WORDS) || tokens.get(1).is_some_and(|word| ["my", "the"].contains(word))),
+        "change" => tokens.contains(&"to") && (has(EVENT_WORDS) || has(&["location", "venue"])),
+        _ => false,
+    }
+}
+
+/// "move the dentist reminder to Friday", "push my call Ana reminder back a day": a new
+/// due date for a reminder the user already has.
+fn reschedules_reminder(verb: &str, tokens: &[&str]) -> bool {
+    if !tokens.iter().any(|token| ["reminder", "reminders"].contains(token)) {
+        return false;
+    }
+    let destination = tokens
+        .iter()
+        .rposition(|word| *word == "to" || *word == "for")
+        .map(|at| &tokens[at + 1..])
+        .unwrap_or(&[]);
+    match verb {
+        "move" | "push" | "shift" | "bump" | "delay" | "pull" | "bring" | "reschedule" | "postpone" | "change" => {
+            crate::edit_targets::shift(tokens).is_some() || destination.iter().any(|word| temporal(word))
+        }
+        _ => false,
+    }
+}
+
+/// "add milk to my shopping note": adding to an existing note, not writing a new one.
+/// "Hide the Dock", "turn off wifi", "switch to dark mode", "change my wallpaper".
+fn changes_mac_setting(tokens: &[&str]) -> bool {
+    let has = |word: &str| tokens.contains(&word);
+    let pair = |a: &str, b: &str| tokens.windows(2).any(|w| w[0] == a && w[1] == b);
+    has("wallpaper")
+        || has("dock")
+        || has("wifi")
+        || has("screensaver")
+        || pair("wi", "fi")
+        || pair("menu", "bar")
+        || pair("dark", "mode")
+        || pair("light", "mode")
+        || pair("hidden", "files")
+        || pair("desktop", "icons")
+        || pair("desktop", "background")
+        || pair("screen", "saver")
+}
+
+fn appends_to_note(tokens: &[&str]) -> bool {
+    let Some(to) = tokens.iter().rposition(|word| *word == "to") else {
+        return false;
+    };
+    let name: Vec<&&str> = tokens[to + 1..]
+        .iter()
+        .skip_while(|word| ["my", "the", "our"].contains(*word))
+        .collect();
+    // What is added may be quoted, and so already removed from these words.
+    to >= 1
+        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
+        && (2..=5).contains(&name.len())
+        && !(["a", "an", "new"].contains(&tokens[1]) && tokens.get(2) == Some(&"note"))
+}
+
+/// "add milk, eggs and bread to my shopping note" is one request: join its list so the
+/// clause splitting at "and" and commas below keeps it together. Lowercase text only.
+pub(crate) fn joined_edit_lists(text: &str) -> String {
+    let mut result = String::new();
+    for sentence in text.split_inclusive([';', '\n', '.', '!', '?']) {
+        let spans: Vec<(usize, &str)> = sentence
+            .split_whitespace()
+            .map(|word| (word.as_ptr() as usize - sentence.as_ptr() as usize, word.trim_matches(|c: char| !c.is_alphanumeric())))
+            .collect();
+        let head = spans.iter().position(|(_, word)| ["note", "notes"].contains(word)).and_then(|end| {
+            let to = (0..end).rev().take(6).find(|&index| spans[index].1 == "to")?;
+            let verb = (0..to).rev().find(|&index| ["add", "append", "put", "jot"].contains(&spans[index].1))?;
+            Some((spans[verb].0, spans[to].0))
+        });
+        match head {
+            Some((start, end)) => {
+                result.push_str(&sentence[..start]);
+                result.push_str(&sentence[start..end].replace(" and ", " & ").replace(',', " &"));
+                result.push_str(&sentence[end..]);
+            }
+            None => result.push_str(sentence),
+        }
+    }
+    result
+}
+
+/// A clause cut from lowercased `joined_edit_lists` text, back in the user's own words:
+/// their capitals, and each " &" the joining wrote as the "and" or comma it replaced
+/// wherever `original` says so. "Add oat milk and eggs to my note" then adds "oat milk
+/// and eggs", not "oat milk & eggs".
+pub(crate) fn unjoined(clause: &str, original: &str) -> String {
+    let parts: Vec<&str> = clause.split(" &").collect();
+    let joins = parts.len() - 1;
+    if joins > 6 {
+        return clause.into();
+    }
+    // Lowercasing that changes a text's length can't map a match back to its letters.
+    let lower = original.to_lowercase();
+    let same_length = lower.len() == original.len();
+    for mut choice in 0..3usize.pow(joins as u32) {
+        let mut text = parts[0].to_string();
+        for part in &parts[1..] {
+            text.push_str([" and", ",", " &"][choice % 3]);
+            choice /= 3;
+            text.push_str(part);
+        }
+        if let Some(start) = lower.find(&text.to_lowercase()) {
+            return match same_length && original.is_char_boundary(start) && original.is_char_boundary(start + text.len()) {
+                true => original[start..start + text.len()].to_string(),
+                false => text,
+            };
+        }
+    }
+    clause.into()
+}
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
-    let prompt = unquoted(&prompt.replace("Additional details: ", "\n"));
+    // "Follow up with Ana until she replies" asks for a goal now; each follow-up is a
+    // check-in's own task.
+    if crate::goals::parse_request(prompt).is_some() {
+        return (vec![crate::goals::TOOL], false);
+    }
+    // "Every weekday at 8, draft…" asks for a routine now; the draft is for each run.
+    if crate::routines::parse_request(prompt).is_some() {
+        return (vec![crate::routines::TOOL], false);
+    }
+    let prompt = joined_edit_lists(&unquoted(&prompt.replace("Additional details: ", "\n")));
     let mut expected = Vec::new();
     let mut unsupported = false;
     // An explanation or negation scopes over its coordinated clauses. Splitting
@@ -130,8 +372,31 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
             let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
             let tool = match verb {
                 "remember" => Some("remember"),
+                // Changing an item the user already has: its id comes from a read.
+                "mark" if has(&["done", "complete", "completed", "finished"]) => {
+                    Some("complete_reminder")
+                }
+                "tick" | "check" | "cross"
+                    if tokens.get(1) == Some(&"off") || tokens.last() == Some(&"off") =>
+                {
+                    Some("complete_reminder")
+                }
+                "complete" | "finish" if has(&["reminder", "reminders", "task", "todo"]) => {
+                    Some("complete_reminder")
+                }
+                verb if edits_event(verb, &tokens) => Some("update_calendar_event"),
+                verb if reschedules_reminder(verb, &tokens) => Some("reschedule_reminder"),
+                "add" | "append" | "put" | "jot" if appends_to_note(&tokens) => {
+                    Some("append_to_note")
+                }
                 "set" | "start" | "create" | "add" if has(&["timer", "timers", "countdown"]) => {
                     Some("set_timer")
+                }
+                "hide" | "show" | "turn" | "switch" | "change" | "set" | "move" | "enable"
+                | "disable" | "make" | "put" | "use"
+                    if changes_mac_setting(&tokens) =>
+                {
+                    Some(crate::mac_settings::TOOL)
                 }
                 "play" | "pause" | "resume" | "skip" | "stop"
                     if !has(&["timer", "task", "search", "watch"]) =>
@@ -171,7 +436,14 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("create_note")
                 }
-                "draft" | "prepare" | "write" if has(&["email", "mail", "message", "draft"]) => {
+                // A reply answers one email, in its thread ("reply to this", "write back
+                // to her", "draft a reply to this email"); a new email is a draft. Neither
+                // is ever sent: the user sends it from Mail.
+                "reply" | "respond" | "write" if addressed_reply(&tokens) => Some("reply_email"),
+                // Only when the reply is what to write ("draft a reply to this email");
+                // "an email to my landlord in response to …" is a new email.
+                "draft" | "prepare" | "write" if noun_reply(&tokens) => Some("reply_email"),
+                "draft" | "prepare" | "write" if has(&["email", "mail", "message"]) => {
                     Some("draft_email")
                 }
                 "open"
@@ -189,6 +461,12 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 }
                 "open" => Some("open_app"),
                 "run" if has(&["shortcut", "shortcuts"]) => Some("run_shortcut"),
+                // Home devices are run through the user's own shortcuts, never guessed.
+                "turn" | "switch" | "dim" | "brighten" | "lock" | "unlock" | "set"
+                    if home_device(verb, &tokens) =>
+                {
+                    Some("run_shortcut")
+                }
                 "send" | "email" | "text" | "post" | "publish" | "book" | "reserve" | "buy"
                 | "purchase" | "order" | "pay" | "delete" | "cancel" | "move" | "update"
                 | "change" => {
@@ -331,6 +609,10 @@ pub fn planning_tools(
 }
 
 fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
+    // A routine's or a goal's reads happen when it runs, not when it is set up.
+    if crate::routines::parse_request(goal).is_some() || crate::goals::parse_request(goal).is_some() {
+        return Ok(());
+    }
     // Online topic words are not requests to read private apps. The durable
     // task contract separately requires the integrated online evidence.
     let search_clauses = crate::search_intent::explicit_clause_spans(goal);
@@ -341,7 +623,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     {
         return Ok(());
     }
-    let text = unquoted(goal)
+    let text = joined_edit_lists(&unquoted(goal))
         .replace("additional details: ", "\n")
         .replace(" and then ", ";")
         .replace(" then ", ";")
@@ -373,24 +655,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
         }) {
             continue;
         }
-        let has = |targets: &[&str]| tokens.iter().any(|word| targets.contains(word));
-        let required: &[&str] = if has(&["calendar", "events", "appointments"]) {
-            &["read_calendar"]
-        } else if has(&["mail", "email", "emails", "inbox"]) {
-            &["read_mail"]
-        } else if has(&["reminders"]) {
-            &["read_reminders"]
-        } else if has(&["note", "notes"]) {
-            &["find_notes"]
-        } else if has(&["page", "website", "webpage"]) {
-            &["read_page", "browse_page", "look_up_online"]
-        } else if has(&["tabs"]) {
-            &["browser_tabs"]
-        } else if has(&["files", "folder", "folders"]) {
-            &["search_files"]
-        } else {
-            &[]
-        };
+        let required = crate::task_contract::read_tools(clause);
         if !required.is_empty()
             && !steps.iter().any(|step| {
                 !step.effect
@@ -409,7 +674,7 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     }
 }
 
-fn claims_own_write(text: &str) -> bool {
+pub(crate) fn claims_own_write(text: &str) -> bool {
     let text = unquoted(text);
     let tokens = words(&text);
     let writes = [
@@ -507,7 +772,10 @@ fn receipt_summary(messages: &[String]) -> String {
 /// Any other continuation keeps the answer phase, including verbs we have never
 /// classified (a blacklist would silently drop new kinds of requested work).
 pub(crate) fn receipt_only_goal(goal: &str) -> bool {
-    let plain = unquoted(&goal.replace("Additional details: ", "\n"))
+    if crate::routines::parse_request(goal).is_some() || crate::goals::parse_request(goal).is_some() {
+        return true;
+    }
+    let plain = joined_edit_lists(&unquoted(&goal.replace("Additional details: ", "\n")))
         .replace(" and then ", ";")
         .replace(" then ", ";")
         .replace(" also ", ";");
@@ -641,6 +909,161 @@ pub fn completed_action_answer(goal: &str, steps: &[Step]) -> Option<String> {
         .filter(|answer| !answer.trim().is_empty())
 }
 
+/// The apps whose contents an answer may only state from this turn's own reads. Earlier
+/// turns may be out of date, and the on-device model has stitched them into a schedule
+/// that was never read ("Buntini test planning: 4:00 PM - 5:00 PM").
+const PERSONAL: [(&str, &[&str], &[&str]); 3] = [
+    (
+        "calendar",
+        &["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments"],
+        &["read_calendar", "add_calendar_event", "update_calendar_event", "search_memory"],
+    ),
+    (
+        "reminders",
+        &["reminder", "reminders", "to-do", "todo", "to-dos"],
+        &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder", "search_memory"],
+    ),
+    (
+        "email",
+        &["email", "emails", "inbox", "mail"],
+        &["read_mail", "reply_email", "draft_email", "search_memory"],
+    ),
+];
+
+/// Clock times written in `text`: "9:00", "4 pm", "16:45", "10am".
+fn clock_times(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let mut times = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != ':');
+        let (number, suffix) = word.split_at(word.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(word.len()));
+        let meridiem = ["am", "pm", "a.m", "p.m"].contains(&suffix.trim_end_matches('.'))
+            || (suffix.is_empty() && words.get(index + 1).is_some_and(|next| ["am", "pm", "a.m.", "p.m."].contains(&next.trim_end_matches(|c: char| c == ',' || c == ')'))));
+        let digits: Vec<&str> = number.split(':').collect();
+        let clock = match digits[..] {
+            [hour, minute] => hour.len() <= 2 && minute.len() == 2 && hour.parse::<u32>().is_ok_and(|h| h < 24) && minute.parse::<u32>().is_ok_and(|m| m < 60),
+            [hour] => meridiem && hour.parse::<u32>().is_ok_and(|h| (1..=12).contains(&h)),
+            _ => false,
+        };
+        if clock && !number.is_empty() {
+            times.push(number.to_string());
+        }
+    }
+    times
+}
+
+/// Sentences and lines of an answer, each with its own punctuation.
+pub(crate) fn sentences(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    for line in text.split_inclusive('\n') {
+        let mut start = 0;
+        let bytes = line.as_bytes();
+        for (index, byte) in bytes.iter().enumerate() {
+            let ends = matches!(byte, b'.' | b'!' | b'?') && bytes.get(index + 1).is_some_and(|next| *next == b' ');
+            if ends {
+                parts.push(&line[start..=index]);
+                start = index + 1;
+            }
+        }
+        parts.push(&line[start..]);
+    }
+    parts.into_iter().filter(|part| !part.trim().is_empty()).collect()
+}
+
+/// An answer that states what is in the user's calendar, reminders or email at a given
+/// time, when nothing this turn read that app, keeps only what it can stand behind. The
+/// sentences with those claims go; what is left (a greeting, a reply to what was asked)
+/// stays. When nothing is left, Buntini offers to look if the user asked about that app,
+/// and otherwise just answers the person. Times the user wrote themselves don't count.
+pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let asked = clock_times(prompt);
+    let claims = |text: &str| clock_times(text).into_iter().any(|time| !asked.contains(&time));
+    let mentions = |text: &str, nouns: &[&str]| {
+        text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
+    };
+    let unread: Vec<(&str, &[&str])> = PERSONAL
+        .iter()
+        .filter(|(_, _, reads)| !steps.iter().any(|step| step.state == "succeeded" && reads.contains(&step.tool.as_str())))
+        .map(|(app, nouns, _)| (*app, *nouns))
+        .collect();
+    let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
+    if !claims(answer) || !unsupported(answer) {
+        return answer.to_string();
+    }
+    // A claim's sentence goes, and so does any sentence about an app that wasn't read
+    // ("Here's what's on your calendar:" would otherwise introduce nothing).
+    let kept: String = sentences(answer)
+        .into_iter()
+        .filter(|part| !claims(part) && !unsupported(part))
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if kept.chars().any(char::is_alphabetic) {
+        return kept;
+    }
+    match unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app) {
+        Some(app) => {
+            let example = match app {
+                "calendar" => "what’s on my calendar today?",
+                "reminders" => "what are my reminders?",
+                _ => "what needs a reply?",
+            };
+            format!("I haven’t looked at your {app} for that, so I won’t guess. Ask me something like “{example}” and I’ll check.")
+        }
+        None => "I’m here. What can I do for you?".into(),
+    }
+}
+
+/// Streams an answer to the window a sentence at a time, each one checked the way the
+/// final answer is: a sentence stating unread calendar, reminder or email facts is never
+/// shown or spoken. After the first such sentence nothing more streams; the checked final
+/// answer replaces what was shown when the task finishes.
+pub struct StreamGate {
+    prompt: String,
+    steps: Vec<Step>,
+    held: String,
+    stopped: bool,
+}
+
+impl StreamGate {
+    pub fn new(prompt: &str, steps: &[Step]) -> Self {
+        Self { prompt: prompt.into(), steps: steps.to_vec(), held: String::new(), stopped: false }
+    }
+
+    /// The text ready to show after `token` arrives: whole sentences that pass.
+    pub fn push(&mut self, token: &str) -> Option<String> {
+        if self.stopped {
+            return None;
+        }
+        self.held.push_str(token);
+        let bytes = self.held.as_bytes();
+        let end = (0..bytes.len()).rev().find(|&index| {
+            bytes[index] == b'\n' || (matches!(bytes[index], b'.' | b'!' | b'?') && bytes.get(index + 1) == Some(&b' '))
+        })?;
+        let ready: String = self.held.drain(..=end).collect();
+        self.release(ready)
+    }
+
+    /// Whatever is left once the model has finished.
+    pub fn finish(&mut self) -> Option<String> {
+        let rest = std::mem::take(&mut self.held);
+        if self.stopped || rest.is_empty() { None } else { self.release(rest) }
+    }
+
+    fn release(&mut self, ready: String) -> Option<String> {
+        let mut shown = String::new();
+        for part in sentences(&ready) {
+            if grounded_personal_answer(&self.prompt, part, &self.steps) != part {
+                self.stopped = true;
+                break;
+            }
+            shown.push_str(part);
+        }
+        (!shown.is_empty()).then_some(shown)
+    }
+}
+
 /// Validate a final response, replacing untrusted success narration with actual
 /// action receipts. Err means the goal remains incomplete and must not display a
 /// completed task badge. Read-only answers remain model-generated.
@@ -674,13 +1097,21 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "add_calendar_event",
             "create_note",
             "draft_email",
+            "reply_email",
             "create_saved_search",
             "create_price_watch",
+            crate::routines::TOOL,
+            crate::goals::TOOL,
             "remember",
             "set_timer",
+            crate::mac_settings::TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
+            "complete_reminder",
+            "reschedule_reminder",
+            "update_calendar_event",
+            "append_to_note",
         ]
         .contains(&step.tool.as_str())
             && receipt.object_id.as_deref().is_none_or(str::is_empty)
@@ -710,9 +1141,9 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         .collect();
     if unsupported || !missing.is_empty() {
         let explanation = if unsupported {
-            "The requested task includes an action Buntini cannot verify or perform through its current tools. That part is unfinished."
+            "That part is something I can’t do yet."
         } else {
-            "A requested app action has no verified receipt. That part is unfinished; Buntini has not confirmed that it was done."
+            "I couldn’t confirm the rest, so I’m not calling it done."
         };
         let mut answer = if messages.is_empty() {
             explanation.into()
@@ -743,10 +1174,10 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             return Ok(summary);
         }
         if text.trim().is_empty() {
-            return Err(format!("{summary}\n\nThe requested explanation or additional answer is still missing. Continue the task to finish that part."));
+            return Err(format!("{summary}\n\nI still owe you the rest. Continue to finish it."));
         }
         if claims_own_write(text) {
-            return Err(format!("{summary}\n\nThe requested explanation or additional answer is still unfinished. Buntini could not provide it without an unverified action claim; continue the task to finish that part."));
+            return Err(format!("{summary}\n\nI still owe you the rest. Continue to finish it."));
         }
         return Ok(format!("{summary}\n\n{}", text.trim()));
     }
@@ -759,6 +1190,18 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         });
     }
     if claims_own_write(text) {
+        let plain = unquoted(prompt);
+        let request = request_clause(&plain);
+        let verb = words(request).first().copied().unwrap_or("");
+        let (actions, unsupported) = requested_actions(prompt);
+        if actions.is_empty() && !unsupported
+            && ["rewrite", "rephrase", "polish", "proofread", "translate", "draft"].contains(&verb)
+        {
+            // A generated message may speak in the user's first person ("I
+            // ordered a monitor"). Render it explicitly as quoted text so it
+            // cannot be mistaken for an assistant execution announcement.
+            return Ok(format!("Text for review:\n\n{}",text.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")));
+        }
         return Err("The response claimed an action without a verified receipt. Buntini has not confirmed that it was done.".into());
     }
     Ok(text.to_string())
@@ -768,6 +1211,96 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn answers_stream_by_sentence_and_stop_before_an_unread_schedule() {
+        let mut gate = StreamGate::new("hey", &[]);
+        assert_eq!(gate.push("Hi Sa"), None);
+        assert_eq!(gate.push("gar! How "), Some("Hi Sagar!".into()));
+        assert_eq!(gate.push("are you? Your meeting is at 4:00 PM. "), Some(" How are you?".into()));
+        assert_eq!(gate.push("More text. "), None, "nothing streams after a held-back claim");
+        assert_eq!(gate.finish(), None);
+        let mut plain = StreamGate::new("hey", &[]);
+        assert_eq!(plain.push("Hello there"), None);
+        assert_eq!(plain.finish(), Some("Hello there".into()));
+    }
+
+    #[test]
+    fn schedules_are_stated_only_from_this_turns_reads() {
+        let made_up = "Here's what's on your calendar tomorrow:\n1. Planning: 4:00 PM - 5:00 PM\n2. Dentist: 9:00 AM";
+        // A greeting gets a greeting, not a lecture about the calendar.
+        assert_eq!(grounded_personal_answer("Hey, Bantini.", made_up, &[]), "I’m here. What can I do for you?");
+        let greeted = "Hi Sagar! Your planning meeting is at 4:00 PM tomorrow. How can I help?";
+        assert_eq!(grounded_personal_answer("Hey, Bantini.", greeted, &[]), "Hi Sagar! How can I help?");
+        // Asked about the calendar with no read: offer to look.
+        let answer = grounded_personal_answer("anything on my calendar tomorrow?", made_up, &[]);
+        assert!(answer.starts_with("I haven’t looked at your calendar"), "{answer}");
+        let read = Step { id: "1".into(), tool: "read_calendar".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false,
+            proposed_at: String::new(), approved_at: None, finished_at: None, evidence: None };
+        assert_eq!(grounded_personal_answer("what's on tomorrow", made_up, &[read]), made_up);
+        // Times the user gave, and answers with no times, are left alone.
+        let echo = "Your meeting at 3pm is in two hours.";
+        assert_eq!(grounded_personal_answer("my meeting is at 3pm, how long until then?", echo, &[]), echo);
+        assert_eq!(grounded_personal_answer("hi", "Hi! Want me to check your calendar?", &[]), "Hi! Want me to check your calendar?");
+        assert_eq!(grounded_personal_answer("hm", "You have a reminder to call mum at 18:00.", &[]), "I’m here. What can I do for you?");
+        assert_eq!(clock_times("from 9:00 to 4 pm, or 10am"), ["9:00", "4", "10"]);
+    }
+
+
+    #[test]
+    fn a_rewritten_first_person_message_is_quoted_instead_of_claiming_execution() {
+        let answer = validate_answer("Rewrite this as a polite email: 'I ordered a monitor and it arrived damaged.'", "Hi Maya, I ordered a monitor and it arrived damaged. Could you replace it?", &[]).unwrap();
+        assert!(answer.starts_with("Text for review:\n\n> "));
+        assert!(!claims_own_write(&answer));
+        assert!(validate_answer("Thanks", "I ordered a monitor.", &[]).is_err());
+        assert!(validate_answer("Rewrite this and add a reminder", "I created the reminder.", &[]).is_err());
+    }
+
+    #[test]
+    fn requests_mixing_this_iterations_writes_each_get_their_own() {
+        // Replies, changes to existing items, shortcut runs and routines share one grammar:
+        // each clause keeps its own write, and a schedule makes the whole request a routine.
+        for (prompt, expected) in [
+            ("Mark buy milk as done and reply to the second one", vec!["complete_reminder", "reply_email"]),
+            ("Turn on the living room lights and move my 3pm to 4", vec!["run_shortcut", "update_calendar_event"]),
+            ("Add milk to my shopping note and lock the front door", vec!["append_to_note", "run_shortcut"]),
+            ("Every weekday at 8, mark buy milk as done", vec!["create_routine"]),
+            ("Every day at 7pm, turn off the living room lights", vec!["create_routine"]),
+            ("Reply to Ana's email", vec!["reply_email"]),
+        ] {
+            assert_eq!(requested_actions(prompt), (expected, false), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn home_device_requests_run_one_of_the_users_shortcuts() {
+        for prompt in [
+            "Turn on the living room lights",
+            "please switch off the kitchen lights",
+            "Dim the bedroom lamp",
+            "Lock the front door",
+            "Set the thermostat to 20",
+            "turn the fan off",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec!["run_shortcut"], false), "{prompt}");
+        }
+        assert_eq!(
+            requested_actions("Turn on the lights and lock the front door").0,
+            ["run_shortcut", "run_shortcut"]
+        );
+        for prompt in [
+            "Turn on dark mode",
+            "turn the volume down",
+            "Don't turn on the lights",
+            "How do I turn on the lights in Home?",
+            "Turn on the lights at 7pm",
+            "turn on the lights every night",
+            "Lock my screen",
+            "switch to the lights tab",
+        ] {
+            assert!(!requested_actions(prompt).0.contains(&"run_shortcut"), "{prompt}");
+        }
+    }
 
     fn saved(tool: &str, message: &str) -> Step {
         Step {
@@ -923,7 +1456,7 @@ mod tests {
                 )
                 .unwrap_err();
                 assert!(
-                    unverified.contains("unfinished") && !unverified.contains("I sent the email")
+                    unverified.contains("I still owe you the rest") && !unverified.contains("I sent the email")
                 );
             }
         }
@@ -1014,6 +1547,56 @@ mod tests {
         let mut unknown = saved("create_note", "Verified Note.");
         unknown.state = "unknown".into();
         assert!(validate_answer("Save a note", "Done", &[unknown]).is_err());
+    }
+
+    #[test]
+    fn only_a_reply_to_a_person_or_an_email_needs_a_draft() {
+        for prompt in [
+            "reply to this saying yes",
+            "write back to her",
+            "reply to Ana's email",
+            "respond to him: no",
+            "reply to the email from my landlord",
+            "write back saying I'll be there",
+            "reply to the second one saying thanks",
+            "draft a reply to this email",
+            "write back to her email",
+            "draft a reply to this email saying I'll be there",
+            "write a reply to the second one",
+            "prepare a response to Ana's message",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec!["reply_email"], false), "{prompt}");
+        }
+        // Whatever is classed as a reply to a named email can also be bound to one.
+        for prompt in [
+            "reply to this saying yes",
+            "draft a reply to this email saying I'll be there",
+            "please write a reply to her",
+        ] {
+            assert!(crate::focus::replies_to_this(prompt), "{prompt}");
+        }
+        assert_eq!(crate::triage::pick("write a reply to the second one"), Some(crate::triage::Pick::Number(2)));
+        assert_eq!(crate::triage::pick("prepare a response to Ana's message"), Some(crate::triage::Pick::Sender("ana".into())));
+        // A new email is a draft, never a reply in someone's thread.
+        for prompt in [
+            "Draft an email to my landlord",
+            "write an email to Ana about Friday",
+            "prepare a message for Sam",
+            "Draft an email to my landlord in response to the rent increase",
+            "Write a message to Sam with my response to his offer",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec!["draft_email"], false), "{prompt}");
+        }
+        for prompt in [
+            "Reply in French",
+            "respond with one word",
+            "respond to this question in one sentence: what is a lease?",
+            "reply to the following in a friendly tone: thanks for the update",
+            "reply",
+            "write a haiku about autumn",
+        ] {
+            assert_eq!(requested_actions(prompt), (vec![], false), "{prompt}");
+        }
     }
 
     #[test]
@@ -1129,6 +1712,9 @@ mod tests {
         for (goal, tool) in [
             ("Remember my preference", "remember"),
             ("Start a timer for ten minutes", "set_timer"),
+            ("Hide the Dock", "change_mac_setting"),
+            ("Turn off Wi-Fi", "change_mac_setting"),
+            ("Switch to dark mode", "change_mac_setting"),
             ("Pause music and switch to my recipe tab", "control_music"),
         ] {
             assert!(validate_proposal(goal, tool, &[]).is_ok(), "{goal}");
@@ -1194,6 +1780,15 @@ mod tests {
             &[saved("create_note", "Verified note.")]
         )
         .is_err());
+    }
+
+    #[test]
+    fn generic_note_read_uses_the_same_source_alternatives_as_the_task_contract() {
+        let mut file = saved("search_files", "Read repair note.");
+        file.effect = false;
+        file.evidence = Some(json!({"files":[{"name":"repair.txt"}]}));
+        assert!(require_reads("Find my bicycle repair note and tell me the appointment", &[file.clone()]).is_ok());
+        assert!(require_reads("Read my notes in Notes app", &[file]).is_err());
     }
 
     #[test]

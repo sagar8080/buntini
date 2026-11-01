@@ -50,8 +50,17 @@ pub struct Settings {
     pub voice_rate: u32,
     pub notifications_enabled: bool,
     /// A short brief from today's calendar and reminders when you first open Buntini each day.
+    /// Mirrors the built-in morning brief routine, which is what decides whether it runs.
     pub morning_brief: bool,
+    /// Heads-ups from local data: before a meeting, when reminders are past due and when
+    /// someone is waiting on a reply. Buntini decides when by fixed rules (`nudges`).
+    pub heads_ups: bool,
+    /// Open Buntini when you log in, through macOS login items. Saved only as
+    /// what macOS confirmed.
+    pub open_at_login: bool,
     pub monthly_budget_usd: f64,
+    /// No longer asked for: the price comes from `budget::PRESETS`. Kept so settings saved
+    /// by earlier versions still load.
     pub cost_per_search_usd: f64,
     pub vad_model_path: String,
     pub ebay_marketplace: String,
@@ -60,7 +69,8 @@ pub struct Settings {
     /// Apps the user allowed Buntini to use (ids from `apps::APPS`). None until they choose.
     pub apps: Vec<String>,
     /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
-    /// prices per million tokens used to estimate spending.
+    /// prices per million tokens. Prices are only read for a model an earlier version let
+    /// the person name; the suggested model uses `cloud::PROVIDERS` (see `cloud_prices`).
     pub cloud_provider: String,
     pub cloud_model: String,
     pub cloud_budget_usd: f64,
@@ -112,6 +122,8 @@ impl Default for Settings {
             voice_rate: 180,
             notifications_enabled: false,
             morning_brief: false,
+            heads_ups: false,
+            open_at_login: false,
             monthly_budget_usd: 5.0,
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
@@ -136,6 +148,20 @@ const CAT_ACCESSORIES: [&str; 6] = ["none", "bell", "bow", "bandana", "hat", "fl
 const PET_MOTIONS: [&str; 3] = ["calm", "playful", "sleepy"];
 
 impl Settings {
+    /// Prices per million tokens for estimating cloud spending. The suggested model is priced
+    /// from the built-in table; a model named in an earlier version keeps the prices typed for it.
+    pub fn cloud_prices(&self) -> (f64, f64) {
+        match crate::cloud::provider(&self.cloud_provider) {
+            Some(provider)
+                if self.cloud_model.trim().is_empty()
+                    || self.cloud_model.trim() == provider.model =>
+            {
+                (provider.input_per_m, provider.output_per_m)
+            }
+            _ => (self.cloud_input_price, self.cloud_output_price),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.assistant_name.trim().is_empty()
             || self.assistant_name.chars().count() > 40
@@ -412,6 +438,33 @@ pub struct AuditEntry {
     pub detail: String,
     pub created_at: String,
 }
+/// Something Buntini does on its own at a set time ("every weekday at 8, brief me"),
+/// approved once by the user. The morning brief is the built-in one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Routine {
+    pub id: String,
+    /// The request run each time, in the user's own words.
+    pub task: String,
+    /// every_day, weekdays, weekends or a weekday name such as monday.
+    pub days: String,
+    /// Local time as HH:MM.
+    pub time: String,
+    pub enabled: bool,
+    /// The morning brief: it runs when you first open Buntini each day, not on the clock,
+    /// and can be paused but not deleted.
+    #[serde(default)]
+    pub built_in: bool,
+    pub created_at: String,
+    /// The next scheduled run (RFC 3339, UTC); empty for the built-in brief.
+    pub next_run_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSearch {
@@ -535,6 +588,9 @@ pub struct Bootstrap {
     pub audit: Vec<AuditEntry>,
     pub saved_searches: Vec<SavedSearch>,
     pub price_watches: Vec<PriceWatch>,
+    pub routines: Vec<Routine>,
+    /// Goals that span days; their check-ins are routines left out of `routines`.
+    pub goals: Vec<crate::goals::Goal>,
     pub os_update_check: Option<OsUpdateCheck>,
     /// When the user last started a new topic; earlier turns are not remembered.
     pub conversation_start: Option<String>,
@@ -654,5 +710,28 @@ mod appearance_tests {
         ] {
             assert!(broken.validate().is_err());
         }
+    }
+
+    #[test]
+    fn the_suggested_cloud_model_is_priced_from_the_built_in_table() {
+        // Prices an earlier version stored for the suggested model give way to the table.
+        let settings = Settings {
+            cloud_provider: "openai".into(),
+            cloud_input_price: 99.0,
+            cloud_output_price: 99.0,
+            ..Settings::default()
+        };
+        assert_eq!(settings.cloud_prices(), (0.25, 2.0));
+        let named = Settings {
+            cloud_model: "gpt-5-mini".into(),
+            ..settings.clone()
+        };
+        assert_eq!(named.cloud_prices(), (0.25, 2.0));
+        // A model named in an earlier version keeps the prices typed for it.
+        let custom = Settings {
+            cloud_model: "gpt-5".into(),
+            ..settings
+        };
+        assert_eq!(custom.cloud_prices(), (99.0, 99.0));
     }
 }

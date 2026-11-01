@@ -51,20 +51,19 @@ export default function ModelAdvisor({ draft, update }: Props) {
   const options = [profile.recommended, ...(profile.alternative ? [profile.alternative] : [])];
   return <div className="advisor">
     <div className="advisor-head"><Cpu size={16} /><span><strong>Recommended for this Mac</strong><small>{profile.chip} · {profile.memoryGb} GB memory</small></span></div>
-    {!profile.appleSilicon && <p className="field-help">Local models need an Apple silicon Mac.</p>}
+    {!profile.appleSilicon && <p className="field-help">Needs an Apple silicon Mac</p>}
     <div className="advisor-options" role="radiogroup" aria-label="Model">
       {options.map((option, index) => <button type="button" key={option.repo} role="radio" aria-checked={profile.selected.repo === option.repo} className={profile.selected.repo === option.repo ? 'active' : ''} onClick={() => setChoice(index === 0 ? null : option.repo)}>
         <strong>{option.label}</strong><em>{index === 0 ? 'Best fit' : 'Also fits'} · {option.downloadGb.toFixed(1)} GB</em><small>{option.note}</small>
       </button>)}
     </div>
-    {inUse ? <p className="advisor-done"><Check size={14} /> {profile.selected.label} is set up and in use.</p> : <>
+    {inUse ? <p className="advisor-done"><Check size={14} /> {profile.selected.label} · in use</p> : <>
       <ol className="advisor-steps">
         {profile.steps.map((step, index) => <li key={step.title} className={step.done ? 'done' : ''}>
           <span className="advisor-step-title">{step.done ? <Check size={13} /> : <b>{index + 1}</b>}{step.title}</span>
           {!step.done && <div className="advisor-command"><code>{step.command}</code><button type="button" aria-label={`Copy: ${step.title}`} title="Copy" onClick={() => { void navigator.clipboard?.writeText(step.command).then(() => { setCopied(index); window.setTimeout(() => setCopied(current => current === index ? -1 : current), 1500); }); }}>{copied === index ? <Check size={13} /> : <Copy size={13} />}</button></div>}
         </li>)}
       </ol>
-      <p className="field-help">{ready ? 'Everything’s ready.' : 'Run these in Terminal. I’ll fill in the paths below as soon as the download finishes.'}</p>
       {ready && <button type="button" className="secondary-button" onClick={() => { update('pythonPath', profile.python!); update('modelPath', profile.modelFolder!); filled.current = `${profile.python}|${profile.modelFolder}`; }}>Use {profile.selected.label}</button>}
     </>}
   </div>;

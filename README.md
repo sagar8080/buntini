@@ -30,15 +30,11 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 
 Buntini needs an Apple silicon Mac with macOS 13 or later. Apple Intelligence needs macOS 26.
 
+**Public rollout is pending.** Release builds must pass signing, notarization and device acceptance before publication. See the [production readiness checklist](docs/production-readiness.md). Earlier ad-hoc builds are development previews.
+
 1. Download **Buntini-macOS-arm64.dmg** from the [latest release](https://github.com/sagar8080/buntini/releases).
 2. Open it and drag **Buntini** to **Applications**.
-3. Open Buntini. Because it isn’t notarized yet, macOS will stop it once: go to **System Settings → Privacy & Security** and choose **Open Anyway**.
-
-Or clear the quarantine flag from Terminal after copying it:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Buntini.app
-```
+3. Open Buntini. A public release should pass Gatekeeper with its Developer ID signature and notarization ticket. A Gatekeeper rejection is a release failure to investigate.
 
 Buntini then walks you through a short setup in its chat bubble.
 
@@ -63,15 +59,16 @@ Read the full [privacy policy](PRIVACY.md).
 
 ## Development
 
-You’ll need Node.js 24, Rust 1.90 or later, and Xcode Command Line Tools. The Apple Intelligence helper builds with the macOS 26 SDK.
+You’ll need Node.js 24, Rust 1.95 or later (CI uses 1.99.1), Python 3.11 or later for the checks, and Xcode Command Line Tools. The Apple Intelligence helper builds with the macOS 26 SDK.
 
 ```bash
 npm ci
+./scripts/fetch-models.sh   # once: the bundled memory search model
 npm run desktop      # run the app with live reload
 ./scripts/check.sh   # build and run every test
 ```
 
-Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). Pushing a tag such as `v0.2.0` publishes a release with a disk image, a zip and checksums. Tags with a suffix, such as `v0.2.0-beta.1`, are published as pre-releases.
+Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). A version-matching tag such as `v0.2.0` requires all checks and dependency audits, a Developer ID certificate and Apple notarization, then prepares a **draft** release with a disk image, zip, build metadata and checksums. A maintainer publishes it after final device acceptance. Prerelease tags must match the prerelease version in all manifests. See the [release runbook](docs/production-readiness.md).
 
 | Folder | What’s inside |
 | --- | --- |
@@ -86,6 +83,7 @@ Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). Pushin
 - [Privacy policy](PRIVACY.md)
 - [Online tools](docs/online-tools.md) and [voice setup](docs/voice-setup.md)
 - [Acceptance checklist](docs/acceptance.md): what’s been verified, and how to check the rest
+- [Production readiness and release runbook](docs/production-readiness.md): security gates, external setup and rollout blockers
 - [Capability map](docs/capabilities.md) and [reliability review](docs/reliability.md): current limits, fixes and the path toward a dependable personal assistant
 - [Scenario evaluations](docs/evaluations.md): measured model failures and release gates
 - [Technical design](docs/technical-design.md)

@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 KINDS = {"routing", "tool_contract", "journey"}
 STATES = {"succeeded", "failed", "unknown", "cancelled"}
-WRITE_TOOLS = {"add_reminder", "add_calendar_event", "create_note", "draft_email", "run_shortcut", "create_saved_search", "create_price_watch", "control_music", "switch_tab", "remember", "set_timer"}
+WRITE_TOOLS = {"add_reminder", "change_mac_setting", "add_calendar_event", "create_note", "draft_email", "reply_email", "run_shortcut", "create_saved_search", "create_price_watch", "create_routine", "create_goal", "complete_reminder", "reschedule_reminder", "update_calendar_event", "append_to_note", "control_music", "switch_tab", "remember", "set_timer"}
 
 
 def corpus():

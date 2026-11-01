@@ -33,3 +33,12 @@ export function greeting(now: Date, name?: string): string {
   const who = name?.trim();
   return who ? `${part}, ${who}.` : `${part}.`;
 }
+
+/** The line under the greeting, in Buntini's voice for the time of day. */
+export function invitation(now: Date): string {
+  const hour = now.getHours();
+  if (hour < 5 || hour >= 22) return 'I’m here if you need me.';
+  if (hour < 12) return 'Ready when you are.';
+  if (hour < 17) return 'What can I fetch for you?';
+  return 'Winding down? I’m all ears.';
+}

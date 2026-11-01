@@ -3,7 +3,8 @@
 //! Skills use it to press buttons and read text in other apps' windows, the way screen
 //! readers do. Every call is synchronous; run it on a blocking thread.
 use objc2_application_services::{
-    kAXTrustedCheckOptionPrompt, AXError, AXIsProcessTrustedWithOptions, AXUIElement,
+    kAXTrustedCheckOptionPrompt, AXError, AXIsProcessTrustedWithOptions, AXUIElement, AXValue,
+    AXValueType,
 };
 use objc2_core_foundation::{
     CFArray, CFBoolean, CFDictionary, CFRetained, CFString, CFType, CFURL,
@@ -180,12 +181,102 @@ impl Element {
     }
 }
 
+/// A CGPoint or CGSize, as AXValue wraps them.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct Pair(f64, f64);
+
+impl Element {
+    fn pair(&self, name: &str, kind: AXValueType) -> Option<(f64, f64)> {
+        let value = self.value(name)?.downcast::<AXValue>().ok()?;
+        let mut pair = Pair::default();
+        unsafe { value.value(kind, NonNull::from(&mut pair).cast()) }.then_some((pair.0, pair.1))
+    }
+
+    fn set_position(&self, x: f64, y: f64) -> bool {
+        let mut pair = Pair(x, y);
+        let Some(value) = (unsafe { AXValue::new(AXValueType::CGPoint, NonNull::from(&mut pair).cast()) }) else {
+            return false;
+        };
+        unsafe { self.0.set_attribute_value(&CFString::from_str("AXPosition"), &value) == AXError::Success }
+    }
+}
+
+/// The cat batting at the window it sits on, once the user said yes: the window is pushed
+/// a few points each way and put back where it was, which is then read back. The window is
+/// found by its owner and frame; nothing else about it is read.
+pub fn knock_window(pid: i32, frame: (f64, f64, f64, f64)) -> Result<(), String> {
+    if !trusted(true) {
+        return Err("access".into());
+    }
+    let app = Element(unsafe { AXUIElement::new_application(pid) });
+    unsafe { app.0.set_messaging_timeout(1.0) };
+    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 2.0 && (a.1 - b.1).abs() < 2.0;
+    let window = app
+        .list("AXWindows")
+        .into_iter()
+        .find(|window| {
+            window.pair("AXPosition", AXValueType::CGPoint).is_some_and(|at| close(at, (frame.0, frame.1)))
+                && window.pair("AXSize", AXValueType::CGSize).is_some_and(|size| close(size, (frame.2, frame.3)))
+        })
+        .ok_or("gone")?;
+    let (x, y) = window.pair("AXPosition", AXValueType::CGPoint).ok_or("gone")?;
+    for dx in [9.0, -6.0, 4.0, 0.0] {
+        window.set_position(x + dx, y);
+        std::thread::sleep(Duration::from_millis(70));
+    }
+    for _ in 0..3 {
+        if window.pair("AXPosition", AXValueType::CGPoint).is_some_and(|at| close(at, (x, y)) && (at.0 - x).abs() < 1.0) {
+            return Ok(());
+        }
+        window.set_position(x, y);
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    Err("moved".into())
+}
+
 /// The process id of a running app by bundle identifier.
 pub fn pid(bundle: &str) -> Option<i32> {
     let apps = objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(
         &objc2_foundation::NSString::from_str(bundle),
     );
     apps.iter().next().map(|app| app.processIdentifier())
+}
+
+/// What an app shows in front: its focused window's title and the text selected in its
+/// focused element, up to `cap` characters. Password fields are never read (`secure`).
+/// Unlike `Element::app`, this only asks Chromium-style apps to build their tree and
+/// leaves every other app's drawing alone, because it runs whenever Buntini opens.
+pub struct Selection {
+    pub window: String,
+    pub text: String,
+    pub secure: bool,
+}
+
+pub fn selection(pid: i32, cap: usize) -> Selection {
+    let app = Element(unsafe { AXUIElement::new_application(pid) });
+    unsafe {
+        app.0.set_messaging_timeout(1.0);
+        app.0.set_attribute_value(
+            &CFString::from_str("AXManualAccessibility"),
+            CFBoolean::new(true),
+        );
+    }
+    let window = app
+        .element("AXFocusedWindow")
+        .map(|window| window.text("AXTitle"))
+        .unwrap_or_default();
+    let Some(focused) = app.element("AXFocusedUIElement") else {
+        return Selection { window, text: String::new(), secure: false };
+    };
+    if [focused.text("AXRole"), focused.text("AXSubrole")]
+        .iter()
+        .any(|role| role == "AXSecureTextField")
+    {
+        return Selection { window, text: String::new(), secure: true };
+    }
+    let text = focused.text("AXSelectedText").trim().chars().take(cap).collect();
+    Selection { window, text, secure: false }
 }
 
 /// Buttons in an app's windows whose label starts with `prefix` ("Play "), in page order,

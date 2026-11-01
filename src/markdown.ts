@@ -6,10 +6,10 @@ export interface Span { text: string; bold?: boolean; italic?: boolean; code?: b
 export type Block =
   | { kind: 'paragraph'; lines: Span[][] }
   | { kind: 'heading'; spans: Span[] }
-  | { kind: 'list'; ordered: boolean; items: Span[][] };
+  | { kind: 'list'; ordered: boolean; items: Span[][]; start?: number };
 
 const BULLET = /^\s*[-*•]\s+(.*)$/;
-const NUMBER = /^\s*\d+[.)]\s+(.*)$/;
+const NUMBER = /^\s*(\d+)[.)]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
 
 /** Inline styles: **bold**, *italic* or _italic_, `code`, [label](https://…). */
@@ -37,9 +37,10 @@ export function parse(text: string): Block[] {
     if (!line.trim()) { blocks.push({ kind: 'paragraph', lines: [] }); continue; }
     if (heading) { blocks.push({ kind: 'heading', spans: inline(heading[1]) }); continue; }
     if (bullet || number) {
-      const ordered = !!number, item = inline((bullet ?? number)![1]);
+      const ordered = !!number, item = inline(bullet ? bullet[1] : number![2]);
       if (previous?.kind === 'list' && previous.ordered === ordered) previous.items.push(item);
-      else blocks.push({ kind: 'list', ordered, items: [item] });
+      // A numbered list split by paragraphs ("1. … text … 2. …") keeps counting.
+      else blocks.push({ kind: 'list', ordered, items: [item], ...(number ? { start: Number(number[1]) } : {}) });
       continue;
     }
     if (previous?.kind === 'paragraph') previous.lines.push(inline(line.trim()));
