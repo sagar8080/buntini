@@ -849,28 +849,38 @@ impl TaskContract {
         }
         // An answer is distinct from successful writes. The conservative bootstrap
         // leaves unfamiliar continuations visible for the answer phase.
-        if !self.outcomes.iter().any(|outcome|outcome.kind=="read") {
-            let plain = completion::unquoted(goal);
-            let pronoun_read = plain.split(['.',';','\n']).any(|clause| {
-                let clause=completion::request_clause(clause.trim());
-                ["find it","read it","check it"].iter().any(|prefix|clause==*prefix || clause.starts_with(&format!("{prefix} ")))
-            });
-            if pronoun_read {
-                let declaration = goal.split(['.',';','\n']).find_map(|sentence| {
-                    let sentence=sentence.trim();
-                    let lower=sentence.to_ascii_lowercase();
-                    ["i just added my ","i added my ","i just saved my ","i saved my "]
-                        .iter().find_map(|prefix|lower.starts_with(prefix).then(||sentence[prefix.len()..].trim()))
-                });
-                if let Some(title)=declaration {
-                    let lower=title.to_ascii_lowercase();
-                    if [" note"," document"," file"].iter().any(|suffix|lower.ends_with(suffix)) && title.len()<=200 {
-                        let query=title.rsplit_once(' ').map(|(head,_)|head).unwrap_or(title).trim();
-                        if !query.is_empty() {
-                            self.push_outcome("read","Read the document the user just identified",vec!["find_notes".into(),"search_files".into()],json!({"query":query}),vec!["query".into()]);
-                        }
-                    }
+        // "I just added my Marigold warranty note. Find it": "it" is that document, so
+        // the search is for its name without the kind of document it is.
+        let plain = completion::unquoted(goal);
+        let pronoun_read = plain.split(['.',';','\n']).any(|clause| {
+            let clause=completion::request_clause(clause.trim());
+            ["find it","read it","check it"].iter().any(|prefix|clause==*prefix || clause.starts_with(&format!("{prefix} ")))
+        });
+        let declared = pronoun_read.then(|| goal.split(['.',';','\n']).find_map(|sentence| {
+            let sentence=sentence.trim();
+            let lower=sentence.to_ascii_lowercase();
+            ["i just added my ","i added my ","i just saved my ","i saved my "]
+                .iter().find_map(|prefix|lower.starts_with(prefix).then(||sentence[prefix.len()..].trim()))
+        })).flatten().filter(|title| {
+            let lower=title.to_ascii_lowercase();
+            [" note"," document"," file"].iter().any(|suffix|lower.ends_with(suffix)) && title.len()<=200
+        }).map(|title| title.rsplit_once(' ').map(|(head,_)|head).unwrap_or(title).trim()).filter(|query| !query.is_empty());
+        if let Some(query) = declared {
+            let unscoped = self.outcomes.iter().enumerate()
+                .filter(|(_,o)| o.kind=="read" && o.accepted_tools.iter().any(|t| t=="search_files" || t=="find_notes"))
+                .map(|(index,o)| (index, o.required_arguments.as_object().is_none_or(|args| args.is_empty())))
+                .collect::<Vec<_>>();
+            match unscoped[..] {
+                [] if !self.outcomes.iter().any(|outcome|outcome.kind=="read") => {
+                    self.push_outcome("read","Read the document the user just identified",vec!["find_notes".into(),"search_files".into()],json!({"query":query}),vec!["query".into()]);
                 }
+                [(index, true)] => {
+                    let outcome = &mut self.outcomes[index];
+                    outcome.accepted_tools = vec!["find_notes".into(),"search_files".into()];
+                    outcome.required_arguments = json!({"query":query});
+                    outcome.required_fields = vec!["query".into()];
+                }
+                _ => {}
             }
         }
         let (writes, unsupported) = completion::requested_actions(goal);
@@ -922,6 +932,57 @@ impl TaskContract {
                 let outcome = &mut self.outcomes[matching[0]];
                 outcome.required_arguments[field] = value.clone();
                 self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:field.into(),value,source:"user_literal".into(),revision:self.revision,record:None});
+            }
+        }
+        // Each timer keeps the length its own words gave it, so the second of two
+        // timers is never a copy of the first.
+        for outcome in self.outcomes.iter_mut().filter(|o| o.kind=="write" && o.tool.as_deref()==Some("set_timer")) {
+            if let Some(seconds) = crate::explicit_fields::timer_seconds(&outcome.description) {
+                outcome.required_arguments["seconds"] = json!(seconds);
+                self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:"seconds".into(),value:json!(seconds),source:"user_literal".into(),revision:self.revision,record:None});
+            }
+        }
+        // "My training session runs from 14:15 to 14:50 on May 21, 2031": an event from the
+        // user's own words keeps the date, start and length they gave, read the way a
+        // note's are (`source_fields::note_event`). The place is `supplied_location`'s.
+        let events = self.outcomes.iter().enumerate()
+            .filter(|(_,o)| o.kind=="write" && o.tool.as_deref()==Some("add_calendar_event"))
+            .map(|(index,_)| index).collect::<Vec<_>>();
+        if let ([index], false) = (&events[..], self.outcomes.iter().any(|o| o.kind=="read")) {
+            for (field, value) in crate::source_fields::note_event(&completion::unquoted(goal)) {
+                let outcome = &mut self.outcomes[*index];
+                if field == "location" || outcome.required_arguments.get(field).is_some() {
+                    continue;
+                }
+                outcome.required_arguments[field] = value.clone();
+                self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:field.into(),value,source:"user_literal".into(),revision:self.revision,record:None});
+            }
+        }
+        // "My books must be returned by 18:00 on May 21, 2031. Set a reminder fifteen
+        // minutes beforehand": the due time is the one the request gives, less the lead
+        // it names. A lead it names in a way this can't read leaves the time unbound.
+        let reminders = self.outcomes.iter().enumerate()
+            .filter(|(_,o)| o.kind=="write" && o.tool.as_deref()==Some("add_reminder"))
+            .map(|(index,_)| index).collect::<Vec<_>>();
+        if let ([index], false) = (&reminders[..], self.outcomes.iter().any(|o| o.kind=="read")) {
+            let plain = completion::unquoted(goal).to_lowercase();
+            let time = crate::source_fields::note_event(&plain).into_iter().find(|(field,_)| *field=="start")
+                .and_then(|(_,value)| chrono::NaiveDateTime::parse_from_str(value.as_str()?, "%Y-%m-%d %H:%M").ok());
+            let leads = plain.split(['.',';','\n'])
+                .filter(|sentence| sentence.split(|c:char| !c.is_alphanumeric()).any(|w| ["before","beforehand","earlier","ahead","prior"].contains(&w)))
+                .collect::<Vec<_>>();
+            let lead = match leads[..] {
+                [] => Some(0),
+                [sentence] => crate::explicit_fields::timer_seconds(sentence).map(|seconds| seconds as i64 / 60),
+                _ => None,
+            };
+            if let (Some(time), Some(lead)) = (time, lead) {
+                let outcome = &mut self.outcomes[*index];
+                if outcome.required_arguments.get("due").is_none() {
+                    let due = json!((time - chrono::Duration::minutes(lead)).format("%Y-%m-%d %H:%M").to_string());
+                    outcome.required_arguments["due"] = due.clone();
+                    self.constraints.push(Constraint {outcome_id:Some(outcome.id.clone()),field:"due".into(),value:due,source:"user_literal".into(),revision:self.revision,record:None});
+                }
             }
         }
         for bound in [
@@ -1070,6 +1131,7 @@ impl TaskContract {
             }
         }
         self.bind_contact_recipient(steps);
+        self.bind_note_event(steps);
         self.unresolved_fields.clear();
         for outcome in &self.outcomes {
             if outcome.kind != "write" || outcome.status == "complete" {
@@ -1094,6 +1156,58 @@ impl TaskContract {
                     || provenance.is_some_and(|p| p.origin == "model_proposal" && !p.verified)
                 {
                     self.unresolved_fields.push(UnresolvedField { outcome_id:outcome.id.clone(), field:field.clone(), status:if present { "unverified" } else { "missing" }.into(), reason:if present { "Proposed by the model; approval records consent, not independent evidence." } else { "A requested value has not been supplied or resolved." }.into() });
+                }
+            }
+        }
+    }
+    /// "Add that workshop to my calendar" after reading the one note it is in: the
+    /// event's date and time, length and place come from the note's own words
+    /// (`source_fields::note_event`), not the model's. A kind of value the request
+    /// itself gives stays the user's, and once an event is proposed the sheet decides.
+    fn bind_note_event(&mut self, steps: &[Step]) {
+        if steps.iter().any(|s| s.tool == "add_calendar_event") {
+            return;
+        }
+        let Some(event) = self.next_outcome().filter(|o| {
+            o.kind == "write" && o.status == "ready" && o.tool.as_deref() == Some("add_calendar_event")
+        }) else {
+            return;
+        };
+        let reads = self
+            .outcomes
+            .iter()
+            .filter(|o| o.kind == "read" && o.status == "complete" && event.dependencies.contains(&o.id))
+            .flat_map(|o| &o.completed_by)
+            .filter_map(|id| steps.iter().find(|s| &s.id == id && ["find_notes", "search_files"].contains(&s.tool.as_str())))
+            .collect::<Vec<_>>();
+        let [step] = reads[..] else {
+            return;
+        };
+        let Some([record]) = step.evidence.as_ref().and_then(|e| e["records"].as_array()).map(|r| &r[..]) else {
+            return;
+        };
+        let (Some(text), true) = (record["excerpt"].as_str(), record["contentComplete"] == true) else {
+            return;
+        };
+        let text = record["title"].as_str().and_then(|title| text.strip_prefix(title)).unwrap_or(text);
+        let request = &self.current_request;
+        let said = |field: &str| match field {
+            "start" => crate::source_fields::note_event(request).iter().any(|(f, _)| *f == "start")
+                || crate::completion::unquoted(request).split(|c: char| !c.is_alphanumeric()).any(|w| {
+                    ["today", "tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].contains(&w)
+                }),
+            "minutes" => crate::explicit_fields::timer_seconds(request).is_some(),
+            _ => crate::location_fields::supplied_location(request).is_some(),
+        };
+        let fields = crate::source_fields::note_event(text)
+            .into_iter()
+            .filter(|(field, _)| !said(field))
+            .collect::<Vec<_>>();
+        let record = json!({"app":if step.tool == "find_notes" {"notes"} else {"files"},"stepId":step.id,"recordId":record["id"]});
+        for (field, value) in fields {
+            if self.bind_write_field("add_calendar_event", field, value, "note_record") {
+                if let Some(constraint) = self.constraints.last_mut() {
+                    constraint.record = Some(record.clone());
                 }
             }
         }
@@ -1306,8 +1420,9 @@ impl TaskContract {
         )))
     }
     /// Fills fields of the next write that Buntini resolved from a source (the open
-    /// email's sender, the one matching contact) when a model left them out. It never
-    /// replaces a value; a different one is still refused by `validate_proposal`.
+    /// email's sender, the one matching contact) when a model left them out; a different
+    /// value is still refused by `validate_proposal`. What a note states about the event
+    /// copied from it replaces the model's version, which is the mistake it prevents.
     pub fn fill_resolved_fields(&self, tool: &str, arguments: &mut Value) {
         let Some(outcome) = self
             .next_outcome()
@@ -1320,11 +1435,15 @@ impl TaskContract {
         };
         for constraint in self.constraints.iter().filter(|c| {
             c.outcome_id.as_deref() == Some(&outcome.id)
-                && ["contact_record", "focus_referent", "mail_listing", "mail_search"].contains(&c.source.as_str())
+                && ["contact_record", "focus_referent", "mail_listing", "mail_search", "note_record"].contains(&c.source.as_str())
         }) {
-            fields
-                .entry(constraint.field.clone())
-                .or_insert_with(|| constraint.value.clone());
+            if constraint.source == "note_record" {
+                fields.insert(constraint.field.clone(), constraint.value.clone());
+            } else {
+                fields
+                    .entry(constraint.field.clone())
+                    .or_insert_with(|| constraint.value.clone());
+            }
         }
     }
     /// "Reply to Ana" with no email bound yet: the inbox search for the sender the user
@@ -1437,6 +1556,12 @@ impl TaskContract {
             .filter(|c| c.outcome_id == outcome_id && c.source == "contact_record")
             .cloned()
             .collect();
+        let notes: Vec<_> = self
+            .constraints
+            .iter()
+            .filter(|c| c.outcome_id == outcome_id && c.source == "note_record")
+            .cloned()
+            .collect();
         // The email on screen or one Buntini listed: Mail's own values, not the model's.
         let mail: Vec<_> = self
             .constraints
@@ -1485,8 +1610,21 @@ impl TaskContract {
                 provenance.source = Some(
                     json!({"kind":"task_constraint","source":"mail","outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
                 );
+            } else if let Some(constraint) = notes
+                .iter()
+                .find(|c| c.field == *field && c.value == *value)
+            {
+                // What the note read for this event says, in its own words.
+                let record = constraint.record.clone().unwrap_or_default();
+                provenance.origin = "note_record".into();
+                provenance.source_step_id = record["stepId"].as_str().map(str::to_owned);
+                provenance.record_id = record["recordId"].as_str().map(str::to_owned);
+                provenance.field_ref = Some(field.clone());
+                provenance.source = Some(
+                    json!({"kind":"task_constraint","source":record["app"],"outcomeId":constraint.outcome_id,"revision":constraint.revision,"field":field}),
+                );
             }
-            if let Some(source) = source {
+            if let Some(source) = source.filter(|_| provenance.origin != "note_record") {
                 provenance.source = Some(source.clone());
                 if source.get("source").and_then(Value::as_str) == Some("user_request")
                     && source.get("fields").and_then(|v| v.get(field)) == Some(value)
@@ -2943,6 +3081,123 @@ mod tests {
             contract.provenance["event"]["minutes"].origin,
             "runtime_default"
         );
+    }
+
+    #[test]
+    fn each_of_two_timers_keeps_the_length_its_own_words_gave_it() {
+        let goal = "Set a 12-minute timer for the rice and set a 6-minute timer for the vegetables.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let timers = contract.outcomes.iter().filter(|o| o.tool.as_deref() == Some("set_timer")).collect::<Vec<_>>();
+        assert_eq!(timers.len(), 2);
+        assert_eq!(timers[0].required_arguments["seconds"], 720);
+        assert_eq!(timers[1].required_arguments["seconds"], 360);
+        assert!(contract.constraints.iter().all(|c| c.source == "user_literal"));
+        // The second timer is the next outcome once the first is set, and only 360 fits it.
+        let first = step("rice", "set_timer", json!({"seconds":720}), true);
+        contract.refresh(goal, std::slice::from_ref(&first));
+        assert!(contract.validate_proposal("set_timer", &json!({"seconds":720}), std::slice::from_ref(&first)).is_err());
+        assert!(contract.validate_proposal("set_timer", &json!({"seconds":360}), std::slice::from_ref(&first)).is_ok());
+    }
+
+    #[test]
+    fn a_document_the_user_just_added_is_searched_by_its_name() {
+        let goal = "I just added my Marigold warranty note. Please find it and tell me the warranty expiry date.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let read = contract.next_outcome().unwrap();
+        assert_eq!(read.kind, "read");
+        assert_eq!(read.required_arguments, json!({"query":"Marigold warranty"}));
+        assert!(contract.validate_proposal("search_files", &json!({"query":"Marigold warranty note"}), &[]).is_err());
+        assert!(contract.validate_proposal("search_files", &json!({"query":"Marigold warranty"}), &[]).is_ok());
+    }
+
+    fn note_read(id: &str, query: &str, title: &str, body: &str) -> Step {
+        let excerpt = format!("{title} {body}");
+        let mut read = step(id, "find_notes", json!({"query":query}), false);
+        read.evidence = Some(json!({"complete":true,"count":1,"kind":"notes","observedAt":"2026-10-29T21:29:22.436216+00:00",
+            "records":[{"contentComplete":true,"excerpt":excerpt,"excerptLimit":400,"excerptTruncated":false,"id":"x-coredata://note/p111",
+                "modifiedAt":"2026-10-29T17:29:00-04:00","modifiedLocal":"2026-10-29 17:29",
+                "reference":{"app":"notes","id":"x-coredata://note/p111","kind":"app_local","mustRevalidate":true},
+                "sourceCharacterCount":excerpt.chars().count(),"title":title}],
+            "schemaVersion":1,"scope":{"app":"notes","excerptLimit":400,"limit":6,"matches":"title_or_plaintext","query":query},
+            "text":format!("Notes mentioning “{query}”:\n- {title} (edited Thu 29 Oct 17:29)\n  {excerpt}"),"total":1}));
+        read
+    }
+
+    #[test]
+    fn an_event_copied_from_a_note_takes_the_notes_date_length_and_place() {
+        let goal = "Read my note mentioning QA Workshop details, then add that workshop to my calendar using exactly the title QA Workshop. Derive the duration from the note. Do not invite anyone.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let read = note_read("read", "QA Workshop details", "QA Workshop details", "The workshop is on May 20, 2031. It starts at 13:20 and ends at 14:05 in Study Room. There are no attendees to invite.");
+        contract.refresh(goal, std::slice::from_ref(&read));
+        let event = contract.next_outcome().unwrap();
+        assert_eq!(event.tool.as_deref(), Some("add_calendar_event"));
+        assert_eq!(
+            event.required_arguments,
+            json!({"title":"QA Workshop","start":"2031-05-20 13:20","minutes":45,"location":"Study Room"})
+        );
+        // A model that defaults to this year is corrected, and a different length refused.
+        let mut proposed = json!({"title":"QA Workshop","start":"2026-05-20 13:20","minutes":45});
+        contract.fill_resolved_fields("add_calendar_event", &mut proposed);
+        assert_eq!(proposed["start"], "2031-05-20 13:20");
+        assert_eq!(proposed["location"], "Study Room");
+        assert!(contract.validate_proposal("add_calendar_event", &proposed, std::slice::from_ref(&read)).is_ok());
+        assert!(contract.validate_proposal("add_calendar_event", &json!({"title":"QA Workshop","start":"2031-05-20 13:20","minutes":60,"location":"Study Room"}), std::slice::from_ref(&read)).is_err());
+        contract.record_proposal("event", &proposed, None);
+        assert_eq!(contract.provenance["event"]["start"].origin, "note_record");
+        assert_eq!(contract.provenance["event"]["start"].source_step_id.as_deref(), Some("read"));
+        assert_eq!(contract.provenance["event"]["title"].origin, "user_literal");
+    }
+
+    #[test]
+    fn an_event_keeps_the_date_and_times_the_request_gives() {
+        let goal = "My training session runs from 14:15 to 14:50 on May 21, 2031 in Training Room. Add it to my calendar with exactly the title \"QA Training session\". Derive its duration from those times, and do not invite anyone.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let event = contract.next_outcome().unwrap();
+        assert_eq!(event.tool.as_deref(), Some("add_calendar_event"));
+        assert_eq!(
+            event.required_arguments,
+            json!({"title":"QA Training session","start":"2031-05-21 14:15","minutes":35,"location":"Training Room"})
+        );
+        assert!(contract.validate_proposal("add_calendar_event", &json!({"title":"QA Training session","start":"2031-05-21 15:15","minutes":35,"location":"Training Room"}), &[]).is_err());
+        // Without a year nothing is bound, so the usual date handling applies.
+        let goal = "Add a calendar event from 14:15 to 14:50 on May 21 titled QA Training.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert!(contract.next_outcome().unwrap().required_arguments.get("start").is_none());
+    }
+
+    #[test]
+    fn a_reminder_is_due_the_lead_before_the_time_the_request_gives() {
+        let due = |goal: &str| {
+            let mut contract = TaskContract::from_request(goal);
+            contract.refresh(goal, &[]);
+            contract.outcomes.iter().find(|o| o.tool.as_deref() == Some("add_reminder")).and_then(|o| o.required_arguments.get("due").cloned())
+        };
+        assert_eq!(
+            due("My library books must be returned by 18:00 on May 21, 2031. Set a reminder fifteen minutes beforehand, using exactly the title \"QA Return library books\"."),
+            Some(json!("2031-05-21 17:45"))
+        );
+        assert_eq!(due("Remind me to call Ana at 09:30 on May 21, 2031."), Some(json!("2031-05-21 09:30")));
+        // A lead in days isn't read here, and no year means no binding: the time stays open.
+        assert_eq!(due("My exam is at 09:00 on May 21, 2031. Remind me two days before."), None);
+        assert_eq!(due("Remind me at 09:30 on May 21 to call Ana."), None);
+    }
+
+    #[test]
+    fn what_the_request_says_about_an_event_outranks_the_note() {
+        let goal = "Read my note mentioning QA Workshop details, then add that workshop to my calendar tomorrow at 9:00 for 30 minutes.";
+        let mut contract = TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        let read = note_read("read", "QA Workshop details", "QA Workshop details", "The workshop is on May 20, 2031. It starts at 13:20 and ends at 14:05 in Study Room.");
+        contract.refresh(goal, std::slice::from_ref(&read));
+        let event = contract.next_outcome().unwrap();
+        assert!(event.required_arguments.get("start").is_none());
+        assert!(event.required_arguments.get("minutes").is_none());
+        assert_eq!(event.required_arguments["location"], "Study Room");
     }
 }
 
