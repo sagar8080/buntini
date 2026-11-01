@@ -42,25 +42,39 @@ fn accent(region: &str) -> String {
     .to_string()
 }
 
+/// Every voice in the Mac's own accent, but only one of each other accent: a dozen
+/// Indian or Scottish voices crowd out the one that sounds like home. Premium and
+/// Enhanced voices were downloaded on purpose, so they're always offered.
 pub(crate) fn curated(voices: Vec<VoiceChoice>, locale: &str) -> Vec<VoiceChoice> {
     let (language, region) = locale.split_once('_').unwrap_or((locale, ""));
-    let mut offered: Vec<(bool, bool, VoiceChoice)> = voices
+    let mut installed: Vec<(u8, bool, String, String, VoiceChoice)> = voices
         .into_iter()
-        .filter(|voice| voice.language.split('_').next() == Some(language))
-        .filter(|voice| {
-            let base = voice.name.split(" (").next().unwrap_or(&voice.name);
-            !NOT_OFFERED.contains(&base)
-        })
-        .map(|voice| {
-            let better = voice.name.contains("(Premium)") || voice.name.contains("(Enhanced)");
-            let local = voice.language.split('_').nth(1) == Some(region);
-            let shown = accent(voice.language.split('_').nth(1).unwrap_or_default());
-            (better, local, VoiceChoice { language: shown, ..voice })
+        .filter_map(|voice| {
+            let (spoken, from) = voice.language.split_once('_').unwrap_or((voice.language.as_str(), ""));
+            let base = voice.name.split(" (").next().unwrap_or(&voice.name).to_string();
+            if spoken != language || NOT_OFFERED.contains(&base.as_str()) {
+                return None;
+            }
+            let quality = if voice.name.contains("(Premium)") { 2 } else if voice.name.contains("(Enhanced)") { 1 } else { 0 };
+            Some((quality, from == region, base, from.to_string(), voice))
         })
         .collect();
     // Higher-quality downloads first, then the Mac's own accent, then by name.
-    offered.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.name.cmp(&b.2.name)));
-    offered.into_iter().map(|(_, _, voice)| voice).take(10).collect()
+    installed.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    let mut offered: Vec<(String, String)> = Vec::new();
+    let mut choices = Vec::new();
+    for (quality, local, base, from, voice) in installed {
+        // A voice installed in two qualities, or listed twice for Siri, is offered once.
+        let repeat = offered.iter().any(|(name, accent)| *name == base && *accent == from);
+        let crowded = !local && quality == 0 && offered.iter().any(|(_, accent)| *accent == from);
+        if repeat || crowded {
+            continue;
+        }
+        offered.push((base.clone(), from.clone()));
+        choices.push(VoiceChoice { name: base, language: accent(&from), ..voice });
+    }
+    choices.truncate(10);
+    choices
 }
 
 /// Every voice installed on this Mac, as `say` lists them.
@@ -220,10 +234,34 @@ mod voice_tests {
         ];
         let offered: Vec<(String, String)> = curated(installed, "en_US").into_iter().map(|v| (v.name, v.language)).collect();
         assert_eq!(offered, [
-            ("Ava (Premium)".into(), "American".into()),
+            ("Ava".into(), "American".into()),
             ("Samantha".into(), "American".into()),
             ("Daniel".into(), "British".into()),
             ("Karen".into(), "Australian".into()),
         ]);
+    }
+
+    #[test]
+    fn other_accents_get_one_voice_each_and_none_is_listed_twice() {
+        let voice = |name: &str, language: &str| VoiceChoice { id: name.into(), name: name.into(), language: language.into() };
+        let installed = vec![
+            voice("Aman (English (India))", "en_IN"), voice("Aman (English (India))", "en_IN"), voice("Rishi", "en_IN"),
+            voice("Tara (English (India))", "en_IN"), voice("Tara (English (India))", "en_IN"), voice("Samantha", "en_US"),
+            voice("Daniel", "en_GB"), voice("Serena (Premium)", "en_GB"), voice("Kate (Enhanced)", "en_GB"),
+            voice("Ava (Enhanced)", "en_US"), voice("Ava (Premium)", "en_US"), voice("Moira", "en_IE"),
+        ];
+        let offered: Vec<(String, String, String)> = curated(installed, "en_US").into_iter().map(|v| (v.id, v.name, v.language)).collect();
+        assert_eq!(offered, [
+            ("Ava (Premium)".into(), "Ava".into(), "American".into()),
+            ("Serena (Premium)".into(), "Serena".into(), "British".into()),
+            ("Kate (Enhanced)".into(), "Kate".into(), "British".into()),
+            ("Samantha".into(), "Samantha".into(), "American".into()),
+            ("Aman (English (India))".into(), "Aman".into(), "Indian".into()),
+            ("Moira".into(), "Moira".into(), "Irish".into()),
+        ]);
+        // At home, every voice of the accent is offered.
+        let home: Vec<String> = curated(vec![voice("Rishi", "en_IN"), voice("Aman (English (India))", "en_IN"), voice("Samantha", "en_US")], "en_IN")
+            .into_iter().map(|v| v.name).collect();
+        assert_eq!(home, ["Aman", "Rishi", "Samantha"]);
     }
 }
