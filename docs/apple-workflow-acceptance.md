@@ -1,6 +1,6 @@
 # Apple Intelligence everyday workflow acceptance
 
-October 29, 2026: **31 of 38 positive user workflows completed**, plus **2 of 3 boundary checks**, across **103 actual Apple Foundation Models SDK calls**. The requested 30-workflow target is met. **Public rollout remains blocked.**
+October 29, 2026: **31 of 38 positive user workflows completed**, plus **2 of 3 boundary checks**, across **103 actual Apple Foundation Models SDK calls**. The requested 30-workflow target is met. **The failures below are still open in v0.2.0.**
 
 All five final cohorts used the same test binary, helper and source fingerprints. Source facts were synthetic; local files, persistent profiles, Notes/Reminders/Calendar records and free public API responses were real. These are backend acceptance tests, with a separate disposable WebView/IPC check. They do not certify the signed release bundle or permission onboarding on a fresh Mac.
 
@@ -71,6 +71,6 @@ A correct receipt proves the approved app fields were written and read back. It 
 
 ## Release boundary
 
-The existing notarized v0.1.0 release is unchanged. The configured local notary profile is already available; no new Apple password or certificate export is needed for local signing. These fixes still require review, a new release candidate, signing/notarization and acceptance of that exact candidate on a fresh Mac. The eight failed scenarios above remain release blockers; keyed/cloud and interactive microphone/Accessibility/browser checks remain outside this local/free-provider run.
+These repairs shipped in v0.2.0, which CI signed and notarized on November 1, 2026. That artifact still needs acceptance on a fresh Mac. The eight failed scenarios above are still open; keyed/cloud and interactive microphone/Accessibility/browser checks remain outside this local/free-provider run.
 
 Raw local evidence is retained under `evals/apple-workflows-*-final-2026-10-29.jsonl`, with SHA-bound independent reviews and earlier failed attempts. No paid provider calls, email sending, purchases or personal content reads were used.
