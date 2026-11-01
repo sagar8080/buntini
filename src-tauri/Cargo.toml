@@ -39,9 +39,9 @@ rfd = "0.17.2"
 rusqlite = { version = "0.41", features = ["bundled"] }
 objc2-application-services = "0.3.2"
 objc2-core-foundation = "0.3.2"
-candle-core = { version = "0.11.0", features = ["accelerate"] }
-candle-nn = "0.11.0"
-candle-transformers = "0.11.0"
+candle-core = { version = "0.11.1", features = ["accelerate"] }
+candle-nn = "0.11.1"
+candle-transformers = "0.11.1"
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

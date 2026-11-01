@@ -62,14 +62,9 @@ jobs:
       - name: Audit npm, including the build toolchain
         run: npm audit --audit-level=high
       - name: Audit Rust crates
-        # RUSTSEC-2026-0367, -0368 and -0369 affect zip's archive extraction to disk.
-        # zip 8 comes only from candle-core (memory search), which uses it to read
-        # .npz tensors; Buntini loads safetensors and never extracts archives.
-        # Remove these exceptions once candle moves to zip 9.
         run: |
           cargo install cargo-audit --version 0.22.1 --locked
-          cargo audit --file src-tauri/Cargo.lock \
-            --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
+          cargo audit --file src-tauri/Cargo.lock
 
   python-audit:
     name: Optional MLX and voice dependency audit
