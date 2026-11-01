@@ -23,10 +23,12 @@ const ink = '#2A2230';
 /* Seated, round-headed kitten. Coat, eyes and accessory come from the saved look;
    state reactions are CSS-driven so the SVG stays static and cheap to render.
    Light comes from the upper left. Shading is gradients only (no filters), so a
-   moving cat costs no more to draw than a still one. */
+   moving cat costs no more to draw than a still one. A still icon (`alive` false: reply
+   avatars, swatches) leaves out what only a living cat shows: walking, its toy, emotes
+   and the faces its moods and habits make. A long conversation draws one per reply. */
 export type CatPose = 'sit' | 'walk' | 'leap';
 
-export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetLook; pose?: CatPose }) {
+export default function Cat({ id, look, pose = 'sit', alive = true }: { id: string; look: PetLook; pose?: CatPose; alive?: boolean }) {
   const idPrefix = id;
   const url = (name: string) => `url(#${id}-${name})`;
   const coat = palettes[look.coat];
@@ -98,10 +100,10 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
     </g></g>
     {/* The upper lid waits above the eye until a mood lowers it (--lid) or tilts it
         (--lid-tilt): soft when content, heavy when drowsy, angled when grumpy. */}
-    <g clipPath={url(side < 0 ? 'eye-left' : 'eye-right')}><g className={`cat-lid cat-lid-${side < 0 ? 'left' : 'right'}`}>
+    {alive && <g clipPath={url(side < 0 ? 'eye-left' : 'eye-right')}><g className={`cat-lid cat-lid-${side < 0 ? 'left' : 'right'}`}>
       <path d={`M${cx - 11} 70H${cx + 11}V92Q${cx} 99 ${cx - 11} 92Z`} fill={url('head')} />
       <path d={`M${cx + 11} 92Q${cx} 99 ${cx - 11} 92`} stroke={ink} strokeWidth="2.2" strokeLinecap="round" />
-    </g></g>
+    </g></g>}
     <ellipse cx={cx} cy="94" rx="9" ry="10" stroke={ink} strokeWidth="1.2" />
     <path d={`M${cx - 8.5} 90.6A9 10 0 0 1 ${cx + 8.5} 90.6`} stroke={ink} strokeWidth="2.2" strokeLinecap="round" />
   </g>;
@@ -126,14 +128,18 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <radialGradient id={`${id}-mask`} cy=".56"><stop stopColor={coat.point} stopOpacity=".95" /><stop offset=".4" stopColor={coat.point} stopOpacity=".82" /><stop offset=".75" stopColor={coat.point} stopOpacity=".38" /><stop offset="1" stopColor={coat.point} stopOpacity="0" /></radialGradient>
       <radialGradient id={`${id}-blush`}><stop stopColor="#FF8DA1" stopOpacity={Math.min(1, coat.blush * 1.6)} /><stop offset="1" stopColor="#FF8DA1" stopOpacity="0" /></radialGradient>
       {iris('iris-left', leftIris)}{iris('iris-right', rightIris)}
-      <clipPath id={`${id}-eye-left`}><ellipse cx="74" cy="94" rx="9" ry="10" /></clipPath>
-      <clipPath id={`${id}-eye-right`}><ellipse cx="106" cy="94" rx="9" ry="10" /></clipPath>
       <linearGradient id={`${id}-nose`} x1="0" y1="0" x2="0" y2="1"><stop stopColor={mix(coat.nose, '#ffffff', .3)} /><stop offset="1" stopColor={coat.nose} /></linearGradient>
       <linearGradient id={`${id}-ear-tip`} x1="58" y1="44" x2="70" y2="72" gradientUnits="userSpaceOnUse"><stop stopColor={coat.outline} stopOpacity=".28" /><stop offset="1" stopColor={coat.outline} stopOpacity="0" /></linearGradient>
       <linearGradient id={`${id}-inner-ear`} x1="0" y1="49" x2="0" y2="73" gradientUnits="userSpaceOnUse"><stop stopColor={mix(coat.ear, coat.outline, .3)} /><stop offset="1" stopColor={coat.ear} /></linearGradient>
       <linearGradient id={`${id}-paw`} x1="0" y1="0" x2="0" y2="1"><stop stopColor={mix(paws, '#ffffff', .25)} /><stop offset=".5" stopColor={paws} /><stop offset="1" stopColor={mix(paws, coat.outline, .2)} /></linearGradient>
       {/* Tails darken where they tuck in behind the body. */}
       <linearGradient id={`${id}-tail`} x1="112" y1="156" x2="140" y2="104" gradientUnits="userSpaceOnUse"><stop stopColor={mix(tail, coat.outline, .35)} /><stop offset=".4" stopColor={tail} /><stop offset="1" stopColor={mix(tail, '#ffffff', .1)} /></linearGradient>
+      <radialGradient id={`${id}-shadow`}><stop stopColor="#1D1720" stopOpacity=".3" /><stop offset=".55" stopColor="#1D1720" stopOpacity=".15" /><stop offset="1" stopColor="#1D1720" stopOpacity="0" /></radialGradient>
+      <radialGradient id={`${id}-bell`} cx=".36" cy=".3" r=".75"><stop stopColor="#FFF1B0" /><stop offset=".45" stopColor="#F6C945" /><stop offset="1" stopColor="#C9921F" /></radialGradient>
+      {alive && <>
+      <clipPath id={`${id}-eye-left`}><ellipse cx="74" cy="94" rx="9" ry="10" /></clipPath>
+      <clipPath id={`${id}-eye-right`}><ellipse cx="106" cy="94" rx="9" ry="10" /></clipPath>
+      <linearGradient id={`${id}-tongue`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#D9607A" /><stop offset=".45" stopColor="#F27D93" /><stop offset="1" stopColor="#FF9DB0" /></linearGradient>
       <linearGradient id={`${id}-walk-tail`} x1="150" y1="124" x2="160" y2="84" gradientUnits="userSpaceOnUse"><stop stopColor={mix(tail, coat.outline, .25)} /><stop offset=".45" stopColor={tail} /><stop offset="1" stopColor={mix(tail, '#ffffff', .1)} /></linearGradient>
       <linearGradient id={`${id}-coat`} x1="0" y1="106" x2="0" y2="146" gradientUnits="userSpaceOnUse"><stop stopColor={mix(coat.base, '#ffffff', .16)} /><stop offset=".35" stopColor={coat.base} /><stop offset=".75" stopColor={coat.base} /><stop offset="1" stopColor={coat.shade} /></linearGradient>
       <radialGradient id={`${id}-torso-form`} cx="118" cy="116" r="38" gradientUnits="userSpaceOnUse"><stop offset=".55" stopColor={deep} stopOpacity="0" /><stop offset="1" stopColor={deep} stopOpacity=".6" /></radialGradient>
@@ -141,14 +147,13 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       <linearGradient id={`${id}-leg`} x1="0" y1="0" x2="1" y2="0"><stop stopColor={coat.point ?? coat.base} /><stop offset=".65" stopColor={coat.point ?? coat.base} /><stop offset="1" stopColor={coat.shade} /></linearGradient>
       <linearGradient id={`${id}-leg-far`} x1="0" y1="0" x2="1" y2="0"><stop stopColor={farLeg} /><stop offset="1" stopColor={mix(farLeg, coat.outline, .3)} /></linearGradient>
       <linearGradient id={`${id}-belly`} x1="100" y1="0" x2="136" y2="0" gradientUnits="userSpaceOnUse"><stop stopColor={coat.belly} /><stop offset=".4" stopColor={coat.belly} /><stop offset="1" stopColor={coat.belly} stopOpacity="0" /></linearGradient>
-      <radialGradient id={`${id}-shadow`}><stop stopColor="#1D1720" stopOpacity=".3" /><stop offset=".55" stopColor="#1D1720" stopOpacity=".15" /><stop offset="1" stopColor="#1D1720" stopOpacity="0" /></radialGradient>
       <radialGradient id={`${id}-yarn`} cx=".38" cy=".32" r=".75"><stop stopColor={mix(accent, '#ffffff', .35)} /><stop offset=".5" stopColor={accent} /><stop offset="1" stopColor={mix(accent, '#1D1720', .35)} /></radialGradient>
-      <radialGradient id={`${id}-bell`} cx=".36" cy=".3" r=".75"><stop stopColor="#FFF1B0" /><stop offset=".45" stopColor="#F6C945" /><stop offset="1" stopColor="#C9921F" /></radialGradient>
       <linearGradient id={`${id}-heart`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#FF9BB0" /><stop offset="1" stopColor="#F0577A" /></linearGradient>
+      </>}
     </defs>
     {/* Soft shadows: a wide one under the cat and a darker one where the paws touch down. */}
     <g className="pet-shadow cat-sit-shadow"><ellipse cx="90" cy="165" rx="44" ry="7" fill={url('shadow')} /><ellipse cx="90" cy="164" rx="34" ry="3.6" fill={url('shadow')} /></g>
-    <g className="pet-shadow cat-walk-shadow"><ellipse cx="114" cy="165" rx="52" ry="7" fill={url('shadow')} /></g>
+    {alive && <g className="pet-shadow cat-walk-shadow"><ellipse cx="114" cy="165" rx="52" ry="7" fill={url('shadow')} /></g>}
     <g className="pet-body">
       {/* Seated body. While walking it fades out and the walking body below fades in;
           the head never changes, so switching poses reads as the cat getting up. */}
@@ -186,7 +191,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
       </g>
 
       {/* Walking body, side-on behind the head: far legs, tail, torso, near legs. */}
-      <g className="cat-walkbody">
+      {alive && <g className="cat-walkbody">
         {[true, false].map(outline => <g key={String(outline)}>{leg(111, 'ff', 'front', true, outline)}{leg(146, 'fb', 'back', true, outline)}</g>)}
         {/* Tail, near legs, neck and torso share one outline: every outline goes down
             first, then every fill, so the parts merge into a single body with no seams. */}
@@ -218,7 +223,7 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
         <path d={torso} fill={url('neck')} />
         <path d="M113 113.6C122 111.8 134 111.8 143 114.6" stroke="#fff" strokeOpacity=".22" strokeWidth="2.2" strokeLinecap="round" />
         <path d="M140 120C148 120 152 128 150 137C148 142 143 144 138 144C143 137 144 127 140 120Z" fill={coat.shade} fillOpacity=".3" />
-      </g>
+      </g>}
 
       {/* Head and collar lean forward a touch while walking. */}
       <g className="cat-front">
@@ -246,23 +251,37 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
 
       <ellipse cx="63" cy="108" rx="7.5" ry="4.4" fill={url('blush')} />
       <ellipse cx="117" cy="108" rx="7.5" ry="4.4" fill={url('blush')} />
+      {alive && <>
       <g className="cat-blush-strong" stroke="#F0607A" strokeWidth="1.2" strokeLinecap="round">
         <ellipse cx="63" cy="108" rx="8.5" ry="5" fill="#FF7A93" fillOpacity=".4" stroke="none" /><ellipse cx="117" cy="108" rx="8.5" ry="5" fill="#FF7A93" fillOpacity=".4" stroke="none" />
         <path d="M59 110.4L61 105.6M63 110.4L65 105.6M67 110.4L69 105.6M111 110.4L113 105.6M115 110.4L117 105.6M119 110.4L121 105.6" />
       </g>
+      </>}
       <g className="pet-eyes">{eye(74, -1, true)}{eye(106, 1)}</g>
       <path className="cat-eyes-closed" d="M65 95Q74 101 83 95M97 95Q106 101 115 95" stroke={lids} strokeWidth="2.4" strokeLinecap="round" />
+      {alive && <>
       <path className="cat-eyes-happy" d="M66 97Q74 88 82 97M98 97Q106 88 114 97" stroke={lids} strokeWidth="2.4" strokeLinecap="round" />
       <path className="cat-eyes-squeeze" d="M67.5 89.5L79 94.5L67.5 99.5M112.5 89.5L101 94.5L112.5 99.5" stroke={lids} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>}
       <path d="M86.5 106.5C86.5 104.8 93.5 104.8 93.5 106.5C93.5 108.3 91.2 110 90 110C88.8 110 86.5 108.3 86.5 106.5Z" fill={url('nose')} />
       <ellipse cx="88.6" cy="106.2" rx="1.3" ry=".75" fill="#fff" fillOpacity=".55" />
+      {/* The tongue tucks under the mouth line, so a blep or a lick comes out of the mouth. */}
+      {alive && <>
+      <g className="cat-tongue">
+        <path d="M87.4 114.6Q90 112.4 92.6 114.6C92.9 116.9 91.8 118.6 90 118.6C88.2 118.6 87.1 116.9 87.4 114.6Z" fill={url('tongue')} />
+        <path d="M87.4 114.6C87.1 116.9 88.2 118.6 90 118.6C91.8 118.6 92.9 116.9 92.6 114.6" stroke="#C9606F" strokeWidth=".8" strokeLinecap="round" />
+        <path d="M90 115.2V116.9" stroke="#C9606F" strokeOpacity=".7" strokeWidth=".6" strokeLinecap="round" />
+        <ellipse cx="88.9" cy="116.4" rx=".7" ry=".9" fill="#fff" fillOpacity=".4" />
+      </g>
+      </>}
       <path className="pet-mouth" d="M90 110V112.5M85 112.5C86.5 115.5 89 115.5 90 112.5C91 115.5 93.5 115.5 95 112.5" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       <path className="pet-speaking-mouth" d="M86 113C88 112 92 112 94 113C94 118 92 120 90 120C88 120 86 118 86 113Z" fill="#7A3B4A" />
+      {alive && <>
       <path className="cat-frown" d="M85 116Q90 112 95 116" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.7" strokeLinecap="round" />
       <g className="cat-yawn"><ellipse cx="90" cy="117" rx="5.2" ry="6.8" fill="#7A3B4A" /><ellipse cx="90" cy="120.6" rx="3.2" ry="2.4" fill="#F08A98" /><path d="M86.4 111.6L87.5 114.4L88.6 111ZM93.6 111.6L92.5 114.4L91.4 111Z" fill="#fff" /></g>
       <path className="cat-wink" d="M97 95Q106 100.5 115 95" stroke={lids} strokeWidth="2.6" strokeLinecap="round" />
       <path className="cat-smile" d="M83.5 112C85 119.5 95 119.5 96.5 112C93 113.6 87 113.6 83.5 112Z" fill="#7A3B4A" stroke={look.coat === 'siamese' ? '#3A2A22' : coat.outline} strokeWidth="1.4" strokeLinejoin="round" />
-      <path className="cat-tongue" d="M87.4 113C87.4 119.4 92.6 119.4 92.6 113Z" fill="#F08A98" stroke="#C9606F" strokeWidth=".8" />
+      </>}
       <path d="M58 106Q50 103.4 42 103M58 110Q50 110 41 111.4M59 114Q52 115.4 45 118.4M122 106Q130 103.4 138 103M122 110Q130 110 139 111.4M121 114Q128 115.4 135 118.4" stroke={coat.whisker} strokeWidth="1" strokeLinecap="round" strokeOpacity=".72" />
       </g>
 
@@ -286,10 +305,12 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
           <circle cx={x} cy={y} r="1.8" fill="#FFD45C" />
         </g>)}
       </g>}
+      {alive && <>
       {/* Feelings that sit on the head: a cross little vein, a nervous drop, a sigh's puff. */}
       <path className="cat-emote cat-emote-vein" d="M107 64.5Q110.5 64.5 110.5 61M113.5 61Q113.5 64.5 117 64.5M117 67.5Q113.5 67.5 113.5 71M110.5 71Q110.5 67.5 107 67.5" stroke="#E5484D" strokeWidth="2" strokeLinecap="round" />
       <g className="cat-emote cat-emote-sweat"><path d="M133 68C135.6 71.6 137.4 74.4 137.4 76.6A4.4 4.4 0 0 1 128.6 76.6C128.6 74.4 130.4 71.6 133 68Z" fill="#9AD8F5" stroke="#4A9CC9" strokeWidth=".9" /><ellipse cx="131.4" cy="76" rx="1" ry="1.6" fill="#fff" fillOpacity=".8" /></g>
       <g className="cat-emote cat-emote-puff" fill="#fff" fillOpacity=".92" stroke="#1D1720" strokeOpacity=".14" strokeWidth=".8"><circle cx="54" cy="123" r="3.6" /><circle cx="49.4" cy="121" r="2.6" /><circle cx="58.4" cy="120.4" r="2.2" /></g>
+      </>}
       </g></g>
 
       {/* A fluffy ruff spills over the chin; a collar or bandana covers it. It belongs to
@@ -311,13 +332,16 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
         <circle cx="84" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="96" cy="133" r="1.4" fill="#fff" fillOpacity=".8" /><circle cx="90" cy="140" r="1.4" fill="#fff" fillOpacity=".8" />
       </g>}
       </g>
+      {alive && <>
       {/* A copy of the right paw that comes up to the face to groom, to wave, or to hide a
           bashful smile. */}
       <g className="cat-groom-paw">
         <path d="M93 156C93 151 97 149 102 149C107 149 110 151 110 156C110 161 107 163 102 163C97 163 93 161 93 156Z" fill={url('paw')} {...line} />
         <path d="M99 151V154M105 151V154" stroke={coat.outline} strokeWidth="1.2" strokeLinecap="round" strokeOpacity=".55" />
       </g>
+      </>}
     </g>
+    {alive && <>
     {/* A ball of wool in the accent colour, beside the front paw. The cat bats it while
         playing (the `bat` habit); a loose strand runs back to the paw. */}
     <g className="cat-yarn">
@@ -338,7 +362,9 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
     </g>
     <g className="cat-hearts" fill={url('heart')}>{[[124, 68], [137, 54], [113, 50]].map(([x, y], index) => <g key={index} transform={`translate(${x} ${y})`}><g className="cat-heart" style={{ animationDelay: `${index * .28}s` }}><path d="M0 3C-1.5 0-6-.5-6 3C-6 6.5-1.5 8.5 0 10C1.5 8.5 6 6.5 6 3C6-.5 1.5 0 0 3Z" /><ellipse cx="-3.2" cy="2.6" rx="1.3" ry=".9" fill="#fff" fillOpacity=".6" /></g></g>)}</g>
     <g className="cat-ask"><path d="M146 18H166C171 18 174 21 174 26V34C174 39 171 42 166 42H155L149 48L150 42H146C141 42 138 39 138 34V26C138 21 141 18 146 18Z" fill="#FFFDF8" stroke={coat.outline} strokeOpacity=".45" strokeWidth="1.2" strokeLinejoin="round" /><path className="cat-ask-heart" d="M156 27C154.4 24 149.5 24.4 149.5 28.4C149.5 32 154 34.6 156 36.4C158 34.6 162.5 32 162.5 28.4C162.5 24.4 157.6 24 156 27Z" fill={url('heart')} /></g>
+    </>}
     <g className="cat-zzz" fill="#8C7FA6" stroke="#fff" strokeOpacity=".7" strokeWidth="2.4" strokeLinejoin="round" paintOrder="stroke" fontFamily="-apple-system, system-ui, sans-serif" fontWeight="800"><text x="128" y="60" fontSize="12">z</text><text x="137" y="48" fontSize="9">z</text><text x="144" y="38" fontSize="7">z</text></g>
+    {alive && <>
     {/* Feelings that pop up beside the head: surprise, a question, delight. */}
     <g className="cat-emote cat-emote-alert" fill="#FF9F43" stroke="#fff" strokeOpacity=".8" strokeWidth="2" paintOrder="stroke">
       <path d="M139.6 28.5C139.6 26.6 144.4 26.6 144.4 28.5L143.6 41C143.5 42.4 140.5 42.4 140.4 41Z" /><circle cx="142" cy="46.6" r="2.7" />
@@ -346,5 +372,6 @@ export default function Cat({ id, look, pose = 'sit' }: { id: string; look: PetL
     </g>
     <g className="cat-emote cat-emote-question" fill="#8C7FA6" stroke="#fff" strokeOpacity=".75" strokeWidth="2.4" strokeLinejoin="round" paintOrder="stroke" fontFamily="-apple-system, system-ui, sans-serif" fontWeight="800"><text x="135" y="48" fontSize="22">?</text></g>
     <g className="cat-emote cat-emote-sparkle" fill="#FFD45C" stroke="#fff" strokeOpacity=".7" strokeWidth="1" strokeLinejoin="round" paintOrder="stroke">{[[140, 50, 5.5], [151, 36, 3.6], [38, 56, 4.4]].map(([x, y, r], index) => <path key={index} className="cat-sparkle" style={{ animationDelay: `${index * .22}s` }} d={star(x, y, r)} />)}</g>
+    </>}
   </svg>;
 }

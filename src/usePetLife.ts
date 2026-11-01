@@ -12,6 +12,14 @@ const reactions = new Set<PetAction>(['love', 'purr', 'happy', 'sad', 'proud', '
 // What a reaction says happened, for the mood.
 const reactionFeeling: Partial<Record<PetAction, MoodEvent>> = { happy: 'done', proud: 'done', sad: 'failed', bashful: 'praise', love: 'praise', excited: 'userBack', wave: 'userBack' };
 const MOOD_KEY = 'buntini-cat-mood';
+const forgetters = new Set<() => void>();
+
+/** Delete everything: the cat forgets its bond and mood, both the saved copy and the one
+    it's feeling now. */
+export function forgetMood() {
+  try { localStorage.removeItem(MOOD_KEY); } catch { /* Nothing was saved. */ }
+  for (const forget of forgetters) forget();
+}
 const stillPreferred = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* Gives a pet its small signs of life: randomized blinks, idle habits picked by its
@@ -143,14 +151,25 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   // you're around but busy with other things.
   useEffect(() => {
     if (!alive) return;
+    // Saved every 30 seconds and as the window goes away, not on every tick.
+    const save = () => { if (remember) try { localStorage.setItem(MOOD_KEY, memory(mood.current, Date.now())); } catch { /* A mood that isn't saved starts fresh next time. */ } };
+    let ticks = 0;
     const timer = window.setInterval(() => {
       const { motion: personality, asleep: napping } = live.current;
       mood.current = drift(mood.current, 5, { motion: personality, hour: new Date().getHours(), userAround: performance.now() - lastMove.current < 60_000, asleep: napping });
       setFace(faceFor(mood.current));
-      if (remember) try { localStorage.setItem(MOOD_KEY, memory(mood.current, Date.now())); } catch { /* A mood that isn't saved starts fresh next time. */ }
+      if (++ticks % 6 === 0) save();
     }, 5000);
-    return () => window.clearInterval(timer);
+    window.addEventListener('pagehide', save);
+    return () => { window.clearInterval(timer); window.removeEventListener('pagehide', save); save(); };
   }, [alive, remember]);
+
+  useEffect(() => {
+    if (!remember) return;
+    const forget = () => { mood.current = startingMood(live.current.motion, new Date().getHours()); setFace(faceFor(mood.current)); };
+    forgetters.add(forget);
+    return () => { forgetters.delete(forget); };
+  }, [remember]);
 
   // Between habits: eyes that wander when nothing is moving, and ears that swivel to small
   // sounds. Both are CSS variables, so none of it re-renders.

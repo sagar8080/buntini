@@ -16,7 +16,7 @@ export default function Pet({ state, small = false, avatar = 'cat', look = defau
   const stride = `${Math.min(.7, Math.max(.26, 36 / speed)).toFixed(2)}s`;
   return <div ref={element} className={classes.filter(Boolean).join(' ')} style={{ '--stride': stride } as CSSProperties} aria-hidden="true">
     <div className="pet-aura" />
-    {avatar === 'orb' ? <Orb state={state} id={gradientId} /> : <Cat id={gradientId} look={look} pose={moving === 'walk' ? 'walk' : moving === 'jump' ? 'leap' : 'sit'} />}
+    {avatar === 'orb' ? <Orb state={state} id={gradientId} /> : <Cat id={gradientId} look={look} alive={alive} pose={moving === 'walk' ? 'walk' : moving === 'jump' ? 'leap' : 'sit'} />}
     <span className="pet-orbit orbit-one" /><span className="pet-orbit orbit-two" />
   </div>;
 }

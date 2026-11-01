@@ -7,7 +7,7 @@ import { ApprovalSheet, ResultCards } from './Online';
 import { backendLabel } from './brain.ts';
 import { lookFrom } from './petOptions';
 import { feelingFor } from './petMood';
-import type { PetReaction } from './usePetLife';
+import { forgetMood, type PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
@@ -894,7 +894,7 @@ export default function App() {
           saver.current!.discard();
           try { await command('delete_all_data', { confirm: 'delete everything' }); }
           catch (error) { if (pending) saver.current!.edit(pending); throw error; }
-        }} onErased={async () => { setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
+        }} onErased={async () => { forgetMood(); setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Nothing yet</h3></div>}</div>}
 

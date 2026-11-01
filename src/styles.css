@@ -1041,7 +1041,8 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet--cat.pet--act-smile .cat-eyes-happy { display: block; }
 .pet--cat.pet--act-smile .cat-smile, .pet--cat.pet--act-wink .cat-smile, .pet--cat.pet--act-askpet .cat-smile { display: block; }
 .pet.pet--act-smile .cat-head { animation: cat-smile-head 2s ease-in-out; }
-.pet--cat.pet--act-lick .pet-eyes, .pet--cat.pet--act-lick .pet-mouth { display: none; }
+/* Licking its lips: the tongue flicks out from under the mouth, which stays put. */
+.pet--cat.pet--act-lick .pet-eyes { display: none; }
 .pet--cat.pet--act-lick .cat-eyes-happy { display: block; }
 .pet--cat.pet--act-lick .cat-tongue { display: block; animation: cat-tongue .65s ease-in-out 4; }
 .pet.pet--act-lick .cat-head { animation: cat-lick-head 2.6s ease-in-out; }
@@ -1114,7 +1115,7 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes cat-wave-head { 20%, 80% { transform: rotate(-5deg); } }
 /* A blep: the tip of the tongue left out, for no reason. */
 .pet.pet--act-blep { --lid: .22; }
-.pet--cat.pet--act-blep .cat-tongue { display: block; transform: scaleY(.5); }
+.pet--cat.pet--act-blep .cat-tongue { display: block; transform: scaleY(.85); }
 .pet.pet--act-blep .cat-head { animation: cat-blep-head 3.2s ease-in-out; }
 @keyframes cat-blep-head { 15%, 85% { transform: rotate(4deg); } }
 /* Chasing its own tail: eyes on it, a swipe, and the tail whisks away. */
