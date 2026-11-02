@@ -11,6 +11,7 @@ mod browser_session;
 mod budget;
 mod calculation;
 mod structured_math;
+mod worked;
 mod writing_context;
 mod source_fields;
 mod edit_targets;

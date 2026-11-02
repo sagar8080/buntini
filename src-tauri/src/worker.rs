@@ -386,9 +386,11 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(150)).await;
             token.store(true, Ordering::Relaxed);
         });
-        // Larger than an OS pipe buffer, but within the JSONL request allowance.
+        // Larger than an OS pipe buffer, but within the JSONL request allowance. The
+        // bound leaves room for Python to start on a busy machine; the worker itself
+        // would hold the request for 30 seconds.
         let result = tokio::time::timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(10),
             worker.request(
                 &launch,
                 json!({"type":"generate","padding":"x".repeat(200_000)}),

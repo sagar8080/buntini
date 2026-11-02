@@ -33,7 +33,7 @@ fn outside(text: &str) -> Option<Vec<usize>> {
     quote.is_none().then_some(result)
 }
 
-fn location(tail: &str) -> Option<String> {
+pub(crate) fn location(tail: &str) -> Option<String> {
     let tail = tail.trim_start();
     let first = tail.chars().next()?;
     let closing = match first {

@@ -1019,11 +1019,23 @@ mod tests {
 
     /// A stand-in for the Apple helper: a shell script with the same command line.
     #[cfg(unix)]
+    /// macOS checks each new executable on its first launch, one at a time, which can
+    /// outlast a read's deadline while many tests start helpers. So every fake helper is
+    /// a link to one launcher, checked once, that runs the body kept beside the link.
     fn fake_helper(dir: &Path, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
+        static LAUNCHER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let launcher = LAUNCHER.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap().keep();
+            let path = dir.join("launcher");
+            fs::write(&path, "#!/bin/sh\nbody=\"$0.sh\"\n[ -f \"$body\" ] || exit 0\nexec /bin/sh \"$body\" \"$@\"\n").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            std::process::Command::new(&path).status().unwrap();
+            path
+        });
         let path = dir.join("buntini-fm");
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(dir.join("buntini-fm.sh"), format!("{body}\n")).unwrap();
+        std::os::unix::fs::symlink(launcher, &path).unwrap();
         path
     }
 

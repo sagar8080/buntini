@@ -186,8 +186,36 @@ fn literal_sentences(goal: &str) -> Option<Vec<&str>> {
 }
 
 fn literal_requests(goal: &str) -> Option<Vec<&str>> {
+    requests_in(goal, false)
+}
+
+/// The request after a sentence's opening that says when ("On May 20, 2031, remind
+/// me …", "Tomorrow, set …"), or the sentence as it is.
+fn after_opening(sentence: &str) -> Option<&str> {
+    if begins_request(sentence) {
+        return Some(sentence);
+    }
+    let first = sentence.split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+    let when = [
+        "on", "at", "by", "before", "after", "today", "tonight", "tomorrow", "this", "next",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january",
+        "february", "march", "april", "may", "june", "july", "august", "september", "october",
+        "november", "december",
+    ]
+    .contains(&first.trim_end_matches(','));
+    let start = outside(sentence).ok()?.into_iter().find_map(|index| {
+        let tail = &sentence[index..];
+        (tail.starts_with(", ") && begins_request(&tail[2..])).then_some(index + 2)
+    });
+    Some(start.filter(|_| when).map_or(sentence, |start| &sentence[start..]))
+}
+
+/// With `dated_openings`, a request that opens with when it happens counts from its
+/// verb. Only titles use that: a due time bound without its opening would lose its date.
+fn requests_in(goal: &str, dated_openings: bool) -> Option<Vec<&str>> {
     let mut requests = Vec::new();
     for sentence in literal_sentences(goal)? {
+        let sentence = if dated_openings { after_opening(sentence)? } else { sentence };
         let plain = crate::completion::unquoted(sentence);
         if crate::completion::non_action(crate::completion::request_clause(&plain))
             || !begins_request(sentence)
@@ -482,7 +510,7 @@ pub(crate) fn action_title(goal: &str, tool: &str) -> Option<String> {
     let mut actions = Vec::new();
     let mut total_writes = 0;
     let mut titles = Vec::new();
-    for request in literal_requests(goal)? {
+    for request in requests_in(goal, true)? {
         let anchored = ["create_note", "add_reminder", "add_calendar_event"]
             .into_iter()
             .find(|candidate| action_tail(request, candidate).is_some());
@@ -549,6 +577,106 @@ pub(crate) fn action_title(goal: &str, tool: &str) -> Option<String> {
     titles.sort();
     titles.dedup();
     (titles.len() == 1).then(|| titles.remove(0))
+}
+
+fn count_word(word: &str) -> Option<u64> {
+    Some(match word {
+        "a" | "an" | "one" => 1,
+        "two" => 2,
+        "three" => 3,
+        "four" => 4,
+        "five" => 5,
+        "six" => 6,
+        "seven" => 7,
+        "eight" => 8,
+        "nine" => 9,
+        "ten" => 10,
+        "eleven" => 11,
+        "twelve" => 12,
+        "fifteen" => 15,
+        "twenty" => 20,
+        "thirty" => 30,
+        "forty" => 40,
+        "fifty" => 50,
+        "sixty" => 60,
+        "ninety" => 90,
+        digits => digits.parse().ok().filter(|n| (1..=86_400).contains(n))?,
+    })
+}
+
+fn unit_seconds(word: &str) -> Option<u64> {
+    match word {
+        "second" | "seconds" | "sec" | "secs" => Some(1),
+        "minute" | "minutes" | "min" | "mins" => Some(60),
+        "hour" | "hours" | "hr" | "hrs" => Some(3600),
+        _ => None,
+    }
+}
+
+/// A timer's length in seconds from the words of its own clause: "a 12-minute timer",
+/// "a timer for 1 hour and 30 minutes", "half an hour", "forty-five minutes". Nothing
+/// when the clause names no length, or more than one.
+pub(crate) fn timer_seconds(clause: &str) -> Option<u64> {
+    let plain = crate::completion::unquoted(clause).to_lowercase();
+    let words: Vec<&str> = plain
+        .split(|c: char| c.is_whitespace() || c == '-' || c == ',' || c == '.')
+        .filter(|w| !w.is_empty())
+        .collect();
+    // Each length is a run of amounts, largest unit first, side by side or joined by
+    // "and": "1 hour 30 minutes", "2 minutes and 30 seconds".
+    let mut lengths: Vec<(u64, u64)> = Vec::new();
+    let mut joined = false;
+    let mut last_end = None;
+    let mut at = 0;
+    while at < words.len() {
+        let amount = if words[at] == "half"
+            && words.get(at + 1).is_some_and(|w| ["a", "an"].contains(w))
+            && words.get(at + 2).and_then(|w| unit_seconds(w)).is_some()
+        {
+            let unit = unit_seconds(words[at + 2]).unwrap();
+            Some((unit / 2, unit, at + 3))
+        } else {
+            count_word(words[at]).and_then(|count| {
+                let (count, next) = match words.get(at + 1).and_then(|w| count_word(w)) {
+                    Some(ones) if count >= 20 && count % 10 == 0 && ones < 10 => (count + ones, at + 2),
+                    _ => (count, at + 1),
+                };
+                let unit = unit_seconds(words.get(next)?)?;
+                let half = words.get(next + 1..next + 4) == Some(&["and", "a", "half"][..]);
+                Some((count * unit + if half { unit / 2 } else { 0 }, unit, if half { next + 4 } else { next + 1 }))
+            })
+        };
+        match amount {
+            Some((seconds, unit, next)) => {
+                let continues = joined || last_end == Some(at);
+                match lengths.last_mut() {
+                    Some((total, smallest)) if continues && unit < *smallest => {
+                        *total += seconds;
+                        *smallest = unit;
+                    }
+                    _ => lengths.push((seconds, unit)),
+                }
+                joined = false;
+                last_end = Some(next);
+                at = next;
+            }
+            None => {
+                // "5 or 10 minutes", "5 to 10 minutes", "5-10 minutes": no one length.
+                if !["a", "an"].contains(&words[at])
+                    && count_word(words[at]).is_some()
+                    && words.get(at + 1).is_some_and(|w| ["or", "to"].contains(w) || count_word(w).is_some())
+                {
+                    return None;
+                }
+                joined = words[at] == "and" && !lengths.is_empty();
+                at += 1;
+            }
+        }
+    }
+    match lengths[..] {
+        [(seconds, _)] if (1..=86_400).contains(&seconds) => Some(seconds),
+        _ => None,
+    }
 }
 
 fn reminder_instruction(clause: &str) -> bool {
@@ -1086,6 +1214,38 @@ mod tests {
         for state in ["failed", "unknown", "running"] {
             step.state = state.into();
             assert!(explicit_note(goal, &[step.clone()]).is_err());
+        }
+    }
+
+    #[test]
+    fn a_reminder_that_opens_with_its_date_keeps_the_exact_title_given_after_it() {
+        let goal = "Read my note mentioning QA-1bf3 Travel. On May 20, 2031, remind me to leave for the station 15 minutes before my stated station-arrival time. Use exactly the reminder title QA-1bf3 Leave for station.";
+        assert_eq!(action_title(goal, "add_reminder").as_deref(), Some("QA-1bf3 Leave for station"));
+        assert_eq!(
+            action_title("Tomorrow, remind me to call Ana. Use exactly the reminder title Call Ana.", "add_reminder").as_deref(),
+            Some("Call Ana")
+        );
+        // An opening that isn't a time is not a request to act.
+        assert!(action_title("For example, create a note titled Copy-77b8.", "create_note").is_none());
+    }
+
+    #[test]
+    fn a_timer_clause_gives_exactly_one_length() {
+        for (clause, seconds) in [
+            ("set a 12-minute timer for the rice", Some(720)),
+            ("set a timer for ten minutes", Some(600)),
+            ("start a timer for 1 hour and 30 minutes", Some(5400)),
+            ("timer for 1 hour 30 minutes", Some(5400)),
+            ("a timer for an hour and a half", Some(5400)),
+            ("half an hour timer", Some(1800)),
+            ("set a forty-five minute timer", Some(2700)),
+            ("90 seconds for the eggs", Some(90)),
+            ("set a timer for 5 or 10 minutes", None),
+            ("set a timer for the pasta", None),
+            ("set a timer at 5 pm", None),
+            ("set a timer for 25 hours", None),
+        ] {
+            assert_eq!(timer_seconds(clause), seconds, "{clause}");
         }
     }
 }

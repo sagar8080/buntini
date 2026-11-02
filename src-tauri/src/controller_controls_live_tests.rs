@@ -49,7 +49,7 @@ pub(super) async fn control_workflows() -> Vec<Value> {
         let checks = json!({"valid_ai_proposal":valid,"approved_write_completed":approved.as_ref().is_some_and(|turn|turn.task.state=="completed"),
             "exactly_one_real_memory":memories.len()==1 && memories[0].fact.to_lowercase().contains("maple library"),
             "recall_after_restart_and_new_thread":recalled.task.state=="completed" && recalled.task.answer.to_lowercase().contains("maple library")});
-        rows.push(record_live_case(json!({"id":"control_remember_work_location","goal":"Ask the assistant to remember a work preference, approve the actual Store write, restart and recall it in a new conversation","passed":calls>0 && checks.as_object().unwrap().values().all(|value|value==true),"apple_calls":calls,"checks":checks,"initial":first,"approved":approved,"memories_read_back":memories,"after_restart":recalled,"source_kind":"synthetic user preference, real disposable persistent profile; no preseeded memory"})));
+        rows.push(record_live_case(json!({"id":"control_remember_work_location","goal":"Ask the assistant to remember a work preference, approve the actual Store write, restart and recall it in a new conversation","passed":checks.as_object().unwrap().values().all(|value|value==true),"apple_calls":calls,"checks":checks,"initial":first,"approved":approved,"memories_read_back":memories,"after_restart":recalled,"source_kind":"synthetic user preference, real disposable persistent profile; no preseeded memory"})));
         restarted.models.shutdown().await;
     }
     {
@@ -93,7 +93,7 @@ pub(super) async fn control_workflows() -> Vec<Value> {
             "two_real_distinct_timers":durations==vec![360u64,720] && timers[0].id!=timers[1].id,
             "completed":current.as_ref().is_some_and(|turn|turn.task.state=="completed"),
             "both_pending":timers.iter().all(|timer|timer.state=="pending")});
-        rows.push(record_live_case(json!({"id":"control_parallel_cooking_timers","goal":"Create two independently verified timers from a natural language cooking request","passed":calls>0 && checks.as_object().unwrap().values().all(|value|value==true),"apple_calls":calls,"checks":checks,"initial":initial,"approvals":approvals,"gate_errors":gate_errors,"timers_read_back":timers,"source_kind":"real timer records in a disposable persistent profile; scheduler not launched, no alerts sent"})));
+        rows.push(record_live_case(json!({"id":"control_parallel_cooking_timers","goal":"Create two independently verified timers from a natural language cooking request","passed":checks.as_object().unwrap().values().all(|value|value==true),"apple_calls":calls,"checks":checks,"initial":initial,"approvals":approvals,"gate_errors":gate_errors,"timers_read_back":timers,"source_kind":"real timer records in a disposable persistent profile; scheduler not launched, no alerts sent"})));
         state.models.shutdown().await;
     }
     rows

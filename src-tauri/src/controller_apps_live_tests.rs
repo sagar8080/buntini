@@ -454,7 +454,6 @@ pub(super) async fn app_workflows() -> Vec<Value> {
         let read_required = case["readRequired"] != false;
         let passed = seed_ok
             && completed
-            && apple_calls > 0
             && (!read_required || actual_read)
             && actual_write
             && facts

@@ -975,9 +975,19 @@ pub(crate) fn sentences(text: &str) -> Vec<&str> {
 /// time, when nothing this turn read that app, keeps only what it can stand behind. The
 /// sentences with those claims go; what is left (a greeting, a reply to what was asked)
 /// stays. When nothing is left, Buntini offers to look if the user asked about that app,
-/// and otherwise just answers the person. Times the user wrote themselves don't count.
+/// and otherwise just answers the person. Times the user wrote themselves don't count,
+/// nor times a file or note read this turn states ("the repair appointment is 14:20").
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
-    let asked = clock_times(prompt);
+    let mut asked = clock_times(prompt);
+    for evidence in steps.iter().filter(|s| s.state == "succeeded" && !s.effect).filter_map(|s| s.evidence.as_ref()) {
+        let mut read = evidence.as_str().unwrap_or_default().to_string();
+        read += evidence["text"].as_str().unwrap_or_default();
+        for record in evidence["records"].as_array().into_iter().flatten() {
+            read += " ";
+            read += record["excerpt"].as_str().unwrap_or_default();
+        }
+        asked.extend(clock_times(&read));
+    }
     let claims = |text: &str| clock_times(text).into_iter().any(|time| !asked.contains(&time));
     let mentions = |text: &str, nouns: &[&str]| {
         text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
@@ -1013,6 +1023,39 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         }
         None => "I’m here. What can I do for you?".into(),
     }
+}
+
+/// "What is my workshop project's name?" when nothing this turn read, and nothing in the
+/// conversation, saved memories or screen (`known`) mentions it: Buntini asks rather
+/// than pass on a name the model made up. None when the model's answer may stand.
+pub fn unknown_personal_fact(prompt: &str, known: &str, steps: &[Step]) -> Option<String> {
+    if steps.iter().any(|step| step.state == "succeeded") {
+        return None;
+    }
+    let plain = unquoted(prompt).to_lowercase().replace('’', "'");
+    let start = ["what is my ", "what's my ", "what was my ", "do you know my ", "do you remember my ", "remind me what my "]
+        .iter()
+        .find_map(|question| plain.find(question).map(|at| at + question.len()))?;
+    let subject = plain[start..].split(['?', '.', '!', ',', ';', '\n']).next()?.trim();
+    let subject = subject.strip_suffix(" is").unwrap_or(subject).trim();
+    let words: Vec<&str> = subject
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3 && !["name", "the", "called", "number"].contains(w))
+        .collect();
+    // A read or the device answers these, and "what's my name?" is in the profile.
+    let looked_up = [
+        "calendar", "schedule", "meeting", "meetings", "event", "events", "reminder", "reminders", "email", "emails",
+        "mail", "inbox", "day", "week", "battery", "cpu", "disk", "storage", "wifi", "mac", "computer", "volume",
+        "song", "music", "playing", "location", "weather", "file", "files", "note", "notes", "screen", "tab",
+    ];
+    if words.is_empty() || words.iter().any(|w| looked_up.contains(w)) || subject.chars().count() > 80 {
+        return None;
+    }
+    let known = known.to_lowercase();
+    if words.iter().any(|w| known.contains(w)) {
+        return None;
+    }
+    Some(format!("I don’t know your {subject} yet. What is it?"))
 }
 
 /// Streams an answer to the window a sentence at a time, each one checked the way the
@@ -1811,5 +1854,34 @@ mod tests {
         )
         .unwrap();
         assert!(!answer.contains("booked"));
+    }
+
+    #[test]
+    fn a_personal_fact_nothing_mentions_is_asked_for_not_guessed() {
+        let prompt = "What is my workshop project's name? If I have not supplied it in this conversation, ask me instead of guessing.";
+        assert_eq!(
+            unknown_personal_fact(prompt, "", &[]).as_deref(),
+            Some("I don’t know your workshop project's name yet. What is it?")
+        );
+        // Said earlier in the thread, saved as a memory, or on screen: the answer stands.
+        assert!(unknown_personal_fact(prompt, "For this conversation only, my workshop project is named Larkspur.", &[]).is_none());
+        // Questions a read, the device or the profile answers are left alone.
+        for prompt in ["What's my next meeting?", "What is my name?", "What is my battery level?", "Tell me a joke"] {
+            assert!(unknown_personal_fact(prompt, "", &[]).is_none(), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn a_time_a_file_states_is_not_an_unread_calendar_claim() {
+        let read = Step {
+            id: "files".into(), tool: "search_files".into(), arguments: serde_json::json!({"query":"Cobalt"}), state: "succeeded".into(),
+            effect: false, proposed_at: String::new(), approved_at: None, finished_at: None,
+            evidence: Some(serde_json::json!("misc-014.txt — “Cobalt bicycle repair note: the rear brake cable needs replacing. The repair appointment is Tuesday at 14:20.”")),
+        };
+        let prompt = "Find the Cobalt bicycle repair note by its contents. What needs replacing and when is the appointment?";
+        let answer = "The rear brake cable needs replacing. The repair appointment is Tuesday at 14:20.";
+        assert_eq!(grounded_personal_answer(prompt, answer, &[read]), answer);
+        // With nothing read, the same claim about an appointment still goes.
+        assert_ne!(grounded_personal_answer(prompt, answer, &[]), answer);
     }
 }

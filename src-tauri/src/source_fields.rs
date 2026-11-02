@@ -536,9 +536,281 @@ pub fn status_sum_fields(goal: &str) -> Option<Value> {
     Some(fields)
 }
 
+const MONTHS: [&str; 12] = [
+    "january", "february", "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december",
+];
+
+fn month(word: &str) -> Option<u32> {
+    MONTHS
+        .iter()
+        .position(|name| *name == word || (word.len() == 3 && name.starts_with(word)) || (word == "sept" && *name == "september"))
+        .map(|index| index as u32 + 1)
+}
+
+fn day(word: &str) -> Option<u32> {
+    let digits = word.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    digits.parse().ok().filter(|d| (1..=31).contains(d)).filter(|_| digits.len() <= 2)
+}
+
+fn year(word: &str) -> Option<i32> {
+    (word.len() == 4).then(|| word.parse().ok()).flatten().filter(|y| (1900..=2200).contains(y))
+}
+
+/// A clock time at `words[at]`: "13:20", "1:20 pm", "1pm", with the index after it.
+fn clock(words: &[&str], at: usize) -> Option<(chrono::NaiveTime, usize)> {
+    let word = words.get(at)?;
+    let (body, suffix) = match word.strip_suffix("am").or_else(|| word.strip_suffix("pm")) {
+        Some(body) => (body, Some(&word[body.len()..])),
+        None => (*word, words.get(at + 1).copied().filter(|w| ["am", "pm"].contains(w))),
+    };
+    let (hour, minute) = match body.split_once(':') {
+        Some((h, m)) if m.len() == 2 => (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?),
+        None if suffix.is_some() => (body.parse::<u32>().ok()?, 0),
+        _ => return None,
+    };
+    let hour = match suffix {
+        Some(_) if !(1..=12).contains(&hour) => return None,
+        Some("pm") => hour % 12 + 12,
+        Some(_) => hour % 12,
+        None => hour,
+    };
+    let next = if suffix.is_some() && !word.ends_with("am") && !word.ends_with("pm") { at + 2 } else { at + 1 };
+    Some((chrono::NaiveTime::from_hms_opt(hour, minute, 0)?, next))
+}
+
+/// An event's fields from the one note or file it is being copied from, when its text
+/// gives each exactly once: "on May 20, 2031", "starts at 13:20 and ends at 14:05",
+/// "in Study Room". A field the text gives twice, or not at all, is left for the model
+/// and the user's review; the date is never guessed from the clock.
+pub fn note_event(text: &str) -> Vec<(&'static str, Value)> {
+    let mut fields = Vec::new();
+    if text.len() > 8000 {
+        return fields;
+    }
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '–')
+        .map(|w| w.trim_matches(|c: char| matches!(c, '.' | ';' | ':' | '(' | ')' | '!' | '?')))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut dates = HashSet::new();
+    for at in 0..words.len() {
+        let date = if let (Some(m), Some(d), Some(y)) = (month(words[at]), words.get(at + 1).and_then(|w| day(w)), words.get(at + 2).and_then(|w| year(w))) {
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+        } else if let (Some(d), Some(m), Some(y)) = (day(words[at]), words.get(at + 1).and_then(|w| month(w)), words.get(at + 2).and_then(|w| year(w))) {
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+        } else {
+            chrono::NaiveDate::parse_from_str(words[at], "%Y-%m-%d").ok()
+        };
+        dates.extend(date);
+    }
+    // Clock times in order, splitting "13:20-14:05".
+    let spread: Vec<&str> = words.iter().flat_map(|w| w.split('-')).filter(|w| !w.is_empty()).collect();
+    let mut times = Vec::new();
+    let mut at = 0;
+    while at < spread.len() {
+        if let Some((time, next)) = clock(&spread, at) {
+            times.push((time, at, next));
+            at = next;
+        } else {
+            at += 1;
+        }
+    }
+    // Two times make a range only side by side ("13:20-14:05") or with an end word
+    // close between them ("starts at 13:20 and ends at 14:05").
+    let range = match times[..] {
+        [(start, _, after), (end, to, _)]
+            if end > start
+                && (to == after
+                    || (to - after <= 4
+                        && spread[after..to].iter().any(|w| ["to", "until", "till", "ends", "end", "ending"].contains(w)))) =>
+        {
+            Some((start, Some((end - start).num_minutes())))
+        }
+        [(start, _, _)] => Some((start, None)),
+        _ => None,
+    };
+    if let ([date], Some((start, minutes))) = (dates.iter().collect::<Vec<_>>().as_slice(), range) {
+        fields.push(("start", json!(format!("{} {}", date.format("%Y-%m-%d"), start.format("%H:%M")))));
+        if let Some(minutes) = minutes.filter(|m| (5..=1440).contains(m)) {
+            fields.push(("minutes", json!(minutes)));
+        }
+    }
+    let mut places = HashSet::new();
+    for sentence in text.split(['.', ';', '\n']) {
+        for marker in [" in ", " at "] {
+            for (index, _) in sentence.match_indices(marker) {
+                let tail = &sentence[index + marker.len()..];
+                if tail.starts_with(|c: char| c.is_uppercase()) {
+                    places.extend(crate::location_fields::location(tail));
+                }
+            }
+        }
+    }
+    if let [place] = places.into_iter().collect::<Vec<_>>().as_slice() {
+        fields.push(("location", json!(place)));
+    }
+    fields
+}
+
+const COMMON: &[&str] = &[
+    "the", "and", "for", "with", "from", "that", "this", "after", "before", "into", "then", "than",
+    "your", "you", "are", "was", "were", "will", "have", "has", "had", "not", "but", "all", "any",
+    "its", "our", "out", "about", "when", "what", "which", "who", "make", "sure", "item", "items",
+    "task", "tasks", "note", "notes", "checklist", "list", "next", "step", "steps",
+];
+
+fn content_words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3 && !COMMON.contains(w))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Labels a request may ask a checklist to keep ("…and owner"), and a source may state
+/// as "Owner: me".
+const LABELS: [&str; 5] = ["owner", "deadline", "location", "budget", "contact"];
+
+/// The value a source gives a label: "Owner: me." → "me".
+fn labelled<'a>(text: &'a str, label: &str) -> Option<&'a str> {
+    let lower = text.to_lowercase();
+    // Offsets found in the lower-case copy must hold in the original.
+    if lower.len() != text.len() {
+        return None;
+    }
+    let marker = format!("{label}:");
+    let mut found = lower.match_indices(&marker).filter(|(at, _)| {
+        *at == 0 || !lower[..*at].ends_with(|c: char| c.is_alphanumeric())
+    });
+    let (at, _) = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    let value = text[at + label.len() + 1..].split(['.', ';', '\n']).next()?.trim();
+    (!value.is_empty() && value.chars().count() <= 60).then_some(value)
+}
+
+/// A checklist made from what this task read keeps only items the request or a source
+/// says: an item most of whose words appear in neither was made up. A labelled fact the
+/// request asks for ("…and owner", with "Owner: me" in the note) is kept. Nothing
+/// changes for a body the user wrote or one with no source; with no item left, nothing
+/// is saved.
+pub fn grounded_checklist(goal: &str, steps: &[Step], body: &str) -> Result<Option<String>, String> {
+    let lines: Vec<&str> = body.lines().filter(|line| !line.trim().is_empty()).collect();
+    if lines.is_empty() || !lines.iter().all(|line| line.starts_with("- [ ] ")) {
+        return Ok(None);
+    }
+    let mut support = content_words(goal);
+    let mut sources = Vec::new();
+    for evidence in steps.iter().filter(|s| s.state == "succeeded" && !s.effect).filter_map(|s| s.evidence.as_ref()) {
+        for record in evidence["records"].as_array().into_iter().flatten() {
+            for field in ["title", "excerpt", "text", "snippet"] {
+                let text = record[field].as_str().unwrap_or_default();
+                support.extend(content_words(text));
+                sources.push(text);
+            }
+        }
+    }
+    let sourced = !sources.is_empty();
+    if !sourced {
+        return Ok(None);
+    }
+    let said = |word: &str| {
+        support.iter().any(|known| {
+            known == word
+                || (word.len() >= 5 && known.len() >= 5 && known.chars().take(5).eq(word.chars().take(5)))
+        })
+    };
+    let mut kept: Vec<String> = lines
+        .iter()
+        .filter(|line| {
+            let words = content_words(&line[6..]);
+            words.is_empty() || words.iter().filter(|w| said(w)).count() * 2 >= words.len()
+        })
+        .map(|line| line.to_string())
+        .collect();
+    if kept.is_empty() {
+        return Err("None of the checklist’s items came from what I read, so nothing was saved. Try asking again.".into());
+    }
+    let asked = crate::completion::unquoted(goal).to_lowercase();
+    let mut added = false;
+    for label in LABELS.iter().filter(|label| asked.split(|c: char| !c.is_alphanumeric()).any(|w| w == **label)) {
+        let values: HashSet<&str> = sources.iter().filter_map(|text| labelled(text, label)).collect();
+        let [value] = values.into_iter().collect::<Vec<_>>()[..] else {
+            continue;
+        };
+        let has = |line: &String| {
+            line.to_lowercase().split(|c: char| !c.is_alphanumeric()).collect::<Vec<_>>().windows(value.split_whitespace().count().max(1))
+                .any(|w| w.join(" ") == value.to_lowercase())
+        };
+        if !kept.iter().any(has) {
+            let mut name = label.to_string();
+            name[..1].make_ascii_uppercase();
+            kept.push(format!("- [ ] {name}: {value}"));
+            added = true;
+        }
+    }
+    Ok((added || kept.len() < lines.len()).then(|| kept.join("\n")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_checklist_from_a_note_drops_items_the_note_never_mentioned() {
+        let goal = "Read my note mentioning QA Project next step, then create a new note titled QA Launch checklist that summarizes the unfinished task, prerequisite and owner as a short checklist.";
+        let mut read = Step {
+            id: "read".into(),
+            tool: "find_notes".into(),
+            arguments: json!({"query":"QA Project next step"}),
+            state: "succeeded".into(),
+            effect: false,
+            proposed_at: "now".into(),
+            approved_at: None,
+            finished_at: Some("now".into()),
+            evidence: None,
+        };
+        read.evidence = Some(json!({"records":[{"title":"QA Project next step","excerpt":"Website launch: design approved; privacy review complete; DNS migration still pending. Next step: update DNS after the backup is verified. Owner: me. Do not change DNS from this note."}]}));
+        let steps = [read];
+        let body = "- [ ] Update DNS after the backup is verified.\n- [ ] Verify the slide order.\n- [ ] Test the microphone.\n- [ ] Owner: me";
+        assert_eq!(
+            grounded_checklist(goal, &steps, body).unwrap().as_deref(),
+            Some("- [ ] Update DNS after the backup is verified.\n- [ ] Owner: me")
+        );
+        // The owner the request asks for, stated in the note as "Owner: me", is kept.
+        assert_eq!(
+            grounded_checklist(goal, &steps, "- [ ] Confirm the backup is verified\n- [ ] Then update DNS").unwrap().as_deref(),
+            Some("- [ ] Confirm the backup is verified\n- [ ] Then update DNS\n- [ ] Owner: me")
+        );
+        assert_eq!(grounded_checklist(goal, &steps, "- [ ] Update DNS once the backup is verified (owner: me)").unwrap(), None);
+        assert!(grounded_checklist(goal, &steps, "- [ ] Test the microphone").is_err());
+        // A body the user wrote, or one with nothing read, is the user's.
+        assert_eq!(grounded_checklist(goal, &steps, "Plain text body").unwrap(), None);
+        assert_eq!(grounded_checklist(goal, &[], "- [ ] Test the microphone").unwrap(), None);
+    }
+
+    #[test]
+    fn a_note_gives_an_event_its_date_times_and_place_only_when_each_is_stated_once() {
+        let fields = note_event("The workshop is on May 20, 2031. It starts at 13:20 and ends at 14:05 in Study Room. There are no attendees to invite.");
+        assert_eq!(
+            fields,
+            vec![("start", json!("2031-05-20 13:20")), ("minutes", json!(45)), ("location", json!("Study Room"))]
+        );
+        assert_eq!(
+            note_event("Design review 20 May 2031, 1:30 pm – 2:15 pm at Harbour Hall."),
+            vec![("start", json!("2031-05-20 13:30")), ("minutes", json!(45)), ("location", json!("Harbour Hall"))]
+        );
+        assert_eq!(note_event("Standup 2031-05-20 09:15")[0], ("start", json!("2031-05-20 09:15")));
+        // No year, two dates, or several unrelated times: nothing is guessed.
+        assert!(note_event("The workshop is on May 20 at 13:20.").is_empty());
+        assert!(note_event("Either May 20, 2031 or May 21, 2031 at 13:20.").iter().all(|(f, _)| *f != "start"));
+        assert!(note_event("May 20, 2031: arrive 09:00, lunch 12:30, leave 17:00.").iter().all(|(f, _)| *f != "start"));
+        // Two places named: the user picks.
+        assert!(note_event("May 20, 2031 at 13:20 in Study Room, or in Room B if busy.").iter().all(|(f, _)| *f != "location"));
+    }
 
     #[test]
     fn literal_monthly_rows_preserve_every_status_amount_and_zero() {

@@ -811,6 +811,7 @@ mod tests {
         assert!(passes("reply-draft","Hi Maya,\nI'd love to join you on Saturday November7 at2pm. I will bring a vegetarian dish. Is parking available?\nBest,\nCasey".replace("November7","November 7").as_str()));
         assert!(!passes("reply-draft","Hi Casey, I will join November 7 at2pm and bring a vegetarian dish. Is parking available?\nBest,\nMaya"));
         assert!(passes("subscription-audit","Cancel Video and Fitness. Keep Music and Storage. Save $33 per month and $396 per year."));
+        assert!(passes("subscription-audit","Cancel: Video, Fitness.\nKeep: Music, Storage.\nYou save 33 per month, which is 33 × 12 = 396 per year."));
         assert!(!passes("subscription-audit","Cancel Music and Storage. Keep Video and Fitness. Save $33 per month and $396 per year."));
         assert!(!passes("subscription-audit","Cancel Video and Fitness. Keep Music and Storage. Save $396 per month and $33 per year."));
         assert!(passes("meeting-actions","- Maya sends revised budget by Friday\n- Leo books venue by Tuesday\n- You approve final agenda by Thursday"));

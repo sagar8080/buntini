@@ -360,6 +360,20 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
     ))
 }
 
+fn period_name(periods: f64) -> &'static str {
+    if periods == 12.0 {
+        "month"
+    } else if periods == 52.0 {
+        "week"
+    } else if periods == 4.0 {
+        "quarter"
+    } else if periods == 365.0 {
+        "day"
+    } else {
+        "period"
+    }
+}
+
 fn sum_status(args: &Value) -> Result<(Value, String), String> {
     let fields = object(args, &["include_status", "items"], &["periods_per_year"])?;
     let status = label(text(fields, "include_status")?)?;
@@ -392,17 +406,7 @@ fn sum_status(args: &Value) -> Result<(Value, String), String> {
         result.push(json!({"label":name,"amount":amount,"status":row_status,"included":included}));
     }
     let yearly = finite(total * periods)?;
-    let period = if periods == 12.0 {
-        "month"
-    } else if periods == 52.0 {
-        "week"
-    } else if periods == 4.0 {
-        "quarter"
-    } else if periods == 365.0 {
-        "day"
-    } else {
-        "period"
-    };
+    let period = period_name(periods);
     let answer = format!("Selected items ({status}): {}.\nOther items kept: {}.\nSelected total per {period}: {}.\nSelected total per year: {} ({} × {}).", if selected.is_empty(){"none".into()}else{selected.join(", ")}, if excluded.is_empty(){"none".into()}else{excluded.join(", ")},display(total),display(yearly),display(total),display(periods));
     Ok((
         json!({"includeStatus":status,"periodsPerYear":periods,"items":result,"selected":selected,"excluded":excluded,"perPeriod":total,"perYear":yearly}),
@@ -435,6 +439,44 @@ pub fn render(evidence: &Value) -> String {
     } else {
         String::new()
     }
+}
+
+/// A status sum asked about as cancelling says what to cancel, what to keep and what
+/// that saves, in the request's own terms.
+pub fn render_for(evidence: &Value, request: &str) -> String {
+    let results = &evidence["results"];
+    let cancelling = request
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|word| word.to_lowercase().starts_with("cancel"));
+    if evidence["tool"] != "sum_by_status" || !cancelling {
+        return render(evidence);
+    }
+    let names = |key: &str| {
+        let names = results[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        if names.is_empty() { "none".into() } else { names.join(", ") }
+    };
+    let (Some(total), Some(yearly), Some(periods)) = (
+        results["perPeriod"].as_f64(),
+        results["perYear"].as_f64(),
+        results["periodsPerYear"].as_f64(),
+    ) else {
+        return render(evidence);
+    };
+    format!(
+        "Cancel: {}.\nKeep: {}.\nYou save {} per {}, which is {} × {} = {} per year.",
+        names("selected"),
+        names("excluded"),
+        display(total),
+        period_name(periods),
+        display(total),
+        display(periods),
+        display(yearly)
+    )
 }
 
 #[cfg(test)]
@@ -483,6 +525,11 @@ mod tests {
         assert_eq!(result["results"]["perPeriod"], 15.0);
         assert_eq!(result["results"]["perYear"], 780.0);
         assert!(render(&result).contains("Other items kept: Library"));
+        assert_eq!(render_for(&result, "What do my inactive ones cost?"), render(&result));
+        assert_eq!(
+            render_for(&result, "How much do I save by cancelling the inactive ones?"),
+            "Cancel: Delivery, Games.\nKeep: Library.\nYou save 15 per week, which is 15 × 52 = 780 per year."
+        );
     }
     #[test]
     fn forged_results_inputs_and_answer_text_never_verify() {
