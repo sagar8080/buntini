@@ -68,7 +68,7 @@ npm run desktop      # run the app with live reload
 ./scripts/check.sh   # build and run every test
 ```
 
-Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). A version-matching tag such as `v0.2.0` requires all checks and dependency audits, a Developer ID certificate and Apple notarization, then prepares a **draft** release with a disk image, zip, build metadata and checksums. A maintainer publishes it after final device acceptance. Prerelease tags must match the prerelease version in all manifests. See the [release runbook](docs/production-readiness.md).
+Every push runs the checks in [GitHub Actions](.github/workflows/ci.yml). A version-matching tag such as `v0.2.1` requires all checks and dependency audits, a Developer ID certificate and Apple notarization, then prepares a **draft** release with a disk image, zip, build metadata and checksums. A maintainer publishes it after final device acceptance. Prerelease tags must match the prerelease version in all manifests. See the [release runbook](docs/production-readiness.md).
 
 | Folder | What’s inside |
 | --- | --- |

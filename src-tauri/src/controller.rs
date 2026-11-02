@@ -3183,7 +3183,7 @@ fn structured_math_answer(flow: &Workflow) -> Option<String> {
     let step = flow.steps.iter().rev().find(|step|step.state=="succeeded" && !step.effect && crate::structured_math::TOOLS.contains(&step.tool.as_str()))?;
     let evidence = step.evidence.as_ref()?;
     if !crate::structured_math::verify(&step.tool,&step.arguments,evidence) { return None; }
-    let answer = crate::structured_math::render(evidence);
+    let answer = crate::structured_math::render_for(evidence, &plain);
     (!answer.trim().is_empty()).then_some(answer)
 }
 

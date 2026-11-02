@@ -2,7 +2,7 @@
 
 ### Actual Apple everyday workflows — November 1, 2026
 
-The current source passes **36 of 38 user workflows** and **3 of 3 boundary checks** automatically, using 91 actual Apple Foundation Models calls, real disposable files/profiles and scoped Notes/Reminders/Calendar records, plus free public APIs. The two automatic failures are checker false negatives with correct answers. v0.2.0 does not have these fixes; on October 29 its source completed 31 of 38 and 2 of 3. See the [current acceptance report](apple-workflow-acceptance.md) for each fix, the regressions found, the evidence and the limits.
+v0.2.1 passes **38 of 38 user workflows** and **3 of 3 boundary checks**, using actual Apple Foundation Models calls, real disposable files/profiles and scoped Notes/Reminders/Calendar records, plus free public APIs. On October 29 the v0.2.0 source completed 31 of 38 and 2 of 3. See the [current acceptance report](apple-workflow-acceptance.md) for each fix, the regressions found, the evidence and the limits.
 
 This records the implementation against the supplied version 0.1 TDD, verified on October 21, 2026. Implemented behavior and completed checks are distinguished from device/provider acceptance. The delivered artifact is the native Tauri macOS app, not the Vite browser preview.
 

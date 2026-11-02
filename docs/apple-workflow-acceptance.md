@@ -1,10 +1,10 @@
 # Apple Intelligence everyday workflow acceptance
 
-November 1, 2026: **36 of 38 user workflows** and **3 of 3 boundary checks** pass automatically, across **91 actual Apple Foundation Models calls**. Three of them Rust now completes with no model call. The two automatic failures are checker false negatives; both answers are correct (see below). On October 29 the same suite completed 31 of 38 and 2 of 3.
+November 2, 2026: **38 of 38 user workflows** and **3 of 3 boundary checks** pass. The controls, public and apps groups come from the November 1 full run, across 91 actual Apple Foundation Models calls. The writing and files groups were run again on November 2, after the last two fixes below, and passed 26 of 26 across 57 calls. Rust completes three of the cases with no model call. On October 29 the same suite completed 31 of 38 and 2 of 3. These fixes ship in **v0.2.1**.
 
-The run used one test binary and helper against the current source, with synthetic source facts and real local files, persistent profiles, Notes/Reminders/Calendar records and free public API responses. These are backend acceptance tests. They do not certify a signed release bundle or permission onboarding on a fresh Mac, and **these fixes are not in v0.2.0**.
+The run used one test binary and helper against the current source, with synthetic source facts and real local files, persistent profiles, Notes/Reminders/Calendar records and free public API responses. These are backend acceptance tests. They do not certify a signed release bundle or permission onboarding on a fresh Mac.
 
-Machine-readable evidence: [the full run](../evals/apple-workflows-all-2026-11-01.jsonl), and baselines of the writing, controls and files groups against the source before these fixes ([writing](../evals/apple-workflows-writing-baseline-2026-11-01.jsonl), [controls](../evals/apple-workflows-controls-baseline-2026-11-01.jsonl), [files](../evals/apple-workflows-files-baseline-2026-11-01.jsonl)). The October 29 evidence is unchanged: [summary and hashes](../evals/apple-workflows-final-summary-2026-10-29.json).
+Machine-readable evidence: [the November 1 full run](../evals/apple-workflows-all-2026-11-01.jsonl), the November 2 [writing](../evals/apple-workflows-writing-2026-11-02.jsonl) and [files](../evals/apple-workflows-files-2026-11-02.jsonl) runs, and baselines of the writing, controls and files groups against the source before these fixes ([writing](../evals/apple-workflows-writing-baseline-2026-11-01.jsonl), [controls](../evals/apple-workflows-controls-baseline-2026-11-01.jsonl), [files](../evals/apple-workflows-files-baseline-2026-11-01.jsonl)). The October 29 evidence is unchanged: [summary and hashes](../evals/apple-workflows-final-summary-2026-10-29.json).
 
 ## Fixed since October 29
 
@@ -33,10 +33,14 @@ A baseline of the current source before these fixes also failed three cases that
 | `create-training-calendar-event` | The model moved 14:15 to 15:15. | An event whose request gives the date and times binds them. Completed with no model call. |
 | `create-library-return-reminder` | The model didn't subtract the 15-minute lead. | A reminder's due time is the request's time less the lead it names. |
 
-## Checker false negatives
+## Fixed on November 2
 
-- `subscription-audit`: the answer cancels Video and Fitness, keeps Music and Storage, and saves 33 a month and 396 a year, but says "Selected items (unused)" rather than "cancel". The same wording was adjudicated as a pass on October 29.
-- `memory_dietary_dinner`: one vegetarian, peanut-free dinner. The checker didn't count recipe steps that say "cooked" or "fluff" rather than an exact verb from its list. It now matches verb stems, with a unit test; it was not re-run live after that change.
+The November 1 run's two automatic failures had correct answers:
+
+- `subscription-audit` cancelled Video and Fitness and saved 33 a month, but labelled them "Selected items (unused)" and "Selected total". A sum asked about as cancelling now says "Cancel: Video, Fitness. Keep: Music, Storage. You save 33 per month, which is 33 × 12 = 396 per year."
+- `memory_dietary_dinner` gave one vegetarian, peanut-free dinner, but the checker didn't count recipe steps that say "cooked" or "fluff". It now matches verb stems.
+
+Both pass in the November 2 runs.
 
 ## How cases count
 
@@ -45,8 +49,8 @@ A case passes on its own checks. One that Rust completes with no Foundation Mode
 ## Verification
 
 - Live: the full suite above. All 36 Notes, Reminders and Calendar test records created across the three apps runs were removed again; Notes may keep copies in Recently Deleted.
-- Automated: 703 Rust tests (including new tests for each fix), 72 worker, 85 frontend, 24 release-tooling tests and 217 helper contract assertions pass, as do the native audio, live speech and scenario checks. Three `local::tests` document-reading tests fail intermittently when the whole Rust suite runs in parallel, on `main` as well; they pass on their own.
+- Automated: 703 Rust tests (including new tests for each fix), 72 worker, 85 frontend, 24 release-tooling tests and 217 helper contract assertions pass, as do the native audio, live speech and scenario checks. The document-reading tests that failed intermittently were waiting on macOS's first-launch check of each freshly written fake helper. They now share one checked launcher, and the whole Rust suite passed three runs in a row.
 
 ## Release boundary
 
-These fixes need review, a new release candidate, signing and notarization, and acceptance of that candidate on a fresh Mac. Keyed and cloud providers, and interactive microphone, Accessibility and browser checks, remain outside this local, free-provider run. No paid provider calls, email sending, purchases or personal content reads were used.
+v0.2.1 is built, signed and notarized by CI from its tag. It still needs acceptance on a fresh Mac before it is published. Keyed and cloud providers, and interactive microphone, Accessibility and browser checks, remain outside this local, free-provider run. No paid provider calls, email sending, purchases or personal content reads were used.
