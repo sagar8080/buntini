@@ -41,7 +41,10 @@ quota, so weather stays on Open-Meteo.
 - Reading recent messages needs Full Disk Access (the chat database), so it waits.
 
 **M3 TV and Photos**
-- TV: now playing and playback, like Music.
+- TV (this branch): a third player beside Music and Spotify, allowed in Settings → Apps.
+  "What am I watching?", "pause the show", "next episode", "play Severance on TV" (from
+  the TV library). Changes go through the same approval and before-and-after check of
+  the player as Music. Streaming apps inside TV that don't report what's on stay out.
 - Photos: find photos by date, place or album (PhotoKit), and show them.
 
 **M4 Home and more**

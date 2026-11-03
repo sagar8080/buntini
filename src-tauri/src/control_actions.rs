@@ -99,7 +99,7 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
         }
         "remember" => ("Remember this?".into(), vec![field("fact", "Fact or preference")], "Saved on your Mac for future conversations. Remove it anytime in Settings → Privacy.".into()),
         "set_timer" => ("Set this timer?".into(), vec![field("seconds", "Duration in seconds")], "The timer is saved across restarts. Alerts require Buntini running and your Mac awake; overdue timers appear when it returns. Desktop alerts need notification permission.".into()),
-        "control_music" => ("Change music playback?".into(), vec![field("app", "Player (music or spotify)"), field("action", "Action (play, pause, next or previous)"), field("query", "Song or playlist (optional for play)")], "Changes playback in the selected app and reads its resulting state. The player must be allowed in Settings → Apps. Named Spotify search is not supported by this approved workflow.".into()),
+        "control_music" => ("Change music playback?".into(), vec![field("app", "Player (music, spotify or tv)"), field("action", "Action (play, pause, next or previous)"), field("query", "Song or playlist (optional for play)")], "Changes playback in the selected app and reads its resulting state. The player must be allowed in Settings → Apps. Named Spotify search is not supported by this approved workflow.".into()),
         _ => ("Switch to this browser tab?".into(), vec![field("browser", "Browser"), field("query", "Words in the tab title or address")], "Switches only if one tab matches in the selected browser, then verifies the front window and selected tab. Private Chromium windows are skipped. Safari does not identify private windows.".into()),
     }
 }
@@ -319,7 +319,7 @@ const MUSIC_STATE: &str = r#"on run argv
     if currentState is not "stopped" then
       my putField(fields, "trackId", TRACK_ID of current track as text)
       my putField(fields, "title", name of current track as text)
-      my putField(fields, "artist", artist of current track as text)
+      my putField(fields, "artist", ARTIST of current track as text)
       my putField(fields, "position", player position)
       PLAYLIST_READ
     end if
@@ -388,7 +388,7 @@ async fn script(source: &str, args: &[String], cancel: &Arc<AtomicBool>) -> Resu
 }
 async fn music_state(app: &str, cancel: &Arc<AtomicBool>) -> Result<MusicState, String> {
     let source = MUSIC_STATE
-        .replace("APP", if app == "spotify" { "Spotify" } else { "Music" })
+        .replace("APP", match app { "spotify" => "Spotify", "tv" => "TV", _ => "Music" })
         .replace(
             "TRACK_ID",
             if app == "spotify" {
@@ -397,6 +397,8 @@ async fn music_state(app: &str, cancel: &Arc<AtomicBool>) -> Result<MusicState, 
                 "persistent ID"
             },
         )
+        // A show is to TV what an artist is to Music.
+        .replace("ARTIST", if app == "tv" { "show" } else { "artist" })
         .replace(
             "PLAYLIST_READ",
             if app == "music" {

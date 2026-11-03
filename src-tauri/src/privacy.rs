@@ -31,7 +31,7 @@ pub enum Share {
     Calendar,
     /// Notes from the Notes app.
     Notes,
-    /// What's playing in Music or Spotify.
+    /// What's playing in Music, Spotify or TV.
     Music,
     /// Open browser tabs and the page showing in Safari.
     Browser,

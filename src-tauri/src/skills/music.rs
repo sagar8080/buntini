@@ -1,5 +1,6 @@
 //! Music: play a song, artist or playlist you name, pause, resume, skip, go back and say
-//! what's playing, in Spotify or the Music app (whichever you allowed in Settings → Apps).
+//! what's playing, in Spotify or the Music app (whichever you allowed in Settings → Apps),
+//! and the same for shows and films in the TV app.
 //! Spotify can't search from AppleScript, so Buntini opens its search and presses play on
 //! the best match through the macOS accessibility API, then reports what Spotify is
 //! actually playing.
@@ -12,7 +13,7 @@ pub struct Command {
     pub action: &'static str,
     /// What to play, in the user's own words.
     pub query: Option<String>,
-    /// "spotify" or "music" when the user named one.
+    /// "spotify", "music" or "tv" when the user named one.
     pub app: Option<&'static str>,
     /// A retry ("that's the wrong song"): skip whatever is playing now.
     pub retry: bool,
@@ -60,10 +61,13 @@ fn last_request(recent: &[String]) -> Option<Command> {
 /// `text` and `recent` (the user's last few messages, newest first) come from
 /// `skills::words`.
 pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
+    let words: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
     let app = if text.contains("spotify") {
         Some("spotify")
     } else if text.contains("apple music") || text.contains("music app") {
         Some("music")
+    } else if words.iter().any(|word| ["tv", "show", "episode", "episodes", "series"].contains(word)) {
+        Some("tv")
     } else {
         None
     };
@@ -98,6 +102,8 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
     let question = without_politeness(text);
     let question = question
         .strip_suffix(" on spotify")
+        .or_else(|| question.strip_suffix(" on tv"))
+        .or_else(|| question.strip_suffix(" on the tv"))
         .or_else(|| question.strip_suffix(" in spotify"))
         .or_else(|| question.strip_suffix(" on apple music"))
         .or_else(|| question.strip_suffix(" in the music app"))
@@ -119,6 +125,21 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
     .contains(&question)
     {
         return command("now_playing", None);
+    }
+    if [
+        "what am i watching",
+        "what's on",
+        "whats on",
+        "what show is this",
+        "what episode is this",
+        "what is this show",
+        "what's this show",
+        "what movie is this",
+        "what film is this",
+    ]
+    .contains(&question)
+    {
+        return Some(Command { action: "now_playing", query: None, app: Some("tv"), retry: false });
     }
     if let Some((verb, rest)) = from_verb(
         text,
@@ -149,6 +170,16 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
             "the music app",
             "in the music app",
             "on the music app",
+            "the show",
+            "the episode",
+            "episode",
+            "to the next episode",
+            "the movie",
+            "the film",
+            "tv",
+            "the tv",
+            "on tv",
+            "on the tv",
         ]
         .contains(&target);
         return match verb {
@@ -199,6 +230,10 @@ fn play(rest: &str, recent: &[String], app: Option<&'static str>) -> Option<Comm
             " in apple music",
             " in the music app",
             " on the music app",
+            " on tv",
+            " on the tv",
+            " in the tv app",
+            " on apple tv",
             " right now",
             " now",
             " again",
@@ -216,6 +251,15 @@ fn play(rest: &str, recent: &[String], app: Option<&'static str>) -> Option<Comm
         query = query.strip_prefix(lead).unwrap_or(&query).to_string();
     }
     let query = query.trim().to_string();
+    // Shows and films play from the TV library; "the next episode" is a skip.
+    if app == Some("tv") || rest.ends_with(" on tv") || rest.ends_with(" in the tv app") || rest.ends_with(" on apple tv") {
+        let app = Some("tv");
+        return match query.as_str() {
+            "the next episode" | "next episode" => Some(Command { action: "next", query: None, app, retry: false }),
+            "" | "it" | "the show" | "the episode" | "the movie" | "the film" | "tv" => Some(Command { action: "play", query: None, app, retry: false }),
+            _ => Some(Command { action: "play", query: Some(query), app, retry: false }),
+        };
+    }
     if [
         "video",
         "game",
@@ -263,11 +307,7 @@ pub async fn run(command: Command, context: &Context<'_>) -> Result<Outcome, Str
         crate::apps::allowed(context.settings, player) && crate::apps::installed(app)
     });
     if !usable {
-        let name = if player == "spotify" {
-            "Spotify"
-        } else {
-            "Music"
-        };
+        let name = crate::apps::app(player).map_or("Music", |app| app.name);
         return Err(format!(
             "{name} isn’t allowed yet. You can allow it in Settings → Apps."
         ));
@@ -397,6 +437,19 @@ mod tests {
             &words(prompt),
             &previous.map(words).into_iter().collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn shows_and_films_go_to_the_tv_app() {
+        let tv = |action: &'static str, query: Option<&str>| Some(Command { action, query: query.map(str::to_string), app: Some("tv"), retry: false });
+        assert_eq!(ask("What am I watching?", None), tv("now_playing", None));
+        assert_eq!(ask("what show is this", None), tv("now_playing", None));
+        assert_eq!(ask("Pause the show", None), tv("pause", None));
+        assert_eq!(ask("skip to the next episode", None), tv("next", None));
+        assert_eq!(ask("play the next episode", None), tv("next", None));
+        assert_eq!(ask("Play Severance on TV", None), tv("play", Some("severance")));
+        assert_eq!(ask("play the show", None), tv("play", None));
+        assert_eq!(ask("Play Coldplay", None).unwrap().app, None, "music stays music");
     }
 
     #[test]
