@@ -31,6 +31,8 @@ test('a Mac without Apple Intelligence starts on another brain and cannot pick i
   assert.equal(unsupported.backend, 'cloud');
   assert.match(blocker('brain', { ...unsupported, backend: 'apple' }, diagnostics('unsupported')), /Choose a local or cloud model/);
   assert.match(message('brain', unsupported, diagnostics('unsupported')), /isn’t ready on this Mac/);
+  assert.equal(unsupported.cloudProvider, 'chatgpt', 'no key saved, so their ChatGPT plan');
+  assert.equal(initialAnswers(settings, diagnostics('unsupported', ['anthropic'])).cloudProvider, 'anthropic', 'a saved key keeps its provider');
 });
 
 test('each step says what is missing', () => {
@@ -39,7 +41,8 @@ test('each step says what is missing', () => {
   assert.match(blocker('hello', { ...answers, assistantName: ' ' }, diagnostics('available')), /name/);
   assert.match(blocker('brain', { ...answers, backend: 'mlx' }, diagnostics('available')), /Python environment/);
   assert.equal(blocker('brain', { ...answers, backend: 'mlx', pythonPath: '/env/bin/python', modelPath: '/models/qwen' }, diagnostics('available')), '');
-  const cloud = { ...answers, backend: 'cloud' as const };
+  assert.match(blocker('brain', { ...answers, backend: 'cloud' }, diagnostics('available')), /Sign in with ChatGPT/, 'no key saved: their ChatGPT plan first');
+  const cloud = { ...answers, backend: 'cloud' as const, cloudProvider: 'anthropic' as const };
   assert.match(blocker('brain', cloud, diagnostics('available')), /API key/);
   assert.equal(blocker('brain', cloud, diagnostics('available', ['anthropic'])), '', 'a key saved earlier is enough');
   assert.equal(blocker('brain', { ...cloud, cloudKey: 'k' }, diagnostics('available')), '', 'a pasted key is enough; there is no cap or price to type');

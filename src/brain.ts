@@ -22,6 +22,12 @@ export function appleSettingsPane(reason?: string): 'siri' | 'language' | null {
   return reason === 'appleIntelligenceNotEnabled' || reason === 'modelStuck' ? 'siri' : null;
 }
 
+/** Whether to offer ChatGPT in Apple Intelligence's place: once Buntini knows it can't
+    answer here yet. */
+export function offersChatGPT(reason?: string): boolean {
+  return reason !== undefined && reason !== 'checking' && !appleStatus(reason).ready;
+}
+
 // Mirrors src-tauri/src/cloud.rs PROVIDERS (suggested models and list prices, October 2026).
 export const cloudProviders: { id: CloudProvider; name: string; model: string; input: number; output: number; keys: string }[] = [
   { id: 'anthropic', name: 'Anthropic', model: 'claude-opus-5-5', input: 4, output: 20, keys: 'console.anthropic.com' },

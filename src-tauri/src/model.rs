@@ -472,14 +472,14 @@ pub fn apple_may_change(reason: &str) -> bool {
 /// What to tell the user when Apple Intelligence can't run.
 pub fn apple_advice(reason: &str) -> String {
     match reason {
-        "deviceNotEligible" => "This Mac doesn’t support Apple Intelligence. Choose a local or cloud model in Settings → Brain.",
+        "deviceNotEligible" => "This Mac doesn’t support Apple Intelligence. Sign in with ChatGPT or choose another brain in Settings → Brain.",
         "appleIntelligenceNotEnabled" => "Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri, then try again.",
-        "modelNotReady" => "Apple Intelligence is still downloading its model. Try again in a few minutes.",
-        "modelStuck" => "Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, choose a local or cloud model in Settings → Brain.",
+        "modelNotReady" => "Apple Intelligence is still downloading its model. Try again in a few minutes, or sign in with ChatGPT in Settings → Brain meanwhile.",
+        "modelStuck" => "Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, sign in with ChatGPT or choose another brain in Settings → Brain.",
         "languageNotSupported" => "Apple Intelligence doesn’t speak this Mac’s language yet. In System Settings → General → Language & Region, put a supported language such as English (India) first, then turn on Apple Intelligence.",
-        "unsupported" => "Apple Intelligence needs macOS 26 on an Apple silicon Mac. Choose a local or cloud model in Settings → Brain.",
+        "unsupported" => "Apple Intelligence needs macOS 26 on an Apple silicon Mac. Sign in with ChatGPT or choose another brain in Settings → Brain.",
         "missing" => "The Apple Intelligence helper is missing from this installation. Reinstall Buntini or choose another brain in Settings.",
-        _ => "Apple Intelligence isn’t available right now. Choose a local or cloud model in Settings → Brain.",
+        _ => "Apple Intelligence isn’t available right now. Sign in with ChatGPT or choose another brain in Settings → Brain.",
     }
     .into()
 }

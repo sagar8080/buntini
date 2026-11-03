@@ -26,10 +26,12 @@ const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady',
 export function initialAnswers(settings: Settings, diagnostics: Diagnostics): Answers {
   const appleUsable = appleLater.includes(diagnostics.appleIntelligence);
   const backend: ModelBackend = settings.modelBackend === 'apple' && !appleUsable ? (settings.modelPath ? 'mlx' : 'cloud') : settings.modelBackend;
+  // Without a saved key, the cloud brain most people can use at once is their ChatGPT plan.
+  const keyless = settings.cloudProvider !== 'chatgpt' && !diagnostics.cloudKeys?.includes(settings.cloudProvider);
   return {
     userName: settings.userName, assistantName: settings.assistantName, coat: settings.catCoat,
     backend, pythonPath: settings.pythonPath, modelPath: settings.modelPath,
-    cloudProvider: settings.cloudProvider, cloudKey: '',
+    cloudProvider: keyless ? 'chatgpt' : settings.cloudProvider, cloudKey: '',
     roam: settings.petRoam, awareness: settings.petAwareness, nudges: settings.petNudges,
   };
 }
