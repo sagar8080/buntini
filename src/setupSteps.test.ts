@@ -51,8 +51,9 @@ test('each step says what is missing', () => {
 test('answers read naturally and become settings and keys', () => {
   const answers = { ...initialAnswers(settings, diagnostics('available')), userName: ' Sam ', assistantName: 'Miso', coat: 'calico' as const, backend: 'cloud' as const, cloudProvider: 'openai' as const, cloudKey: ' sk-1 ', awareness: false };
   assert.equal(reply('hello', answers), 'Call me Sam. You’re Miso, my calico.');
-  assert.equal(reply('brain', answers, settings), 'Use OpenAI, up to $5 a month.');
-  assert.equal(reply('brain', answers, { cloudBudgetUsd: 0 }), 'Use OpenAI, up to $5 a month.', 'no saved cap: the default');
+  assert.equal(reply('brain', answers, settings), 'Use OpenAI, up to $5 a month. It sees nothing personal.');
+  assert.equal(reply('brain', answers, { cloudBudgetUsd: 0 }), 'Use OpenAI, up to $5 a month. It sees nothing personal.', 'no saved cap: the default');
+  assert.equal(reply('brain', { ...answers, cloudProvider: 'chatgpt', shares: ['files'] }), 'Use ChatGPT with my own plan. It may see my files.');
   assert.match(message('done', answers, diagnostics('available')), /^All set, Sam! Ask me anything\.$/);
   const saved = applyAnswers({ ...settings, cloudModel: 'claude-old', freeTierOnly: false, dailySearchLimit: 12 }, answers);
   assert.equal(saved.userName, 'Sam');
@@ -69,7 +70,7 @@ test('answers read naturally and become settings and keys', () => {
   const chatgpt = { ...answers, cloudProvider: 'chatgpt' as const, cloudKey: '' };
   assert.match(blocker('brain', chatgpt, diagnostics('available')), /Sign in with ChatGPT/);
   assert.equal(blocker('brain', chatgpt, { ...diagnostics('available'), chatgptAccount: 'sam@example.com' }), '', 'signed in is enough; no key or cap');
-  assert.equal(reply('brain', chatgpt), 'Use ChatGPT with my own plan.');
+  assert.equal(reply('brain', chatgpt), 'Use ChatGPT with my own plan. It sees nothing personal.');
 });
 
 test('welcome shortcuts ask for the apps they read instead of dead-ending', () => {
@@ -79,4 +80,12 @@ test('welcome shortcuts ask for the apps they read instead of dead-ending', () =
   assert.deepEqual(shortcutNeeds('day', ['music'])?.apps, ['calendar', 'reminders']);
   assert.equal(shortcutNeeds('day', ['reminders']), null, 'the brief works with any one of its apps');
   assert.equal(shortcutNeeds('day', ['mail']), null);
+});
+
+test('what a cloud brain may see is saved only when a cloud brain was chosen', () => {
+  const start = { ...settings, externalShares: ['music'] } as Settings;
+  const answers = initialAnswers(start, diagnostics('unsupported'));
+  assert.deepEqual(answers.shares, ['music'], 'starts from the Privacy choices');
+  assert.deepEqual(applyAnswers(start, { ...answers, backend: 'cloud', shares: ['mail', 'files'] }).externalShares, ['mail', 'files']);
+  assert.deepEqual(applyAnswers(start, { ...answers, backend: 'apple', shares: ['mail'] }).externalShares, ['music']);
 });

@@ -1,6 +1,7 @@
 // First-run setup, guided by Buntini in the chat bubble. Pure step logic: what Buntini
 // says, what the user's answer reads like, what blocks a step, and the settings it saves.
 import { appleStatus, cloudProviders } from './brain.ts';
+import { sharedSentence } from './cloudShares.ts';
 import { coats } from './petOptions.ts';
 import type { CatCoat, CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
@@ -15,6 +16,8 @@ export interface Answers {
   userName: string; assistantName: string; coat: CatCoat;
   backend: ModelBackend; pythonPath: string; modelPath: string;
   cloudProvider: CloudProvider; cloudKey: string;
+  /** What a cloud brain may see (Settings::externalShares). */
+  shares: string[];
   roam: boolean; awareness: boolean; nudges: boolean;
 }
 
@@ -31,7 +34,7 @@ export function initialAnswers(settings: Settings, diagnostics: Diagnostics): An
   return {
     userName: settings.userName, assistantName: settings.assistantName, coat: settings.catCoat,
     backend, pythonPath: settings.pythonPath, modelPath: settings.modelPath,
-    cloudProvider: keyless ? 'chatgpt' : settings.cloudProvider, cloudKey: '',
+    cloudProvider: keyless ? 'chatgpt' : settings.cloudProvider, cloudKey: '', shares: settings.externalShares ?? [],
     roam: settings.petRoam, awareness: settings.petAwareness, nudges: settings.petNudges,
   };
 }
@@ -84,8 +87,8 @@ export function reply(step: Step, answers: Answers, settings?: Pick<Settings, 'c
       if (answers.backend === 'apple') return 'Use Apple Intelligence.';
       if (answers.backend === 'mlx') return 'Use my local MLX model.';
       const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
-      if (provider.id === 'chatgpt') return 'Use ChatGPT with my own plan.';
-      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month.`;
+      if (provider.id === 'chatgpt') return `Use ChatGPT with my own plan. ${sharedSentence(answers.shares)}`;
+      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month. ${sharedSentence(answers.shares)}`;
     }
     case 'roam': return answers.roam ? `Roam around${answers.awareness ? ' and notice what I’m up to' : ''}.` : 'Stay put for now.';
     case 'done': return '';
@@ -105,6 +108,8 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
     // A new provider starts on its suggested model and list prices; the cap carries over.
     cloudProvider: answers.cloudProvider, cloudModel: sameProvider ? settings.cloudModel : '', cloudBudgetUsd: cloudBudget(settings),
     cloudInputPrice: sameProvider ? settings.cloudInputPrice : provider.input, cloudOutputPrice: sameProvider ? settings.cloudOutputPrice : provider.output,
+    // Only a cloud brain was asked; choosing another leaves the Privacy choices as they were.
+    externalShares: answers.backend === 'cloud' ? answers.shares : settings.externalShares,
     petRoam: answers.roam, petAwareness: answers.awareness, petNudges: answers.awareness && answers.nudges,
   };
 }

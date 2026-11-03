@@ -3,6 +3,8 @@ import { Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
+import Toggle from './Toggle';
+import { groupShared, setGroup, shareGroups } from './cloudShares.ts';
 import { command, errorMessage } from './bridge';
 import { appleSettingsPane, appleStatus, cloudProviders, friendlyStatus, offersChatGPT } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
@@ -52,9 +54,11 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
     try { await onKey(provider.id, value); setKey(''); } catch (error) { onError(errorMessage(error)); } finally { setSaving(false); }
   }
   const providers = <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{cloudProviders.map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.name}</button>)}</div>;
+  const shares = <CloudShares name={provider.name} shared={draft.externalShares} onChange={value => update('externalShares', value)} />;
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
     {providers}
     <ChatGPTAccount account={diagnostics.chatgptAccount} onChange={onRefresh} onError={onError} onNotice={onNotice} />
+    {shares}
     {draft.cloudModel.trim() && <div className="row-actions"><span className="field-help">Using {draft.cloudModel.trim()}</span><button type="button" className="text-button" onClick={() => update('cloudModel', '')}>Use default</button></div>}
   </div>;
   return <div className="cloud-settings">
@@ -66,7 +70,18 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
       <div className={`usage-track ${ratio >= .8 ? 'is-high' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={draft.cloudBudgetUsd} aria-valuenow={spend} aria-label="Cloud spending this month"><i style={{ width: `${ratio * 100}%` }} /><b style={{ left: '80%' }} /></div>
     </div>
     <label className="inline-field"><span>Monthly cap ($)</span><input aria-label="Monthly cloud spending cap in USD" type="number" min="0" max="10000" step="0.5" value={draft.cloudBudgetUsd} onChange={event => update('cloudBudgetUsd', Number(event.target.value))} /></label>
+    {shares}
     {named && <div className="row-actions"><span className="field-help">Using {named}</span><button type="button" className="text-button" onClick={() => { update('cloudModel', ''); update('cloudInputPrice', provider.input); update('cloudOutputPrice', provider.output); }}>Use default</button></div>}
+  </div>;
+}
+
+/** What this cloud brain may see, asked where it is picked. */
+export function CloudShares({ name, shared, onChange, setup = false }: { name: string; shared: string[]; onChange: (shared: string[]) => void; setup?: boolean }) {
+  return <div className="cloud-shares" role="group" aria-label={`${name} may see`}>
+    <span className="setup-label cloud-shares-label">{name} may see</span>
+    {shareGroups.map(group => setup
+      ? <label key={group.id} className="notification-choice cloud-share"><input type="checkbox" checked={groupShared(group, shared)} onChange={event => onChange(setGroup(group, shared, event.target.checked))} /><span>{group.label}</span></label>
+      : <Toggle key={group.id} label={group.label} checked={groupShared(group, shared)} onChange={value => onChange(setGroup(group, shared, value))} />)}
   </div>;
 }
 

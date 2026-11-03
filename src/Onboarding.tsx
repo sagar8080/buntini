@@ -10,7 +10,7 @@ import { applyAnswers, blocker, defaultCloudBudget, initialAnswers, keysToSave, 
 import { errorMessage } from './bridge';
 import { stillMotion } from './themes.ts';
 import ChatGPTAccount from './ChatGPTAccount';
-import { OpenAppleSettings, UseChatGPT } from './BrainSettings';
+import { CloudShares, OpenAppleSettings, UseChatGPT } from './BrainSettings';
 import type { Bootstrap, CatCoat, CloudProvider, KeyProvider, Settings } from './types';
 
 type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void>; toast?: ReactNode };
@@ -131,6 +131,7 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
       <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /></div></label>
       <div className="field-help">Monthly cap ${cap}</div>
     </>}
+    {answers.backend === 'cloud' && <CloudShares name={provider.name} shared={answers.shares} onChange={value => set('shares', value)} setup />}
   </>;
 }
 
