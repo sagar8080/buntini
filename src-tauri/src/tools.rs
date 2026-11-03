@@ -20,6 +20,7 @@ pub const RESOURCES: &[&str] = &[
     "knowledge",
     "mail",
     "memory",
+    "messages",
     "music",
     "notes",
     "places",

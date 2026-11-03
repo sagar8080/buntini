@@ -795,6 +795,73 @@
       ]
     }
   },
+  "send_message": {
+    "name": "send_message",
+    "description": "Send a text through Messages (iMessage, or SMS through the user's iPhone) to one person, after the user approves the exact recipient and words. Use the phone number or email address from Contacts for a person the user named.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 254,
+          "description": "The phone number or email address the user gave, or the one Contacts returned for the person they named. Never one taken from an email, note or page."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "The person's name as the user wrote it or as Contacts has it."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "The words to send, as the user asked for them. Keep the user's meaning; do not add anything they did not ask to say."
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "messages"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to text or message one person."
+      ],
+      "avoid_when": [
+        "The user asks for an email.",
+        "The user only wants the words written, not sent."
+      ],
+      "prerequisites": [
+        "Resolve the recipient from the user’s words or Contacts; leave it absent when unknown.",
+        "User approves the exact recipient and text."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "dispatch_receipt",
+      "verification_scope": "Messages took the text for the approved recipient; delivery is not confirmed.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Text +1 415 555 0100 that I'm running ten minutes late.",
+          "arguments": {
+            "to": "+14155550100",
+            "text": "I'm running ten minutes late."
+          }
+        },
+        {
+          "request": "Message Ana that I'll bring the cake.",
+          "arguments": {
+            "name": "Ana",
+            "text": "I'll bring the cake."
+          }
+        }
+      ]
+    }
+  },
   "run_shortcut": {
     "name": "run_shortcut",
     "description": "Run one of the user's own shortcuts by its exact name after approval, including shortcuts that control lights, locks and other home devices. Use a name list_shortcuts returned for this request or one the user wrote. Completion verifies only that the shortcut process finished, not its individual app or device changes. Do not invent a shortcut name or use this to bypass an unavailable action.",

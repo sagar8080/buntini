@@ -419,6 +419,18 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("create_price_watch")
                 }
+                // A text to one person through Messages; never email, WhatsApp or the like.
+                "text" | "imessage" | "message"
+                    if tokens.len() > 1 && !has(&["email", "mail", "whatsapp", "slack", "telegram", "signal"]) =>
+                {
+                    Some("send_message")
+                }
+                "send"
+                    if has(&["text", "texts", "imessage", "sms"])
+                        && !has(&["email", "mail", "whatsapp", "slack", "telegram", "signal"]) =>
+                {
+                    Some("send_message")
+                }
                 "remind" if tokens.get(1) == Some(&"me") => Some("add_reminder"),
                 "add" | "create" | "set" | "make" if has(&["reminder", "reminders"]) => {
                     Some("add_reminder")
@@ -1883,5 +1895,15 @@ mod tests {
         assert_eq!(grounded_personal_answer(prompt, answer, &[read]), answer);
         // With nothing read, the same claim about an appointment still goes.
         assert_ne!(grounded_personal_answer(prompt, answer, &[]), answer);
+    }
+
+    #[test]
+    fn texting_one_person_is_a_text_and_other_apps_are_not() {
+        for prompt in ["Text mom that I'm running late", "message Raj about dinner", "Send a text to Ana saying hi", "imessage Sam that I'm outside"] {
+            assert_eq!(requested_actions(prompt), (vec!["send_message"], false), "{prompt}");
+        }
+        for prompt in ["Send an email to Ana", "Message Raj on WhatsApp", "text"] {
+            assert!(!requested_actions(prompt).0.contains(&"send_message"), "{prompt}");
+        }
     }
 }

@@ -3599,7 +3599,7 @@ where
         }
         // Several people in Contacts match the name the user gave: they pick the address
         // in the sheet, so an address the model chose is left out rather than shown.
-        let choices = if name == "draft_email" {
+        let choices = if ["draft_email", "send_message"].contains(&name.as_str()) {
             flow.contract.recipient_choices(&flow.steps)
         } else {
             vec![]

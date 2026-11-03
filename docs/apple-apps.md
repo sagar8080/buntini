@@ -31,8 +31,13 @@ quota, so weather stays on Open-Meteo.
   ends, or the places numbered as listed. Clicking it opens the same view in Maps. The
   latest 40 maps are kept in the cache.
 
-**M2 Messages**
-- `send_message` to a person found in Contacts, through Messages, always approved.
+**M2 Messages** (this branch)
+- `send_message`: "text mom that I'm late", "send a text to Ana saying …". The person
+  is looked up in Contacts (a phone number first, else an address iMessage can use);
+  several numbers are offered in the sheet. Nothing sends until the user approves the
+  exact recipient and words. Messages is allowed in Settings → Apps like any other app.
+- The receipt says Messages took the text; delivery isn't confirmed, and an unclear
+  result is never sent again automatically.
 - Reading recent messages needs Full Disk Access (the chat database), so it waits.
 
 **M3 TV and Photos**

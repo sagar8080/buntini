@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 
+/// Writes addressed to one person, whose recipient Contacts may supply.
+const RECIPIENT_TOOLS: [&str; 2] = ["draft_email", "send_message"];
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TaskContract {
@@ -1245,13 +1248,13 @@ impl TaskContract {
         });
         true
     }
-    /// The next requested email draft while nothing the user wrote, approved or had on
-    /// screen has fixed its recipient. Only then may Contacts be read for it.
+    /// The next requested email draft or text while nothing the user wrote, approved or
+    /// had on screen has fixed its recipient. Only then may Contacts be read for it.
     fn awaiting_recipient(&self) -> Option<&Outcome> {
         self.next_outcome().filter(|o| {
             o.kind == "write"
                 && o.status == "ready"
-                && o.tool.as_deref() == Some("draft_email")
+                && o.tool.as_deref().is_some_and(|tool| RECIPIENT_TOOLS.contains(&tool))
                 && !self
                     .constraints
                     .iter()
@@ -1261,8 +1264,8 @@ impl TaskContract {
     /// The person to look up before drafting, when the user named the recipient and no
     /// lookup for that name has run yet. The controller reads Contacts with it itself.
     pub fn contact_lookup(&self, steps: &[Step]) -> Option<String> {
-        self.awaiting_recipient()?;
-        if steps.iter().any(|s| s.tool == "draft_email") {
+        let tool = self.awaiting_recipient()?.tool.clone()?;
+        if steps.iter().any(|s| s.tool == tool) {
             return None;
         }
         let name = crate::source_fields::named_recipient(&self.current_request)?;
@@ -1276,18 +1279,21 @@ impl TaskContract {
     /// person with exactly one address matched a name the user wrote. Once a draft has
     /// been proposed, the recipient is the user's to change in the approval sheet.
     fn bind_contact_recipient(&mut self, steps: &[Step]) {
-        if steps.iter().any(|s| s.tool == "draft_email") {
+        let Some(tool) = self.awaiting_recipient().and_then(|o| o.tool.clone()) else {
+            return;
+        };
+        if steps.iter().any(|s| s.tool == tool) {
             return;
         }
         let crate::source_fields::ContactRecipient::One {
             address,
             step_id,
             record_id,
-        } = crate::source_fields::contact_recipient(&self.current_request, steps)
+        } = crate::source_fields::contact_recipient_for(&tool, &self.current_request, steps)
         else {
             return;
         };
-        if self.bind_write_field("draft_email", "to", Value::String(address), "contact_record") {
+        if self.bind_write_field(&tool, "to", Value::String(address), "contact_record") {
             if let Some(constraint) = self.constraints.last_mut() {
                 constraint.record =
                     Some(json!({"app":"contacts","stepId":step_id,"recordId":record_id}));
@@ -1297,10 +1303,10 @@ impl TaskContract {
     /// Addresses the user can pick from when several people or addresses matched the
     /// person they named. Empty once the recipient is fixed or there is nothing to pick.
     pub fn recipient_choices(&self, steps: &[Step]) -> Vec<crate::source_fields::ContactChoice> {
-        if self.awaiting_recipient().is_none() {
+        let Some(tool) = self.awaiting_recipient().and_then(|o| o.tool.clone()) else {
             return vec![];
-        }
-        match crate::source_fields::contact_recipient(&self.current_request, steps) {
+        };
+        match crate::source_fields::contact_recipient_for(&tool, &self.current_request, steps) {
             crate::source_fields::ContactRecipient::Several(choices) => choices,
             _ => vec![],
         }
