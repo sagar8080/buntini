@@ -307,6 +307,8 @@ pub fn run() {
             pet::pet_purr_tap,
             pet::pet_sound_allowed,
             integrations::maps::map_picture,
+            skills::photos::photo_thumbnail,
+            skills::photos::show_photo,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

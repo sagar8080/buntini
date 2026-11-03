@@ -64,7 +64,7 @@ const skillActivity: Record<string, string> = {
   read_reminders: 'Checking your reminders', read_calendar: 'Checking your calendar', read_mail: 'Checking your email',
   find_notes: 'Looking through your notes', search_files: 'Searching your files', search_memory: 'Thinking back',
   find_contact: 'Looking in Contacts', list_shortcuts: 'Checking your shortcuts', web_search: 'Searching the web',
-  weather: 'Checking the weather', places: 'Looking at the map', travel_time: 'Checking the route', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
+  photos: 'Looking through your photos', weather: 'Checking the weather', places: 'Looking at the map', travel_time: 'Checking the route', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
 };
 
 export default function App() {

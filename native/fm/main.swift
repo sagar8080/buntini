@@ -5,8 +5,8 @@
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`. It also reads
-// Calendar, Reminders and Contacts, the text of documents in shared folders, and
-// places and travel times from Apple Maps.
+// Calendar, Reminders and Contacts, the text of documents in shared folders, photos in
+// the Photos library, and places and travel times from Apple Maps.
 import AppKit
 import AVFoundation
 import Compression
@@ -19,6 +19,7 @@ import MapKit
 import FoundationModels
 #endif
 import PDFKit
+import Photos
 import Speech
 
 let output = FileHandle.standardOutput
@@ -2264,6 +2265,79 @@ enum Maps {
     }
 }
 
+/// `--find-photos <json>`: the newest photos matching `from`/`to` (local "YYYY-MM-DD",
+/// `to` exclusive), an `album` name, `favorites` and a `kind` (photo, video, screenshot or
+/// selfie), with small JPEG thumbnails saved in `thumbs` (a folder). Read-only; prints one
+/// JSON object, or `{"error":"denied"}` when Photos isn't allowed, or `{"error":"no_album"}`.
+enum Library {
+    static let limit = 12
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        guard arguments.count == 3, arguments[1] == "--find-photos", arguments[2].utf8.count <= 4096,
+              let query = (try? JSONSerialization.jsonObject(with: Data(arguments[2].utf8))) as? [String: Any],
+              let thumbs = query["thumbs"] as? String, thumbs.hasPrefix("/") else {
+            FileHandle.standardError.write(Data("invalid-query: Say which photos to find.\n".utf8))
+            return 2
+        }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            emit(["error": "denied"])
+            return 0
+        }
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        var conditions: [NSPredicate] = []
+        let day = DateFormatter()
+        day.calendar = Calendar(identifier: .gregorian)
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        if let from = (query["from"] as? String).flatMap(day.date(from:)) { conditions.append(NSPredicate(format: "creationDate >= %@", from as NSDate)) }
+        if let to = (query["to"] as? String).flatMap(day.date(from:)) { conditions.append(NSPredicate(format: "creationDate < %@", to as NSDate)) }
+        if query["favorites"] as? Bool == true { conditions.append(NSPredicate(format: "favorite == YES")) }
+        var collection: PHAssetCollection?
+        switch query["kind"] as? String {
+        case "video": conditions.append(NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue))
+        case "screenshot": conditions.append(NSPredicate(format: "(mediaSubtypes & %d) != 0", PHAssetMediaSubtype.photoScreenshot.rawValue))
+        case "selfie": collection = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumSelfPortraits, options: nil).firstObject
+        case "photo": conditions.append(NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue))
+        default: break
+        }
+        if let album = (query["album"] as? String)?.trimmingCharacters(in: .whitespaces), !album.isEmpty {
+            var named: PHAssetCollection?
+            PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil).enumerateObjects { item, _, stop in
+                if item.localizedTitle?.compare(album, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame { named = item; stop.pointee = true }
+            }
+            guard let named else { emit(["error": "no_album"]); return 0 }
+            collection = named
+        }
+        options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: conditions)
+        let found = collection.map { PHAsset.fetchAssets(in: $0, options: options) } ?? PHAsset.fetchAssets(with: options)
+        let stamp = ISO8601DateFormatter()
+        stamp.timeZone = .current
+        var rows: [[String: Any]] = []
+        let request = PHImageRequestOptions()
+        request.isSynchronous = true
+        request.deliveryMode = .highQualityFormat
+        request.resizeMode = .fast
+        // Only what is already on this Mac: an iCloud original is never downloaded for this.
+        request.isNetworkAccessAllowed = false
+        found.enumerateObjects { asset, index, stop in
+            guard index < limit else { stop.pointee = true; return }
+            var thumb = ""
+            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 320, height: 320), contentMode: .aspectFill, options: request) { image, _ in
+                guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                      let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75]) else { return }
+                let name = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".jpg"
+                if (try? jpeg.write(to: URL(fileURLWithPath: thumbs).appendingPathComponent(name), options: .atomic)) != nil { thumb = name }
+            }
+            rows.append(["id": asset.localIdentifier, "taken": asset.creationDate.map { stamp.string(from: $0) } ?? "",
+                         "video": asset.mediaType == .video, "favorite": asset.isFavorite, "thumb": thumb])
+        }
+        emit(["total": found.count, "photos": rows])
+        return 0
+    }
+}
+
 @main
 struct Helper {
     static func main() async {
@@ -2274,6 +2348,9 @@ struct Helper {
         }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
             exit(await People.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--find-photos" {
+            exit(await Library.run(CommandLine.arguments))
         }
         if CommandLine.arguments.count > 1, ["--maps-places", "--maps-route"].contains(CommandLine.arguments[1]) {
             exit(await Maps.run(CommandLine.arguments))

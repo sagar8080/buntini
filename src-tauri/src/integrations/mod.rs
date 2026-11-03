@@ -377,6 +377,7 @@ pub(crate) fn card(
         attribution: attribution.into(),
         retrieved_at: now(),
         map: None,
+        photos: vec![],
     }
 }
 

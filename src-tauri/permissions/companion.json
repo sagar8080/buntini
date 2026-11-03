@@ -61,6 +61,8 @@
           "pet_purr_tap",
           "pet_sound_allowed",
           "map_picture",
+          "photo_thumbnail",
+          "show_photo",
           "pet_world",
           "pet_move",
           "pet_stop",

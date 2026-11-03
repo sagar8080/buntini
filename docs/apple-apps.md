@@ -45,7 +45,12 @@ quota, so weather stays on Open-Meteo.
   "What am I watching?", "pause the show", "next episode", "play Severance on TV" (from
   the TV library). Changes go through the same approval and before-and-after check of
   the player as Music. Streaming apps inside TV that don't report what's on stay out.
-- Photos: find photos by date, place or album (PhotoKit), and show them.
+- Photos (this branch): "show me photos from last weekend", "my favourite photos",
+  "screenshots from today", "selfies from March", "photos from my Goa trip album". The
+  helper reads the library with PhotoKit (never downloading from iCloud for it) and
+  saves small thumbnails in the cache (the latest 240); the reply shows the newest 12
+  and opens one in Photos when clicked. No model sees the pictures. Searching by place
+  would send the place to Apple, so it waits.
 
 **M4 Home and more**
 - Ready-made shortcuts for Home scenes and devices, added with one click.

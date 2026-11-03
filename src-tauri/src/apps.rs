@@ -30,7 +30,7 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 16] = [
+pub const APPS: [App; 17] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
@@ -40,6 +40,7 @@ pub const APPS: [App; 16] = [
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "photos", name: "Photos", can: &["Find and show photos"], tools: &[], share: Some(Share::Photos), note: None },
     App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
     App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
     App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },

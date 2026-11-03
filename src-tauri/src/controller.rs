@@ -217,6 +217,7 @@ impl AppState {
         let store = Arc::new(Mutex::new(store));
         let models = ModelHub::new(resource("worker/main.py"), native_dir.join("buntini-fm"));
         integrations::maps::set_helper(models.apple_helper(), &cache.join("maps"));
+        crate::skills::photos::set_thumbs(&cache.join("photos"));
         models.set_ledger(store.clone());
         Ok(Self {
             store,
@@ -2805,6 +2806,14 @@ async fn execute_with_settings(
                     for share in shares {
                         touch(task, share);
                     }
+                    task.answer = answer;
+                    emit(channel, "delta", &task.id, Some(task.answer.clone()));
+                }
+                crate::skills::Outcome::Shown { answer, shares, cards } => {
+                    for share in shares {
+                        touch(task, share);
+                    }
+                    task.cards = cards;
                     task.answer = answer;
                     emit(channel, "delta", &task.id, Some(task.answer.clone()));
                 }

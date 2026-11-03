@@ -411,6 +411,19 @@ pub struct ResultCard {
     /// A map of the results, drawn on this Mac.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<CardMap>,
+    /// Photos from the user's library, shown as thumbnails.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub photos: Vec<CardPhoto>,
+}
+/// One photo a reply shows: its Photos library id (to open it there), its thumbnail in
+/// the cache (read back with `photo_thumbnail`), when it was taken and whether it moves.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CardPhoto {
+    pub id: String,
+    pub thumb: String,
+    pub taken: String,
+    pub video: bool,
 }
 /// A saved map picture (read back with `map_picture`) and the Maps view it shows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
