@@ -30,13 +30,14 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 17] = [
+pub const APPS: [App; 18] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
     App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
     App { id: "messages", name: "Messages", can: &["Send texts"], tools: &["send_message"], share: None, note: None },
+    App { id: "facetime", name: "FaceTime", can: &["Start calls"], tools: &["start_call"], share: None, note: None },
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
@@ -2985,6 +2986,14 @@ pub(crate) fn app_names() -> Vec<String> {
     names.sort_by_key(|name| name.to_lowercase());
     names.dedup();
     names
+}
+
+/// Opens Shortcuts on a new shortcut, from a reply that found none that fits.
+#[tauri::command]
+pub async fn new_shortcut() -> Result<(), String> {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("shortcuts://create-shortcut");
+    crate::actions::output(command, 15).await.map(|_| ())
 }
 
 /// The apps Buntini can work with and whether each is allowed, plus the rest it can open.

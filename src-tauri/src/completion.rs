@@ -431,6 +431,17 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("send_message")
                 }
+                // A call to one person through FaceTime; never another service, or "call me".
+                "call" | "facetime" | "ring" | "phone"
+                    if tokens.len() > 1
+                        && !["me", "us", "it", "this", "that", "the", "a", "an", "back", "up", "off", "number", "numbers"].contains(&tokens[1])
+                        && !has(&["whatsapp", "zoom", "teams", "slack", "meet", "skype", "api", "function", "method"]) =>
+                {
+                    Some("start_call")
+                }
+                "video" if tokens.get(1) == Some(&"call") && tokens.len() > 2 && !has(&["whatsapp", "zoom", "teams", "slack", "meet", "skype"]) => {
+                    Some("start_call")
+                }
                 "remind" if tokens.get(1) == Some(&"me") => Some("add_reminder"),
                 "add" | "create" | "set" | "make" if has(&["reminder", "reminders"]) => {
                     Some("add_reminder")
@@ -1895,6 +1906,16 @@ mod tests {
         assert_eq!(grounded_personal_answer(prompt, answer, &[read]), answer);
         // With nothing read, the same claim about an appointment still goes.
         assert_ne!(grounded_personal_answer(prompt, answer, &[]), answer);
+    }
+
+    #[test]
+    fn calling_one_person_is_a_call_and_other_things_are_not() {
+        for prompt in ["Call mom", "FaceTime Ana", "video call Raj", "ring my dad", "Please call Priya"] {
+            assert_eq!(requested_actions(prompt).0, vec!["start_call"], "{prompt}");
+        }
+        for prompt in ["Call me when it's done", "Call the API again", "Call Raj on WhatsApp", "Remind me to call Ana", "phone number for Ana", "video call"] {
+            assert!(!requested_actions(prompt).0.contains(&"start_call"), "{prompt}");
+        }
     }
 
     #[test]

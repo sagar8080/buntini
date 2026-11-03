@@ -63,6 +63,7 @@
           "map_picture",
           "photo_thumbnail",
           "show_photo",
+          "new_shortcut",
           "pet_world",
           "pet_move",
           "pet_stop",

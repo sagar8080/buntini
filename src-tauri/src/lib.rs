@@ -309,6 +309,7 @@ pub fn run() {
             integrations::maps::map_picture,
             skills::photos::photo_thumbnail,
             skills::photos::show_photo,
+            apps::new_shortcut,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

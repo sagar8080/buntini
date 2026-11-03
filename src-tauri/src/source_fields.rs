@@ -65,8 +65,8 @@ const FAMILY: &[&str] = &[
     "grandma", "grandpa", "granny", "nana",
 ];
 
-/// Verbs whose object is the person written to: "text Ana", "message mom".
-const DIRECT: &[&str] = &["text", "message", "imessage"];
+/// Verbs whose object is the person written to or called: "text Ana", "call mom".
+const DIRECT: &[&str] = &["text", "message", "imessage", "call", "facetime", "ring", "phone"];
 
 /// The person a requested email draft or text is for, by name, when the user's own words
 /// say exactly one: "Draft an email to Ana Silva", "reply to Ana's email", "write back to
@@ -112,7 +112,7 @@ pub fn named_recipient(goal: &str) -> Option<String> {
             && index
                 .checked_sub(1)
                 .and_then(|before| words.get(before))
-                .is_none_or(|(before, ended)| *ended || ["please", "and", "then", "also"].contains(&before.to_lowercase().as_str()));
+                .is_none_or(|(before, ended)| *ended || ["please", "and", "then", "also", "video"].contains(&before.to_lowercase().as_str()));
         if *ends || !(direct || ["to", "for"].contains(&cue.as_str())) {
             continue;
         }
@@ -247,8 +247,8 @@ pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
     contact_recipient_for("draft_email", goal, steps)
 }
 
-/// `contact_recipient` for a draft or a text: an email goes to an email address, and a
-/// text to a phone number first, else an address iMessage can use.
+/// `contact_recipient` for a draft, a text or a call: an email goes to an email address,
+/// and a text or call to a phone number first, else an address iMessage or FaceTime can use.
 pub fn contact_recipient_for(tool: &str, goal: &str, steps: &[Step]) -> ContactRecipient {
     let Some(named) = named_recipient(goal) else {
         return ContactRecipient::Unknown;
@@ -268,7 +268,7 @@ pub fn contact_recipient_for(tool: &str, goal: &str, steps: &[Step]) -> ContactR
     };
     let evidence = step.evidence.as_ref().unwrap();
     let records = evidence["records"].as_array().cloned().unwrap_or_default();
-    let kinds: &[&str] = if tool == "send_message" { &["phones", "emails"] } else { &["emails"] };
+    let kinds: &[&str] = if tool == "draft_email" { &["emails"] } else { &["phones", "emails"] };
     let values = |record: &Value, kind: &str| -> Vec<String> {
         record[kind]
             .as_array()
@@ -279,7 +279,7 @@ pub fn contact_recipient_for(tool: &str, goal: &str, steps: &[Step]) -> ContactR
             .collect()
     };
     let addresses = |record: &Value| -> Vec<String> { kinds.iter().flat_map(|kind| values(record, kind)).collect() };
-    // A text goes to the one phone number when there is one, before any address.
+    // A text or call goes to the one phone number when there is one, before any address.
     let preferred = |record: &Value| -> Vec<String> {
         kinds.iter().map(|kind| values(record, kind)).find(|found| !found.is_empty()).unwrap_or_default()
     };
@@ -963,7 +963,10 @@ mod tests {
         ] {
             assert_eq!(named_recipient(goal).as_deref(), Some(name), "{goal}");
         }
-        for goal in ["Text my landlord about the boiler", "Text the team that I'm late", "Read the text from Ana"] {
+        assert_eq!(named_recipient("Call mom").as_deref(), Some("mom"));
+        assert_eq!(named_recipient("video call Raj").as_deref(), Some("Raj"));
+        assert_eq!(named_recipient("FaceTime Ana Silva").as_deref(), Some("Ana Silva"));
+        for goal in ["Text my landlord about the boiler", "Text the team that I'm late", "Read the text from Ana", "Call the dentist"] {
             assert_eq!(named_recipient(goal), None, "{goal}");
         }
         let goal = "Text Ana that I'm late";

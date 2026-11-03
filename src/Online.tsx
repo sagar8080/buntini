@@ -8,7 +8,7 @@ const titles: Record<string, string> = {
   web_search: 'Search the web?', weather: 'Check the weather?', currency: 'Get exchange rates?', wikipedia: 'Look it up on Wikipedia?',
   places: 'Find nearby places?', travel_time: 'Check the travel time?', ebay_search: 'Search eBay listings?', flight_search: 'Search flights?',
 };
-const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: MapPin, route: Route, listing: ShoppingBag, flight: Plane, photos: Images };
+const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: MapPin, route: Route, listing: ShoppingBag, flight: Plane, photos: Images, shortcut: Play };
 
 /** Shows exactly what one approved request will send, and to whom, before anything leaves the Mac. */
 export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebInstead }: { approval: WebApproval; approving: boolean; onCancel: () => void; onAllow: () => void; onWebInstead: () => void }) {
@@ -56,8 +56,15 @@ function PhotoThumb({ photo }: { photo: CardPhoto }) {
   </button>;
 }
 
+/** Opens Shortcuts on a new shortcut, when none of the user's fits. */
+function NewShortcut({ label }: { label: string }) {
+  const [failed, setFailed] = useState(false);
+  return <div className="row-actions"><button type="button" className="secondary-button" onClick={() => { setFailed(false); command('new_shortcut').catch(() => setFailed(true)); }}>{label}</button>{failed && <span className="field-help">Shortcuts didn’t open.</span>}</div>;
+}
+
 /** Numbered cards matching the [n] citations in the answer. */
 export function ResultCards({ cards, onOpen }: { cards: ResultCard[]; onOpen: (url: string) => void }) {
+  if (cards.length === 1 && cards[0].kind === 'shortcut') return <NewShortcut label={cards[0].title} />;
   const mapped = cards.find(card => card.map);
   return <div className="result-cards"><div className="section-label">Live results</div>
     {mapped?.map && <MapPicture map={mapped.map} label={mapped.kind === 'route' ? mapped.subtitle : mapped.subtitle.split(' · ')[0]} onOpen={onOpen} />}

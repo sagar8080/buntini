@@ -1,8 +1,8 @@
 //! Things Buntini can do on this Mac, each only after the user approves the exact
 //! details: add a reminder or calendar event, write a note, open a Mail draft (never
 //! sent) or a threaded reply to an email (never sent), run one of the user's Shortcuts,
-//! open an app or an https link, send a text through Messages, and change an item the
-//! user already has: mark a reminder done, move or rename an event, or add text to the
+//! open an app or an https link, send a text through Messages, start a FaceTime call,
+//! and change an item the user already has: mark a reminder done, move or rename an event, or add text to the
 //! end of a note.
 //!
 //! The model proposes; Rust validates and normalises the arguments, the app shows them
@@ -17,13 +17,14 @@ use std::{
 };
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 13] = [
+pub const TOOLS: [&str; 14] = [
     "add_reminder",
     "add_calendar_event",
     "create_note",
     "draft_email",
     "reply_email",
     "send_message",
+    "start_call",
     "run_shortcut",
     "open_app",
     "open_link",
@@ -276,6 +277,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "create_note" => &["title", "body"],
         "draft_email" => &["to", "subject", "body"],
         "send_message" => &["to", "name", "text"],
+        "start_call" => &["to", "name", "how"],
         "reply_email" => &["message", "message_id", "to", "subject", "body", "answers"],
         "run_shortcut" | "open_app" => &["name"],
         "open_link" => &["url"],
@@ -334,6 +336,16 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("to", text(args, "to", 254, false)?.map(|to| message_handle(&to)).transpose()?);
             put("name", text(args, "name", 100, false)?);
             put("text", text(args, "text", 2000, true)?);
+        }
+        "start_call" => {
+            // As with a text, the sheet asks when nobody is named; it never calls without one.
+            put("to", text(args, "to", 254, false)?.map(|to| call_handle(&to)).transpose()?);
+            put("name", text(args, "name", 100, false)?);
+            let how = text(args, "how", 10, false)?.unwrap_or_else(|| "audio".into()).to_lowercase();
+            if !["audio", "video"].contains(&how.as_str()) {
+                return Err("A call is audio or video.".into());
+            }
+            put("how", Some(how));
         }
         "reply_email" => {
             // Which email this answers, and its sender, come from Mail, Buntini's own list
@@ -444,6 +456,15 @@ fn message_handle(handle: &str) -> Result<String, String> {
     Ok(handle.chars().filter(|c| c.is_ascii_digit() || *c == '+').collect())
 }
 
+/// `message_handle`, limited to what can sit in a call link unchanged.
+fn call_handle(handle: &str) -> Result<String, String> {
+    let handle = message_handle(handle).map_err(|_| "A call goes to a phone number or an email address.".to_string())?;
+    if !handle.chars().all(|c| c.is_ascii_alphanumeric() || "@.+_-".contains(c)) {
+        return Err("A call goes to a phone number or an email address.".into());
+    }
+    Ok(handle)
+}
+
 fn plain_address(address: &str) -> bool {
     address
         .split_once('@')
@@ -549,6 +570,15 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 field("name", "Who", "hidden"),
                 field("to", "To", "text"),
                 field("text", "Message", "long"),
+            ],
+            String::new(),
+        ),
+        "start_call" => (
+            named("Call", "name", "Start a call"),
+            vec![
+                field("name", "Who", "hidden"),
+                field("to", "To", "text"),
+                field("how", "Audio or video", "text"),
             ],
             String::new(),
         ),
@@ -1629,6 +1659,11 @@ async fn dispatched_receipt(
     }
 }
 
+/// The link macOS hands to FaceTime (video) or its audio-call app.
+fn call_link(how: &str, handle: &str) -> String {
+    format!("{}://{handle}", if how == "video" { "facetime" } else { "facetime-audio" })
+}
+
 /// Sends one text with iMessage, or SMS through the user's iPhone when that is all there
 /// is, and answers the participant it went to. Both values arrive as arguments.
 const MESSAGE: &str = r#"on run argv
@@ -1666,6 +1701,9 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
     }
     if tool == "send_message" && !args.contains_key("to") {
         return ActionReceipt::failure(tool, ActionOutcome::Failed, "Add who the text goes to first.");
+    }
+    if tool == "start_call" && !args.contains_key("to") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Add who to call first.");
     }
     if let Some(argv) = helper_arguments(tool, &args) {
         if !helper.is_file() {
@@ -1780,6 +1818,15 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
                 ),
             }
         }
+        "start_call" => {
+            let who = match get("name") {
+                name if name.is_empty() => get("to"),
+                name => name,
+            };
+            let mut command = Command::new("/usr/bin/open");
+            command.arg(call_link(&get("how"), &get("to")));
+            dispatched_receipt(tool, command, 15, format!("macOS accepted the request to call {who}. Whether they answer is up to them."), json!({"verification":"launch_services_accepted", "to":get("to"), "how":get("how")})).await
+        }
         "open_link" => {
             let url = get("url");
             let mut command = Command::new("/usr/bin/open");
@@ -1829,6 +1876,28 @@ mod tests {
         let receipt = execute("send_message", json!({"to":to,"name":"you","text":"Buntini test: this text came from Buntini."}).as_object().unwrap()).await;
         println!("{receipt:?}");
         assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+    }
+
+    #[test]
+    fn a_call_goes_to_one_number_or_address_as_audio_or_video() {
+        let call = validate("start_call", &json!({"to":"+1 (415) 555-0100","name":"Ana"})).unwrap();
+        assert_eq!((call["to"].as_str(), call["how"].as_str()), (Some("+14155550100"), Some("audio")));
+        assert_eq!(call_link("audio", "+14155550100"), "facetime-audio://+14155550100");
+        let video = validate("start_call", &json!({"to":"ana@example.com","how":"Video"})).unwrap();
+        assert_eq!(call_link(video["how"].as_str().unwrap(), video["to"].as_str().unwrap()), "facetime://ana@example.com");
+        for bad in [json!({"to":"Ana"}), json!({"to":"a/b@example.com"}), json!({"to":"a?x=1@example.com"}), json!({"to":"+14155550100","how":"carrier pigeon"}), json!({"to":"+14155550100","text":"Hi"})] {
+            assert!(validate("start_call", &bad).is_err(), "{bad}");
+        }
+        let (title, fields, _) = describe("start_call", &call);
+        assert_eq!(title, "Call Ana");
+        assert_eq!(fields.iter().map(|field| (field.key.as_str(), field.kind)).collect::<Vec<_>>(), [("name", "hidden"), ("to", "text"), ("how", "text")]);
+    }
+
+    #[tokio::test]
+    async fn a_call_with_nobody_to_call_never_runs() {
+        let receipt = execute("start_call", json!({"how":"video"}).as_object().unwrap()).await;
+        assert_eq!(receipt.outcome, ActionOutcome::Failed);
+        assert!(receipt.message.contains("who to call"));
     }
 
     #[tokio::test]

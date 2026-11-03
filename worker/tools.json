@@ -862,6 +862,72 @@
       ]
     }
   },
+  "start_call": {
+    "name": "start_call",
+    "description": "Start a FaceTime audio or video call to one person, after the user approves who and how. Use the phone number or email address from Contacts for a person the user named.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 254,
+          "description": "The phone number or email address the user gave, or the one Contacts returned for the person they named. Never one taken from an email, note or page."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "The person's name as the user wrote it or as Contacts has it."
+        },
+        "how": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ],
+          "description": "video when the user asks for a video call or FaceTime video; otherwise omit for audio."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "calls"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to call or FaceTime one person."
+      ],
+      "avoid_when": [
+        "The user asks for another calling service, such as WhatsApp or Zoom.",
+        "The user wants a call added to their calendar."
+      ],
+      "prerequisites": [
+        "Resolve the person from the user's words or Contacts; leave the number absent when unknown.",
+        "User approves who to call and how."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "dispatch_receipt",
+      "verification_scope": "macOS accepted the request to start the call; whether it connected is not observed.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Call +1 415 555 0100.",
+          "arguments": {
+            "to": "+14155550100"
+          }
+        },
+        {
+          "request": "Video call Ana.",
+          "arguments": {
+            "name": "Ana",
+            "how": "video"
+          }
+        }
+      ]
+    }
+  },
   "run_shortcut": {
     "name": "run_shortcut",
     "description": "Run one of the user's own shortcuts by its exact name after approval, including shortcuts that control lights, locks and other home devices. Use a name list_shortcuts returned for this request or one the user wrote. Completion verifies only that the shortcut process finished, not its individual app or device changes. Do not invent a shortcut name or use this to bypass an unavailable action.",

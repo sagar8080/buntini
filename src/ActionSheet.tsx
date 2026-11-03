@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, MessageCircle, NotebookPen, Play, Plug, AppWindow, Reply } from 'lucide-react';
+import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, MessageCircle, NotebookPen, Phone, Play, Plug, AppWindow, Reply } from 'lucide-react';
 import ModalSheet from './ModalSheet';
 
 /** `hidden` is sent back without being shown (an item's id); `fixed` is shown but never edited or sent, such as the email a reply answers, its recipient, or what an item is like now. */
@@ -8,7 +8,7 @@ export interface ActionField { key: string; label: string; value: string; kind: 
 export interface ActionChoice { field: string; label: string; value: string; also?: Record<string, string> }
 export interface ActionProposal { id: string; tool: string; title: string; fields: ActionField[]; note: string; choices?: ActionChoice[] }
 
-const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, reply_email: Reply, send_message: MessageCircle, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink, complete_reminder: ListChecks, reschedule_reminder: BellRing, update_calendar_event: CalendarClock, append_to_note: NotebookPen };
+const icons: Record<string, typeof Bell> = { add_reminder: Bell, add_calendar_event: CalendarPlus, create_note: NotebookPen, draft_email: Mail, reply_email: Reply, send_message: MessageCircle, start_call: Phone, run_shortcut: Play, open_app: AppWindow, open_link: ExternalLink, complete_reminder: ListChecks, reschedule_reminder: BellRing, update_calendar_event: CalendarClock, append_to_note: NotebookPen };
 // The sheet edits "YYYY-MM-DD HH:MM"; the browser's picker wants "YYYY-MM-DDTHH:MM".
 const toPicker = (value: string) => value.replace(' ', 'T');
 const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
@@ -20,7 +20,7 @@ const shown = (value: string) => {
   return value.length > 10 ? `${day}, ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : day;
 };
 // The button says what happens.
-const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', send_message: 'Send', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', change_mac_setting: 'Change', create_saved_search: 'Save', create_price_watch: 'Watch' };
+const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', send_message: 'Send', start_call: 'Call', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', change_mac_setting: 'Change', create_saved_search: 'Save', create_price_watch: 'Watch' };
 // What an edit changes from, shown struck through beside its new value.
 const before: Record<string, string> = { due: 'was_due', start: 'occurrence' };
 

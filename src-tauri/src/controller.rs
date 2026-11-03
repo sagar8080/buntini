@@ -3436,7 +3436,10 @@ where
                 arguments: json!({"query":query}),
                 source: json!({"kind":"user_fields","source":"user_request","fields":{"query":query}}),
             })
-        } else if let Some((name, source)) = flow.contract.shortcut_proposal(&flow.steps)? {
+        } else if let Some((name, source)) = flow.contract.shortcut_proposal(&flow.steps).inspect_err(|_| {
+            // Nothing fits: the reply offers to make the shortcut.
+            task.cards = vec![crate::integrations::card("shortcut", "Make it in Shortcuts", "", vec![], None, "Shortcuts")];
+        })? {
             Some(crate::planning::BoundAction {
                 tool: "run_shortcut",
                 arguments: json!({"name":name}),
@@ -3608,7 +3611,7 @@ where
         }
         // Several people in Contacts match the name the user gave: they pick the address
         // in the sheet, so an address the model chose is left out rather than shown.
-        let choices = if ["draft_email", "send_message"].contains(&name.as_str()) {
+        let choices = if crate::task_contract::RECIPIENT_TOOLS.contains(&name.as_str()) {
             flow.contract.recipient_choices(&flow.steps)
         } else {
             vec![]

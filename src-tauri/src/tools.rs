@@ -13,6 +13,7 @@ pub const RESOURCES: &[&str] = &[
     "automation",
     "browser",
     "calendar",
+    "calls",
     "contacts",
     "currency",
     "files",

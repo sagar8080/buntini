@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 
 /// Writes addressed to one person, whose recipient Contacts may supply.
-const RECIPIENT_TOOLS: [&str; 2] = ["draft_email", "send_message"];
+pub const RECIPIENT_TOOLS: [&str; 3] = ["draft_email", "send_message", "start_call"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]

@@ -122,6 +122,8 @@ async fn several_fitting_shortcuts_are_offered_and_none_fitting_runs_nothing() {
         shortcut_journey(dir.path(), "Lock the front door", &["Lights On", "Unlock Front Door"]).await;
     assert!(result.unwrap_err().contains("None of your shortcuts fits"));
     assert!(task.action.is_none());
+    assert_eq!(task.cards.len(), 1, "the reply offers to make the shortcut");
+    assert_eq!((task.cards[0].kind.as_str(), task.cards[0].title.as_str()), ("shortcut", "Make it in Shortcuts"));
     assert!(!flow.steps.iter().any(|step| step.tool == "run_shortcut"));
     state.models.shutdown().await;
 }

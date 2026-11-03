@@ -11,7 +11,7 @@ itself needs (a Maps search, say) leaves it, exactly as when the user opens that
 | Apple frameworks in `buntini-fm` | MapKit, EventKit, Contacts, PhotoKit | No app needs to open. Free; no key. |
 | AppleScript | Music, TV, Messages, Photos, Finder, iWork | Values passed as arguments, never script text. |
 | App links | Maps, TV, FaceTime, App Store | Opens the app at the right place. |
-| Shortcuts | Home and every App Intent an app offers | Needs the shortcut; Buntini can ship ready-made ones. |
+| Shortcuts | Home and every App Intent an app offers | Needs the shortcut, which the user makes. |
 | Accessibility | Anything else | Last resort: slow and brittle. |
 
 Not available to a Mac app: other apps' App Intents directly, HomeKit outside Mac
@@ -52,9 +52,15 @@ quota, so weather stays on Open-Meteo.
   and opens one in Photos when clicked. No model sees the pictures. Searching by place
   would send the place to Apple, so it waits.
 
-**M4 Home and more**
-- Ready-made shortcuts for Home scenes and devices, added with one click.
-- FaceTime calls (confirmed first), opening App Store pages.
+**M4 Home and calls** (this branch)
+- Home runs through the user's own shortcuts: "turn on the living room lights" reads
+  them and proposes the one that fits. A shortcut's Home action is tied to that home's
+  own devices, so a ready-made one can't be shipped. When none fits, the reply has a
+  button that opens Shortcuts on a new shortcut.
+- `start_call`: "call mom", "FaceTime Ana", "video call Raj". The person is found as for
+  a text, and nothing starts until the user approves who and how. FaceTime is allowed in
+  Settings → Apps. The receipt says macOS accepted the request; a connected call isn't
+  observed.
 
 ## Privacy
 
