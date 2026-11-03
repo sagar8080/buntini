@@ -3,8 +3,8 @@ import { Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
-import { errorMessage } from './bridge';
-import { appleStatus, cloudProviders, friendlyStatus } from './brain.ts';
+import { command, errorMessage } from './bridge';
+import { appleSettingsPane, appleStatus, cloudProviders, friendlyStatus } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
 export { appleStatus, backendLabel, cloudProviders } from './brain.ts';
@@ -24,6 +24,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
         {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'ChatGPT plan' : provider.name, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
+      {draft.modelBackend === 'apple' && <OpenAppleSettings reason={diagnostics.appleIntelligence} onError={onError} />}
       {draft.modelBackend === 'mlx' && <LocalModel draft={draft} update={update} onError={onError} />}
       {draft.modelBackend === 'cloud' && <CloudSettings draft={draft} update={update} diagnostics={diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       {/* Only a brain that can't answer yet needs a word here. */}
@@ -66,4 +67,11 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
     <label className="inline-field"><span>Monthly cap ($)</span><input aria-label="Monthly cloud spending cap in USD" type="number" min="0" max="10000" step="0.5" value={draft.cloudBudgetUsd} onChange={event => update('cloudBudgetUsd', Number(event.target.value))} /></label>
     {named && <div className="row-actions"><span className="field-help">Using {named}</span><button type="button" className="text-button" onClick={() => { update('cloudModel', ''); update('cloudInputPrice', provider.input); update('cloudOutputPrice', provider.output); }}>Use default</button></div>}
   </div>;
+}
+
+/** Opens the System Settings pane that can get Apple Intelligence working here. */
+export function OpenAppleSettings({ reason, onError }: { reason?: string; onError: (message: string) => void }) {
+  const pane = appleSettingsPane(reason);
+  if (!pane) return null;
+  return <button type="button" className="text-button" onClick={() => void command('open_apple_settings', { pane }).catch(error => onError(errorMessage(error)))}>Open System Settings</button>;
 }

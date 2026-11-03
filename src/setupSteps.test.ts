@@ -23,6 +23,10 @@ test('steps run in order and stop at the ends', () => {
 test('a Mac without Apple Intelligence starts on another brain and cannot pick it', () => {
   assert.equal(initialAnswers(settings, diagnostics('available')).backend, 'apple');
   assert.equal(initialAnswers(settings, diagnostics('appleIntelligenceNotEnabled')).backend, 'apple', 'it can be turned on later');
+  const language = initialAnswers(settings, diagnostics('languageNotSupported'));
+  assert.equal(language.backend, 'apple', 'a Mac in Hindi can switch to English (India) and turn it on');
+  assert.equal(blocker('brain', language, diagnostics('languageNotSupported')), '');
+  assert.equal(initialAnswers(settings, diagnostics('modelStuck')).backend, 'apple', 'fixed in System Settings, it gets ready');
   const unsupported = initialAnswers(settings, diagnostics('unsupported'));
   assert.equal(unsupported.backend, 'cloud');
   assert.match(blocker('brain', { ...unsupported, backend: 'apple' }, diagnostics('unsupported')), /Choose a local or cloud model/);

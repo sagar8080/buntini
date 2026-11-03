@@ -425,6 +425,50 @@ fn execution_policy_changed(previous: &Settings, next: &Settings) -> bool {
         || previous.ebay_marketplace != next.ebay_marketplace
 }
 
+/// Keeps an eye on Apple Intelligence while it can still become usable: turned on later,
+/// or its model finishing its download. The app hears of each change ("apple-status"),
+/// so Settings and chat stop waiting on an answer from launch. A model still not ready
+/// after a while is shown as stuck, with what to check.
+pub async fn watch_apple(app: tauri::AppHandle) {
+    const SINCE: &str = "apple-not-ready-since";
+    let state = app.state::<AppState>();
+    let mut shown = String::new();
+    loop {
+        let (available, reason) = state.models.probe_apple().await;
+        let now_shown = {
+            let store = state.store.lock().unwrap();
+            let saved = store.preference(SINCE).ok().flatten().and_then(|at| chrono::DateTime::parse_from_rfc3339(&at).ok()).map(|at| at.to_utc());
+            let (now_shown, since) = crate::model::waiting(&reason, saved, chrono::Utc::now());
+            if since != saved {
+                let _ = store.set_preference(SINCE, &since.map(|at| at.to_rfc3339()).unwrap_or_default());
+            }
+            now_shown
+        };
+        state.models.set_apple_status(available, now_shown.clone());
+        if now_shown != shown {
+            let _ = tauri::Emitter::emit(&app, "apple-status", &now_shown);
+            shown = now_shown;
+        }
+        if !crate::model::apple_may_change(&reason) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+}
+
+/// Opens the System Settings pane that fixes Apple Intelligence: Siri's (Apple
+/// Intelligence & Siri on Macs that have it) or Language & Region.
+#[tauri::command]
+pub async fn open_apple_settings(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "siri" => "x-apple.systempreferences:com.apple.Siri-Settings.extension",
+        "language" => "x-apple.systempreferences:com.apple.Localization-Settings.extension",
+        _ => return Err("Unknown System Settings pane.".into()),
+    };
+    let status = tokio::process::Command::new("/usr/bin/open").arg(url).status().await.map_err(|e| e.to_string())?;
+    if status.success() { Ok(()) } else { Err("System Settings didn’t open.".into()) }
+}
+
 /// Starts `warm_up` in the background.
 pub fn warm_up_soon(app: &tauri::AppHandle) {
     let app = app.clone();

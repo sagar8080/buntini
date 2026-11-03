@@ -237,6 +237,11 @@ impl ModelHub {
         self.apple_state.lock().unwrap().clone()
     }
 
+    /// Replaces the helper's reason with the one to show (a download called stuck).
+    pub fn set_apple_status(&self, available: bool, reason: String) {
+        *self.apple_state.lock().unwrap() = Some((available, reason));
+    }
+
     /// Asks the helper whether Apple Intelligence can run here and remembers the answer,
     /// so the synchronous bootstrap and readiness checks can report it.
     pub async fn probe_apple(&self) -> (bool, String) {
@@ -443,12 +448,35 @@ impl ModelHub {
     }
 }
 
+/// How long Apple's model may stay "not ready" before Buntini stops calling it a download.
+pub const STUCK_AFTER_MINUTES: i64 = 15;
+
+/// The reason to show for Apple's `reason` now, and when the model was first seen not
+/// ready (kept across launches, None once it isn't). A model still not ready after
+/// STUCK_AFTER_MINUTES is "modelStuck": on a Mac whose System Settings shows only Siri,
+/// macOS never finishes it, and the user needs to know what to check.
+pub fn waiting(reason: &str, since: Option<chrono::DateTime<chrono::Utc>>, now: chrono::DateTime<chrono::Utc>) -> (String, Option<chrono::DateTime<chrono::Utc>>) {
+    if reason != "modelNotReady" {
+        return (reason.into(), None);
+    }
+    let since = since.filter(|at| *at <= now).unwrap_or(now);
+    let shown = if now - since >= chrono::Duration::minutes(STUCK_AFTER_MINUTES) { "modelStuck" } else { "modelNotReady" };
+    (shown.into(), Some(since))
+}
+
+/// Whether Apple Intelligence may still become usable here, so it's worth checking again.
+pub fn apple_may_change(reason: &str) -> bool {
+    !["available", "deviceNotEligible", "unsupported", "missing"].contains(&reason)
+}
+
 /// What to tell the user when Apple Intelligence can't run.
 pub fn apple_advice(reason: &str) -> String {
     match reason {
         "deviceNotEligible" => "This Mac doesn’t support Apple Intelligence. Choose a local or cloud model in Settings → Brain.",
         "appleIntelligenceNotEnabled" => "Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri, then try again.",
         "modelNotReady" => "Apple Intelligence is still downloading its model. Try again in a few minutes.",
+        "modelStuck" => "Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, choose a local or cloud model in Settings → Brain.",
+        "languageNotSupported" => "Apple Intelligence doesn’t speak this Mac’s language yet. In System Settings → General → Language & Region, put a supported language such as English (India) first, then turn on Apple Intelligence.",
         "unsupported" => "Apple Intelligence needs macOS 26 on an Apple silicon Mac. Choose a local or cloud model in Settings → Brain.",
         "missing" => "The Apple Intelligence helper is missing from this installation. Reinstall Buntini or choose another brain in Settings.",
         _ => "Apple Intelligence isn’t available right now. Choose a local or cloud model in Settings → Brain.",
@@ -523,6 +551,20 @@ mod tests {
             hub.budget(&settings("apple")).history_tokens
                 < hub.budget(&settings("mlx")).history_tokens
         );
+    }
+
+    #[test]
+    fn a_download_that_never_finishes_is_called_stuck_after_a_while() {
+        let at = |minutes: i64| chrono::DateTime::parse_from_rfc3339("2026-11-03T12:00:00Z").unwrap().to_utc() + chrono::Duration::minutes(minutes);
+        assert_eq!(waiting("modelNotReady", None, at(0)), ("modelNotReady".into(), Some(at(0))));
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(14)).0, "modelNotReady");
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(15)), ("modelStuck".into(), Some(at(0))));
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(60 * 24)).0, "modelStuck", "remembered across launches");
+        assert_eq!(waiting("available", Some(at(0)), at(30)), ("available".into(), None), "ready: the wait is over");
+        assert_eq!(waiting("modelNotReady", Some(at(90)), at(0)).1, Some(at(0)), "a clock set back starts the wait again");
+        assert!(apple_may_change("modelNotReady") && apple_may_change("appleIntelligenceNotEnabled") && apple_may_change("modelStuck"));
+        assert!(!apple_may_change("available") && !apple_may_change("deviceNotEligible") && !apple_may_change("unsupported"));
+        assert!(apple_advice("modelStuck").contains("only Siri"));
     }
 
     #[test]

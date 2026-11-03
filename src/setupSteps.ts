@@ -21,7 +21,7 @@ export interface Answers {
 /** The cloud cap setup uses when none was saved; it can be changed in Settings → Brain. */
 export const defaultCloudBudget = 5;
 // Apple Intelligence can be turned on later in these cases; in the others it never runs here.
-const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady', 'checking', undefined];
+const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady', 'modelStuck', 'languageNotSupported', 'checking', undefined];
 
 export function initialAnswers(settings: Settings, diagnostics: Diagnostics): Answers {
   const appleUsable = appleLater.includes(diagnostics.appleIntelligence);

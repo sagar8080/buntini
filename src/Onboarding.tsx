@@ -10,6 +10,7 @@ import { applyAnswers, blocker, defaultCloudBudget, initialAnswers, keysToSave, 
 import { errorMessage } from './bridge';
 import { stillMotion } from './themes.ts';
 import ChatGPTAccount from './ChatGPTAccount';
+import { OpenAppleSettings } from './BrainSettings';
 import type { Bootstrap, CatCoat, CloudProvider, KeyProvider, Settings } from './types';
 
 type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void>; toast?: ReactNode };
@@ -118,6 +119,7 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
       {option('cloud', <Cloud size={16} />, 'Cloud model', 'Anthropic, OpenAI or Gemini')}
     </div>
     {answers.backend === 'apple' && apple.advice && <div className="field-help">{apple.advice}</div>}
+    {answers.backend === 'apple' && <OpenAppleSettings reason={data.diagnostics.appleIntelligence} onError={onError} />}
     {answers.backend === 'mlx' && <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} />}
     {answers.backend === 'cloud' && provider.id === 'chatgpt' && <>
       {providers}

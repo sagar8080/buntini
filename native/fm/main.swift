@@ -500,7 +500,11 @@ func fail(_ id: String, _ failure: Failure) {
 func availability() -> (available: Bool, reason: String) {
     #if canImport(FoundationModels)
     if #available(macOS 26.0, *) {
-        switch SystemLanguageModel.default.availability {
+        let model = SystemLanguageModel.default
+        // Apple Intelligence can't be turned on while the Mac's language is one it doesn't
+        // speak yet (Hindi, say): that, not the switch, is what to tell the user.
+        if case .unavailable = model.availability, !model.supportsLocale(Locale.current) { return (false, "languageNotSupported") }
+        switch model.availability {
         case .available: return (true, "available")
         case .unavailable(.deviceNotEligible): return (false, "deviceNotEligible")
         case .unavailable(.appleIntelligenceNotEnabled): return (false, "appleIntelligenceNotEnabled")

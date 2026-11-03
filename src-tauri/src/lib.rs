@@ -150,15 +150,9 @@ pub fn run() {
                 .on_notice(move |text| {
                     let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
                 });
-            // Learn whether Apple Intelligence can run here before the first chat.
-            let probe = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                probe
-                    .state::<controller::AppState>()
-                    .models
-                    .probe_apple()
-                    .await;
-            });
+            // Learn whether Apple Intelligence can run here before the first chat, and
+            // keep checking while it may still become usable.
+            tauri::async_runtime::spawn(controller::watch_apple(app.handle().clone()));
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
             browser_workspace::set_app(app.handle().clone());
@@ -306,6 +300,7 @@ pub fn run() {
             pet::save_pet_memory,
             pet::pet_purr_tap,
             pet::pet_sound_allowed,
+            controller::open_apple_settings,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

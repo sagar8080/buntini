@@ -312,8 +312,10 @@ export default function App() {
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
-    return () => { void subscription.then(unlisten => unlisten()); };
-  }, [expand]);
+    // Apple Intelligence turned on, finished downloading or got stuck: show it now.
+    const apple = listen('apple-status', () => { void refresh().catch(() => {}); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); };
+  }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
