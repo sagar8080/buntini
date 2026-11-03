@@ -1,8 +1,10 @@
 //! Apple Maps through the `buntini-fm` helper (MapKit): places around somewhere and how
 //! long a trip takes. Keyless and unthrottled; Maps sees only the approved places and
 //! category, as when the user searches in the Maps app. Without the helper, places fall
-//! back to OpenStreetMap and travel times are unavailable.
+//! back to OpenStreetMap and travel times are unavailable. Each result comes with a
+//! map the helper draws, kept in the cache (the latest few dozen).
 use super::*;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -11,10 +13,72 @@ pub const HOST: &str = "Apple Maps (via macOS)";
 pub const MODES: [&str; 3] = ["driving", "walking", "transit"];
 
 static HELPER: OnceLock<PathBuf> = OnceLock::new();
+static PICTURES: OnceLock<PathBuf> = OnceLock::new();
+/// Maps kept; older ones are removed as new ones are drawn.
+const PICTURES_KEPT: usize = 40;
 
-/// Where the helper is, set once at startup.
-pub fn set_helper(path: &Path) {
+/// Where the helper is and where its maps go, set once at startup.
+pub fn set_helper(path: &Path, pictures: &Path) {
     let _ = HELPER.set(path.to_path_buf());
+    let _ = PICTURES.set(pictures.to_path_buf());
+}
+
+fn new_picture() -> Option<(String, PathBuf)> {
+    new_picture_in(PICTURES.get()?)
+}
+
+/// A new map's id and file, after clearing out all but the newest maps.
+fn new_picture_in(folder: &Path) -> Option<(String, PathBuf)> {
+    std::fs::create_dir_all(folder).ok()?;
+    let mut saved = std::fs::read_dir(folder)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|extension| extension == "png"))
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect::<Vec<_>>();
+    saved.sort();
+    for (_, old) in saved.iter().rev().skip(PICTURES_KEPT - 1) {
+        let _ = std::fs::remove_file(old);
+    }
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let file = folder.join(format!("{id}.png"));
+    Some((id, file))
+}
+
+fn picture_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// A saved map as a data URL, for the chat to show.
+#[tauri::command]
+pub fn map_picture(id: String) -> Result<String, String> {
+    picture_in(PICTURES.get().ok_or("That map isn’t here.")?, &id)
+}
+
+fn picture_in(folder: &Path, id: &str) -> Result<String, String> {
+    if !picture_id(id) {
+        return Err("That map isn’t here.".into());
+    }
+    let bytes = std::fs::read(folder.join(format!("{id}.png"))).map_err(|_| "That map isn’t here any more.".to_string())?;
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+/// Attaches the map the helper drew, if it drew one, to the first card.
+fn with_map(mut cards: Vec<ResultCard>, answer: &Value, picture: Option<(String, PathBuf)>, url: String) -> Vec<ResultCard> {
+    if let (Some((id, file)), Some(first)) = (picture, cards.first_mut()) {
+        if answer["map"] == true && file.is_file() {
+            first.map = Some(CardMap { id, url });
+        }
+    }
+    cards
+}
+
+/// The helper's arguments, with a file to draw the map into when there is room for one.
+fn with_picture<'a>(mut args: Vec<&'a str>, picture: &'a Option<(String, PathBuf)>) -> Vec<&'a str> {
+    if let Some(file) = picture.as_ref().and_then(|(_, file)| file.to_str()) {
+        args.extend(["--map", file]);
+    }
+    args
 }
 
 /// The helper when it is on this Mac.
@@ -202,19 +266,58 @@ pub(crate) fn route_card(answer: &Value, args: &Value) -> Result<ResultCard, Str
 
 pub async fn places(helper: &Path, args: &Value, label: &str) -> Result<Vec<ResultCard>, String> {
     let (category, near, radius) = (text_of(args, "category"), text_of(args, "near"), text_of(args, "radius_m"));
-    let answer = ask(helper, &["--maps-places", &category, &near, &radius]).await?;
-    place_cards(&answer, &near, radius.parse().unwrap_or(1000.0), label)
+    let picture = new_picture();
+    let answer = ask(helper, &with_picture(vec!["--maps-places", &category, &near, &radius], &picture)).await?;
+    let cards = place_cards(&answer, &near, radius.parse().unwrap_or(1000.0), label)?;
+    let url = maps_link(&[("q", label.to_string()), ("sll", spot(&answer["center"]))]);
+    Ok(with_map(cards, &answer, picture, url))
 }
 
 pub async fn travel_time(args: &Value) -> Result<Vec<ResultCard>, String> {
     let helper = helper().ok_or("Travel times need Buntini’s Apple helper, which isn’t on this Mac.")?;
-    let answer = ask(helper, &["--maps-route", &text_of(args, "from"), &text_of(args, "to"), &text_of(args, "mode")]).await?;
-    Ok(vec![route_card(&answer, args)?])
+    let (from, to, mode) = (text_of(args, "from"), text_of(args, "to"), text_of(args, "mode"));
+    let picture = new_picture();
+    let answer = ask(helper, &with_picture(vec!["--maps-route", &from, &to, &mode], &picture)).await?;
+    let card = route_card(&answer, args)?;
+    let url = card.url.clone().unwrap_or_default();
+    Ok(with_map(vec![card], &answer, picture, url))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_are_kept_for_a_while_and_read_back_only_by_their_id() {
+        let folder = tempfile::tempdir().unwrap();
+        let (id, file) = new_picture_in(folder.path()).unwrap();
+        assert!(picture_id(&id));
+        std::fs::write(&file, b"png").unwrap();
+        assert_eq!(picture_in(folder.path(), &id).unwrap(), "data:image/png;base64,cG5n");
+        for bad in ["../secret", "", &id.to_uppercase(), &format!("{id}0")] {
+            assert!(picture_in(folder.path(), bad).is_err(), "{bad}");
+        }
+        for _ in 0..PICTURES_KEPT + 5 {
+            std::fs::write(new_picture_in(folder.path()).unwrap().1, b"png").unwrap();
+        }
+        new_picture_in(folder.path());
+        let left = std::fs::read_dir(folder.path()).unwrap().count();
+        assert!(left < PICTURES_KEPT, "only the newest maps stay ({left})");
+    }
+
+    #[test]
+    fn a_map_is_attached_only_when_the_helper_drew_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let cards = || vec![card("route", "45 min by car", "", vec![], None, ATTRIBUTION)];
+        let drawn = new_picture_in(folder.path()).unwrap();
+        std::fs::write(&drawn.1, b"png").unwrap();
+        let with = with_map(cards(), &json!({"map":true}), Some(drawn.clone()), "https://maps.apple.com/".into());
+        assert_eq!(with[0].map, Some(CardMap { id: drawn.0.clone(), url: "https://maps.apple.com/".into() }));
+        assert_eq!(with_map(cards(), &json!({"map":false}), Some(drawn), String::new())[0].map, None);
+        let missing = new_picture_in(folder.path()).unwrap();
+        assert_eq!(with_map(cards(), &json!({"map":true}), Some(missing), String::new())[0].map, None, "no file, no map");
+        assert_eq!(with_picture(vec!["--maps-route"], &None), ["--maps-route"]);
+    }
 
     #[test]
     fn routes_are_bounded_and_default_to_driving() {
@@ -269,7 +372,8 @@ mod live {
     #[tokio::test]
     #[ignore = "asks Apple Maps; run with --ignored live_apple_maps"]
     async fn live_apple_maps() {
-        set_helper(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../native/buntini-fm"));
+        let pictures = tempfile::tempdir().unwrap();
+        set_helper(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../native/buntini-fm"), pictures.path());
         let settings = Settings::default();
         let cancel = Arc::new(AtomicBool::new(false));
         for (tool, args) in [
@@ -281,7 +385,9 @@ mod live {
             let preview = super::super::preview(&call, &settings);
             assert_eq!(preview.provider, "Apple Maps", "{tool}");
             let outcome = super::super::execute(&call, &settings, cancel.clone()).await.unwrap_or_else(|error| panic!("{tool}: {error}"));
-            println!("--- {tool}: {}\n{}", preview.summary, cards_text(&outcome.cards));
+            let map = outcome.cards[0].map.clone().unwrap_or_else(|| panic!("{tool}: no map"));
+            assert!(map_picture(map.id.clone()).unwrap().starts_with("data:image/png;base64,"));
+            println!("--- {tool}: {}\n{}\nmap opens {}", preview.summary, cards_text(&outcome.cards), map.url);
         }
         assert!(super::super::available().contains(&"travel_time"));
     }

@@ -376,6 +376,7 @@ pub(crate) fn card(
         url: url.filter(|url| safe_link(url)),
         attribution: attribution.into(),
         retrieved_at: now(),
+        map: None,
     }
 }
 

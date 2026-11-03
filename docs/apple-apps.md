@@ -27,6 +27,9 @@ quota, so weather stays on Open-Meteo.
   with a link that opens the route in Maps.
 - Both stay approved online lookups: the sheet names Apple Maps and shows exactly what
   is sent.
+- Each result shows a map drawn on the Mac (MapKit snapshots): the route with its two
+  ends, or the places numbered as listed. Clicking it opens the same view in Maps. The
+  latest 40 maps are kept in the cache.
 
 **M2 Messages**
 - `send_message` to a person found in Contacts, through Messages, always approved.

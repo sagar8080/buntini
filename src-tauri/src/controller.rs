@@ -216,7 +216,7 @@ impl AppState {
         }
         let store = Arc::new(Mutex::new(store));
         let models = ModelHub::new(resource("worker/main.py"), native_dir.join("buntini-fm"));
-        integrations::maps::set_helper(models.apple_helper());
+        integrations::maps::set_helper(models.apple_helper(), &cache.join("maps"));
         models.set_ledger(store.clone());
         Ok(Self {
             store,

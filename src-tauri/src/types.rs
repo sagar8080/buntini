@@ -408,6 +408,16 @@ pub struct ResultCard {
     pub url: Option<String>,
     pub attribution: String,
     pub retrieved_at: String,
+    /// A map of the results, drawn on this Mac.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<CardMap>,
+}
+/// A saved map picture (read back with `map_picture`) and the Maps view it shows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CardMap {
+    pub id: String,
+    pub url: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

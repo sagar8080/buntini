@@ -2081,6 +2081,8 @@ func contractSelfTest() async -> Int32 {
 /// object; a place Maps can't find answers `{"error":"not_found","which":…}`.
 /// `--maps-places <category> <near> <radius metres>`: points of interest around a place.
 /// `--maps-route <from> <to> <driving|walking|transit>`: how long the trip takes.
+/// Either may end with `--map <file.png>` to also draw the result on a map there: the
+/// route and its ends, or the places numbered as listed.
 enum Maps {
     static let categories: [String: [MKPointOfInterestCategory]] = [
         "cafe": [.cafe], "restaurant": [.restaurant], "bar": [.nightlife, .brewery, .winery],
@@ -2093,6 +2095,12 @@ enum Maps {
     static let placeLimit = 10
 
     static func run(_ arguments: [String]) async -> Int32 {
+        var arguments = arguments
+        var picture: URL?
+        if arguments.count == 7, arguments[5] == "--map", arguments[6].hasPrefix("/"), arguments[6].hasSuffix(".png") {
+            picture = URL(fileURLWithPath: arguments[6])
+            arguments.removeLast(2)
+        }
         guard arguments.count == 5, arguments.dropFirst(2).allSatisfy({ !$0.isEmpty && $0.count <= 160 }) else {
             FileHandle.standardError.write(Data("invalid-query: Say what to look for and where.\n".utf8))
             return 2
@@ -2101,11 +2109,11 @@ enum Maps {
             switch arguments[1] {
             case "--maps-places":
                 guard let kinds = categories[arguments[2]], let radius = Double(arguments[4]), (100...5000).contains(radius) else { break }
-                emit(try await places(kinds, near: arguments[3], radius: radius))
+                emit(try await places(kinds, near: arguments[3], radius: radius, picture: picture))
                 return 0
             case "--maps-route":
                 guard ["driving", "walking", "transit"].contains(arguments[4]) else { break }
-                emit(try await route(from: arguments[2], to: arguments[3], mode: arguments[4]))
+                emit(try await route(from: arguments[2], to: arguments[3], mode: arguments[4], picture: picture))
                 return 0
             default: break
             }
@@ -2132,7 +2140,7 @@ enum Maps {
                 "latitude": coordinate.latitude, "longitude": coordinate.longitude]
     }
 
-    static func places(_ kinds: [MKPointOfInterestCategory], near: String, radius: Double) async throws -> [String: Any] {
+    static func places(_ kinds: [MKPointOfInterestCategory], near: String, radius: Double, picture: URL?) async throws -> [String: Any] {
         guard let center = try await find(near) else { return ["error": "not_found", "which": "near"] }
         let request = MKLocalPointsOfInterestRequest(center: center.placemark.coordinate, radius: radius)
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: kinds)
@@ -2148,10 +2156,19 @@ enum Maps {
             return row
         }.filter { ($0["distance_m"] as? Double ?? 0) <= radius }
          .sorted { ($0["distance_m"] as? Double ?? 0) < ($1["distance_m"] as? Double ?? 0) }
-        return ["center": describe(center), "places": Array(rows.prefix(placeLimit)), "total": rows.count]
+        let shown = Array(rows.prefix(placeLimit))
+        var result: [String: Any] = ["center": describe(center), "places": shown, "total": rows.count]
+        if let picture, !shown.isEmpty {
+            let pins = shown.compactMap { row -> CLLocationCoordinate2D? in
+                guard let latitude = row["latitude"] as? Double, let longitude = row["longitude"] as? Double else { return nil }
+                return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            }
+            result["map"] = await draw(pins: pins.enumerated().map { (String($0.offset + 1), $0.element) }, line: nil, to: picture)
+        }
+        return result
     }
 
-    static func route(from: String, to: String, mode: String) async throws -> [String: Any] {
+    static func route(from: String, to: String, mode: String, picture: URL?) async throws -> [String: Any] {
         guard let start = try await find(from) else { return ["error": "not_found", "which": "from"] }
         guard let end = try await find(to) else { return ["error": "not_found", "which": "to"] }
         let request = MKDirections.Request()
@@ -2159,6 +2176,7 @@ enum Maps {
         request.destination = end
         request.transportType = mode == "walking" ? .walking : mode == "transit" ? .transit : .automobile
         var result: [String: Any] = ["from": describe(start), "to": describe(end), "mode": mode]
+        var line: MKPolyline?
         do {
             // Maps gives transit only as a travel time, not a full route.
             if mode == "transit" {
@@ -2170,11 +2188,79 @@ enum Maps {
                 result["seconds"] = best.expectedTravelTime.rounded()
                 result["distance_m"] = best.distance.rounded()
                 result["via"] = best.name
+                line = best.polyline
             }
         } catch let error as MKError where error.code == .directionsNotFound {
             result["error"] = "no_route"
         }
+        if let picture, result["error"] == nil {
+            result["map"] = await draw(pins: [("A", start.placemark.coordinate), ("B", end.placemark.coordinate)], line: line, to: picture)
+        }
         return result
+    }
+
+    /// Draws a map around the pins (and the route line, when there is one), in the Mac's
+    /// light or dark look, and saves it as a PNG. Whether it was saved.
+    static func draw(pins: [(String, CLLocationCoordinate2D)], line: MKPolyline?, to file: URL) async -> Bool {
+        let size = CGSize(width: 560, height: 300)
+        var area = line?.boundingMapRect ?? .null
+        for (_, coordinate) in pins {
+            let point = MKMapPoint(coordinate)
+            area = area.union(MKMapRect(x: point.x, y: point.y, width: 0, height: 0))
+        }
+        // Room around the edges for the pins, at least a few streets' worth, in the picture's shape.
+        let least = 1500 * MKMapPointsPerMeterAtLatitude(pins.first?.1.latitude ?? 0)
+        var width = max(area.size.width * 1.3, least), height = max(area.size.height * 1.4, least)
+        if width / height < size.width / size.height { width = height * size.width / size.height } else { height = width * size.height / size.width }
+        let options = MKMapSnapshotter.Options()
+        options.mapRect = MKMapRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height)
+        options.size = size
+        let dark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        options.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        guard let shot = try? await MKMapSnapshotter(options: options).start() else { return false }
+        let scale: CGFloat = 2
+        guard let canvas = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: canvas) else { return false }
+        canvas.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: scale, y: scale)
+        shot.image.draw(in: CGRect(origin: .zero, size: size))
+        if let line, line.pointCount > 1 {
+            let path = NSBezierPath()
+            let points = line.points()
+            for index in 0..<line.pointCount {
+                // On the Mac a snapshot's points already count up from the bottom, as AppKit draws.
+                let at = shot.point(for: points[index].coordinate)
+                if index == 0 { path.move(to: at) } else { path.line(to: at) }
+            }
+            path.lineWidth = 7
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            NSColor.white.withAlphaComponent(0.85).setStroke()
+            path.stroke()
+            path.lineWidth = 4.5
+            NSColor.systemBlue.setStroke()
+            path.stroke()
+        }
+        // Drawn last to first, so the nearest place sits on top.
+        for (label, coordinate) in pins.reversed() {
+            let center = shot.point(for: coordinate)
+            let dot = NSBezierPath(ovalIn: CGRect(x: center.x - 11, y: center.y - 11, width: 22, height: 22))
+            NSColor.white.setFill()
+            dot.fill()
+            let inner = NSBezierPath(ovalIn: CGRect(x: center.x - 9, y: center.y - 9, width: 18, height: 18))
+            NSColor.systemRed.setFill()
+            inner.fill()
+            let text = NSAttributedString(string: label, attributes: [.font: NSFont.boldSystemFont(ofSize: 11), .foregroundColor: NSColor.white])
+            let bounds = text.size()
+            text.draw(at: CGPoint(x: center.x - bounds.width / 2, y: center.y - bounds.height / 2))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = canvas.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: file, options: .atomic)) != nil
     }
 }
 

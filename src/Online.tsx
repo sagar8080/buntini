@@ -1,12 +1,14 @@
-import { BookOpen, CloudSun, Coins, ExternalLink, Globe2, MapPin, Plane, ShieldCheck, ShoppingBag } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { BookOpen, CloudSun, Coins, ExternalLink, Globe2, MapPin, Plane, Route, ShieldCheck, ShoppingBag } from 'lucide-react';
 import ModalSheet from './ModalSheet';
-import type { ResultCard, WebApproval } from './types';
+import { command } from './bridge';
+import type { CardMap, ResultCard, WebApproval } from './types';
 
 const titles: Record<string, string> = {
   web_search: 'Search the web?', weather: 'Check the weather?', currency: 'Get exchange rates?', wikipedia: 'Look it up on Wikipedia?',
-  places: 'Find nearby places?', ebay_search: 'Search eBay listings?', flight_search: 'Search flights?',
+  places: 'Find nearby places?', travel_time: 'Check the travel time?', ebay_search: 'Search eBay listings?', flight_search: 'Search flights?',
 };
-const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: MapPin, listing: ShoppingBag, flight: Plane };
+const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: MapPin, route: Route, listing: ShoppingBag, flight: Plane };
 
 /** Shows exactly what one approved request will send, and to whom, before anything leaves the Mac. */
 export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebInstead }: { approval: WebApproval; approving: boolean; onCancel: () => void; onAllow: () => void; onWebInstead: () => void }) {
@@ -20,9 +22,27 @@ export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebIns
   </ModalSheet>;
 }
 
+// Maps already read this session, so a thread doesn't fetch them again as it re-renders.
+const pictures = new Map<string, string>();
+
+/** The map drawn for these results; opens the same view in Maps. */
+function MapPicture({ map, label, onOpen }: { map: CardMap; label: string; onOpen: (url: string) => void }) {
+  const [source, setSource] = useState(pictures.get(map.id) || '');
+  useEffect(() => {
+    if (pictures.has(map.id)) return;
+    let current = true;
+    command<string>('map_picture', { id: map.id }).then(data => { if (data) pictures.set(map.id, data); if (current) setSource(data); }).catch(() => {});
+    return () => { current = false; };
+  }, [map.id]);
+  if (!source) return null;
+  return <button type="button" className="result-map" aria-label={`Open ${label} in Maps`} onClick={() => onOpen(map.url)}><img src={source} alt="" /></button>;
+}
+
 /** Numbered cards matching the [n] citations in the answer. */
 export function ResultCards({ cards, onOpen }: { cards: ResultCard[]; onOpen: (url: string) => void }) {
+  const mapped = cards.find(card => card.map);
   return <div className="result-cards"><div className="section-label">Live results</div>
+    {mapped?.map && <MapPicture map={mapped.map} label={mapped.kind === 'route' ? mapped.subtitle : mapped.subtitle.split(' · ')[0]} onOpen={onOpen} />}
     {cards.map((card, index) => {
       const Icon = icons[card.kind] || Globe2;
       return <article key={`${card.title}-${index}`} className={`result-card result-card--${card.kind}`}>
