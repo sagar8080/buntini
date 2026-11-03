@@ -360,6 +360,8 @@ export default function Cat({ id, look, pose = 'sit', alive = true }: { id: stri
         <circle cx="38" cy="155" r="11" stroke="#000" strokeOpacity=".22" strokeWidth="1.2" />
       </g>
     </g>
+    {/* Fur parting under a stroke; placed and turned by usePetLife.ts. */}
+    {alive && <g className="cat-ruffle" stroke={coat.outline} strokeOpacity=".5" strokeWidth="1.1" strokeLinecap="round"><path d="M-6 -3.4Q0 -5.4 6 -3.4M-7 0Q0 -2 7 0M-5 3.4Q0 1.4 5 3.4" /></g>}
     <g className="cat-hearts" fill={url('heart')}>{[[124, 68], [137, 54], [113, 50]].map(([x, y], index) => <g key={index} transform={`translate(${x} ${y})`}><g className="cat-heart" style={{ animationDelay: `${index * .28}s` }}><path d="M0 3C-1.5 0-6-.5-6 3C-6 6.5-1.5 8.5 0 10C1.5 8.5 6 6.5 6 3C6-.5 1.5 0 0 3Z" /><ellipse cx="-3.2" cy="2.6" rx="1.3" ry=".9" fill="#fff" fillOpacity=".6" /></g></g>)}</g>
     <g className="cat-ask"><path d="M146 18H166C171 18 174 21 174 26V34C174 39 171 42 166 42H155L149 48L150 42H146C141 42 138 39 138 34V26C138 21 141 18 146 18Z" fill="#FFFDF8" stroke={coat.outline} strokeOpacity=".45" strokeWidth="1.2" strokeLinejoin="round" /><path className="cat-ask-heart" d="M156 27C154.4 24 149.5 24.4 149.5 28.4C149.5 32 154 34.6 156 36.4C158 34.6 162.5 32 162.5 28.4C162.5 24.4 157.6 24 156 27Z" fill={url('heart')} /></g>
     </>}

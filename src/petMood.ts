@@ -12,7 +12,7 @@ export type Feeling = keyof Mood;
 /** What the cat looks like between habits. */
 export type Face = 'neutral' | 'content' | 'drowsy' | 'bored' | 'grumpy' | 'excited';
 export type MoodEvent =
-  | 'pet' | 'click' | 'poke' | 'overpet' | 'held' | 'woken'
+  | 'pet' | 'roughPet' | 'tooMuch' | 'click' | 'poke' | 'overpet' | 'tail' | 'held' | 'woken'
   | 'play' | 'chase' | 'userBack' | 'talk' | 'praise' | 'done' | 'failed';
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
@@ -34,9 +34,12 @@ export function startingMood(motion: PetMotion, hour: number): Mood {
 // Each event nudges a few feelings. Playful cats find being picked up fun; others don't.
 const nudges: Record<MoodEvent, Partial<Mood>> = {
   pet: { affection: .03, boredom: -.2, annoyance: -.04, bond: .002 },
+  roughPet: { affection: .02, boredom: -.2, annoyance: -.02, bond: .001 },
+  tooMuch: { annoyance: .06 },
   click: { affection: .05, boredom: -.3, excitement: .08, bond: .002 },
   poke: { annoyance: .28, boredom: -.3, affection: -.02, bond: -.004 },
   overpet: { annoyance: .35, excitement: .1 },
+  tail: { annoyance: .12, affection: -.01 },
   held: { annoyance: .12, boredom: -.4 },
   woken: { annoyance: .3, energy: .1 },
   play: { energy: -.03, excitement: .12, boredom: -.15 },
@@ -47,6 +50,15 @@ const nudges: Record<MoodEvent, Partial<Mood>> = {
   done: { excitement: .25, affection: .04 },
   failed: { excitement: -.2, affection: .02 },
 };
+
+/** How close the cat is to you. A new cat (bond under 0.15) is shy; a close one (0.5 and
+    up) purrs at the first touch and rolls over for a belly rub. */
+export function bandFor(bond: number): 'new' | 'familiar' | 'close' {
+  return bond < .15 ? 'new' : bond < .5 ? 'familiar' : 'close';
+}
+
+/** How much sooner it asks for a pet: half as often when new, more often when close. */
+export const askPace = { new: .5, familiar: 1, close: 1.5 } as const;
 
 export function feel(mood: Mood, event: MoodEvent, motion: PetMotion): Mood {
   const change = event === 'held' && motion === 'playful' ? { excitement: .25, boredom: -.4 } : nudges[event];
@@ -75,18 +87,26 @@ export function drift(mood: Mood, seconds: number, { motion, hour, userAround, a
   };
 }
 
-/** The mood saved when Buntini last ran, brought up to now. Time apart passes as a nap:
-    it wakes rested and over any crossness, with its bond (a little faded) intact. */
-export function remembered(saved: string | null, motion: PetMotion, hour: number, now: number): Mood {
+/** The mood saved when Buntini last ran (`at`, in ms), brought up to now. Time apart passes
+    as a nap: it wakes rested and over any crossness, with its bond (a little faded) intact. */
+export function restored(saved: Partial<Record<Feeling, unknown>> | null, at: number | null, motion: PetMotion, hour: number, now: number): Mood {
   const fresh = startingMood(motion, hour);
+  if (!saved || typeof at !== 'number') return fresh;
+  const mood = { ...fresh };
+  for (const feeling of Object.keys(fresh) as Feeling[]) {
+    const value = saved[feeling];
+    if (typeof value === 'number' && Number.isFinite(value)) mood[feeling] = clamp(value);
+  }
+  const apart = Math.max(0, (now - at) / 1000);
+  return { ...drift(mood, Math.min(apart, 6 * 3600), { motion, hour, userAround: false, asleep: apart > 600 }), bond: clamp(mood.bond * Math.max(0, 1 - apart / BOND_FADES)) };
+}
+
+/** A mood saved by an earlier version in this browser's storage, as `memory` wrote it. */
+export function remembered(saved: string | null, motion: PetMotion, hour: number, now: number): Mood {
   try {
     const { mood, at } = JSON.parse(saved ?? '');
-    if (!mood || typeof at !== 'number') return fresh;
-    const restored = { ...fresh };
-    for (const feeling of Object.keys(fresh) as Feeling[]) if (typeof mood[feeling] === 'number') restored[feeling] = clamp(mood[feeling]);
-    const apart = Math.max(0, (now - at) / 1000);
-    return { ...drift(restored, Math.min(apart, 6 * 3600), { motion, hour, userAround: false, asleep: apart > 600 }), bond: clamp(restored.bond * Math.max(0, 1 - apart / BOND_FADES)) };
-  } catch { return fresh; }
+    return restored(mood && typeof mood === 'object' ? mood : null, at, motion, hour, now);
+  } catch { return startingMood(motion, hour); }
 }
 
 export const memory = (mood: Mood, now: number) => JSON.stringify({ mood, at: now });

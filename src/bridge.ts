@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, Settings, TaskEvent, TaskRecord } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
@@ -81,6 +81,21 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
   localStorage.setItem('buntini-preview-settings', JSON.stringify(settings));
   return settings;
 }
+/** The browser preview's cat lives in this browser, with the same shape as the app's. */
+function previewPetMemory(name: string, args?: Record<string, unknown>): PetMemory | undefined {
+  const key = 'buntini-preview-cat';
+  let saved: PetMemory | null = null;
+  try { saved = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* A new cat. */ }
+  if (name === 'save_pet_memory') {
+    if (saved?.id === args?.id) localStorage.setItem(key, JSON.stringify({ ...saved, mood: args?.mood, savedAt: args?.savedAt }));
+    return undefined;
+  }
+  if (saved?.id) return saved;
+  const favourites: PetMemory['favourite'][] = ['cheeks', 'chin', 'ears'];
+  const cat: PetMemory = { id: crypto.randomUUID(), adoptedOn: new Date().toISOString().slice(0, 10), favourite: favourites[Math.floor(Math.random() * 3)], mood: null, savedAt: null };
+  localStorage.setItem(key, JSON.stringify(cat));
+  return cat;
+}
 export async function command<T = void>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (!desktop) {
     // The browser preview keeps the conversation controls usable without the desktop app.
@@ -97,6 +112,10 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
       if (name === 'open_conversation') { state.activeId = id; savePreviewThreads(state); }
       return page as T;
     }
+    if (name === 'pet_memory' || name === 'save_pet_memory') return previewPetMemory(name, args) as T;
+    // The preview can purr out loud; it has no trackpad taps.
+    if (name === 'pet_sound_allowed') return true as T;
+    if (name === 'pet_purr_tap') return undefined as T;
     if (name === 'finish_onboarding') { localStorage.setItem('buntini-preview-onboarded', '1'); return undefined as T; }
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.

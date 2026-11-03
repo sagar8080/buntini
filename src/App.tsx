@@ -7,7 +7,7 @@ import { ApprovalSheet, ResultCards } from './Online';
 import { backendLabel } from './brain.ts';
 import { lookFrom } from './petOptions';
 import { feelingFor } from './petMood';
-import { forgetMood, type PetReaction } from './usePetLife';
+import { forgetMood, petFromKeyboard, type PetFeeling, type PetReaction } from './usePetLife';
 import { usePetWorld } from './usePetWorld';
 import type { NudgeAction } from './petWorld';
 import PriceWatches from './PriceWatches';
@@ -134,6 +134,12 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const setHandsFreeMode = (on: boolean) => { handsFreeRef.current = on; setHandsFree(on); };
   const [listenSeconds, setListenSeconds] = useState(0);
+  // Petting the cat is announced to screen readers: once when it purrs, once when it kneads.
+  useEffect(() => {
+    const said = (event: Event) => setAnnouncement(`${data?.settings.assistantName || 'Buntini'} is ${(event as CustomEvent<PetFeeling>).detail}`);
+    window.addEventListener('buntini-pet-feeling', said);
+    return () => window.removeEventListener('buntini-pet-feeling', said);
+  }, [data?.settings.assistantName]);
   useEffect(() => {
     if (!recording) { setListenSeconds(0); return; }
     const started = Date.now();
@@ -936,6 +942,7 @@ export default function App() {
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
+        <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>Pet {assistantName}</button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>

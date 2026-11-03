@@ -2,6 +2,14 @@ export type Mode = 'auto' | 'files' | 'system' | 'web';
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
 export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';
+/** The cat's memory of you, kept by the desktop app (pet.rs). */
+export interface PetMemory {
+  id: string;
+  adoptedOn: string;
+  favourite: 'cheeks' | 'chin' | 'ears';
+  mood: { energy: number; affection: number; boredom: number; annoyance: number; excitement: number; bond: number } | null;
+  savedAt: number | null;
+}
 export type CatAccessory = 'none' | 'bell' | 'bow' | 'bandana' | 'hat' | 'flowers';
 export type PetMotion = 'calm' | 'playful' | 'sleepy';
 /** accent is the resolved accessory colour (#RRGGBB). */
