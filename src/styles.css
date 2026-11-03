@@ -567,9 +567,29 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes yarn-nudge { 0%, 38%, 100% { transform: none; } 58% { transform: translateX(calc(var(--toy-roll, 1) * -6px)) rotate(calc(var(--toy-roll, 1) * -80deg)); } 74% { transform: translateX(calc(var(--toy-roll, 1) * -7px)) rotate(calc(var(--toy-roll, 1) * -95deg)); } }
 @keyframes yarn-nudge-shadow { 0%, 38%, 100% { transform: none; } 58%, 74% { transform: translateX(calc(var(--toy-roll, 1) * -6px)); } }
 [data-motion=reduced] .pet[class*="pet--act-"] .cat-paw-left, [data-motion=reduced] .pet[class*="pet--act-"] .cat-yarn-ball, [data-motion=reduced] .pet[class*="pet--act-"] .cat-yarn-shadow, [data-motion=reduced] .pet[class*="pet--act-"] .cat-yarn-strand, [data-motion=reduced] .pet.pet--act-bat .cat-head, [data-motion=reduced] .pet.pet--act-pounce .cat-head, [data-motion=reduced] .pet.pet--act-pounce .pet-body { animation: none; }
+/* A purr: the breathing deepens as it builds (--purr, 0 to 1) and settles after the
+   strokes stop. Actions below that move the body take over while they play. */
+.pet[data-purring] .pet-body { animation: pet-purr-breath 2.4s ease-in-out infinite; }
 .pet.pet--act-love .pet-body, .pet.pet--act-happy .pet-body { animation: pet-happy 1.4s ease-in-out; }
-.pet.pet--act-purr .pet-body { animation: pet-purr .12s linear infinite; }
-.pet.pet--act-love .cat-hearts, .pet.pet--act-happy .cat-hearts, .pet.pet--act-purr .cat-hearts { display: block; }
+.pet.pet--act-love .cat-hearts, .pet.pet--act-happy .cat-hearts, .pet.pet--act-purr[data-purr-high] .cat-hearts { display: block; }
+/* Where you pet it: a rubbed cheek or ear tips the head into your hand, a scratched chin
+   lifts it, and a stroked back arches up to meet the stroke. */
+.pet--cat.pet--act-purr[data-touch=cheeks] .cat-head, .pet--cat.pet--act-purr[data-touch=ears] .cat-head { transform: rotate(calc(var(--touch-side, 1) * 6deg)); transition: transform .4s ease-out; }
+.pet--cat.pet--act-purr[data-touch=chin] .cat-head { transform: translateY(-2.5px) rotate(calc(var(--touch-side, 1) * -2deg)); transition: transform .4s ease-out; }
+.pet--cat.pet--act-purr[data-touch=back] .cat-sit { transform: translateY(-1.5px) scale(1.02, 1.04); transform-origin: 90px 160px; }
+/* The fur parts along the stroke and smooths back. */
+.cat-ruffle { opacity: 0; transform: translate(var(--ruffle-x, 90px), var(--ruffle-y, 90px)) rotate(var(--ruffle-angle, 0deg)); transition: opacity .6s ease; pointer-events: none; }
+.pet--cat[data-ruffle] .cat-ruffle { opacity: 1; transition: opacity .12s ease; }
+/* Stroking the tail: it flicks away, ears back, and it looks off for a moment. */
+.pet.pet--act-flick .cat-tail { animation: cat-tail-flick 1.1s ease-in-out; }
+.pet.pet--act-flick .cat-head { animation: cat-look-away 1.1s ease-in-out; }
+.pet--cat.pet--act-flick .cat-ear-left { transform: rotate(-16deg) translateY(3px); }
+.pet--cat.pet--act-flick .cat-ear-right { transform: rotate(16deg) translateY(3px); }
+/* A long belly rub to a playful cat: both front paws grab the hand and the back feet kick. */
+.pet.pet--act-grab .cat-paw-left { animation: cat-grab-left 1.9s ease-in-out; }
+.pet.pet--act-grab .cat-paw-right { animation: cat-grab-right 1.9s ease-in-out; }
+.pet.pet--act-grab .cat-hind-paw { animation: cat-kick .28s ease-in-out .35s 4; }
+.pet.pet--act-grab .cat-head { animation: cat-grab-head 1.9s ease-in-out; }
 .pet.pet--act-sad .pet-body { animation: pet-sad 1.8s ease-in-out; }
 .pet.pet--act-sad .cat-ear-left { animation: none; transform: rotate(-34deg) translateY(7px); }
 .pet.pet--act-sad .cat-ear-right { animation: none; transform: rotate(34deg) translateY(7px); }
@@ -593,7 +613,13 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes pet-wiggle { 10%, 30%, 50% { transform: translateX(-1.5px) rotate(-1.5deg); } 20%, 40%, 60% { transform: translateX(1.5px) rotate(1.5deg); } 72% { transform: translateY(2px) scale(1.03, .96); } 84% { transform: translateY(-9px) scale(.98, 1.03); } 94% { transform: scale(1.02, .97); } }
 @keyframes cat-nod { 60% { transform: translateY(3px) rotate(4deg); } 70% { transform: translateY(-1px) rotate(-1deg); } }
 @keyframes pet-happy { 20% { transform: translateY(2px) scale(1.03, .96); } 38% { transform: translateY(-8px) scale(.98, 1.03); } 55% { transform: scale(1.02, .97); } 70% { transform: translateY(-4px); } 85% { transform: none; } }
-@keyframes pet-purr { 50% { transform: translate(.4px, .25px); } }
+@keyframes pet-purr-breath { 50% { transform: translateY(calc(var(--purr, 0) * -1.6px)) scale(calc(1 + var(--purr, 0) * .022), calc(1 + var(--purr, 0) * .03)); } }
+@keyframes cat-tail-flick { 14% { transform: rotate(-18deg); } 30% { transform: rotate(11deg); } 46% { transform: rotate(-8deg); } 70%, 100% { transform: none; } }
+@keyframes cat-look-away { 20%, 70% { transform: rotate(-7deg) translateX(-2px); } }
+@keyframes cat-grab-left { 15%, 80% { transform: translate(6px, -16px) rotate(18deg); } }
+@keyframes cat-grab-right { 15%, 80% { transform: translate(-6px, -16px) rotate(-18deg); } }
+@keyframes cat-kick { 50% { transform: translateY(-4px); } }
+@keyframes cat-grab-head { 15%, 80% { transform: translateY(4px) rotate(-3deg); } }
 @keyframes pet-sad { 20%, 75% { transform: translateY(2px) scale(1.01, .98); } }
 @keyframes cat-heart { 0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-14px) scale(.9); } }
 /* Online integrations: approval details, live result cards and connected services. */
@@ -1009,7 +1035,6 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet.pet--act-hunt .cat-paw-left, .pet.pet--act-hunt .cat-paw-right { animation: cat-hunt-paws .9s ease-out; }
 .pet.pet--act-knead .cat-paw-left { animation: cat-knead .55s ease-in-out infinite; }
 .pet.pet--act-knead .cat-paw-right { animation: cat-knead .55s ease-in-out .27s infinite; }
-.pet.pet--act-knead .pet-body { animation: pet-purr .12s linear infinite; }
 .pet--cat.pet--act-knead .pet-eyes { display: none; }
 .pet--cat.pet--act-knead .cat-eyes-happy { display: block; }
 .pet.pet--act-loaf .cat-paw { opacity: 0; transition: opacity .5s ease; }

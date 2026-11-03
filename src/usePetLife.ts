@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
-import { desktop } from './bridge';
+import { command, desktop } from './bridge';
 import { actionDuration, ASK_GAP, forCharacter, gazeToward, Hunter, isToyAction, nearness, nextBlinkDelay, nextDreamDelay, nextEarSwivel, nextHabit, nextHabitDelay, nextSaccade, randomGlance, toyPlay, type PetAction } from './petLife';
-import { drift, faceFor, feel, memory, moodPace, Pokes, proudOrHappy, remembered, startingMood, type Face, type Mood, type MoodEvent } from './petMood';
-import type { PetMotion, PetState } from './types';
+import { drift, faceFor, feel, moodPace, Pokes, proudOrHappy, remembered, restored, startingMood, type Face, type Mood, type MoodEvent } from './petMood';
+import { Petting, zoneAt, type Favourite, type Zone } from './petTouch';
+import type { PetMemory, PetMotion, PetState } from './types';
 
 export interface PetReaction { kind: PetAction; id: number }
 
@@ -11,11 +12,14 @@ export interface PetReaction { kind: PetAction; id: number }
 const reactions = new Set<PetAction>(['love', 'purr', 'happy', 'sad', 'proud', 'bashful', 'curious', 'excited', 'startle', 'grumpy', 'wave', 'swat']);
 // What a reaction says happened, for the mood.
 const reactionFeeling: Partial<Record<PetAction, MoodEvent>> = { happy: 'done', proud: 'done', sad: 'failed', bashful: 'praise', love: 'praise', excited: 'userBack', wave: 'userBack' };
+// Where earlier versions kept the mood; it moves into the app's store once.
 const MOOD_KEY = 'buntini-cat-mood';
+// Petting reactions that play out before a stroke can start another.
+const pettingReactions = new Set<PetAction | null>(['knead', 'swat', 'bunt', 'flick', 'grab']);
 const forgetters = new Set<() => void>();
 
-/** Delete everything: the cat forgets its bond and mood, both the saved copy and the one
-    it's feeling now. */
+/** Delete everything: the store has erased the cat's memory already. This forgets the
+    mood it's feeling now, and a new cat joins. */
 export function forgetMood() {
   try { localStorage.removeItem(MOOD_KEY); } catch { /* Nothing was saved. */ }
   for (const forget of forgetters) forget();
@@ -29,11 +33,14 @@ const stillPreferred = () => document.documentElement.dataset.motion === 'reduce
 /** `paused`: travelling, napping or being carried, when habits wait. `remember`: the
     desktop cat, whose mood and bond carry over to the next launch. */
 export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state, paused = false, motion, cat, reaction, asleep = false, held = false, remember = false }: { alive: boolean; state: PetState; paused?: boolean; motion: PetMotion; cat: boolean; reaction?: PetReaction; asleep?: boolean; held?: boolean; remember?: boolean }) {
+  // Until the store answers, any mood an earlier version left in this browser.
   const [initialMood] = useState<Mood>(() => {
     const hour = new Date().getHours();
     if (!remember) return startingMood(motion, hour);
     try { return remembered(localStorage.getItem(MOOD_KEY), motion, hour, Date.now()); } catch { return startingMood(motion, hour); }
   });
+  // Which cat this is and its favourite spot, once the store has answered.
+  const known = useRef<{ id: string; favourite: Favourite } | null>(null);
   const [action, setAction] = useState<PetAction | null>(null);
   const [blinking, setBlinking] = useState(false);
   const [face, setFace] = useState<Face>(() => faceFor(initialMood));
@@ -51,6 +58,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const mood = useRef<Mood>(initialMood);
   // A feeling that arrived while another was playing, or while the cat was on the move.
   const pending = useRef<{ kind: PetAction; at: number } | null>(null);
+  // What it settles into after the slow blink that follows a good purr.
+  const settleAfter = useRef<PetAction | null>(null);
   const live = useRef({ state, paused, motion, cat, asleep });
   live.current = { state, paused, motion, cat, asleep };
 
@@ -103,7 +112,9 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     }
     // Asked for a pet and got none: a little flick of the ear, and it lets it go. Poked
     // awake, it shakes off the fright and grumbles.
-    const then = next === 'askpet' ? () => play('ear') : next === 'startle' && mood.current.annoyance > .25 ? () => play('grumpy') : () => {
+    const settle = next === 'slowblink' ? settleAfter.current : null;
+    settleAfter.current = null;
+    const then = next === 'askpet' ? () => play('ear') : next === 'startle' && mood.current.annoyance > .25 ? () => play('grumpy') : settle ? () => play(settle) : () => {
       const waiting = takePending();
       if (waiting) play(waiting); else stop();
     };
@@ -147,29 +158,54 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     return () => { cancelled = true; window.clearTimeout(timer); setBlinking(false); };
   }, [alive, motion]);
 
+  const save = useCallback(async () => {
+    const cat = known.current;
+    if (!remember || !cat) return;
+    await command('save_pet_memory', { id: cat.id, mood: mood.current, savedAt: Date.now() });
+  }, [remember]);
+
+  // The desktop cat's memory lives in the app's store, so export has it and Delete
+  // everything erases it. A mood from an earlier version moves there once.
+  useEffect(() => {
+    if (!remember) return;
+    let cancelled = false;
+    const load = async () => {
+      const saved = await command<PetMemory>('pet_memory');
+      if (cancelled) return;
+      let legacy: string | null = null;
+      try { legacy = localStorage.getItem(MOOD_KEY); } catch { /* Nothing to move. */ }
+      const hour = new Date().getHours();
+      if (saved.mood) mood.current = restored(saved.mood, saved.savedAt, live.current.motion, hour, Date.now());
+      else if (legacy) mood.current = remembered(legacy, live.current.motion, hour, Date.now());
+      setFace(faceFor(mood.current));
+      known.current = { id: saved.id, favourite: saved.favourite };
+      if (!saved.mood && legacy) await save();
+      try { localStorage.removeItem(MOOD_KEY); } catch { /* Already gone. */ }
+    };
+    // A cat whose memory can't be reached starts fresh and isn't saved.
+    const start = () => void load().catch(() => {});
+    start();
+    const forget = () => { known.current = null; mood.current = startingMood(live.current.motion, new Date().getHours()); setFace(faceFor(mood.current)); start(); };
+    forgetters.add(forget);
+    return () => { cancelled = true; forgetters.delete(forget); };
+  }, [remember, save]);
+
   // Time passes: feelings drift back to the cat's usual self, and boredom creeps in while
   // you're around but busy with other things.
   useEffect(() => {
     if (!alive) return;
     // Saved every 30 seconds and as the window goes away, not on every tick.
-    const save = () => { if (remember) try { localStorage.setItem(MOOD_KEY, memory(mood.current, Date.now())); } catch { /* A mood that isn't saved starts fresh next time. */ } };
+    const keep = () => void save().catch(() => { /* Saved next time. */ });
     let ticks = 0;
     const timer = window.setInterval(() => {
       const { motion: personality, asleep: napping } = live.current;
       mood.current = drift(mood.current, 5, { motion: personality, hour: new Date().getHours(), userAround: performance.now() - lastMove.current < 60_000, asleep: napping });
       setFace(faceFor(mood.current));
-      if (++ticks % 6 === 0) save();
+      if (++ticks % 6 === 0) keep();
     }, 5000);
-    window.addEventListener('pagehide', save);
-    return () => { window.clearInterval(timer); window.removeEventListener('pagehide', save); save(); };
-  }, [alive, remember]);
-
-  useEffect(() => {
-    if (!remember) return;
-    const forget = () => { mood.current = startingMood(live.current.motion, new Date().getHours()); setFace(faceFor(mood.current)); };
-    forgetters.add(forget);
-    return () => { forgetters.delete(forget); };
-  }, [remember]);
+    window.addEventListener('pagehide', keep);
+    return () => { window.clearInterval(timer); window.removeEventListener('pagehide', keep); keep(); };
+  }, [alive, save]);
 
   // Between habits: eyes that wander when nothing is moving, and ears that swivel to small
   // sounds. Both are CSS variables, so none of it re-renders.
@@ -324,21 +360,69 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const element = ref.current;
     if (!alive || !element) return;
     const pokes = new Pokes();
-    let travel = 0;
-    let windowStart = 0;
-    let purringSince = 0;
-    let pettingSince = 0;
-    let lastFelt = 0;
-    let swatted = false;
+    const petting = new Petting();
     let inside = false;
     let still = 0;
+    let ticker = 0;
+    let lastStroke = 0;
     let lastBunt = -Infinity;
     let last: { x: number; y: number } | null = null;
+    const context = () => ({ cat: live.current.cat, motion: live.current.motion, annoyance: mood.current.annoyance, favourite: known.current?.favourite ?? null });
+    // A point on the page in the cat's own 180 × 180 drawing, and which side of it.
+    const where = (clientX: number, clientY: number) => {
+      const rect = (element.querySelector('svg') ?? element).getBoundingClientRect();
+      return { x: (clientX - rect.left) / rect.width * 180, y: (clientY - rect.top) / rect.height * 180, side: clientX < rect.left + rect.width / 2 ? -1 : 1 };
+    };
+    const zoneUnder = (point: { x: number; y: number }): Zone | null => live.current.cat ? zoneAt(point.x, point.y) : 'head';
+    // While a purr lasts: its level for the CSS, the purr held until it fades, and a slow
+    // blink once the strokes stop after a good one.
+    const showPurr = (level: number) => {
+      element.style.setProperty('--purr', level.toFixed(3));
+      element.toggleAttribute('data-purring', level > .02);
+      element.toggleAttribute('data-purr-high', level > .6);
+    };
+    const tick = () => {
+      const now = performance.now();
+      const level = petting.purr(now);
+      showPurr(level);
+      if (now - lastStroke > 600) { delete element.dataset.touch; delete element.dataset.ruffle; }
+      // Asked only once it's free to, so a knead still playing doesn't use up the blink.
+      const free = live.current.cat && live.current.state === 'idle' && !live.current.paused && (current.current === 'purr' || !current.current);
+      if (free && petting.afterglow(now)) {
+        settleAfter.current = live.current.motion === 'sleepy' ? 'loaf' : 'tailcurl';
+        play('slowblink');
+      } else if (current.current === 'purr' && level < .12) stop();
+      if (!level && now - lastStroke > 1200) { window.clearInterval(ticker); ticker = 0; }
+    };
+    const holdPurr = () => {
+      if (current.current === 'purr') return;
+      window.clearTimeout(endTimer.current);
+      current.current = 'purr';
+      setAction('purr');
+    };
+    const stroke = (zone: Zone, distance: number, point: { x: number; y: number; side: number }, angle: number) => {
+      const now = performance.now();
+      const touch = petting.stroke(zone, distance, now, context());
+      lastStroke = now;
+      if (!ticker) ticker = window.setInterval(tick, 100);
+      showPurr(touch.purr);
+      element.dataset.touch = zone;
+      element.style.setProperty('--touch-side', String(point.side));
+      // The fur parts where the hand goes, and smooths back after.
+      element.style.setProperty('--ruffle-x', `${point.x.toFixed(1)}px`);
+      element.style.setProperty('--ruffle-y', `${point.y.toFixed(1)}px`);
+      element.style.setProperty('--ruffle-angle', `${(angle * 180 / Math.PI).toFixed(0)}deg`);
+      element.dataset.ruffle = '';
+      if (touch.mood) moodTo(touch.mood);
+      // The pet it asked for.
+      if (current.current === 'askpet' && touch.mood === 'pet') { play('love'); return; }
+      if (pettingReactions.has(current.current) || !touch.play) return;
+      if (touch.play === 'purr') holdPurr(); else play(touch.play);
+    };
     // A hand held still over the cat gets a head rub against it.
     const settle = (event: PointerEvent) => {
       window.clearTimeout(still);
-      const rect = element.getBoundingClientRect();
-      const side = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
+      const { side } = where(event.clientX, event.clientY);
       still = window.setTimeout(() => {
         if (!inside || current.current || !live.current.cat || live.current.state !== 'idle' || live.current.paused || stillPreferred() || performance.now() - lastBunt < 20_000) return;
         lastBunt = performance.now();
@@ -352,29 +436,24 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       if (event.buttons || stillPreferred()) return;
       inside = true;
       settle(event);
-      const now = performance.now();
-      if (now - windowStart > 1400) { windowStart = now; travel = 0; }
-      if (last) travel += Math.hypot(event.clientX - last.x, event.clientY - last.y);
+      const previous = last;
       last = { x: event.clientX, y: event.clientY };
-      // A few seconds of steady petting and it starts making biscuits.
-      if (current.current === 'knead' || current.current === 'swat' || current.current === 'bunt') return;
-      // The pet it asked for.
-      if (current.current === 'askpet') { play('love'); moodTo('pet'); return; }
-      if (current.current === 'purr' || travel > 140) {
-        if (!purringSince) purringSince = now;
-        if (!pettingSince) pettingSince = now;
-        if (now - lastFelt > 1000) { lastFelt = now; moodTo('pet'); }
-        // Too much of a good thing: a playful (or cross) cat swats the hand, once a session.
-        if (!swatted && live.current.cat && now - pettingSince > 12_000 && (live.current.motion === 'playful' || mood.current.annoyance > .3)) {
-          swatted = true; purringSince = 0;
-          play('swat'); moodTo('overpet');
-          return;
-        }
-        if (now - purringSince > 3000 && live.current.cat) { purringSince = 0; play('knead'); return; }
-        play('purr');
-      }
+      if (!previous) return;
+      const point = where(event.clientX, event.clientY);
+      const zone = zoneUnder(point);
+      const dx = event.clientX - previous.x, dy = event.clientY - previous.y;
+      if (zone) stroke(zone, Math.hypot(dx, dy), point, Math.atan2(dy, dx));
     };
-    const leave = () => { inside = false; window.clearTimeout(still); last = null; travel = 0; purringSince = 0; pettingSince = 0; swatted = false; };
+    // Two fingers stroking across the cat on a trackpad pet it too. A pinch is not a pet.
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || stillPreferred()) return;
+      event.preventDefault();
+      const point = where(event.clientX, event.clientY);
+      const zone = zoneUnder(point);
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+      if (zone) stroke(zone, Math.hypot(event.deltaX, event.deltaY) * unit, point, Math.atan2(event.deltaY, event.deltaX));
+    };
+    const leave = () => { inside = false; window.clearTimeout(still); last = null; petting.leave(); };
     const click = () => {
       if (stillPreferred()) return;
       const poked = pokes.click(performance.now()) === 'poke';
@@ -387,9 +466,17 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     };
     element.addEventListener('pointermove', move);
     element.addEventListener('pointerleave', leave);
+    element.addEventListener('wheel', wheel, { passive: false });
     element.addEventListener('click', click);
-    return () => { window.clearTimeout(still); element.removeEventListener('pointermove', move); element.removeEventListener('pointerleave', leave); element.removeEventListener('click', click); };
-  }, [alive, ref, play, moodTo]);
+    return () => {
+      window.clearTimeout(still);
+      window.clearInterval(ticker);
+      element.removeEventListener('pointermove', move);
+      element.removeEventListener('pointerleave', leave);
+      element.removeEventListener('wheel', wheel);
+      element.removeEventListener('click', click);
+    };
+  }, [alive, ref, play, stop, moodTo]);
 
   // Waking from a nap: a long stretch, and it's pleased to see you.
   const wasAsleep = useRef(asleep);

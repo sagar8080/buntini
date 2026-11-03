@@ -56,6 +56,8 @@
           "cancel_recording",
           "open_source",
           "plan_online_request",
+          "pet_memory",
+          "save_pet_memory",
           "pet_world",
           "pet_move",
           "pet_stop",

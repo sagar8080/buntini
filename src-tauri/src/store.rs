@@ -569,6 +569,7 @@ impl Store {
             "controlIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'objectId',object_id) FROM control_intents")?,
             "monitorIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'monitorId',monitor_id) FROM monitor_intents")?,
             "activityLog": self.audit_entries()?,
+            "cat": crate::pet::export(self)?,
         }))
     }
     /// "Delete everything": every table back to empty, as on a fresh install.

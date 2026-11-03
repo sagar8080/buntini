@@ -42,6 +42,7 @@ mod monitor_actions;
 mod notifications;
 mod nudges;
 mod overlay;
+mod pet;
 mod planning;
 mod pricing;
 mod privacy;
@@ -301,6 +302,8 @@ pub fn run() {
             controller::cancel_recording,
             controller::open_source,
             approvals::plan_online_request,
+            pet::pet_memory,
+            pet::save_pet_memory,
             world::pet_world,
             world::pet_move,
             world::pet_stop,
