@@ -1230,7 +1230,7 @@
   },
   "places": {
     "name": "places",
-    "description": "Find nearby places of one kind around a street, district or city using OpenStreetMap.",
+    "description": "Find nearby places of one kind around a street, district or city using Apple Maps (OpenStreetMap when Apple Maps isn’t available).",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1295,7 +1295,7 @@
       ],
       "output_kind": "place_results",
       "success_verifier": "integration_response",
-      "verification_scope": "Parsed OpenStreetMap places establish returned records, not live availability or reservations.",
+      "verification_scope": "Parsed map places establish returned records, not live availability or reservations.",
       "retry_policy": "retry_read_after_failure",
       "examples": [
         {
@@ -1304,6 +1304,80 @@
             "category": "cafe",
             "near": "Baixa, Porto",
             "radius_m": 800
+          }
+        }
+      ]
+    }
+  },
+  "travel_time": {
+    "name": "travel_time",
+    "description": "How long a trip takes between two places the user named, by car, on foot or by public transport, using Apple Maps. Returns the time, distance and a link that opens the route in Maps.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Where the trip starts, exactly as the user named it; do not invent the user’s current location or home."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Where the trip ends, exactly as the user named it."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "driving",
+            "walking",
+            "transit"
+          ],
+          "description": "How the user travels; omit for driving."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "places"
+      ],
+      "operation": "read",
+      "use_when": [
+        "The user asks how long it takes, or how far it is, to get from one named place to another."
+      ],
+      "avoid_when": [
+        "The user did not name where the trip starts.",
+        "The user wants places of a kind nearby."
+      ],
+      "prerequisites": [
+        "Resolve both places from the user’s words.",
+        "User approves the provider request."
+      ],
+      "output_kind": "place_results",
+      "success_verifier": "integration_response",
+      "verification_scope": "Apple Maps’ travel time is an estimate at the time of asking, not a guarantee of traffic or departures.",
+      "retry_policy": "retry_read_after_failure",
+      "examples": [
+        {
+          "request": "How long does it take to drive from Indiranagar to Bengaluru airport?",
+          "arguments": {
+            "from": "Indiranagar, Bengaluru",
+            "to": "Kempegowda International Airport",
+            "mode": "driving"
+          }
+        },
+        {
+          "request": "How long is the walk from Union Square to Golden Gate Park?",
+          "arguments": {
+            "from": "Union Square, San Francisco",
+            "to": "Golden Gate Park",
+            "mode": "walking"
           }
         }
       ]

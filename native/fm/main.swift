@@ -5,7 +5,8 @@
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`. It also reads
-// Calendar, Reminders and Contacts, and the text of documents in shared folders.
+// Calendar, Reminders and Contacts, the text of documents in shared folders, and
+// places and travel times from Apple Maps.
 import AppKit
 import AVFoundation
 import Compression
@@ -13,6 +14,7 @@ import Contacts
 import CoreFoundation
 import EventKit
 import Foundation
+import MapKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -2075,6 +2077,107 @@ func contractSelfTest() async -> Int32 {
     }
 }
 
+/// Apple Maps, for the approved places and travel-time lookups. Each prints one JSON
+/// object; a place Maps can't find answers `{"error":"not_found","which":…}`.
+/// `--maps-places <category> <near> <radius metres>`: points of interest around a place.
+/// `--maps-route <from> <to> <driving|walking|transit>`: how long the trip takes.
+enum Maps {
+    static let categories: [String: [MKPointOfInterestCategory]] = [
+        "cafe": [.cafe], "restaurant": [.restaurant], "bar": [.nightlife, .brewery, .winery],
+        "pharmacy": [.pharmacy], "hospital": [.hospital], "atm": [.atm], "bank": [.bank],
+        "supermarket": [.foodMarket], "bakery": [.bakery], "fuel": [.gasStation],
+        "charging_station": [.evCharger], "parking": [.parking], "hotel": [.hotel],
+        "museum": [.museum], "park": [.park, .nationalPark], "library": [.library],
+        "post_office": [.postOffice], "gym": [.fitnessCenter], "toilets": [.restroom],
+    ]
+    static let placeLimit = 10
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        guard arguments.count == 5, arguments.dropFirst(2).allSatisfy({ !$0.isEmpty && $0.count <= 160 }) else {
+            FileHandle.standardError.write(Data("invalid-query: Say what to look for and where.\n".utf8))
+            return 2
+        }
+        do {
+            switch arguments[1] {
+            case "--maps-places":
+                guard let kinds = categories[arguments[2]], let radius = Double(arguments[4]), (100...5000).contains(radius) else { break }
+                emit(try await places(kinds, near: arguments[3], radius: radius))
+                return 0
+            case "--maps-route":
+                guard ["driving", "walking", "transit"].contains(arguments[4]) else { break }
+                emit(try await route(from: arguments[2], to: arguments[3], mode: arguments[4]))
+                return 0
+            default: break
+            }
+            FileHandle.standardError.write(Data("invalid-query: That isn’t a Maps lookup Buntini knows.\n".utf8))
+            return 2
+        } catch {
+            FileHandle.standardError.write(Data("lookup-failed: Apple Maps didn’t answer. Check the internet connection.\n".utf8))
+            return 4
+        }
+    }
+
+    /// The best match for a place the user named, or nil when Maps knows none.
+    static func find(_ text: String) async throws -> MKMapItem? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = text
+        request.resultTypes = [.address, .pointOfInterest]
+        do { return try await MKLocalSearch(request: request).start().mapItems.first }
+        catch let error as MKError where error.code == .placemarkNotFound { return nil }
+    }
+
+    static func describe(_ item: MKMapItem) -> [String: Any] {
+        let coordinate = item.placemark.coordinate
+        return ["name": item.name ?? "", "address": item.placemark.title ?? "",
+                "latitude": coordinate.latitude, "longitude": coordinate.longitude]
+    }
+
+    static func places(_ kinds: [MKPointOfInterestCategory], near: String, radius: Double) async throws -> [String: Any] {
+        guard let center = try await find(near) else { return ["error": "not_found", "which": "near"] }
+        let request = MKLocalPointsOfInterestRequest(center: center.placemark.coordinate, radius: radius)
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: kinds)
+        let found: [MKMapItem]
+        do { found = try await MKLocalSearch(request: request).start().mapItems }
+        catch let error as MKError where error.code == .placemarkNotFound { found = [] }
+        let origin = CLLocation(latitude: center.placemark.coordinate.latitude, longitude: center.placemark.coordinate.longitude)
+        let rows = found.map { item -> [String: Any] in
+            var row = describe(item)
+            row["phone"] = item.phoneNumber ?? ""
+            row["url"] = item.url?.absoluteString ?? ""
+            row["distance_m"] = (item.placemark.location?.distance(from: origin) ?? 0).rounded()
+            return row
+        }.filter { ($0["distance_m"] as? Double ?? 0) <= radius }
+         .sorted { ($0["distance_m"] as? Double ?? 0) < ($1["distance_m"] as? Double ?? 0) }
+        return ["center": describe(center), "places": Array(rows.prefix(placeLimit)), "total": rows.count]
+    }
+
+    static func route(from: String, to: String, mode: String) async throws -> [String: Any] {
+        guard let start = try await find(from) else { return ["error": "not_found", "which": "from"] }
+        guard let end = try await find(to) else { return ["error": "not_found", "which": "to"] }
+        let request = MKDirections.Request()
+        request.source = start
+        request.destination = end
+        request.transportType = mode == "walking" ? .walking : mode == "transit" ? .transit : .automobile
+        var result: [String: Any] = ["from": describe(start), "to": describe(end), "mode": mode]
+        do {
+            // Maps gives transit only as a travel time, not a full route.
+            if mode == "transit" {
+                let eta = try await MKDirections(request: request).calculateETA()
+                result["seconds"] = eta.expectedTravelTime.rounded()
+                result["distance_m"] = eta.distance.rounded()
+            } else {
+                guard let best = try await MKDirections(request: request).calculate().routes.first else { return result.merging(["error": "no_route"]) { $1 } }
+                result["seconds"] = best.expectedTravelTime.rounded()
+                result["distance_m"] = best.distance.rounded()
+                result["via"] = best.name
+            }
+        } catch let error as MKError where error.code == .directionsNotFound {
+            result["error"] = "no_route"
+        }
+        return result
+    }
+}
+
 @main
 struct Helper {
     static func main() async {
@@ -2085,6 +2188,9 @@ struct Helper {
         }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
             exit(await People.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, ["--maps-places", "--maps-route"].contains(CommandLine.arguments[1]) {
+            exit(await Maps.run(CommandLine.arguments))
         }
         if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--extract-document" {
             exit(Documents.run(CommandLine.arguments))

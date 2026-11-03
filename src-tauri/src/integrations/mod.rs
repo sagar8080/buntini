@@ -7,6 +7,7 @@
 pub mod duffel;
 pub mod ebay;
 pub mod everyday;
+pub mod maps;
 pub mod places;
 mod summary;
 mod weather_advice;
@@ -32,7 +33,7 @@ pub struct Tool {
     /// Keychain entry the tool needs, if any.
     pub key: Option<&'static str>,
 }
-pub const TOOLS: [Tool; 7] = [
+pub const TOOLS: [Tool; 8] = [
     Tool {
         name: "web_search",
         provider: "Web search",
@@ -55,7 +56,12 @@ pub const TOOLS: [Tool; 7] = [
     },
     Tool {
         name: "places",
-        provider: "OpenStreetMap",
+        provider: "Maps",
+        key: None,
+    },
+    Tool {
+        name: "travel_time",
+        provider: "Apple Maps",
         key: None,
     },
     Tool {
@@ -94,11 +100,13 @@ pub fn tool(name: &str) -> Option<&'static Tool> {
     TOOLS.iter().find(|tool| tool.name == name)
 }
 
-/// Tools the planner may offer: keyless ones always, keyed ones once their key is saved.
+/// Tools the planner may offer: keyless ones always, keyed ones once their key is saved,
+/// and travel times when the Apple helper is here.
 pub fn available() -> Vec<&'static str> {
     TOOLS
         .iter()
         .filter(|tool| tool.key.map_or(true, |key| web::credential(key).is_ok()))
+        .filter(|tool| tool.name != "travel_time" || maps::helper().is_some())
         .map(|tool| tool.name)
         .collect()
 }
@@ -118,6 +126,7 @@ pub fn validate(tool_name: &str, arguments: &Value, prompt: &str) -> Result<Call
         "currency" => everyday::validate_currency(arguments)?,
         "wikipedia" => everyday::validate_wikipedia(arguments)?,
         "places" => places::validate(arguments)?,
+        "travel_time" => maps::validate_route(arguments)?,
         "ebay_search" => ebay::validate(arguments)?,
         "flight_search" => duffel::validate(arguments, today)?,
         _ => return Err(format!("The tool '{tool_name}' is not available.")),
@@ -134,7 +143,9 @@ pub fn preview(call: &Call, settings: &Settings) -> Preview {
         "weather" => everyday::preview_weather(args),
         "currency" => everyday::preview_currency(args),
         "wikipedia" => everyday::preview_wikipedia(args),
+        "places" if maps::helper().is_some() => maps::preview_places(args, places::label(&text_of(args, "category"))),
         "places" => places::preview(args),
+        "travel_time" => maps::preview_route(args),
         "ebay_search" => ebay::preview(args, &settings.ebay_marketplace),
         "flight_search" => duffel::preview(args),
         _ => {
@@ -180,7 +191,11 @@ pub async fn execute(
             "weather" => everyday::weather(args).await,
             "currency" => everyday::currency(args).await,
             "wikipedia" => everyday::wikipedia(args).await,
-            "places" => places::search(args, cancel.clone()).await,
+            "places" => match maps::helper() {
+                Some(helper) => maps::places(helper, args, places::label(&text_of(args, "category"))).await,
+                None => places::search(args, cancel.clone()).await,
+            },
+            "travel_time" => maps::travel_time(args).await,
             "ebay_search" => {
                 ebay::search(
                     args,
@@ -220,7 +235,7 @@ pub async fn plan(
         .collect();
     let today = chrono::Local::now().format("%A %-d %B %Y");
     let messages = json!([
-        {"role":"system","content":format!("Route the user's request to exactly one read-only online lookup and reply only with that tool call. Today is {today}. Prefer the most specific tool: weather for forecasts, currency for exchange rates, wikipedia for encyclopedic facts about a topic, places for nearby businesses or amenities, ebay_search for buying or pricing items, flight_search for flights (use IATA codes when you know them). Use web_search for news and everything else. Fill arguments only with details the user wrote; never invent dates, places or personal information.")},
+        {"role":"system","content":format!("Route the user's request to exactly one read-only online lookup and reply only with that tool call. Today is {today}. Prefer the most specific tool: weather for forecasts, currency for exchange rates, wikipedia for encyclopedic facts about a topic, places for nearby businesses or amenities, travel_time for how long a trip takes between two named places, ebay_search for buying or pricing items, flight_search for flights (use IATA codes when you know them). Use web_search for news and everything else. Fill arguments only with details the user wrote; never invent dates, places or personal information.")},
         {"role":"user","content":prompt}
     ]);
     let request = json!({"messages":messages,"tools":tools,"max_tokens":256});
