@@ -572,10 +572,12 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet[data-purring] .pet-body { animation: pet-purr-breath 2.4s ease-in-out infinite; }
 .pet.pet--act-love .pet-body, .pet.pet--act-happy .pet-body { animation: pet-happy 1.4s ease-in-out; }
 .pet.pet--act-love .cat-hearts, .pet.pet--act-happy .cat-hearts, .pet.pet--act-purr[data-purr-high] .cat-hearts { display: block; }
-/* Where you pet it: a rubbed cheek or ear tips the head into your hand, a scratched chin
-   lifts it, and a stroked back arches up to meet the stroke. */
-.pet--cat.pet--act-purr[data-touch=cheeks] .cat-head, .pet--cat.pet--act-purr[data-touch=ears] .cat-head { transform: rotate(calc(var(--touch-side, 1) * 6deg)); transition: transform .4s ease-out; }
-.pet--cat.pet--act-purr[data-touch=chin] .cat-head { transform: translateY(-2.5px) rotate(calc(var(--touch-side, 1) * -2deg)); transition: transform .4s ease-out; }
+/* Where you pet it: the head tips into your hand, most for a rubbed cheek or ear (--tilt),
+   a scratched chin lifts it, and a stroked back arches up to meet the stroke. */
+.pet--cat.pet--act-purr .cat-head { transform: rotate(var(--tilt, 0deg)); transition: transform .4s ease-out; }
+.pet--cat.pet--act-purr[data-touch=chin] .cat-head { transform: translateY(-2.5px) rotate(var(--tilt, 0deg)); }
+/* A hand leaving mid-purr: the cat leans after it, then settles back. */
+.pet--cat[data-lean] .cat-front { transform: translateX(calc(var(--lean-side, 1) * 3px)) rotate(calc(var(--lean-side, 1) * 4deg)); transform-origin: 90px 128px; transition: transform .2s ease-out; }
 .pet--cat.pet--act-purr[data-touch=back] .cat-sit { transform: translateY(-1.5px) scale(1.02, 1.04); transform-origin: 90px 160px; }
 /* The fur parts along the stroke and smooths back. */
 .cat-ruffle { opacity: 0; transform: translate(var(--ruffle-x, 90px), var(--ruffle-y, 90px)) rotate(var(--ruffle-angle, 0deg)); transition: opacity .6s ease; pointer-events: none; }

@@ -36,6 +36,24 @@ const KNEAD_AFTER = 2000;
 const GRAB_AFTER = 4000;
 const SWAT_AFTER = 12_000;
 
+/** One breath of a purring cat, in ms; the CSS breathing (pet-purr-breath) matches it. */
+export const BREATH = 2400;
+
+/** Trackpad taps due between `from` and `to` for a purr whose breathing began at `since`:
+    one at the start of each breath once the purr is over 0.3, and a second close behind
+    it over 0.7. */
+export function tapsDue(since: number, from: number, to: number, level: number): 0 | 1 | 2 {
+  if (level <= .3 || to <= from || Math.floor((to - since) / BREATH) <= Math.floor((from - since) / BREATH)) return 0;
+  return level > .7 ? 2 : 1;
+}
+
+/** How far the head tips toward the side being stroked, in degrees: most for the cheeks
+    and ears, and growing with the purr. */
+const tilt: Record<Zone, number> = { ears: 8, cheeks: 8, head: 5, chin: 3, back: 2, chest: 2, tail: 0, paws: 0 };
+export function tiltFor(zone: Zone, level: number, side: -1 | 1): number {
+  return tilt[zone] * Math.min(1, level / .5) * side;
+}
+
 export interface PetContext { cat: boolean; motion: PetMotion; annoyance: number; favourite: Favourite | null }
 export interface Touch { purr: number; play: PetAction | null; mood: MoodEvent | null }
 
@@ -117,11 +135,13 @@ export class Petting {
     return true;
   }
 
-  /** The hand left: the next petting starts a new session, with a swat allowed again. */
-  leave() {
+  /** The hand left: the next petting starts a new session, with a swat allowed again.
+      True when the purr was going well enough for the cat to lean after the hand. */
+  leave(at: number): boolean {
     this.samples = [];
     this.swatted = false;
     this.zoneRun = null;
+    return this.purr(at) > .4;
   }
 
   private fade(at: number) {

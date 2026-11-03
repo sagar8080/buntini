@@ -555,7 +555,7 @@ pub fn entries(store: &Store, at: DateTime<Utc>) -> Result<Vec<Entry>, String> {
 /// Whether a Focus (or Do Not Disturb) is on, when macOS lets Buntini see it. macOS
 /// keeps this private without Full Disk Access; then the answer is "no", and the alert,
 /// which is never marked time sensitive, is held by the Focus itself.
-fn focus_on() -> bool {
+pub(crate) fn focus_on() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return false;
     };

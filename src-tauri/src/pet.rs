@@ -117,10 +117,123 @@ pub async fn save_pet_memory(id: String, mood: PetMood, saved_at: i64, state: St
     save(&state.store.lock().unwrap(), &id, mood, saved_at)
 }
 
+/// Whether a purr may be heard: the Mac's "Play user interface sound effects" is on (it
+/// is unless someone turned it off), no call or recording has the microphone, and no
+/// Focus is on.
+pub fn sound_allowed(ui_sounds: Option<bool>, microphone_in_use: bool, focus: bool) -> bool {
+    ui_sounds != Some(false) && !microphone_in_use && !focus
+}
+
+#[tauri::command]
+pub fn pet_sound_allowed() -> bool {
+    sound_allowed(mac::ui_sounds(), mac::microphone_in_use(), crate::nudges::focus_on())
+}
+
+/// One soft tap on a Force Touch trackpad, and a second 120 ms later for a strong purr.
+/// Taps closer than 700 ms apart are dropped, whatever the page asks for. Mice and
+/// trackpads without haptics, and the Mac's own haptics setting, simply feel nothing.
+#[tauri::command]
+pub fn pet_purr_tap(double: bool, app: tauri::AppHandle) {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap();
+        if last.is_some_and(|at| at.elapsed() < Duration::from_millis(700)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let _ = app.run_on_main_thread(mac::tap);
+    if double {
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(120));
+            let _ = app.run_on_main_thread(mac::tap);
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::c_void;
+
+    pub fn tap() {
+        use objc2_app_kit::{NSHapticFeedbackManager, NSHapticFeedbackPattern, NSHapticFeedbackPerformanceTime, NSHapticFeedbackPerformer};
+        NSHapticFeedbackManager::defaultPerformer().performFeedbackPattern_performanceTime(NSHapticFeedbackPattern::Alignment, NSHapticFeedbackPerformanceTime::Now);
+    }
+
+    /// The global `com.apple.sound.uiaudio.enabled`, or None when it was never changed.
+    pub fn ui_sounds() -> Option<bool> {
+        let defaults = objc2_foundation::NSUserDefaults::standardUserDefaults();
+        let key = objc2_foundation::ns_string!("com.apple.sound.uiaudio.enabled");
+        defaults.objectForKey(key)?;
+        Some(defaults.boolForKey(key))
+    }
+
+    #[repr(C)]
+    struct Address {
+        selector: u32,
+        scope: u32,
+        element: u32,
+    }
+    #[link(name = "CoreAudio", kind = "framework")]
+    unsafe extern "C" {
+        fn AudioObjectGetPropertyData(object: u32, address: *const Address, qualifier_size: u32, qualifier: *const c_void, size: *mut u32, data: *mut c_void) -> i32;
+    }
+    const SYSTEM_OBJECT: u32 = 1;
+    const fn code(name: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*name)
+    }
+
+    fn property(object: u32, selector: &[u8; 4]) -> Option<u32> {
+        let address = Address { selector: code(selector), scope: code(b"glob"), element: 0 };
+        let mut value = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: a global property whose value is one UInt32, read into a UInt32.
+        let status = unsafe { AudioObjectGetPropertyData(object, &address, 0, std::ptr::null(), &mut size, (&mut value as *mut u32).cast()) };
+        (status == 0).then_some(value)
+    }
+
+    /// Whether anything (a call, a recording, Buntini listening) is using the default
+    /// input device. Reading this needs no microphone permission.
+    pub fn microphone_in_use() -> bool {
+        property(SYSTEM_OBJECT, b"dIn ")
+            .filter(|device| *device != 0)
+            .and_then(|device| property(device, b"gone"))
+            .is_some_and(|running| running != 0)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod mac {
+    pub fn tap() {}
+    pub fn ui_sounds() -> Option<bool> {
+        None
+    }
+    pub fn microphone_in_use() -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn a_purr_is_heard_only_when_nothing_says_otherwise() {
+        assert!(sound_allowed(None, false, false), "interface sounds are on unless turned off");
+        assert!(sound_allowed(Some(true), false, false));
+        assert!(!sound_allowed(Some(false), false, false));
+        assert!(!sound_allowed(None, true, false), "not during a call or recording");
+        assert!(!sound_allowed(None, false, true), "not in Focus");
+    }
+
+    #[test]
+    fn the_macs_audio_and_defaults_can_be_read() {
+        // Whatever this Mac's state, reading it never fails or hangs.
+        let _ = (mac::ui_sounds(), mac::microphone_in_use());
+    }
 
     fn day(text: &str) -> chrono::NaiveDate {
         chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()

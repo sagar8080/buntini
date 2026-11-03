@@ -3,7 +3,8 @@ import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { command, desktop } from './bridge';
 import { actionDuration, ASK_GAP, forCharacter, gazeToward, Hunter, isToyAction, nearness, nextBlinkDelay, nextDreamDelay, nextEarSwivel, nextHabit, nextHabitDelay, nextSaccade, randomGlance, toyPlay, type PetAction } from './petLife';
 import { drift, faceFor, feel, moodPace, Pokes, proudOrHappy, remembered, restored, startingMood, type Face, type Mood, type MoodEvent } from './petMood';
-import { Petting, zoneAt, type Favourite, type Zone } from './petTouch';
+import { Petting, tapsDue, tiltFor, zoneAt, type Favourite, type Zone } from './petTouch';
+import { PurrSound } from './purrSound';
 import type { PetMemory, PetMotion, PetState } from './types';
 
 export interface PetReaction { kind: PetAction; id: number }
@@ -17,6 +18,8 @@ const MOOD_KEY = 'buntini-cat-mood';
 // Petting reactions that play out before a stroke can start another.
 const pettingReactions = new Set<PetAction | null>(['knead', 'swat', 'bunt', 'flick', 'grab']);
 const forgetters = new Set<() => void>();
+// One purr for the desktop cat, made in the page; see purrSound.ts.
+const purrSound = new PurrSound(() => { try { return new AudioContext(); } catch { return null; } });
 
 /** Delete everything: the store has erased the cat's memory already. This forgets the
     mood it's feeling now, and a new cat joins. */
@@ -60,8 +63,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const pending = useRef<{ kind: PetAction; at: number } | null>(null);
   // What it settles into after the slow blink that follows a good purr.
   const settleAfter = useRef<PetAction | null>(null);
-  const live = useRef({ state, paused, motion, cat, asleep });
-  live.current = { state, paused, motion, cat, asleep };
+  const live = useRef({ state, paused, motion, cat, asleep, remember });
+  live.current = { state, paused, motion, cat, asleep, remember };
 
   const moodTo = useCallback((event: MoodEvent) => {
     mood.current = feel(mood.current, event, live.current.motion);
@@ -365,6 +368,11 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     let still = 0;
     let ticker = 0;
     let lastStroke = 0;
+    let lastTick = 0;
+    let purringSince = 0;
+    let lean = 0;
+    // Whether the purr may be heard, asked of the app every 10 seconds while purring.
+    const hearing = { allowed: false, asked: -Infinity };
     let lastBunt = -Infinity;
     let last: { x: number; y: number } | null = null;
     const context = () => ({ cat: live.current.cat, motion: live.current.motion, annoyance: mood.current.annoyance, favourite: known.current?.favourite ?? null });
@@ -376,15 +384,32 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const zoneUnder = (point: { x: number; y: number }): Zone | null => live.current.cat ? zoneAt(point.x, point.y) : 'head';
     // While a purr lasts: its level for the CSS, the purr held until it fades, and a slow
     // blink once the strokes stop after a good one.
-    const showPurr = (level: number) => {
+    const showPurr = (level: number, now: number) => {
       element.style.setProperty('--purr', level.toFixed(3));
-      element.toggleAttribute('data-purring', level > .02);
+      const purring = level > .02;
+      // The breathing animation starts over when the purr starts; taps keep time with it.
+      if (purring && !purringSince) purringSince = now;
+      if (!purring) purringSince = 0;
+      element.toggleAttribute('data-purring', purring);
       element.toggleAttribute('data-purr-high', level > .6);
+    };
+    // The desktop cat's purr can be felt on a trackpad and heard, quietly.
+    const feelAndHear = (level: number, now: number) => {
+      if (!live.current.remember) return;
+      if (level > 0 && now - hearing.asked > 10_000) {
+        hearing.asked = now;
+        void command<boolean>('pet_sound_allowed').then(allowed => { hearing.allowed = allowed; }).catch(() => { hearing.allowed = false; });
+      }
+      purrSound.set(level, hearing.allowed && live.current.state === 'idle', now);
+      const taps = purringSince && now - lastStroke < 400 ? tapsDue(purringSince, lastTick, now, level) : 0;
+      if (taps) void command('pet_purr_tap', { double: taps === 2 }).catch(() => {});
     };
     const tick = () => {
       const now = performance.now();
       const level = petting.purr(now);
-      showPurr(level);
+      showPurr(level, now);
+      feelAndHear(level, now);
+      lastTick = now;
       if (now - lastStroke > 600) { delete element.dataset.touch; delete element.dataset.ruffle; }
       // Asked only once it's free to, so a knead still playing doesn't use up the blink.
       const free = live.current.cat && live.current.state === 'idle' && !live.current.paused && (current.current === 'purr' || !current.current);
@@ -392,7 +417,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
         settleAfter.current = live.current.motion === 'sleepy' ? 'loaf' : 'tailcurl';
         play('slowblink');
       } else if (current.current === 'purr' && level < .12) stop();
-      if (!level && now - lastStroke > 1200) { window.clearInterval(ticker); ticker = 0; }
+      if (!level && now - lastStroke > 1200 && purrSound.resting(now)) { window.clearInterval(ticker); ticker = 0; }
     };
     const holdPurr = () => {
       if (current.current === 'purr') return;
@@ -404,10 +429,11 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       const now = performance.now();
       const touch = petting.stroke(zone, distance, now, context());
       lastStroke = now;
-      if (!ticker) ticker = window.setInterval(tick, 100);
-      showPurr(touch.purr);
+      if (!ticker) { lastTick = now; ticker = window.setInterval(tick, 100); }
+      showPurr(touch.purr, now);
       element.dataset.touch = zone;
-      element.style.setProperty('--touch-side', String(point.side));
+      // It leans its head into the hand, more as the purr builds.
+      element.style.setProperty('--tilt', `${tiltFor(zone, touch.purr, point.side < 0 ? -1 : 1).toFixed(1)}deg`);
       // The fur parts where the hand goes, and smooths back after.
       element.style.setProperty('--ruffle-x', `${point.x.toFixed(1)}px`);
       element.style.setProperty('--ruffle-y', `${point.y.toFixed(1)}px`);
@@ -453,7 +479,19 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
       if (zone) stroke(zone, Math.hypot(event.deltaX, event.deltaY) * unit, point, Math.atan2(event.deltaY, event.deltaX));
     };
-    const leave = () => { inside = false; window.clearTimeout(still); last = null; petting.leave(); };
+    const leave = () => {
+      inside = false;
+      window.clearTimeout(still);
+      // Mid-purr, it leans after the hand for a moment as it goes.
+      const exit = last && where(last.x, last.y);
+      if (petting.leave(performance.now()) && exit && live.current.cat && !live.current.paused && !stillPreferred()) {
+        element.style.setProperty('--lean-side', String(exit.side));
+        element.dataset.lean = '';
+        window.clearTimeout(lean);
+        lean = window.setTimeout(() => { delete element.dataset.lean; }, 400);
+      }
+      last = null;
+    };
     const click = () => {
       if (stillPreferred()) return;
       const poked = pokes.click(performance.now()) === 'poke';
@@ -464,13 +502,20 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       moodTo('click');
       play(faceFor(mood.current) === 'grumpy' ? 'grumpy' : 'love');
     };
+    // Audio may start only after a click or key press in Buntini.
+    const unlock = () => purrSound.unlock();
+    if (live.current.remember) { window.addEventListener('pointerdown', unlock, true); window.addEventListener('keydown', unlock, true); }
     element.addEventListener('pointermove', move);
     element.addEventListener('pointerleave', leave);
     element.addEventListener('wheel', wheel, { passive: false });
     element.addEventListener('click', click);
     return () => {
       window.clearTimeout(still);
+      window.clearTimeout(lean);
       window.clearInterval(ticker);
+      if (live.current.remember) purrSound.set(0, false, performance.now());
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
       element.removeEventListener('pointermove', move);
       element.removeEventListener('pointerleave', leave);
       element.removeEventListener('wheel', wheel);

@@ -90,9 +90,10 @@ Build these in order, since P1 and P2 underpin the rest.
 - **Goal:** On a Force Touch trackpad, the user feels a soft tap in time with each purr breath.
 - **Build:**
   - Turn on the `NSHapticFeedback` feature of `objc2-app-kit`.
-  - A command `pet_purr_tap(strength)` calls `NSHapticFeedbackManager::defaultPerformer().performFeedbackPattern_performanceTime(Alignment, Now)`.
-  - The frontend calls it once per breath while purr is above 0.3 and the pointer or a two-finger stroke moved within the last 400 ms. Rust drops any tap that comes sooner than 700 ms after the last.
-  - Above 0.7, each breath gets a second tap 120 ms after the first.
+  - A command `pet_purr_tap(double)` calls `NSHapticFeedbackManager::defaultPerformer().performFeedbackPattern_performanceTime(Alignment, Now)` on the main thread. With `double`, a second tap follows 120 ms later.
+  - The frontend asks for one at the start of each 2.4 s breath (`tapsDue` in `petTouch.ts`, kept in time with the CSS breathing) while the purr is above 0.3 and a stroke moved within the last 400 ms. Above 0.7 it asks for a double.
+  - Rust drops any call that comes sooner than 700 ms after the last.
+  - Only the desktop cat taps and purrs out loud, not the small cats elsewhere in the window.
 - **Unknowns, for the device check:**
   - Whether taps reach the finger while Buntini isn't the active app. The cat lives in a non-activating overlay window.
   - Whether `Alignment` or `Generic` feels closer to a purr.
@@ -121,7 +122,7 @@ Build these in order, since P1 and P2 underpin the rest.
 
 - **Goal:** The cat moves toward the touch, not just in place.
 - **Build:**
-  - While purring, the existing head gaze points at the pointer, and `cat-head` tilts up to 8° toward the side being stroked.
+  - While purring, the existing head gaze points at the pointer, and `cat-head` tilts toward the side being stroked (`tiltFor`): up to 8° for the cheeks and ears, 5° for the head, 3° for the chin and 2° for the body, growing with the purr up to a level of 0.5.
   - When the hand slides off one side above a level of 0.4, the cat leans after it for 400 ms before settling back.
   - The head rub (`bunt`) rubs toward the side the hand is on. This already exists through `--bunt-dir`; keep it.
 - **Acceptance:** tests that the tilt follows the stroke's side and that the lean happens once per exit.

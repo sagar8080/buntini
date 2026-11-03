@@ -113,6 +113,9 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
       return page as T;
     }
     if (name === 'pet_memory' || name === 'save_pet_memory') return previewPetMemory(name, args) as T;
+    // The preview can purr out loud; it has no trackpad taps.
+    if (name === 'pet_sound_allowed') return true as T;
+    if (name === 'pet_purr_tap') return undefined as T;
     if (name === 'finish_onboarding') { localStorage.setItem('buntini-preview-onboarded', '1'); return undefined as T; }
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.

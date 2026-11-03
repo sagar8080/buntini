@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { Petting, PURR_FALL, zoneAt, type PetContext, type Zone } from './petTouch.ts';
+import { BREATH, Petting, PURR_FALL, tapsDue, tiltFor, zoneAt, type PetContext, type Zone } from './petTouch.ts';
 
 const calm: PetContext = { cat: true, motion: 'calm', annoyance: 0, favourite: null };
 const playful: PetContext = { ...calm, motion: 'playful' };
@@ -95,7 +95,7 @@ test('a playful or cross cat swats once a session, a calm one never', () => {
   const petting = new Petting();
   const first = pet(petting, 'head', 14_000, playful);
   assert.ok(!pet(petting, 'head', 14_000, playful, first.at + 1500).seen.includes('swat'), 'not again until the hand leaves');
-  petting.leave();
+  petting.leave(first.at + 39_000);
   assert.ok(pet(petting, 'head', 14_000, playful, first.at + 40_000).seen.includes('swat'));
 });
 
@@ -115,4 +115,31 @@ test('a mood nudge comes once a second of stroking, not on every movement', () =
   let nudges = 0;
   for (let at = 0; at <= 3000; at += 16) if (petting.stroke('head', 12, at, calm).mood === 'pet') nudges++;
   assert.ok(nudges >= 3 && nudges <= 4, String(nudges));
+});
+
+test('a tap at the start of each breath once the purr is going, two when it is strong', () => {
+  assert.equal(tapsDue(0, BREATH - 50, BREATH + 50, .5), 1);
+  assert.equal(tapsDue(0, BREATH - 50, BREATH + 50, .9), 2);
+  assert.equal(tapsDue(0, BREATH - 50, BREATH + 50, .2), 0, 'a faint purr is not felt');
+  assert.equal(tapsDue(0, BREATH + 100, BREATH + 200, .9), 0, 'mid-breath');
+  let taps = 0;
+  for (let at = 0; at < 3 * BREATH; at += 100) taps += tapsDue(0, at, at + 100, .5);
+  assert.equal(taps, 3, 'one a breath: at 2.4, 4.8 and 7.2 s');
+});
+
+test('the head tips toward the stroked side, most for cheeks and ears, more as the purr builds', () => {
+  assert.equal(tiltFor('cheeks', 1, -1), -8);
+  assert.equal(tiltFor('ears', 1, 1), 8);
+  assert.equal(tiltFor('cheeks', .25, 1), 4);
+  assert.ok(Math.abs(tiltFor('chin', 1, 1)) < Math.abs(tiltFor('head', 1, 1)));
+  assert.equal(tiltFor('tail', 1, 1), 0);
+});
+
+test('it leans after a hand that leaves mid-purr, not after a quick pat', () => {
+  const petting = new Petting();
+  const { at } = pet(petting, 'cheeks', 2000);
+  assert.equal(petting.leave(at + 16), true);
+  const brief = new Petting();
+  const short = pet(brief, 'head', 500);
+  assert.equal(brief.leave(short.at + 16), false);
 });

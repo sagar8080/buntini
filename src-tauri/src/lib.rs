@@ -304,6 +304,8 @@ pub fn run() {
             approvals::plan_online_request,
             pet::pet_memory,
             pet::save_pet_memory,
+            pet::pet_purr_tap,
+            pet::pet_sound_allowed,
             world::pet_world,
             world::pet_move,
             world::pet_stop,
