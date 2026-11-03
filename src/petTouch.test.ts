@@ -2,17 +2,17 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { BREATH, Petting, PURR_FALL, tapsDue, tiltFor, zoneAt, type PetContext, type Zone } from './petTouch.ts';
+import { BREATH, KEY_STROKE, Petting, PURR_FALL, tapsDue, tiltFor, zoneAt, type PetContext, type Zone } from './petTouch.ts';
 
-const calm: PetContext = { cat: true, motion: 'calm', annoyance: 0, favourite: null };
+const calm: PetContext = { cat: true, motion: 'calm', annoyance: 0, favourite: null, band: 'familiar', still: false };
 const playful: PetContext = { ...calm, motion: 'playful' };
 
-/** Steady strokes of 12 px every 16 ms (750 px/s) on `zone` for `ms`, from `from`. */
-function pet(petting: Petting, zone: Zone, ms: number, context = calm, from = 0) {
+/** Steady strokes of `step` px every 16 ms (12 px is 750 px/s) on `zone` for `ms`, from `from`. */
+function pet(petting: Petting, zone: Zone, ms: number, context = calm, from = 0, step = 12) {
   const seen: string[] = [];
   let at = from;
   for (; at <= from + ms; at += 16) {
-    const touch = petting.stroke(zone, 12, at, context);
+    const touch = petting.stroke(zone, step, at, context);
     if (touch.play && seen.at(-1) !== touch.play) seen.push(touch.play);
   }
   return { seen, at, purr: petting.purr(at) };
@@ -94,7 +94,9 @@ test('a playful or cross cat swats once a session, a calm one never', () => {
   assert.ok(pet(new Petting(), 'head', 14_000, { ...calm, annoyance: .4 }).seen.includes('swat'));
   const petting = new Petting();
   const first = pet(petting, 'head', 14_000, playful);
-  assert.ok(!pet(petting, 'head', 14_000, playful, first.at + 1500).seen.includes('swat'), 'not again until the hand leaves');
+  const after = pet(petting, 'head', 14_000, playful, first.at + 16);
+  assert.ok(!after.seen.includes('swat'), 'not again until the hand leaves');
+  assert.equal(after.purr, 0, 'nor any purr');
   petting.leave(first.at + 39_000);
   assert.ok(pet(petting, 'head', 14_000, playful, first.at + 40_000).seen.includes('swat'));
 });
@@ -142,4 +144,81 @@ test('it leans after a hand that leaves mid-purr, not after a quick pat', () => 
   const brief = new Petting();
   const short = pet(brief, 'head', 500);
   assert.equal(brief.leave(short.at + 16), false);
+});
+
+test('a playful cat at full purr warns before it swats, and slowing down calms it', () => {
+  const petting = new Petting();
+  let warned = -1, swatted = -1;
+  for (let at = 0; at < 14_000 && swatted < 0; at += 16) {
+    const play = petting.stroke('cheeks', 12, at, playful).play;
+    if (play === 'warn' && warned < 0) warned = at;
+    if (play === 'swat') swatted = at;
+  }
+  assert.ok(warned > 0 && swatted - warned >= 1500 && swatted - warned < 1600, `${warned} → ${swatted}`);
+  const calmed = new Petting();
+  let at = 0, warnedAt = -1;
+  for (; at < 14_000 && warnedAt < 0; at += 16) if (calmed.stroke('cheeks', 12, at, playful).play === 'warn') warnedAt = at;
+  // The hand stops for a moment, then strokes on: no swat, and a slow blink first.
+  assert.equal(calmed.afterglow(at + 400), true);
+  assert.ok(!pet(calmed, 'cheeks', 1600, playful, at + 600).seen.includes('swat'));
+});
+
+test('a new cat purrs more slowly, and pulls away after a long petting', () => {
+  const shy = { ...calm, band: 'new' as const };
+  const familiar = pet(new Petting(), 'head', 2000);
+  const fresh = pet(new Petting(), 'head', 2000, shy);
+  assert.ok(Math.abs(fresh.purr - familiar.purr / 2) < .02, `${fresh.purr} vs ${familiar.purr}`);
+  const petting = new Petting();
+  const moods: string[] = [];
+  let shied = 0;
+  for (let at = 0; at < 12_000; at += 16) {
+    const touch = petting.stroke('head', 12, at, shy);
+    if (touch.play === 'shy') shied++;
+    if (at > 8100 && touch.mood) moods.push(touch.mood);
+  }
+  assert.equal(shied, 1);
+  assert.ok(moods.length >= 3 && moods.every(mood => mood === 'tooMuch'), moods.join());
+  assert.ok(petting.purr(12_000) < pet(new Petting(), 'head', 8000, shy).purr, 'the purr fades once it has had enough');
+});
+
+test('a close cat purrs at the first touch and rolls over for a belly rub', () => {
+  const close = { ...calm, band: 'close' as const };
+  assert.ok(pet(new Petting(), 'head', 100, close).seen.includes('purr'));
+  assert.ok(!pet(new Petting(), 'head', 100).seen.includes('purr'));
+  const rolled = pet(new Petting(), 'chest', 7000, close).seen;
+  assert.ok(rolled.includes('flop') && !rolled.includes('grab'), rolled.join());
+  const playfulClose = pet(new Petting(), 'chest', 7000, { ...playful, band: 'close' }).seen;
+  assert.ok(playfulClose.indexOf('flop') < playfulClose.indexOf('grab'), playfulClose.join());
+  assert.ok(!pet(new Petting(), 'chest', 7000, playful).seen.includes('flop'), 'only a close cat');
+  assert.ok(!pet(new Petting(), 'chest', 7000, { ...calm, band: 'new' }).seen.includes('flop'));
+});
+
+test('frantic petting does less for the bond than steady petting', () => {
+  const moods = (step: number) => {
+    const petting = new Petting();
+    const seen = new Set<string>();
+    for (let at = 0; at < 3000; at += 16) { const mood = petting.stroke('head', step, at, calm).mood; if (mood) seen.add(mood); }
+    return [...seen];
+  };
+  assert.deepEqual(moods(6), ['pet']);
+  assert.ok(moods(20).includes('roughPet'));
+});
+
+test('with Reduce motion the purr builds the same and nothing moves', () => {
+  const still = { ...playful, still: true };
+  const moved = ['swat', 'warn', 'knead', 'grab', 'flop', 'flick', 'bat', 'shy'];
+  for (const zone of ['cheeks', 'chest', 'tail', 'paws'] as Zone[]) {
+    const { seen } = pet(new Petting(), zone, 14_000, { ...still, band: 'close' });
+    assert.ok(!seen.some(play => moved.includes(play)), `${zone}: ${seen.join()}`);
+  }
+  assert.equal(pet(new Petting(), 'head', 2000, still).purr, pet(new Petting(), 'head', 2000, playful).purr);
+});
+
+test('key presses alone build a purr', () => {
+  const petting = new Petting();
+  let at = 0;
+  for (let press = 0; press < 3; press++) {
+    for (const end = at + KEY_STROKE.lasts; at < end; at += KEY_STROKE.every) petting.stroke('head', KEY_STROKE.distance, at, calm);
+  }
+  assert.ok(petting.purr(at) > .6, String(petting.purr(at)));
 });

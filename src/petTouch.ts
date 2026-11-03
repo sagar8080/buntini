@@ -34,7 +34,6 @@ const STROKING = 100;
 const KNEAD_AT = .8;
 const KNEAD_AFTER = 2000;
 const GRAB_AFTER = 4000;
-const SWAT_AFTER = 12_000;
 
 /** One breath of a purring cat, in ms; the CSS breathing (pet-purr-breath) matches it. */
 export const BREATH = 2400;
@@ -54,8 +53,29 @@ export function tiltFor(zone: Zone, level: number, side: -1 | 1): number {
   return tilt[zone] * Math.min(1, level / .5) * side;
 }
 
-export interface PetContext { cat: boolean; motion: PetMotion; annoyance: number; favourite: Favourite | null }
+/** How close the cat is to you, from its bond (petMood.ts bandFor): a new cat is shy, a
+    close one melts at the first touch. */
+export type Band = 'new' | 'familiar' | 'close';
+/** `still`: Reduce motion. The purr, its sound and taps carry on; nothing moves. */
+export interface PetContext { cat: boolean; motion: PetMotion; annoyance: number; favourite: Favourite | null; band: Band; still: boolean }
 export interface Touch { purr: number; play: PetAction | null; mood: MoodEvent | null }
+
+/** Strokes faster than this (px/s) are frantic, and do less for the bond. */
+const FRANTIC = 900;
+/** A new cat puts up with this much stroking before it pulls away. */
+const SHY_AFTER = 8000;
+/** A cat with a close bond rolls over for a belly rub after this long. */
+const FLOP_AFTER = 2000;
+const CLOSE_GRAB_AFTER = 6000;
+/** Overstimulation: a playful cat at full purr for this long, or a cross one stroked for
+    this long, warns before it swats. */
+const WARN_FULL = 4000;
+const WARN_CROSS = 3000;
+const WARNING = 1500;
+
+/** Keyboard and VoiceOver petting: each press is a second of steady head strokes, made
+    of strokes this far apart and this long. */
+export const KEY_STROKE = { every: 50, distance: 25, lasts: 1000 } as const;
 
 export class Petting {
   private samples: { at: number; distance: number }[] = [];
@@ -65,6 +85,10 @@ export class Petting {
   private strokingSince = 0;
   private zoneRun: { zone: Zone; since: number } | null = null;
   private highSince = 0;
+  private fullSince = 0;
+  private warnSince = 0;
+  private calmed = false;
+  private shied = false;
   private lastFelt = -Infinity;
   private peak = 0;
   private swatted = false;
@@ -82,54 +106,91 @@ export class Petting {
     this.samples = [...this.samples.filter(sample => at - sample.at < WINDOW), { at, distance }];
     const speed = this.samples.reduce((sum, sample) => sum + sample.distance, 0) / (WINDOW / 1000);
     const quiet = { purr: this.level, play: null, mood: null };
+    const moving = context.cat && !context.still;
     if (zone === 'tail') {
       if (!this.ready('flick', at, 3000)) return quiet;
       this.level = 0;
       this.peak = 0;
-      return { purr: 0, play: context.cat ? 'flick' : 'tilt', mood: 'tail' };
+      return { purr: 0, play: context.still ? null : context.cat ? 'flick' : 'tilt', mood: 'tail' };
     }
     if (zone === 'paws') {
-      if (speed < STROKING || !context.cat || !this.ready('bat', at, 4000)) return quiet;
+      if (speed < STROKING || !moving || !this.ready('bat', at, 4000)) return quiet;
       return { purr: this.level, play: 'bat', mood: 'play' };
     }
-    if (speed < STROKING) return quiet;
+    if (speed < STROKING) {
+      // Slowing down during a warning calms it: no swat, and a slow blink instead.
+      if (this.warnSince) this.calm();
+      return quiet;
+    }
     if (at - this.lastStroke > 1000) { this.strokingSince = at; this.zoneRun = null; }
     // The first stroke after a pause only starts the count.
     const elapsed = at - this.lastStroke < 200 ? at - this.lastStroke : 0;
     this.lastStroke = at;
     this.zoneRun = this.zoneRun?.zone === zone ? this.zoneRun : { zone, since: at };
-    const favourite = context.favourite === zone ? 2 : 1;
-    this.level = Math.min(1, this.level + PURR_RISE * rise[zone] * favourite * elapsed / 1000);
-    this.updated = at;
-    this.peak = Math.max(this.peak, this.level);
     const felt = at - this.lastFelt >= 1000;
     if (felt) this.lastFelt = at;
-    const mood: MoodEvent | null = felt ? 'pet' : null;
-    if (!context.cat) return { purr: this.level, play: this.level > .15 ? 'purr' : null, mood };
-    // Too much of a good thing: a playful (or cross) cat swats the hand, once a session.
-    if (!this.swatted && at - this.strokingSince > SWAT_AFTER && (context.motion === 'playful' || context.annoyance > .3)) {
+    // After a swat it won't purr again until the hand has gone and come back.
+    if (this.swatted) return { purr: this.level, play: null, mood: felt ? 'tooMuch' : null };
+    // A new cat has had enough after a while: it leans away, and more stroking only
+    // makes it cross.
+    if (context.band === 'new' && context.cat && (this.shied || at - this.strokingSince > SHY_AFTER)) {
+      const first = !this.shied;
+      this.shied = true;
+      this.level = Math.max(0, this.level - PURR_FALL * elapsed / 1000);
+      return { purr: this.level, play: first && !context.still ? 'shy' : null, mood: felt ? 'tooMuch' : null };
+    }
+    const favourite = context.favourite === zone ? 2 : 1;
+    const shyness = context.band === 'new' ? .5 : 1;
+    // A close cat purrs at the first touch.
+    if (context.band === 'close' && elapsed === 0) this.level = Math.max(this.level, .2);
+    this.level = Math.min(1, this.level + PURR_RISE * rise[zone] * favourite * shyness * elapsed / 1000);
+    this.updated = at;
+    this.peak = Math.max(this.peak, this.level);
+    // Gentle, steady petting does the most for the bond.
+    const mood: MoodEvent | null = felt ? (speed > FRANTIC ? 'roughPet' : 'pet') : null;
+    const purring = { purr: this.level, play: this.level > .15 ? 'purr' as const : null, mood };
+    if (!context.cat) return purring;
+    if (this.level >= .95) { if (!this.fullSince) this.fullSince = at; } else this.fullSince = 0;
+    // Too much of a good thing: a playful (or cross) cat warns, then swats, once a session.
+    if (this.warnSince) {
+      if (at - this.warnSince < WARNING) return { ...purring, play: null };
+      this.warnSince = 0;
       this.swatted = true;
       this.level = 0;
       this.peak = 0;
       return { purr: 0, play: 'swat', mood: 'overpet' };
     }
-    // A long belly rub is an invitation to a playful cat: it grabs your hand and kicks.
-    if (zone === 'chest' && context.motion === 'playful' && at - this.zoneRun.since > GRAB_AFTER && this.ready('grab', at, 10_000)) {
-      this.level = Math.max(0, this.level - .3);
-      this.zoneRun = null;
-      return { purr: this.level, play: 'grab', mood: 'play' };
+    const overstimulated = (context.motion === 'playful' && this.fullSince && at - this.fullSince > WARN_FULL) || (context.annoyance > .3 && at - this.strokingSince > WARN_CROSS);
+    if (!this.swatted && !context.still && overstimulated) {
+      this.warnSince = at;
+      return { ...purring, play: 'warn' };
+    }
+    if (zone === 'chest' && moving) {
+      const run = at - this.zoneRun.since;
+      // A close cat rolls over for more; a playful one, after a long rub, grabs the hand
+      // and kicks. A familiar playful cat grabs sooner.
+      const grabAfter = context.band === 'close' ? CLOSE_GRAB_AFTER : GRAB_AFTER;
+      if (context.motion === 'playful' && run > grabAfter && this.ready('grab', at, 10_000)) {
+        this.level = Math.max(0, this.level - .3);
+        this.zoneRun = null;
+        return { purr: this.level, play: 'grab', mood: 'play' };
+      }
+      if (context.band === 'close' && run > FLOP_AFTER && this.ready('flop', at, 15_000)) return { ...purring, play: 'flop' };
     }
     // Purring hard for a while, it starts making biscuits.
     if (this.level >= KNEAD_AT) {
       if (!this.highSince) this.highSince = at;
-      if (at - this.highSince >= KNEAD_AFTER) { this.highSince = 0; return { purr: this.level, play: 'knead', mood }; }
+      if (at - this.highSince >= KNEAD_AFTER) { this.highSince = 0; if (!context.still) return { ...purring, play: 'knead' }; }
     } else this.highSince = 0;
-    return { purr: this.level, play: this.level > .15 ? 'purr' : null, mood };
+    return purring;
   }
 
-  /** Once, a second after a good long purr's strokes stop: time for a slow blink. */
+  /** Once, a second after a good long purr's strokes stop, or as soon as a warned cat is
+      calmed: time for a slow blink. */
   afterglow(at: number): boolean {
     this.fade(at);
+    if (this.warnSince && at - this.lastStroke > 300) this.calm();
+    if (this.calmed && at - this.lastStroke > 300) { this.calmed = false; this.peak = 0; return true; }
     if (this.peak < .5 || at - this.lastStroke < 1000) return false;
     this.peak = 0;
     return true;
@@ -140,8 +201,16 @@ export class Petting {
   leave(at: number): boolean {
     this.samples = [];
     this.swatted = false;
+    this.shied = false;
     this.zoneRun = null;
     return this.purr(at) > .4;
+  }
+
+  /** The warned cat calms down: no swat, and its overstimulation starts over. */
+  private calm() {
+    this.warnSince = 0;
+    this.fullSince = 0;
+    this.calmed = true;
   }
 
   private fade(at: number) {

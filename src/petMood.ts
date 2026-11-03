@@ -12,7 +12,7 @@ export type Feeling = keyof Mood;
 /** What the cat looks like between habits. */
 export type Face = 'neutral' | 'content' | 'drowsy' | 'bored' | 'grumpy' | 'excited';
 export type MoodEvent =
-  | 'pet' | 'click' | 'poke' | 'overpet' | 'tail' | 'held' | 'woken'
+  | 'pet' | 'roughPet' | 'tooMuch' | 'click' | 'poke' | 'overpet' | 'tail' | 'held' | 'woken'
   | 'play' | 'chase' | 'userBack' | 'talk' | 'praise' | 'done' | 'failed';
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
@@ -34,6 +34,8 @@ export function startingMood(motion: PetMotion, hour: number): Mood {
 // Each event nudges a few feelings. Playful cats find being picked up fun; others don't.
 const nudges: Record<MoodEvent, Partial<Mood>> = {
   pet: { affection: .03, boredom: -.2, annoyance: -.04, bond: .002 },
+  roughPet: { affection: .02, boredom: -.2, annoyance: -.02, bond: .001 },
+  tooMuch: { annoyance: .06 },
   click: { affection: .05, boredom: -.3, excitement: .08, bond: .002 },
   poke: { annoyance: .28, boredom: -.3, affection: -.02, bond: -.004 },
   overpet: { annoyance: .35, excitement: .1 },
@@ -48,6 +50,15 @@ const nudges: Record<MoodEvent, Partial<Mood>> = {
   done: { excitement: .25, affection: .04 },
   failed: { excitement: -.2, affection: .02 },
 };
+
+/** How close the cat is to you. A new cat (bond under 0.15) is shy; a close one (0.5 and
+    up) purrs at the first touch and rolls over for a belly rub. */
+export function bandFor(bond: number): 'new' | 'familiar' | 'close' {
+  return bond < .15 ? 'new' : bond < .5 ? 'familiar' : 'close';
+}
+
+/** How much sooner it asks for a pet: half as often when new, more often when close. */
+export const askPace = { new: .5, familiar: 1, close: 1.5 } as const;
 
 export function feel(mood: Mood, event: MoodEvent, motion: PetMotion): Mood {
   const change = event === 'held' && motion === 'playful' ? { excitement: .25, boredom: -.4 } : nudges[event];

@@ -6,7 +6,7 @@ export type PetAction =
   | 'bat' | 'pounce' | 'nudge' | 'mischief'
   | 'stalk' | 'hunt' | 'knead' | 'loaf'
   | 'wink' | 'smile' | 'lick' | 'askpet'
-  | 'sigh' | 'wave' | 'blep' | 'tailchase' | 'sneeze' | 'chatter' | 'bunt' | 'swat' | 'dream' | 'flick' | 'grab'
+  | 'sigh' | 'wave' | 'blep' | 'tailchase' | 'sneeze' | 'chatter' | 'bunt' | 'swat' | 'dream' | 'flick' | 'grab' | 'shy' | 'warn' | 'flop'
   | 'love' | 'purr' | 'happy' | 'sad' | 'proud' | 'bashful' | 'curious' | 'excited' | 'startle' | 'grumpy';
 
 /** How long each one-shot action class stays on the pet, in ms. Purr is held while the
@@ -16,12 +16,12 @@ export const actionDuration: Record<PetAction, number> = {
   yawn: 2000, wiggle: 1500, nod: 2400, bat: 2200, pounce: 1700, nudge: 1300, love: 1600, purr: 900, happy: 1400, sad: 1800,
   mischief: 2800, stalk: 1500, hunt: 900, knead: 2800, loaf: 7000,
   wink: 1100, smile: 2000, lick: 2600, askpet: 9000,
-  sigh: 2400, wave: 2000, blep: 3200, tailchase: 2600, sneeze: 1300, chatter: 2000, bunt: 2600, swat: 900, dream: 1400, flick: 1100, grab: 1900,
+  sigh: 2400, wave: 2000, blep: 3200, tailchase: 2600, sneeze: 1300, chatter: 2000, bunt: 2600, swat: 900, dream: 1400, flick: 1100, grab: 1900, shy: 1600, warn: 1500, flop: 3000,
   proud: 2200, bashful: 2400, curious: 2200, excited: 1800, startle: 1200, grumpy: 2600,
 };
 
 /** Actions only a cat can act out; other characters fall back to a plain reaction. */
-export const catOnly: ReadonlySet<PetAction> = new Set(['flick', 'grab', 'bat', 'pounce', 'nudge', 'mischief', 'stalk', 'hunt', 'knead', 'loaf', 'groom', 'lick', 'askpet', 'sigh', 'wave', 'blep', 'tailchase', 'sneeze', 'chatter', 'bunt', 'swat', 'dream', 'bashful', 'grumpy', 'curious', 'startle', 'proud', 'excited', 'wink', 'smile']);
+export const catOnly: ReadonlySet<PetAction> = new Set(['flick', 'grab', 'shy', 'warn', 'flop', 'bat', 'pounce', 'nudge', 'mischief', 'stalk', 'hunt', 'knead', 'loaf', 'groom', 'lick', 'askpet', 'sigh', 'wave', 'blep', 'tailchase', 'sneeze', 'chatter', 'bunt', 'swat', 'dream', 'bashful', 'grumpy', 'curious', 'startle', 'proud', 'excited', 'wink', 'smile']);
 export const forCharacter = (action: PetAction, cat: boolean): PetAction => cat || !catOnly.has(action) ? action : ['grumpy', 'startle', 'curious'].includes(action) ? 'tilt' : 'happy';
 
 /** Ways of playing with the ball of wool: two swipes, a pounce, a lazy nudge. */

@@ -136,9 +136,9 @@ Build these in order, since P1 and P2 underpin the rest.
   |---|---|
   | New (below 0.15) | Purr starts after twice as much stroking. After 8 s it leans away with ears flat, and stroking after that only raises `annoyance`. It asks for pets half as often. |
   | Familiar (0.15–0.5) | Today's behaviour, with P2–P7. |
-  | Close (0.5 and up) | Purrs at the first touch. A chest rub rolls it onto its back (new `flop` pose) for more, with no grab unless it's playful and the rub goes past 6 s. It asks for pets more often, and when you come back after an hour or more it walks to the pointer and rubs against it. |
+  | Close (0.5 and up) | Purrs at the first touch. A chest rub rolls it back (new `flop` pose) for more, with no grab unless it's playful and the rub goes past 6 s. It asks for pets more often, and when it wakes as you come back after an hour or more it stretches, then rubs against you. Walking over to the pointer first needs the desktop movement in `petWorld.ts` and is left for later. |
 
-  The bond grows as it does now. Gentle, steady petting counts a little more than frantic petting: travel per second between 200 and 900 px counts in full, and faster than that counts half.
+  The bond grows as it does now. Gentle, steady petting counts more than frantic petting: strokes up to 900 px/s count in full (`pet`), and faster ones count half (`roughPet`).
 - **Files:** `petMood.ts` (bands), `petTouch.ts`, `Cat.tsx` and `styles.css` (the `flop` pose), `petLife.ts` (how often it asks).
 - **Acceptance:** tests run each band through the same stroke sequence and check the reactions differ as listed, and that a new cat can't reach `flop`.
 
@@ -146,8 +146,9 @@ Build these in order, since P1 and P2 underpin the rest.
 
 - **Goal:** Users can see a swat coming and avoid it by stopping.
 - **Build:**
-  - 1.5 s before the swat would fire, the tail tip twitches and the ears flatten (`cat-ear` rotation, already drawn). If the user stops or slows below 100 px/s during that time, there's no swat and it ends with a slow blink.
-  - The swat condition stays playful-or-cross, now counted from the purr level rather than a 12 s timer.
+  - A playful cat at full purr (0.95 or more) for 4 s, or a cross one (annoyance over 0.3) stroked for 3 s, warns (`warn`): the tail twitches and the ears flatten. The warning cuts in on kneading.
+  - 1.5 s later, if the strokes go on, it swats. If the user stops or slows below 100 px/s during the warning, there's no swat, the count starts over, and it slow-blinks instead.
+  - After a swat it doesn't purr again until the hand has left, and a swat happens at most once each time the hand comes.
 - **Acceptance:** tests that stopping during the warning cancels the swat, and that the swat stays once per session.
 
 ### P10. Its own favourite spot (S)
@@ -165,12 +166,12 @@ Build these in order, since P1 and P2 underpin the rest.
   - **Keyboard and VoiceOver:** a "Pet {name}" control comes right after the cat button in the tab order, visually hidden until it has focus.
     - Each press counts as one second of steady head strokes, and holding Space keeps petting.
     - Its live region says "{name} is purring" once when the purr starts, and "{name} is kneading" once when kneading starts.
-    - VoiceOver users also get it as a custom action on the cat button.
+    - VoiceOver reaches the same control. Web content can't add a custom action to the cat button, so there's no separate one.
   - **Reduce motion:** remove the early return in the pointer handlers.
     - Touch, purr, haptics and sound all run as normal.
     - Visual changes become instant face swaps: happy eyes, blush, hearts with no float.
     - Tilt, lean, swat, grab and `flop` don't run.
-- **Acceptance:** a test drives the purr level from key presses alone, and another checks that Reduce motion runs the same touch sequence with no motion classes. A VoiceOver device check confirms the custom action.
+- **Acceptance:** a test drives the purr level from key presses alone, and another checks that Reduce motion builds the same purr with no motion actions. A VoiceOver device check confirms the control and its announcements.
 
 ### Device acceptance for part 1
 

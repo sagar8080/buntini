@@ -592,6 +592,20 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet.pet--act-grab .cat-paw-right { animation: cat-grab-right 1.9s ease-in-out; }
 .pet.pet--act-grab .cat-hind-paw { animation: cat-kick .28s ease-in-out .35s 4; }
 .pet.pet--act-grab .cat-head { animation: cat-grab-head 1.9s ease-in-out; }
+/* Its favourite spot: it blushes while you find it. */
+.pet--cat.pet--act-purr[data-favourite] .cat-blush-strong { display: block; }
+/* A new cat that has had enough leans away from the hand, ears back. */
+.pet.pet--act-shy .cat-front { animation: cat-shy 1.6s ease-in-out; transform-origin: 90px 160px; }
+.pet--cat.pet--act-shy .cat-ear-left, .pet--cat.pet--act-warn .cat-ear-left { transform: rotate(-20deg) translateY(4px); }
+.pet--cat.pet--act-shy .cat-ear-right, .pet--cat.pet--act-warn .cat-ear-right { transform: rotate(20deg) translateY(4px); }
+/* Overstimulated: the tail twitches and the ears flatten, a moment before a swat. */
+.pet.pet--act-warn .cat-tail { animation: cat-tail-twitch .25s ease-in-out 6; }
+/* A cat close to you rolls back for a belly rub, paws up and eyes closed. */
+.pet.pet--act-flop .pet-body { animation: cat-flop 3s ease-in-out; transform-origin: 90px 165px; }
+.pet.pet--act-flop .cat-paw-left { animation: cat-flop-left 3s ease-in-out; }
+.pet.pet--act-flop .cat-paw-right { animation: cat-flop-right 3s ease-in-out; }
+.pet--cat.pet--act-flop .pet-eyes { display: none; }
+.pet--cat.pet--act-flop .cat-eyes-happy, .pet.pet--act-flop .cat-hearts { display: block; }
 .pet.pet--act-sad .pet-body { animation: pet-sad 1.8s ease-in-out; }
 .pet.pet--act-sad .cat-ear-left { animation: none; transform: rotate(-34deg) translateY(7px); }
 .pet.pet--act-sad .cat-ear-right { animation: none; transform: rotate(34deg) translateY(7px); }
@@ -621,6 +635,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes cat-grab-left { 15%, 80% { transform: translate(6px, -16px) rotate(18deg); } }
 @keyframes cat-grab-right { 15%, 80% { transform: translate(-6px, -16px) rotate(-18deg); } }
 @keyframes cat-kick { 50% { transform: translateY(-4px); } }
+@keyframes cat-shy { 20%, 75% { transform: translateX(calc(var(--touch-side, 1) * -3px)) rotate(calc(var(--touch-side, 1) * -5deg)); } }
+@keyframes cat-tail-twitch { 50% { transform: rotate(-6deg); } }
+@keyframes cat-flop { 18%, 80% { transform: rotate(-14deg) translate(-4px, 3px); } }
+@keyframes cat-flop-left { 18%, 80% { transform: translate(5px, -12px) rotate(30deg); } }
+@keyframes cat-flop-right { 18%, 80% { transform: translate(-3px, -14px) rotate(-24deg); } }
 @keyframes cat-grab-head { 15%, 80% { transform: translateY(4px) rotate(-3deg); } }
 @keyframes pet-sad { 20%, 75% { transform: translateY(2px) scale(1.01, .98); } }
 @keyframes cat-heart { 0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-14px) scale(.9); } }
@@ -1099,6 +1118,9 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 /* Asking to play with the window the cat sits on: a paw in a bubble, answered with a tap. */
 .pet-ask { position: absolute; top: calc(4px * var(--companion-scale, 1)); left: calc(6px * var(--companion-scale, 1)); width: calc(34px * var(--companion-scale, 1)); height: calc(30px * var(--companion-scale, 1)); padding: 0; border-radius: 15px; border: 1px solid var(--hairline); background: var(--panel); color: var(--accent); box-shadow: var(--shadow); display: grid; place-items: center; z-index: 3; animation: nudge-in .3s var(--spring), cat-ask-bob 2.2s ease-in-out .3s infinite; }
 .pet-ask svg { width: 60%; height: 60%; }
+/* Pets the cat from the keyboard or VoiceOver; seen only while it has keyboard focus. */
+.pet-pet:not(:focus-visible) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.pet-pet:focus-visible { position: absolute; top: calc(4px * var(--companion-scale, 1)); right: calc(13px * var(--companion-scale, 1)); z-index: 3; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--panel); color: var(--accent); box-shadow: var(--shadow); font: inherit; font-size: 12px; white-space: nowrap; }
 .pet-ask:hover { transform: scale(1.08); }
 /* Moods (petMood.ts). Upper lids wait above the eyes until a mood lowers or tilts them.
    Resting faces use :where() so states (listening, thinking) and habits always win. */
