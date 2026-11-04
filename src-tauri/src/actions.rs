@@ -434,6 +434,7 @@ fn plain_address(address: &str) -> bool {
 pub fn fixed_fields(tool: &str) -> &'static [&'static str] {
     match tool {
         "reply_email" => &["message", "message_id", "to", "answers"],
+        crate::glance::QUIT_TOOL => &["app"],
         _ => &[],
     }
 }

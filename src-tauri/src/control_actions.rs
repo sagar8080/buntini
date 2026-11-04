@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-pub const TOOLS: [&str; 5] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL];
+pub const TOOLS: [&str; 6] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL, crate::glance::QUIT_TOOL];
 
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     if matches!(tool, "control_music" | "switch_tab") {
@@ -43,6 +43,13 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     let args = args.as_object().ok_or("Arguments must be an object.")?;
     if tool == crate::mac_settings::TOOL {
         return crate::mac_settings::validate(args);
+    }
+    if tool == crate::glance::QUIT_TOOL {
+        let app = args.get("app").and_then(Value::as_str).unwrap_or_default().trim();
+        if args.len() != 1 || app.is_empty() || app.chars().count() > 100 || app.chars().any(char::is_control) {
+            return Err("Say which app to quit.".into());
+        }
+        return Ok(Map::from_iter([("app".into(), json!(app))]));
     }
     let key = match tool {
         "remember" => "fact",
@@ -96,6 +103,10 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
             let label = crate::mac_settings::setting(id).map(|s| s.label).unwrap_or("Setting");
             let value = args.get("value").and_then(Value::as_str).unwrap_or_default();
             (label.into(), vec![Field { key: "value".into(), label: label.into(), kind: "text", value: value.into() }], String::new())
+        }
+        crate::glance::QUIT_TOOL => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or_default();
+            (format!("Quit {app}?"), vec![Field { key: "app".into(), label: "App".into(), kind: "fixed", value: app.into() }], String::new())
         }
         "remember" => ("Remember this?".into(), vec![field("fact", "Fact or preference")], "Saved on your Mac for future conversations. Remove it anytime in Settings → Privacy.".into()),
         "set_timer" => ("Set this timer?".into(), vec![field("seconds", "Duration in seconds")], "The timer is saved across restarts. Alerts require Buntini running and your Mac awake; overdue timers appear when it returns. Desktop alerts need notification permission.".into()),
@@ -613,6 +624,22 @@ fn tab_receipt(browser: &str, query: &str, raw: &str) -> ActionReceipt {
     )
 }
 
+/// Done only once the app is gone. An app that stays open was asked and said no, or is
+/// asking the user something, so it's reported as it is.
+async fn quit_receipt(app: String, cancel: Arc<AtomicBool>) -> ActionReceipt {
+    let tool = crate::glance::QUIT_TOOL;
+    let quit = async {
+        tauri::async_runtime::spawn_blocking(move || crate::glance::quit_app(&app))
+            .await
+            .map_err(|_| "Quitting the app failed.".to_string())
+    };
+    match cancellable(&cancel, quit).await {
+        Ok(Ok(name)) => success(tool, name.clone(), &name, format!("{name} has quit."), json!({"verified":true,"app":name})),
+        Ok(Err(still_open)) => failure(tool, ActionOutcome::Failed, still_open, json!({})),
+        Err(error) => failure(tool, ActionOutcome::Unknown, error, json!({})),
+    }
+}
+
 pub async fn execute(
     state: &AppState,
     intent_id: &str,
@@ -640,6 +667,9 @@ pub async fn execute(
             &args,
             &cancel,
         );
+    }
+    if tool == crate::glance::QUIT_TOOL {
+        return quit_receipt(args["app"].as_str().unwrap_or_default().to_string(), cancel).await;
     }
     let settings = match state.store.lock().unwrap().settings() {
         Ok(settings) => settings,

@@ -378,6 +378,9 @@ pub struct TaskRecord {
     pub files: Vec<FileHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemSnapshot>,
+    /// The Mac at a glance card this reply shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glance: Option<crate::glance::Glance>,
     #[serde(default)]
     pub research: Vec<crate::research::ResearchContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -16,6 +16,7 @@ impl Store {
             .map_err(|e| e.to_string())?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;
           CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS mac_history (at INTEGER PRIMARY KEY, cpu REAL NOT NULL, pressure INTEGER NOT NULL, battery INTEGER);
           CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY);
           CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, fact TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -570,6 +571,7 @@ impl Store {
             "monitorIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'monitorId',monitor_id) FROM monitor_intents")?,
             "activityLog": self.audit_entries()?,
             "cat": crate::pet::export(self)?,
+            "macHistory": crate::glance::export(self)?,
         }))
     }
     /// "Delete everything": every table back to empty, as on a fresh install.
@@ -582,7 +584,7 @@ impl Store {
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines; DELETE FROM goals;
                  DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
-                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent;",
+                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent; DELETE FROM mac_history;",
             )
             .map_err(|e| e.to_string())?;
         self.bump_index();

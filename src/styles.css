@@ -29,11 +29,15 @@
   --reply: color-mix(in srgb, var(--surface-soft) 72%, var(--panel));
   --shadow: 0 30px 60px -24px #3a1f0f40, 0 10px 24px -12px #3a1f0f24;
   --float-shadow: 0 10px 28px -14px #3a1f0f45, 0 1px 2px #3a1f0f14;
+  --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #1baf7a;
+  --chart-rest: color-mix(in srgb, var(--muted) 50%, var(--surface));
+  --tone-good: #0ca30c; --tone-warn: #fab219; --tone-critical: #d03b3b;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --spring: cubic-bezier(.34, 1.4, .64, 1);
 }
 /* data-mode is the resolved light or dark mode (src/themes.ts). Classic dark is cocoa. */
 :root[data-mode=dark] {
+  --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70;
   --panel: #1a1512; --surface: #231c18; --surface-soft: #2d2520;
   --text: #f3ebe3; --muted: #a89a8f; --border: #3a2f29;
   --accent: #ff9e62; --accent-soft: #3b271b; --on-accent: #1f1008; --danger: #f09a8c;
@@ -311,16 +315,59 @@ button svg { vertical-align: middle; }
 .composer-area > .toast, .setup-actions > .toast { bottom: calc(100% + 4px); }
 .setup-actions { position: relative; }
 .error-box { font-size: 12px; line-height: 1.7; padding: 10px; border-radius: 7px; margin-top: 10px; }
-.system-card { margin-top: 12px; background: var(--surface); border-radius: 14px; padding: 13px 14px; font-family: -apple-system, system-ui, sans-serif; }
-.system-card-heading { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
-.system-card-heading small { margin-left: auto; font-size: 11px; }
-.system-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 14px; }
-.system-metrics > div > span { color: var(--muted); font-size: 11px; }
-.system-metrics strong { display: block; font-size: 21px; font-weight: 450; letter-spacing: -.8px; margin-top: 4px; }
-.system-metrics strong small { color: var(--muted); font-size: 11px; letter-spacing: 0; }
-.metric-track { height: 3px; border-radius: 5px; overflow: hidden; background: var(--surface-soft); margin-top: 8px; }
-.metric-track i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
-.system-card > p { font-size: 11px; color: var(--muted); margin: 12px 0 0; }
+.mac-glance { margin-top: 10px; background: var(--surface); border-radius: 14px; padding: 13px 14px; font-family: -apple-system, system-ui, sans-serif; color: var(--text); }
+.mac-verdict { display: flex; align-items: center; gap: 7px; font-size: 14px; }
+.mac-verdict strong { font-weight: 550; min-width: 0; }
+.mac-verdict svg { flex: none; }
+.tone-good { color: var(--tone-good); stroke: var(--tone-good); }
+.tone-warn { color: var(--tone-warn); stroke: var(--tone-warn); }
+.tone-critical { color: var(--tone-critical); stroke: var(--tone-critical); }
+.mac-verdict svg.tone-good, .mac-verdict svg.tone-critical { fill: none; }
+.mac-rings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.mac-rings.has-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mac-rings figure { margin: 0; text-align: center; min-width: 0; }
+.mac-rings figcaption { font-size: 11px; color: var(--muted); }
+.mac-ring { display: block; width: 100%; max-width: 78px; margin: 0 auto; }
+.mac-ring.is-big { width: 112px; max-width: none; flex: none; margin: 0; }
+.mac-ring circle { fill: none; stroke-width: 8; }
+.mac-ring-track { stroke: var(--surface-soft); }
+.mac-arc { animation: mac-arc-in .55s var(--ease-out); }
+@keyframes mac-arc-in { from { stroke-dasharray: 0 201.06; } }
+.mac-ring-value { font-size: 15px; font-weight: 550; fill: var(--text); }
+.mac-ring-value.is-small { font-size: 10.5px; }
+.mac-ring-note { font-size: 9px; fill: var(--muted); }
+.part-apps { stroke: var(--chart-1); background: var(--chart-1); }
+.part-caches { stroke: var(--chart-2); background: var(--chart-2); }
+.part-folders { stroke: var(--chart-3); background: var(--chart-3); }
+.part-other { stroke: var(--chart-rest); background: var(--chart-rest); }
+.part-free { background: var(--surface-soft); box-shadow: inset 0 0 0 1px var(--border); }
+.mac-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.mac-legend span { display: flex; align-items: center; gap: 4px; }
+.mac-legend i, .mac-sizes i { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.mac-hero { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.mac-sizes { flex: 1; min-width: 0; margin: 0; display: grid; gap: 6px; font-size: 12px; }
+.mac-sizes > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.mac-sizes dt { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); }
+.mac-sizes dd { margin: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mac-hot { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 12px; }
+.mac-section-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); }
+.mac-section-head span:last-child { font-variant-numeric: tabular-nums; }
+.mac-section-head small { font-size: 11px; }
+.mac-trend { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--hairline); }
+.mac-trend svg { display: block; width: 100%; height: 44px; margin-top: 4px; touch-action: none; }
+.mac-trend-base { stroke: var(--border); stroke-width: 1; }
+.mac-trend-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.mac-trend-cross { stroke: var(--muted); stroke-width: 1; }
+.mac-apps { margin-top: 11px; display: grid; gap: 7px; }
+.mac-trend + .mac-apps { padding-top: 0; }
+.mac-rings + .mac-apps, .mac-legend + .mac-apps, .mac-hero + .mac-apps { padding-top: 11px; border-top: 1px solid var(--hairline); }
+.mac-app { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr) 42px; align-items: center; gap: 8px; font-size: 12px; }
+.mac-app > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mac-app small { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.mac-app-track { height: 7px; border-radius: 4px; background: var(--surface-soft); overflow: hidden; }
+.mac-app-track i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.mac-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.mac-actions .secondary-button { font-size: 12px; padding: 6px 11px; }
 .saved-searches { border-bottom: 1px solid var(--border); padding-bottom: 18px; margin-bottom: 22px; }
 .saved-searches > .section-label > button { margin-left: auto; font-size: 11px; letter-spacing: 0; }
 .saved-search-form { border: 1px solid var(--hairline); background: var(--surface); padding: 10px; border-radius: 8px; margin-top: 12px; }
@@ -991,7 +1038,7 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .bubble { border-radius: var(--radius-bubble); }
 .bubble-you { border-bottom-right-radius: calc(var(--radius-bubble) / 3); }
 .bubble-buntini { border-bottom-left-radius: calc(var(--radius-bubble) / 3); }
-.system-card, .result-card, .file-result, .service-row, .advisor { border-radius: var(--radius-card); }
+.mac-glance, .result-card, .file-result, .service-row, .advisor { border-radius: var(--radius-card); }
 :root[data-font=rounded] .panel { font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
 :root[data-font=serif] .panel { font-family: ui-serif, 'New York', Georgia, serif; }
 :root[data-font=mono] .panel { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

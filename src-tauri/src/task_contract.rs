@@ -28,6 +28,10 @@ pub struct TaskContract {
     /// The tools a request that named a tool the user added may use (`mcp::route`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub connector_tools: Vec<String>,
+    /// The one write a skill already recognised and checked ("Quit Chrome"), which the
+    /// request's words alone can't establish.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub direct_tool: String,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -416,6 +420,7 @@ fn verified_write(step: &Step) -> bool {
             "remember",
             "set_timer",
             crate::mac_settings::TOOL,
+            crate::glance::QUIT_TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
@@ -594,8 +599,20 @@ impl TaskContract {
     fn connector_request(&self) -> bool {
         !self.connector_tools.is_empty()
     }
+    /// Makes this request exactly one write of `tool`.
+    pub fn direct(&mut self, tool: &str) {
+        self.direct_tool = tool.into();
+        let goal = self.current_request.clone();
+        self.bootstrap(&goal);
+    }
     fn bootstrap(&mut self, goal: &str) {
         self.outcomes.clear();
+        if !self.direct_tool.is_empty() {
+            let tool = self.direct_tool.clone();
+            self.push_outcome("write", goal, vec![tool], json!({}), vec![]);
+            self.intent_status = "direct_skill".into();
+            return;
+        }
         if self.connector_request() {
             let tools = self.connector_tools.clone();
             self.push_outcome("write", goal, tools, json!({}), vec![]);

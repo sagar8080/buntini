@@ -104,6 +104,7 @@ mod tests {
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
         research_report: None,
             prices: vec![],

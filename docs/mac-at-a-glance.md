@@ -4,25 +4,19 @@
 battery?" get a picture, not a paragraph. The picture answers the question first and
 offers one thing to do about it.
 
-Status: proposed. Nothing here is built.
-
-## Today
-
-- `SystemCard` shows two bars: CPU percent and memory used of total.
-- `local::snapshot` reads RAM, CPU, disks and the top 8 processes with `sysinfo`.
-  `world.rs` reads CPU and the root disk for the pet.
-- There's no history, no chart code and no battery on the card.
-- Memory used of total alarms people for no reason, because macOS keeps memory full on
-  purpose.
-- The busiest processes are system names. On this Mac today they were `WindowServer` and
-  `coreaudiod`, which mean nothing to most people.
+Status: G1, G2 and G3 are built and not yet run in a signed release. G4 isn't started.
+Each card was checked in the browser preview with sample data, and the readings and a real
+quit were run on one MacBook. Not done yet: VoiceOver and Reduce Motion in the built app, an
+app with unsaved work, energy figures under real load, and thermal states, since this Mac
+has never reported one. App icons on the bars aren't built.
 
 ## The card
 
 Read top to bottom, it answers in one look:
 
 1. **A verdict with an icon:** "Your Mac is fine", or the one thing that isn't.
-2. **Three rings:** storage, memory and battery. A Mac with no battery shows two.
+2. **Three rings:** storage, memory and battery. A Mac with no battery shows two. Memory's
+   ring shows the state, never used of total, because macOS keeps memory full on purpose.
 3. **Busy, last hour:** a CPU line.
 4. **Using the most:** up to three apps as bars.
 5. **Up to two buttons** that fit the verdict.
@@ -60,8 +54,10 @@ the ring shows what Buntini can measure honestly, plus "Everything else". Trash 
 permission Buntini doesn't ask for, so it stays in "Everything else".
 
 **Apps, not processes.** Helpers roll up to the app they belong to using its bundle path, so
-Chrome's many helpers read as Chrome, with its own icon. System processes group as "macOS"
-and are never offered to quit.
+Chrome's many helpers read as Chrome. A process with no app of its own belongs to the app
+that started it, so a Terminal's `cargo` counts as Terminal. System processes group as
+"macOS", anything else as "Background tasks", and neither is ever offered to quit. Neither is
+Buntini, or a helper macOS doesn't list as a running app.
 
 ## Verdict rules
 
@@ -79,14 +75,22 @@ Fixed rules, tested as a pure function. The first match wins:
 
 The thresholds are starting points to tune on real Macs.
 
+The question can add its own next step, up to two buttons in all: Storage settings for a
+storage question, Battery settings for a battery question, and for "why is it slow?", quitting
+the app using the most when it's using at least 10% of the CPU, or any amount while memory is
+short.
+
 ## History
 
 A sampler adds one point a minute: CPU, memory pressure and battery level. The card shows
 the last hour, and 24 hours are kept in the local database.
 
-- **Numbers only are saved.** App names stay in memory, like the existing 3-hour activity
-  timeline, because which apps someone uses is more private than how busy their Mac was.
-- The sampler must not show up in the chart itself. It needs a measured cost target.
+- **Numbers only are sampled.** The history table has no column for a name, because which
+  apps someone uses is more private than how busy their Mac was. A card the user asked for is
+  kept with that turn, top three apps included, like any other reply.
+- The sampler must not show up in the chart itself. The target is 0.1% of one core, 60 ms of
+  CPU a sample, and it measured 6.4 ms (0.01%) on one MacBook, `pmset` included.
+  `cargo test --lib glance::tests::measure_sampler_cost -- --ignored --nocapture` repeats it.
 - Delete everything and data export both include it.
 
 ## Asking
@@ -96,7 +100,12 @@ so it's instant on every brain and works when a brain isn't ready. The phrases b
 routing tests, as for other skills. Anything else, such as "is 16 GB enough for video
 editing?", goes to the model as before.
 
-The card also opens from the cat's menu.
+The card also opens from the companion menu, as "Your Mac", and "Check my Mac" on a nudge
+opens it too.
+
+The model's `system_info` tool shows the same card beside the model's own reply. A question
+to the My Mac mode about FileVault, Gatekeeper, integrity protection or updates keeps those
+words above the card, since the card doesn't cover them.
 
 **Privacy:** the card goes to no one. A cloud brain sees this data only if "Mac health"
 is allowed in Settings → Privacy, so a turn showing the card is recorded with
@@ -104,10 +113,13 @@ is allowed in Settings → Privacy, so a turn showing the card is recorded with
 
 ## Actions
 
-- **Quit an app:** a new `quit_app` action through the approval sheet. It asks the app to
-  quit, so the app can ask about unsaved work. Buntini never force-quits and never offers
-  system processes. It succeeds only when the app is actually gone, and otherwise reports
-  that it's still open.
+- **Quit an app:** a new `quit_app` action through the approval sheet. The button sends
+  "Quit {App}" as the user's message, and typing the same thing works when it names one open
+  app; "quit smoking" names none, so it goes to the model. It asks the app to quit, so the
+  app can ask about unsaved work, and brings it forward after a moment so that prompt can be
+  answered. Buntini never force-quits and never offers system processes. It succeeds only
+  when the app is actually gone, and otherwise reports that it's still open. Models aren't
+  offered this tool, and nothing with nobody at the window can propose it.
 - **Storage settings, Battery settings:** open the pane, with the same mechanism as
   "Open System Settings" for Apple Intelligence.
 - **Left out on purpose:** emptying Trash, deleting caches or files, and restarting. They
@@ -115,14 +127,14 @@ is allowed in Settings → Privacy, so a turn showing the card is recorded with
 
 ## Phases
 
-**G1 The card.** Snapshot additions, verdict rules, SVG rings, `skills/system.rs`, and
+**G1 The card (built).** Snapshot additions, verdict rules, SVG rings, `skills/system.rs`, and
 replacing `SystemCard`.
 
-**G2 Apps and history.** Rolling processes up to apps, the sampler, the CPU line, energy.
+**G2 Apps and history (built).** Rolling processes up to apps, the sampler, the CPU line, energy.
 
-**G3 Actions.** `quit_app` and the settings buttons.
+**G3 Actions (built).** `quit_app` and the settings buttons.
 
-**G4 Always in view.** A small glance from the cat. A desktop widget needs a WidgetKit
+**G4 Always in view (not started).** A small glance from the cat. A desktop widget needs a WidgetKit
 extension built with Xcode inside the Tauri bundle, the same unknown as App Intents, so it
 gets a test build before any promise.
 

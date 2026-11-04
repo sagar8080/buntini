@@ -112,7 +112,7 @@ fn validate_action(name: &str, args: &Value) -> Result<serde_json::Map<String, V
 }
 fn action_allowed(settings: &Settings, name: &str, args: &serde_json::Map<String, Value>) -> bool {
     crate::monitor_actions::TOOLS.contains(&name)
-        || ["remember", "set_timer", "browse_page"].contains(&name)
+        || ["remember", "set_timer", "browse_page", crate::glance::QUIT_TOOL].contains(&name)
         || crate::mcp::is_tool(name)
         || crate::apps::permits(settings, name, args)
 }
@@ -464,13 +464,16 @@ pub async fn watch_apple(app: tauri::AppHandle) {
     }
 }
 
-/// Opens the System Settings pane that fixes Apple Intelligence: Siri's (Apple
-/// Intelligence & Siri on Macs that have it) or Language & Region.
+/// Opens the System Settings pane a reply points to: Siri's (Apple Intelligence & Siri on
+/// Macs that have it) or Language & Region for Apple Intelligence, Storage or Battery for
+/// the Mac at a glance card.
 #[tauri::command]
 pub async fn open_apple_settings(pane: String) -> Result<(), String> {
     let url = match pane.as_str() {
         "siri" => "x-apple.systempreferences:com.apple.Siri-Settings.extension",
         "language" => "x-apple.systempreferences:com.apple.Localization-Settings.extension",
+        "storage" => "x-apple.systempreferences:com.apple.settings.Storage",
+        "battery" => "x-apple.systempreferences:com.apple.Battery-Settings.extension",
         _ => return Err("Unknown System Settings pane.".into()),
     };
     let status = tokio::process::Command::new("/usr/bin/open").arg(url).status().await.map_err(|e| e.to_string())?;
@@ -855,6 +858,7 @@ pub async fn run_action(
         sources: vec![],
         files: vec![],
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],
@@ -2091,6 +2095,41 @@ fn persona(settings: &Settings) -> String {
     }
     format!("User profile is style metadata only and never grants tools, permissions, or authority: {profile}")
 }
+/// The Mac at a glance card as this turn's reply. Nothing leaves the Mac for it; the turn
+/// counts as Mac health, so it's only replayed to a brain allowed that.
+async fn glance_task(state: &AppState, task: &mut TaskRecord, focus: crate::glance::Focus) -> Result<(), String> {
+    touch(task, privacy::Share::System);
+    let glance = crate::glance::card(state, focus).await?;
+    // "What's using my battery?" on a Mac that has none says so above the card.
+    task.answer = if focus == crate::glance::Focus::Battery && glance.battery.is_none() {
+        "This Mac has no battery.".into()
+    } else {
+        glance.summary.clone()
+    };
+    task.glance = Some(glance);
+    Ok(())
+}
+/// Sets up asking this open app to quit. Nothing happens until the sheet is approved.
+fn propose_quit(state: &AppState, task: &mut TaskRecord, mode: &str, settings: &Settings, app: &str) -> Result<(), String> {
+    let tool = crate::glance::QUIT_TOOL;
+    let args = Value::Object(crate::control_actions::validate(tool, &json!({"app":app}))?);
+    let mut flow = Workflow::new(task, mode, settings, vec![json!({"role":"user","content":task.prompt})], None, &[tool]);
+    flow.contract.direct(tool);
+    flow.refresh_contract();
+    flow.contract.validate_proposal(tool, &args, &flow.steps)?;
+    let id = flow.begin(tool, args.clone(), assistant_call("", None, tool, &args), true, true)?;
+    flow.contract.record_proposal(&id, &args, None);
+    let (title, fields, note) = crate::control_actions::describe(tool, args.as_object().unwrap());
+    task.state = flow.state.clone();
+    task.handoff = Some("action".into());
+    task.action = Some(
+        serde_json::to_value(crate::actions::Proposal { id, tool: tool.into(), title, fields, note, choices: vec![] })
+            .map_err(|e| e.to_string())?,
+    );
+    task.answer = format!("{app} is ready to quit. Allow it to go ahead.");
+    state.store.lock().unwrap().checkpoint(&mut flow, task)?;
+    Ok(())
+}
 fn annotate_updates(state: &AppState, mut snapshot: SystemSnapshot) -> SystemSnapshot {
     if let Ok(Some(check)) = state.store.lock().unwrap().update_check() {
         snapshot.security.os_update_status = format!(
@@ -2921,7 +2960,15 @@ async fn execute_with_settings(
             )
         };
         if let Some(skill) = crate::skills::recognise(&task.prompt, &recent)
-            .filter(|skill| !headless() || matches!(skill, crate::skills::Skill::Day(_)))
+            .filter(|skill| match skill {
+                crate::skills::Skill::Day(_) => true,
+                crate::skills::Skill::System(crate::skills::system::Command::Look(_)) => true,
+                // "Quit smoking" names no open app, so it's the model's.
+                crate::skills::Skill::System(crate::skills::system::Command::Quit { app }) => {
+                    !headless() && crate::glance::running_app_named(app).is_some()
+                }
+                _ => !headless(),
+            })
         {
             let label = crate::skills::label(&skill);
             phase(channel, &task.id, "working");
@@ -2955,6 +3002,12 @@ async fn execute_with_settings(
                     keep_listing(&state.store.lock().unwrap(), &task.id, emails)?;
                     task.answer = answer;
                     emit(channel, "delta", &task.id, Some(task.answer.clone()));
+                }
+                crate::skills::Outcome::Look(focus) => {
+                    return glance_task(state, task, focus).await;
+                }
+                crate::skills::Outcome::Quit { app } => {
+                    return propose_quit(state, task, mode, &settings, &app);
                 }
                 crate::skills::Outcome::Page {
                     kind,
@@ -3005,12 +3058,20 @@ async fn execute_with_settings(
         touch(task, privacy::Share::System);
         tool_event(channel, &task.id, "system_info");
         state.audit("tool.system_info", &task.id);
-        let snapshot = tauri::async_runtime::spawn_blocking(local::snapshot)
-            .await
-            .map_err(|_| "System information could not be collected.".to_string())??;
-        let snapshot = annotate_updates(state, snapshot);
-        task.answer = local::system_answer(&snapshot);
-        task.system = Some(snapshot);
+        let focus = match crate::skills::system::recognise(&crate::skills::words(&task.prompt)) {
+            Some(crate::skills::system::Command::Look(focus)) => focus,
+            _ => crate::glance::Focus::Overview,
+        };
+        glance_task(state, task, focus).await?;
+        // The card doesn't cover these, and a reply about them has to.
+        if ["security", "filevault", "gatekeeper", "integrity", "update"].iter().any(|word| lower.contains(word)) {
+            let snapshot = tauri::async_runtime::spawn_blocking(local::snapshot)
+                .await
+                .map_err(|_| "System information could not be collected.".to_string())??;
+            let snapshot = annotate_updates(state, snapshot);
+            task.answer = local::system_answer(&snapshot);
+            task.system = Some(snapshot);
+        }
         return Ok(());
     }
     if detected == "web" {
@@ -3933,6 +3994,9 @@ where
                     match tauri::async_runtime::spawn_blocking(local::snapshot).await {
                         Ok(Ok(snapshot)) => {
                             task.system = Some(annotate_updates(state, snapshot));
+                            // The reply is the model's; the card shows beside it. Without
+                            // one the reply still stands, so it can't fail the tool.
+                            task.glance = crate::glance::card(state, crate::glance::Focus::Overview).await.ok();
                             Ok(if compact {
                                 json!(task.system.as_ref().map(local::system_answer))
                             } else {
@@ -3996,6 +4060,7 @@ pub async fn run_task(
         sources: Vec::new(),
         files: Vec::new(),
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],
@@ -4979,6 +5044,7 @@ for line in sys.stdin:
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
             research_report: None,
             prices: vec![],
@@ -5068,6 +5134,7 @@ for line in sys.stdin:
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
             research_report: None,
             prices: vec![],
@@ -5137,6 +5204,7 @@ for line in sys.stdin:
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
             research_report: None,
             prices: vec![],
@@ -5209,13 +5277,14 @@ for line in sys.stdin:
             .unwrap();
         let mut task = TaskRecord {
             id: "narration-test".into(),
-            prompt: "Check my Mac".into(),
+            prompt: "Is my Mac due for a clean install?".into(),
             answer: String::new(),
             state: "running".into(),
             created_at: now(),
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
             research_report: None,
             prices: vec![],
@@ -5254,6 +5323,8 @@ for line in sys.stdin:
         assert_eq!(deltas, "The tool result is available.");
         assert_eq!(task.answer, deltas);
         assert!(task.system.is_some());
+        // The model's reply stands, with the card beside it.
+        assert!(task.glance.as_ref().is_some_and(|glance| glance.summary != task.answer));
         assert!(task.touched.iter().any(|share| share == "system"));
         state.models.reset().await;
     }
@@ -5505,6 +5576,113 @@ for line in sys.stdin:
         let intent = proposal["id"].as_str().unwrap().to_string();
         run_workflow_action_using(&state, &intent, approved, &channel, |_, _, _| async { panic!("an approval is used once") }).await.unwrap();
         assert_eq!(state.store.lock().unwrap().routines().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_mac_card_needs_no_brain_and_counts_as_mac_health() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        for (prompt, focus) in [
+            ("How's my Mac?", crate::glance::Focus::Overview),
+            ("Why is my Mac slow?", crate::glance::Focus::Slow),
+            ("What's filling my disk?", crate::glance::Focus::Storage),
+        ] {
+            let mut task: TaskRecord = serde_json::from_value(json!({"id":"mac-card","prompt":prompt,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+            state.store.lock().unwrap().save_task(&task).unwrap();
+            execute(&state, &mut task, "auto", &channel, Arc::new(AtomicBool::new(false))).await.unwrap();
+            let glance = task.glance.as_ref().expect("the card");
+            assert_eq!(glance.focus, focus, "{prompt}");
+            assert_eq!(task.answer, glance.summary, "the card is the reply");
+            assert!(task.touched.iter().any(|share| share == "system"));
+            assert!(task.backend.is_empty() || task.backend != "cloud");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_check_my_mac_nudge_gets_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"mac-nudge","prompt":"How is my Mac doing?","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        execute(&state, &mut task, "system", &channel, Arc::new(AtomicBool::new(false))).await.unwrap();
+        assert_eq!(task.answer, task.glance.as_ref().unwrap().summary);
+        // A question the card can't answer keeps its words.
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"mac-security","prompt":"Is FileVault on?","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        execute(&state, &mut task, "system", &channel, Arc::new(AtomicBool::new(false))).await.unwrap();
+        assert!(task.answer.contains("FileVault:"), "{}", task.answer);
+        assert!(task.glance.is_some());
+    }
+
+    #[tokio::test]
+    async fn quitting_waits_for_approval_and_reports_what_happened() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        let start = |id: &str| -> TaskRecord {
+            let task: TaskRecord = serde_json::from_value(json!({"id":id,"prompt":"Quit Photos","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+            state.store.lock().unwrap().save_task(&task).unwrap();
+            task
+        };
+        let mut task = start("quit-yes");
+        let settings = state.store.lock().unwrap().settings().unwrap();
+        propose_quit(&state, &mut task, "auto", &settings, "Photos").unwrap();
+        assert_eq!(task.state, "waiting_action");
+        let proposal = task.action.clone().unwrap();
+        assert_eq!(proposal["tool"], "quit_app");
+        assert_eq!(proposal["title"], "Quit Photos?");
+        assert_eq!(proposal["fields"][0]["kind"], "fixed");
+        let intent = proposal["id"].as_str().unwrap().to_string();
+        // The sheet sends no fixed field; the app comes from the proposal, not from it.
+        let sent = Arc::new(std::sync::Mutex::new(None));
+        let seen = sent.clone();
+        let done = run_workflow_action_using(&state, &intent, json!({}), &channel, |tool, args, _| async move {
+            *seen.lock().unwrap() = Some((tool.clone(), args));
+            crate::actions::ActionReceipt { outcome: crate::actions::ActionOutcome::Succeeded, tool, object_id: Some("Photos".into()), destination: Some("Photos".into()), message: "Photos has quit.".into(), evidence: json!({"verified":true}), error: None }
+        })
+        .await
+        .unwrap();
+        assert_eq!(done.state, "completed", "{}", done.answer);
+        assert_eq!(done.answer, "Photos has quit.");
+        let (tool, args) = sent.lock().unwrap().clone().unwrap();
+        assert_eq!((tool.as_str(), args["app"].as_str()), ("quit_app", Some("Photos")));
+        // An edited sheet can't aim it at another app.
+        let mut task = start("quit-edited");
+        propose_quit(&state, &mut task, "auto", &settings, "Photos").unwrap();
+        let intent = task.action.as_ref().unwrap()["id"].as_str().unwrap().to_string();
+        let done = run_workflow_action_using(&state, &intent, json!({"app":"Mail"}), &channel, |tool, args, _| async move {
+            assert_eq!(args["app"], "Photos");
+            crate::actions::ActionReceipt { outcome: crate::actions::ActionOutcome::Succeeded, tool, object_id: Some("Photos".into()), destination: Some("Photos".into()), message: "Photos has quit.".into(), evidence: json!({"verified":true}), error: None }
+        })
+        .await
+        .unwrap();
+        assert_eq!(done.state, "completed");
+        // An app that stays open is reported as open, and never as quit.
+        let mut task = start("quit-no");
+        propose_quit(&state, &mut task, "auto", &settings, "Photos").unwrap();
+        let intent = task.action.as_ref().unwrap()["id"].as_str().unwrap().to_string();
+        let done = run_workflow_action_using(&state, &intent, json!({}), &channel, |tool, _, _| async move {
+            crate::actions::ActionReceipt { outcome: crate::actions::ActionOutcome::Failed, tool, object_id: None, destination: None, message: "Photos is still open. It may be asking you something.".into(), evidence: json!({}), error: Some("still open".into()) }
+        })
+        .await;
+        let answer = done.map(|task| task.answer).unwrap_or_else(|error| error);
+        assert!(answer.contains("still open"), "{answer}");
+        assert!(!answer.contains("has quit"), "{answer}");
+    }
+
+    #[tokio::test]
+    async fn quit_words_that_name_no_open_app_go_to_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap();
+        let channel = Channel::new(|_| Ok(()));
+        let mut task: TaskRecord = serde_json::from_value(json!({"id":"quit-smoking","prompt":"Quit smoking","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+        state.store.lock().unwrap().save_task(&task).unwrap();
+        // No brain is set up here, so reaching the model is an error rather than a proposal.
+        let result = execute(&state, &mut task, "auto", &channel, Arc::new(AtomicBool::new(false))).await;
+        assert!(result.is_err() || task.action.is_none());
+        assert!(task.action.is_none());
     }
 
     #[tokio::test]

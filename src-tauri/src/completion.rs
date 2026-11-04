@@ -1148,6 +1148,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "remember",
             "set_timer",
             crate::mac_settings::TOOL,
+            crate::glance::QUIT_TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
@@ -1213,7 +1214,8 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
     }
     if !messages.is_empty() {
         let summary = receipt_summary(&messages);
-        if receipt_only_goal(prompt) {
+        // A reply that only repeats its receipt says it once.
+        if receipt_only_goal(prompt) || text.trim() == summary {
             return Ok(summary);
         }
         if text.trim().is_empty() {

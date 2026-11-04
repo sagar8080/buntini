@@ -227,6 +227,7 @@ pub async fn morning_brief(
         sources: vec![],
         files: vec![],
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],

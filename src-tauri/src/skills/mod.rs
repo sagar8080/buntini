@@ -10,6 +10,7 @@ pub mod browser;
 pub mod day;
 pub mod mac;
 pub mod music;
+pub mod system;
 pub mod this;
 
 use crate::{privacy::Share, types::Settings};
@@ -21,6 +22,7 @@ pub enum Skill {
     Mac(mac::Command),
     This(this::Command),
     Day(day::Command),
+    System(system::Command),
 }
 
 pub enum Outcome {
@@ -45,6 +47,10 @@ pub enum Outcome {
         shares: Vec<Share>,
         emails: Vec<crate::triage::Listed>,
     },
+    /// The Mac at a glance card; the controller reads it, since it needs the history.
+    Look(crate::glance::Focus),
+    /// Ask to quit this open app. The controller proposes it, so it waits for approval.
+    Quit { app: String },
 }
 
 pub struct Context<'a> {
@@ -221,6 +227,7 @@ fn compound_request(prompt: &str) -> bool {
         "watch",
         "download",
         "upload",
+        "quit",
     ];
     let command = |tail: &str| {
         let normalized = words(tail);
@@ -295,6 +302,7 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
         .or_else(|| this::recognise(&text, &recent).map(Skill::This))
         .or_else(|| day::recognise(&text).map(Skill::Day))
+        .or_else(|| system::recognise(&text).map(Skill::System))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }
 
@@ -306,6 +314,7 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::Mac(_) => "mac",
         Skill::This(_) => "this",
         Skill::Day(_) => "day",
+        Skill::System(_) => "system",
     }
 }
 
@@ -316,6 +325,7 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::Mac(command) => mac::run(command).await,
         Skill::This(command) => this::run(command, context).await,
         Skill::Day(command) => day::run(command, context).await,
+        Skill::System(command) => system::run(command).await,
     }
 }
 

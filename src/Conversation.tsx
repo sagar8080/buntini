@@ -1,7 +1,8 @@
 import { useState, type RefObject } from 'react';
-import { Check, Copy, ExternalLink, FileText, Laptop, LoaderCircle, Square, Volume2, VolumeX } from 'lucide-react';
+import { Check, Copy, ExternalLink, FileText, LoaderCircle, Square, Volume2, VolumeX } from 'lucide-react';
 import Pet from './Pet';
 import { ResultCards } from './Online';
+import MacGlanceCard from './MacGlance';
 import { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
 import { ProgressDetails } from './TaskProgress';
@@ -19,10 +20,11 @@ type Props = {
   progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
   onFollowUp: (text: string) => void;
   chatgptPlan?: ChatGptPlan; onAskChatGpt?: (question: string) => void; onOpenChatGpt?: (question: string) => void;
+  onOpenPane?: (pane: string) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
@@ -57,16 +59,19 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
       onContinue(item, clarifications[item.id], Object.values(updates));
     };
     const askedQuestion = askedChatGpt(item);
-    const help = !isLive && item === turns[turns.length - 1] && item.id ? chatGptHelp(item, chatgptPlan, settings) : null;
+    const latest = !isLive && item === turns[turns.length - 1];
+    const help = latest && item.id ? chatGptHelp(item, chatgptPlan, settings) : null;
+    // A card that says it all stands alone; a model's own reply about the Mac sits above it.
+    const cardOnly = !!item.glance && item.answer === item.glance.summary;
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
       {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>
           {askedQuestion !== undefined && <div className="asked-chatgpt"><span>Asked ChatGPT</span>{askedQuestion}</div>}
-          {item.answer && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
+          {item.answer && !cardOnly && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
           {working && !item.answer && <div className="typing" role="status" aria-label={activity || 'Thinking'}><i /><i /><i /><span>{activity}</span></div>}
-          {item.system && <SystemCard snapshot={item.system} />}
+          {item.glance && <MacGlanceCard glance={item.glance} actions={latest && !busy} onQuit={app => onFollowUp(`Quit ${app}`)} onPane={pane => onOpenPane?.(pane)} />}
           {!!item.cards?.length && <ResultCards cards={item.cards} onOpen={onOpen} />}
           {item.files.length > 0 && <div className="file-results">{item.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
           {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={source.url} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(source.url); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
@@ -122,12 +127,6 @@ function Reply({ text, onOpen }: { text: string; onOpen: (url: string) => void }
     }
     return <p key={index}>{block.lines.map((line, at) => <span key={at}>{at > 0 && <br />}<Spans spans={line} onOpen={onOpen} /></span>)}</p>;
   })}</div>;
-}
-
-export function SystemCard({ snapshot }: { snapshot: Record<string, unknown> }) {
-  const memoryUsed = Number(snapshot.memoryUsed || 0), memoryTotal = Number(snapshot.memoryTotal || 1);
-  const cpu = Number(snapshot.cpuPercent || 0), memoryPercent = memoryUsed / memoryTotal * 100;
-  return <div className="system-card"><div className="system-card-heading"><Laptop size={13} /><span>{String(snapshot.os || 'Your Mac')}</span></div><div className="system-metrics"><div><span>CPU usage</span><strong>{cpu.toFixed(1)}<small>%</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, cpu))}%` }} /></div></div><div><span>Memory in use</span><strong>{(memoryUsed / 1073741824).toFixed(1)}<small> / {(memoryTotal / 1073741824).toFixed(0)} GB</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, memoryPercent))}%` }} /></div></div></div></div>;
 }
 
 /** Receipt lines ("Milk · done", "• Dentist · now Mon 2 Nov 09:00") as their item and

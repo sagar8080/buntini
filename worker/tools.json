@@ -2784,5 +2784,52 @@
         }
       ]
     }
+  },
+  "quit_app": {
+    "name": "quit_app",
+    "description": "Propose asking one open app to quit, as its own Quit menu does, so it can ask about unsaved work. The user approves it, and it succeeds only if the app is actually gone. Never force-quits and never quits system processes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The name of the open app."
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "system"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user explicitly asks to quit one open app."
+      ],
+      "avoid_when": [
+        "The user only asks what is running or slowing the Mac."
+      ],
+      "prerequisites": [
+        "The app is open.",
+        "User approves quitting it."
+      ],
+      "output_kind": "action_receipt",
+      "success_verifier": "control_receipt",
+      "verification_scope": "The app's process must be gone. An app that stays open is reported as still open.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Quit Photos.",
+          "arguments": {
+            "app": "Photos"
+          }
+        }
+      ]
+    }
   }
 }

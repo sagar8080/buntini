@@ -92,6 +92,7 @@ export interface TaskRecord {
   prices?: PriceOffer[];
   cards?: ResultCard[];
   system?: Record<string, unknown>;
+  glance?: MacGlance;
   backend?: string;
   touched?: string[];
   /** 'online' when the model asked to look something up; the app then asks for approval. */
@@ -148,3 +149,23 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
 export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
+
+export type MemoryState = 'easy' | 'tight' | 'struggling';
+export type GlanceMetric = 'cpu' | 'memory' | 'energy';
+export interface MacBattery { percent: number; charging: boolean; minutesLeft?: number; healthPercent?: number; cycles?: number }
+export interface GlanceApp { name: string; cpuPercent: number; memoryBytes: number; energy?: number; quittable: boolean }
+export interface GlanceSample { at: number; cpu: number; pressure: number; battery?: number }
+export interface MacGlance {
+  focus: 'overview' | 'slow' | 'storage' | 'battery';
+  summary: string;
+  verdict: { kind: string; title: string; actions: { kind: 'quit' | 'settings'; target: string; label: string }[] };
+  storage: { totalBytes: number; freeBytes: number; parts: { key: string; label: string; bytes: number }[] };
+  memory: { state: MemoryState; totalBytes: number; swapBytes: number };
+  battery?: MacBattery;
+  cpuPercent: number;
+  hot: boolean;
+  history: GlanceSample[];
+  metric: GlanceMetric;
+  apps: GlanceApp[];
+  capturedAt: string;
+}

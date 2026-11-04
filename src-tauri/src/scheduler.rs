@@ -178,6 +178,7 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         sources: Vec::new(),
         files: Vec::new(),
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],

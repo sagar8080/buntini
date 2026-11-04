@@ -20,6 +20,7 @@ mod location_fields;
 mod chat_threads;
 mod chatgpt;
 mod helper;
+mod glance;
 mod cloud;
 mod completion;
 mod control_actions;
@@ -158,6 +159,8 @@ pub fn run() {
             tauri::async_runtime::spawn(controller::watch_apple(app.handle().clone()));
             // A local model setup left unfinished carries on where it stopped.
             tauri::async_runtime::spawn(local_setup::resume(app.handle().clone()));
+            // One point a minute for the Mac at a glance card's trend.
+            glance::start(app.handle().clone());
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
             browser_workspace::set_app(app.handle().clone());
