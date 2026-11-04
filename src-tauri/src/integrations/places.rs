@@ -41,7 +41,7 @@ pub fn validate(args: &Value) -> Result<Value, String> {
     }))
 }
 
-fn label(category: &str) -> &'static str {
+pub(crate) fn label(category: &str) -> &'static str {
     CATEGORIES
         .iter()
         .find(|(id, _, _)| *id == category)

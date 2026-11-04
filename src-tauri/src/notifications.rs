@@ -445,6 +445,8 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
     match tool {
         "draft_email" => "Buntini drafted an email and needs your OK.",
         "reply_email" => "Buntini drafted a reply and needs your OK.",
+        "send_message" => "Buntini wrote a text and needs your OK.",
+        "start_call" => "Buntini wants to start a call and needs your OK.",
         "add_reminder" => "Buntini prepared a reminder and needs your OK.",
         "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
         // A change names no item: "Dentist" or "Divorce lawyer" is as private as a title.

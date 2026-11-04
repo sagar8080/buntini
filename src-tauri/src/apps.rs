@@ -30,14 +30,18 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 14] = [
+pub const APPS: [App; 18] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
     App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
+    App { id: "messages", name: "Messages", can: &["Send texts"], tools: &["send_message"], share: None, note: None },
+    App { id: "facetime", name: "FaceTime", can: &["Start calls"], tools: &["start_call"], share: None, note: None },
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "photos", name: "Photos", can: &["Find and show photos"], tools: &[], share: Some(Share::Photos), note: None },
     App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
     App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
     App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
@@ -48,6 +52,27 @@ pub const APPS: [App; 14] = [
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
+
+/// Apps whose playback `control_music` reads and changes.
+pub const PLAYERS: [&str; 3] = ["music", "spotify", "tv"];
+
+/// A player's name, and the script that reads and changes it.
+fn player_script(app: &str) -> (&'static str, &'static str) {
+    match app {
+        "spotify" => ("Spotify", SPOTIFY),
+        "tv" => ("TV", TV),
+        _ => ("Music", MUSIC),
+    }
+}
+
+/// "from Severance, Season 1, Episode 2" for a show; nothing for a film.
+fn from_show(show: &str, episode: &str) -> String {
+    match (show.trim(), episode.trim()) {
+        ("", _) => String::new(),
+        (show, "") => format!(" from {show}"),
+        (show, episode) => format!(" from {show}, {episode}"),
+    }
+}
 
 /// App read/control schemas. The workflow controller requires durable approval
 /// for playback mutations and tab switching; now_playing remains a read.
@@ -89,9 +114,10 @@ pub fn for_call(tool: &str, args: &Map<String, Value>) -> Option<&'static App> {
     }
 }
 
-/// Which music app a playback call means. Saying "Spotify" or "Apple Music" decides it;
-/// otherwise the model's choice if it made one; otherwise the allowed app that's open,
-/// preferring Spotify. Small models often leave the app out or pick the wrong one.
+/// Which player a playback call means. Saying "Spotify", "Apple Music" or the TV, a
+/// show, an episode or a film decides it; otherwise the model's choice if it made one;
+/// otherwise the allowed app that's open, preferring Spotify, then TV when it alone is
+/// open. Small models often leave the app out or pick the wrong one.
 pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'static str {
     let said = prompt.to_lowercase();
     if said.contains("spotify") {
@@ -101,8 +127,14 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
         return "music";
     }
     let usable = |id: &str| app(id).is_some_and(|app| allowed(settings, id) && installed(app));
+    let words: Vec<&str> = said.split(|c: char| !c.is_alphanumeric()).collect();
+    let watching = ["tv", "show", "episode", "episodes", "movie", "film", "series", "watching"];
+    if usable("tv") && words.iter().any(|word| watching.contains(word)) {
+        return "tv";
+    }
     match chosen {
         Some("spotify") if usable("spotify") => return "spotify",
+        Some("tv") if usable("tv") => return "tv",
         Some("music") if usable("music") && !usable("spotify") => return "music",
         _ => {}
     }
@@ -112,6 +144,9 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
             .status()
             .is_ok_and(|status| status.success())
     };
+    if usable("tv") && running("TV") && !running("Music") && !running("Spotify") {
+        return "tv";
+    }
     match (usable("spotify"), usable("music")) {
         (true, true) if running("Music") && !running("Spotify") => "music",
         (false, true) => "music",
@@ -264,8 +299,8 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "control_music" => {
             let selected = text(args, "app", 10)?;
             let app = selected.as_deref().unwrap_or("music");
-            if !["music", "spotify"].contains(&app) {
-                return Err("Music controls work with Music or Spotify.".into());
+            if !PLAYERS.contains(&app) {
+                return Err("Playback works with Music, Spotify or TV.".into());
             }
             let action = args
                 .get("action")
@@ -452,6 +487,63 @@ const MUSIC: &str = r#"on run argv
       if found is {} then return "notfound"
       play item 1 of found
       return "track" & tab & my clean(name of item 1 of found) & tab & my clean(artist of item 1 of found)
+    end if
+  end tell
+  return "ok"
+end run
+"#;
+// argv: action, query. Shows answer their name, the show and "Season 1, Episode 2" where
+// Music answers a track, its artist and album; playing by name searches the TV library.
+const TV: &str = r#"on run argv
+  set act to item 1 of argv
+  set q to item 2 of argv
+  if (act is "now_playing" or act is "read_evidence") and application "TV" is not running then return "closed"
+  tell application "TV"
+    if act is "now_playing" or act is "read_evidence" then
+      if player state is stopped then return "stopped"
+      set trackId to ""
+      set showName to ""
+      set episodeName to ""
+      if act is "read_evidence" then
+        try
+          set trackId to persistent ID of current track
+        end try
+      end if
+      try
+        set showName to show of current track
+        set seasonNumber to season number of current track
+        set episodeNumber to episode number of current track
+        if seasonNumber > 0 and episodeNumber > 0 then set episodeName to "Season " & seasonNumber & ", Episode " & episodeNumber
+      end try
+      -- Something streaming may not be a track TV can describe; its stream title is.
+      set trackName to ""
+      try
+        set trackName to name of current track
+      on error
+        try
+          set trackName to current stream title
+        end try
+      end try
+      set result to (player state as text) & tab & my clean(trackName) & tab & my clean(showName) & tab & my clean(episodeName)
+      if act is "read_evidence" then return result & tab & my clean(trackId) & tab & "__buntini_end__"
+      return result
+    else if act is "pause" then
+      pause
+    else if act is "next" then
+      next track
+    else if act is "previous" then
+      previous track
+    else if q is "" then
+      play
+    else
+      set found to (search library playlist 1 for q)
+      if found is {} then return "notfound"
+      play item 1 of found
+      set showName to ""
+      try
+        set showName to show of item 1 of found
+      end try
+      return "track" & tab & my clean(name of item 1 of found) & tab & my clean(showName)
     end if
   end tell
   return "ok"
@@ -1483,16 +1575,7 @@ pub async fn run_evidence(
             } else {
                 get("app")
             };
-            let output = osascript(
-                if selected == "spotify" {
-                    SPOTIFY
-                } else {
-                    MUSIC
-                },
-                &["read_evidence".into(), String::new()],
-                20,
-            )
-            .await?;
+            let output = osascript(player_script(selected).1, &["read_evidence".into(), String::new()], 20).await?;
             music_evidence(selected, &output)
         }
         "browser_tabs" => browser_tabs_evidence(&browsers_for(settings, args), get("query")).await,
@@ -1702,7 +1785,7 @@ pub fn validate_evidence(
         }
         "music" => {
             let state = value["state"].as_str().ok_or_else(invalid)?;
-            if !["music", "spotify"].contains(&app)
+            if !PLAYERS.contains(&app)
                 || scope["action"] != "now_playing"
                 || !["playing", "paused", "closed", "stopped"].contains(&state)
                 || count != u64::from(["playing", "paused"].contains(&state))
@@ -2185,7 +2268,7 @@ async fn find_notes(query: &str) -> Result<String, String> {
 }
 
 fn music_evidence(app: &str, output: &str) -> Result<Value, String> {
-    let name = if app == "spotify" { "Spotify" } else { "Music" };
+    let name = player_script(app).0;
     let parts: Vec<_> = output.trim_end_matches(['\r', '\n']).split('\t').collect();
     let (state, records, display) = match parts.as_slice() {
         ["closed"] => (
@@ -2197,17 +2280,15 @@ fn music_evidence(app: &str, output: &str) -> Result<Value, String> {
         [state @ ("playing" | "paused"), track, artist, album, id, "__buntini_end__"] => {
             let record = json!({"id":nonempty(id), "reference":source_reference(app, nonempty(id), 0),
                 "title":track, "artist":artist, "album":album, "state":state});
+            let doing = if *state == "paused" { "paused on" } else { "playing" };
             (
                 *state,
                 vec![record],
-                format!(
-                    "{name} is {}: “{track}” by {artist}, from {album}.",
-                    if *state == "paused" {
-                        "paused on"
-                    } else {
-                        "playing"
-                    }
-                ),
+                if app == "tv" {
+                    format!("{name} is {doing}: “{track}”{}.", from_show(artist, album))
+                } else {
+                    format!("{name} is {doing}: “{track}” by {artist}, from {album}.")
+                },
             )
         }
         _ => {
@@ -2234,7 +2315,7 @@ pub(crate) async fn control_music(
     query: &str,
     retry: bool,
 ) -> Result<String, String> {
-    let name = if app == "spotify" { "Spotify" } else { "Music" };
+    let (name, script) = player_script(app);
     let words = query.to_string();
     // On a retry, the song playing now is the wrong one.
     let avoid = if retry && app == "spotify" {
@@ -2258,12 +2339,7 @@ pub(crate) async fn control_music(
     } else {
         query.to_string()
     };
-    let result = osascript(
-        if app == "spotify" { SPOTIFY } else { MUSIC },
-        &[action.into(), query.clone()],
-        20,
-    )
-    .await?;
+    let result = osascript(script, &[action.into(), query.clone()], 20).await?;
     if result.trim() == "search" {
         return Ok(
             match crate::skills::music::press_play(&words, avoid).await {
@@ -2296,6 +2372,14 @@ pub(crate) async fn control_music(
     Ok(match (action, parts.as_slice()) {
         (_, ["closed"]) => format!("{name} isn’t open, so nothing is playing."),
         (_, ["stopped"]) => format!("Nothing is playing in {name}."),
+        ("now_playing", [state, track, show, episode]) if app == "tv" => format!(
+            "{name} is {}: “{track}”{}.",
+            if *state == "paused" { "paused on" } else { "playing" },
+            from_show(show, episode)
+        ),
+        (_, ["track", title, show]) if app == "tv" => format!("Playing “{title}”{} in {name}.", from_show(show, "")),
+        ("next", _) if app == "tv" => format!("Skipped to the next episode in {name}."),
+        ("previous", _) if app == "tv" => format!("Went back in {name}."),
         ("now_playing", [state, track, artist, album]) => format!(
             "{name} is {}: “{track}” by {artist}, from {album}.",
             if *state == "paused" {
@@ -2904,6 +2988,14 @@ pub(crate) fn app_names() -> Vec<String> {
     names
 }
 
+/// Opens Shortcuts on a new shortcut, from a reply that found none that fits.
+#[tauri::command]
+pub async fn new_shortcut() -> Result<(), String> {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("shortcuts://create-shortcut");
+    crate::actions::output(command, 15).await.map(|_| ())
+}
+
 /// The apps Buntini can work with and whether each is allowed, plus the rest it can open.
 #[tauri::command]
 pub fn app_list(state: tauri::State<'_, crate::controller::AppState>) -> Result<AppList, String> {
@@ -3415,6 +3507,12 @@ mod tests {
         );
         assert!(validate("find_notes", &json!({})).is_err());
         assert!(validate("control_music", &json!({"app":"vlc","action":"play"})).is_err());
+        assert_eq!(validate("control_music", &json!({"app":"tv","action":"pause"})).unwrap()["app"], "tv");
+        assert_eq!(from_show("Severance", "Season 1, Episode 2"), " from Severance, Season 1, Episode 2");
+        assert_eq!(from_show("", ""), "", "a film is just its name");
+        let watching = music_evidence("tv", "playing\tGood News About Hell\tSeverance\tSeason 1, Episode 1\tABC\t__buntini_end__").unwrap();
+        assert_eq!(watching["text"], "TV is playing: “Good News About Hell” from Severance, Season 1, Episode 1.");
+        assert_eq!(music_evidence("tv", "closed").unwrap()["text"], "TV isn’t open, so nothing is playing.");
         assert!(validate("control_music", &json!({"action":"shuffle"})).is_err());
         let play = validate(
             "control_music",

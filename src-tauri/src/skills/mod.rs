@@ -11,6 +11,7 @@ pub mod day;
 pub mod mac;
 pub mod music;
 pub mod system;
+pub mod photos;
 pub mod this;
 
 use crate::{privacy::Share, types::Settings};
@@ -23,6 +24,7 @@ pub enum Skill {
     This(this::Command),
     Day(day::Command),
     System(system::Command),
+    Photos(photos::Command),
 }
 
 pub enum Outcome {
@@ -39,6 +41,12 @@ pub enum Outcome {
         title: String,
         text: String,
         share: Share,
+    },
+    /// Done, with result cards to show (photos), which no model sees.
+    Shown {
+        answer: String,
+        shares: Vec<Share>,
+        cards: Vec<crate::types::ResultCard>,
     },
     /// Done, naming emails by number. The controller saves them with the turn, so a
     /// follow-up ("reply to the second one") answers exactly that email.
@@ -301,6 +309,7 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
         .or_else(|| this::recognise(&text, &recent).map(Skill::This))
+        .or_else(|| photos::recognise(&text).map(Skill::Photos))
         .or_else(|| day::recognise(&text).map(Skill::Day))
         .or_else(|| system::recognise(&text).map(Skill::System))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
@@ -315,6 +324,7 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::This(_) => "this",
         Skill::Day(_) => "day",
         Skill::System(_) => "system",
+        Skill::Photos(_) => "photos",
     }
 }
 
@@ -326,6 +336,7 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::This(command) => this::run(command, context).await,
         Skill::Day(command) => day::run(command, context).await,
         Skill::System(command) => system::run(command).await,
+        Skill::Photos(command) => photos::run(command, context).await,
     }
 }
 

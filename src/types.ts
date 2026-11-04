@@ -77,7 +77,11 @@ export interface Source { title: string; url: string; snippet: string; retrieved
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }
 export interface PriceOffer { product: string; url: string; price: string; currency: string; availability?: string; seller?: string; isAggregate: boolean; highPrice?: string }
 export interface CardField { label: string; value: string }
-export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'listing' | 'flight'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string }
+export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'route' | 'listing' | 'flight' | 'photos' | 'shortcut'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string; map?: CardMap; photos?: CardPhoto[] }
+/** A photo from the user's library: its id in Photos and its thumbnail in the cache. */
+export interface CardPhoto { id: string; thumb: string; taken: string; video: boolean }
+/** A map of the results, drawn on the Mac, and the Maps view it opens. */
+export interface CardMap { id: string; url: string }
 export interface FileHit { name: string; path: string; size: number; modifiedAt: string; excerpt?: string }
 export interface TaskRecord {
   id: string;

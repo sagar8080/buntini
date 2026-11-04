@@ -733,6 +733,15 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .planning-status { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); padding: 0 2px 8px; }
 .planning-status .text-button { margin-left: auto; }
 .result-cards { margin-top: 18px; }
+.result-map { display: block; width: 100%; padding: 0; margin: 0 0 6px; border: 1px solid var(--hairline); border-radius: 7px; overflow: hidden; background: var(--surface); cursor: pointer; }
+.result-map img { display: block; width: 100%; aspect-ratio: 560 / 300; object-fit: cover; }
+.result-map:hover { border-color: var(--accent); }
+.photo-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.photo-thumb { position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--hairline); border-radius: 5px; overflow: hidden; background: var(--panel); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-thumb:hover { border-color: var(--accent); }
+.photo-thumb.is-failed { border-color: var(--danger); }
+.photo-video { position: absolute; right: 4px; bottom: 4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff; }
 .result-card { border: 1px solid var(--hairline); background: var(--surface); border-radius: 7px; padding: 10px 11px; margin-bottom: 6px; }
 .result-card header { display: flex; align-items: flex-start; gap: 7px; }
 .result-card header > svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }

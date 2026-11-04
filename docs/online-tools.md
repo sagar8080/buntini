@@ -58,11 +58,12 @@ The flow is:
 | `weather` | Open-Meteo (`geocoding-api.open-meteo.com`, `api.open-meteo.com`) | No | Place name and units (always the 7-day forecast) |
 | `currency` | Frankfurter / ECB (`api.frankfurter.dev`) | No | Amount and ISO currency codes |
 | `wikipedia` | Wikipedia (`<lang>.wikipedia.org`) | No | Search text and language |
-| `places` | OpenStreetMap Nominatim (`nominatim.openstreetmap.org`) | No | Location text, one of 19 categories, radius (100–5000 m) |
+| `places` | Apple Maps (MapKit, through the Apple helper); OpenStreetMap Nominatim (`nominatim.openstreetmap.org`) without the helper | No | Location text, one of 19 categories, radius (100–5000 m) |
+| `travel_time` | Apple Maps (MapKit, through the Apple helper) | No | Start and end place text, driving, walking or transit |
 | `ebay_search` | eBay Browse API (`api.ebay.com`, sandbox for SBX keys) | App ID + secret | Search text, max price, condition, sort, marketplace |
 | `flight_search` | Duffel (`api.duffel.com`) | Access token | Origin, destination, dates, adults, cabin |
 
-Nominatim calls are spaced at least 1.1 seconds apart to respect its usage
+Apple Maps lookups have no wait between them. Nominatim calls are spaced at least 1.1 seconds apart to respect its usage
 policy. eBay application tokens are cached in memory until shortly before they
 expire. Duffel searches create an offer request and read back the eight cheapest
 offers; Buntini has no booking, payment or order endpoints. Keyed requests are

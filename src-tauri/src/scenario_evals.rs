@@ -40,6 +40,9 @@ fn observed(prompt: &str, recent: &[String]) -> Value {
             skills::system::Command::Look(focus) => json!({"skill":"system", "action":"look", "focus":focus}),
             skills::system::Command::Quit { app } => json!({"skill":"system", "action":"quit", "app":app}),
         },
+        Some(Skill::Photos(command)) => {
+            json!({"skill":"photos", "from":command.from.map(|day| day.to_string()), "album":command.album, "kind":command.kind})
+        }
     }
 }
 
