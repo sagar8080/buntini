@@ -644,6 +644,10 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes pet-sad { 20%, 75% { transform: translateY(2px) scale(1.01, .98); } }
 @keyframes cat-heart { 0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-14px) scale(.9); } }
 /* Online integrations: approval details, live result cards and connected services. */
+.approval-actions { flex-wrap: wrap; }
+.asked-chatgpt { margin-bottom: 8px; padding: 6px 8px; border-left: 2px solid var(--border); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.asked-chatgpt span { display: block; font-size: 11px; font-weight: 600; }
+.chatgpt-help { padding: 4px 0 0 36px; }
 .approval-sends { margin: 12px 0; padding: 4px 10px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 4px; font-size: 12px; }
 .approval-sends > div { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
 .approval-sends > div:last-child { border-bottom: 0; }

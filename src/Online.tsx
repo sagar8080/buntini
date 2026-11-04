@@ -3,20 +3,20 @@ import ModalSheet from './ModalSheet';
 import type { ResultCard, WebApproval } from './types';
 
 const titles: Record<string, string> = {
-  web_search: 'Search the web?', weather: 'Check the weather?', currency: 'Get exchange rates?', wikipedia: 'Look it up on Wikipedia?',
+  web_search: 'Search the web?', chatgpt_search: 'Ask ChatGPT?', ask_chatgpt: 'Ask ChatGPT?', weather: 'Check the weather?', currency: 'Get exchange rates?', wikipedia: 'Look it up on Wikipedia?',
   places: 'Find nearby places?', ebay_search: 'Search eBay listings?', flight_search: 'Search flights?',
 };
 const icons = { weather: CloudSun, currency: Coins, article: BookOpen, place: MapPin, listing: ShoppingBag, flight: Plane };
 
 /** Shows exactly what one approved request will send, and to whom, before anything leaves the Mac. */
-export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebInstead }: { approval: WebApproval; approving: boolean; onCancel: () => void; onAllow: () => void; onWebInstead: () => void }) {
-  const web = approval.tool === 'web_search';
+export function ApprovalSheet({ approval, approving, onCancel, onAllow, onWebInstead, onOpenChatGpt }: { approval: WebApproval; approving: boolean; onCancel: () => void; onAllow: (always?: boolean) => void; onWebInstead: () => void; onOpenChatGpt?: () => void }) {
+  const web = approval.tool === 'web_search', search = approval.tool === 'chatgpt_search', asked = approval.tool === 'ask_chatgpt';
   return <ModalSheet labelledBy="approval-title">
     <ShieldCheck size={23} /><h3 id="approval-title">{titles[approval.tool] || 'Send this request?'}</h3>
     <p>{approval.summary}</p>
     <dl className="approval-sends"><div><dt>Sent to</dt><dd>{approval.service} <span>{approval.host}</span></dd></div>{approval.sends.map(field => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>
     {approval.note && <p className="approval-note">{approval.note}</p>}
-    <div>{!web && <button className="text-button" disabled={approving} onClick={onWebInstead}>Web search instead</button>}<button className="secondary-button" disabled={approving} onClick={onCancel}>Cancel</button><button className="primary-button" disabled={approving} autoFocus onClick={onAllow}>{approving ? 'Starting…' : 'Allow once'}</button></div>
+    <div className="approval-actions">{web && onOpenChatGpt && <button className="text-button" disabled={approving} onClick={onOpenChatGpt}>Open in ChatGPT</button>}{!web && !asked && <button className="text-button" disabled={approving} onClick={onWebInstead}>{search ? 'Use the browser' : 'Web search instead'}</button>}<button className="secondary-button" disabled={approving} onClick={onCancel}>Cancel</button>{search && <button className="secondary-button" disabled={approving} onClick={() => onAllow(true)}>Always allow</button>}<button className="primary-button" disabled={approving} autoFocus onClick={() => onAllow()}>{approving ? 'Starting…' : 'Allow once'}</button></div>
   </ModalSheet>;
 }
 

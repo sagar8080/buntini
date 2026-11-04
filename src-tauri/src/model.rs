@@ -386,6 +386,22 @@ impl ModelHub {
         }
     }
 
+    /// One question to ChatGPT beside whichever brain is in use. Unlike the main brain's
+    /// requests, nothing else answers it if ChatGPT can't: the user approved ChatGPT.
+    pub async fn ask_chatgpt<F>(
+        &self,
+        settings: &Settings,
+        payload: Value,
+        cancel: Arc<AtomicBool>,
+        on_token: F,
+    ) -> Result<Turn, String>
+    where
+        F: FnMut(String) + Send,
+    {
+        let settings = crate::brain::with(settings, crate::brain::Brain::ChatGpt);
+        self.cloud_generate(&settings, payload, cancel, on_token).await
+    }
+
     /// One cloud call: reserve the estimated cost, stream, then settle with real usage.
     /// Rejected requests cost nothing; anything accepted keeps at least its reservation
     /// until the provider reports usage.

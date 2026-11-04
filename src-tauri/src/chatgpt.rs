@@ -639,6 +639,7 @@ pub async fn chatgpt_sign_in(
         .set_preference("chatgpt-client-id", &session.client_id)?;
     state.audit("chatgpt.signed_in", "Signed in with ChatGPT");
     state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_in(&state.store.lock().unwrap())?;
     crate::brain::settle_and_tell(&app).await;
     if !session.plan_allowed() {
         return Err("You’re signed in, but Buntini wasn’t allowed to use your ChatGPT plan. Sign in again and allow plan usage.".into());
@@ -660,6 +661,7 @@ pub async fn chatgpt_sign_out(
 ) -> Result<bool, String> {
     let confirmed = sign_out().await?;
     state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_out(&state.store.lock().unwrap())?;
     crate::brain::settle_and_tell(&app).await;
     state.audit(
         "chatgpt.signed_out",

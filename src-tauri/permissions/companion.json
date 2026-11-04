@@ -40,6 +40,8 @@
           "chatgpt_sign_in",
           "chatgpt_cancel_sign_in",
           "chatgpt_sign_out",
+          "chatgpt_always_allow_off",
+          "plan_ask_chatgpt",
           "morning_brief",
           "day_glance",
           "usual_requests",

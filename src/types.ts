@@ -88,6 +88,7 @@ export interface TaskRecord {
   sources: Source[];
   files: FileHit[];
   research?: ResearchContent[];
+  researchReport?: { attempts: { route: string; status: string; detail: string }[] };
   prices?: PriceOffer[];
   cards?: ResultCard[];
   system?: Record<string, unknown>;
@@ -115,6 +116,7 @@ export interface Diagnostics {
   cloudSpendUsd?: number;
   chatgptAccount?: string | null;
   chatgptPlan?: 'none' | 'usable' | 'refused';
+  chatgptAlwaysAllow?: boolean;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 /** Something done on its own at a set time; the morning brief is the built-in one. */

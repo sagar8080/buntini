@@ -189,3 +189,41 @@ fn guidance_never_rewrites_unknown_running_waiting_or_failed_writes() {
         assert_eq!(flow.steps[1].evidence, preserved.evidence);
     }
 }
+
+#[test]
+fn a_question_chatgpt_could_not_take_waits_for_the_browser_route_to_be_approved() {
+    let goal = "Search the web for Node.js release dates";
+    let mut task: TaskRecord = serde_json::from_value(json!({"id":"helper-fallback","prompt":goal,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+    let mut flow = Workflow::new(&task, "auto", &Settings::default(), vec![], None, &["look_up_online"]);
+    let args = json!({"query":"Node.js release dates"});
+    let id = flow.begin("look_up_online", args.clone(), json!({}), false, true).unwrap();
+    flow.approve(&id, args.clone()).unwrap();
+    flow.finish_step("failed", json!({"error":"ChatGPT is busy right now. Try again in a moment.","researchReport":null})).unwrap();
+
+    offer_browser_instead(&mut flow, &mut task, "Node.js release dates").unwrap();
+
+    assert_eq!(flow.state, "waiting_online", "nothing runs until it's approved");
+    assert_eq!(task.state, "waiting_online");
+    assert_eq!(task.handoff.as_deref(), Some("online"));
+    let waiting = flow.steps.last().unwrap();
+    assert_eq!((waiting.state.as_str(), &waiting.arguments), ("waiting", &args), "the same question, as a new step");
+    assert_eq!(flow.steps[0].state, "failed", "the failure stays on record");
+}
+
+#[test]
+fn only_a_task_started_at_the_window_counts_as_having_someone_there() {
+    let task: TaskRecord = serde_json::from_value(json!({"id":"t","prompt":"hi","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+    let flow = Workflow::new(&task, "auto", &Settings::default(), vec![], None, &[]);
+    assert!(flow.attended);
+    let mut saved = serde_json::to_value(&flow).unwrap();
+    saved.as_object_mut().unwrap().remove("attended");
+    let older: Workflow = serde_json::from_value(saved).unwrap();
+    assert!(!older.attended, "a task saved before this was recorded");
+}
+
+#[tokio::test]
+async fn a_routine_or_goal_run_has_nobody_at_the_window() {
+    let task: TaskRecord = serde_json::from_value(json!({"id":"t","prompt":"hi","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
+    let flow = HEADLESS.scope((), async { Workflow::new(&task, "auto", &Settings::default(), vec![], None, &[]) }).await;
+    assert!(!flow.attended);
+}

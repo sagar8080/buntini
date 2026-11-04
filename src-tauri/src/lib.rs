@@ -19,6 +19,7 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod helper;
 mod cloud;
 mod completion;
 mod control_actions;
@@ -284,6 +285,8 @@ pub fn run() {
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
+            helper::chatgpt_always_allow_off,
+            approvals::plan_ask_chatgpt,
             brief::morning_brief,
             brief::day_glance,
             brief::usual_requests,

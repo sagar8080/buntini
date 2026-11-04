@@ -4,7 +4,7 @@ Every Mac gets a working brain on day one, chosen by Buntini. Nobody needs an AP
 a Terminal or a technical decision. ChatGPT works beside Apple Intelligence as a helper,
 and only ever sees what the user approved.
 
-Status: B1 and B2 are built and not yet run in a signed release. B3 isn't started. It builds on `codex/apple-intelligence-status` (the
+Status: B1, B2 and B3 are built and not yet run in a signed release. B3 has never talked to a real ChatGPT account. It builds on `codex/apple-intelligence-status` (the
 stuck-download state, "Use ChatGPT instead" and the sharing question).
 
 ## The rule
@@ -128,19 +128,25 @@ memory, files or sharing ticks. As the main brain the sharing ticks apply as the
 | When | What happens |
 |---|---|
 | A public internet question (`look_up_online`), signed in | The approval sheet names ChatGPT and shows the exact question. Allow once sends it with hosted `web_search`, and the answer comes back with its sources. |
-| The same, not signed in or web search refused | Today's route: Google in the browser, then Brave or Tavily |
+| The same, not signed in | Today's route: Google in the browser, then Brave or Tavily |
+| ChatGPT can't take it (web search refused, a limit, no connection) | The sheet for today's route. The user approved ChatGPT, so the browser is never used without asking. Search stays with the browser for 10 minutes, or until the next sign-in if ChatGPT refused it |
 | "Ask ChatGPT …" | The same sheet, with the user's words |
-| Apple Intelligence can't answer | An **Ask ChatGPT** button on the reply. It's never automatic. |
-| Images, or anything else plan usage can't do | An **Open in ChatGPT** hand-off |
-| No usable plan | The hand-off, for internet questions too |
+| Apple Intelligence or the local model can't answer | An **Ask ChatGPT** button on the latest reply. It's never automatic. |
+| Images, or a question ChatGPT itself couldn't answer | An **Open in ChatGPT** hand-off |
+| No usable plan | The hand-off, on the reply and on the browser route's sheet |
 
-The helper is `ModelHub::generate` with settings derived for ChatGPT, so it uses the
-existing sign-in, streaming and errors. It's marked `Locality::External` for that one
-call. `Settings` itself doesn't change.
+The hand-off copies the question and opens chatgpt.com. A pre-filled link would need `?q=`, which OpenAI doesn't document and reports disagree about, and it would put the question in the address and the browser's history.
 
-`cloud.rs` needs two changes: request `web_search` on this route only, and read
-`url_citation` annotations into sources. The decoder already keeps `web_search_call` items
-without treating them as tool calls for Buntini to run.
+The reply always shows the exact question that was sent, under "Asked ChatGPT".
+
+`ModelHub::ask_chatgpt` makes the call with settings derived for ChatGPT, so it uses the
+existing sign-in, streaming and errors. Nothing else answers if ChatGPT can't, since ChatGPT
+is what the user approved. `Settings` itself doesn't change. `helper.rs` holds the request
+and the rules.
+
+`cloud.rs` requests `web_search` on this route only, and `helper::sources` reads
+`url_citation` annotations into sources. The decoder keeps `web_search_call` items without
+treating them as tool calls for Buntini to run.
 
 ### Always allow
 
@@ -154,6 +160,9 @@ The sheet still appears when:
   can't leave inside a question nobody reviewed, including through instructions hidden in
   that content.
 - The request came from a routine, a goal or anything else running with nobody at the window.
+  A task saved before this was recorded counts as one of these.
+- The question has a word the user didn't write, so a model can't add something it remembers
+  or saw, or it's longer than 300 characters.
 - The question is something other than a public internet question. "Ask ChatGPT" and the
   reply button always show it.
 
@@ -183,8 +192,9 @@ Intelligence get a Terminal screen.
 | Real download sizes for Python and packages | Measured: Python 25 MB, packages up to 119 MB, 526 MB unpacked | Done |
 | Licence terms for each model fetched automatically | One click fetches Apache 2.0 models only. The Qwen and Apache licences themselves still need a read before release | B2 |
 | Tool-call evaluation on Qwen 4B on an 8 GB Mac | The smallest supported brain becomes some people's whole experience | B2 |
-| Hosted `web_search` on a real account and model | OpenAI lists it as "subject to model and account/workspace policy" | B3 |
-| Whether a link can pre-fill a question in ChatGPT, and OpenAI's terms on hand-offs | The hand-off depends on it | B3 |
+| Hosted `web_search` on a real account and model, and that replies carry `url_citation` annotations | OpenAI lists it as "subject to model and account/workspace policy". The request and the reading of replies are tested only on hand-written examples | B3 |
+| The exact errors a refused `web_search` returns | Decides how long search stays with the browser. The code treats a capability error, a 400 and a 403 as lasting | B3 |
+| Whether a link can pre-fill a question in ChatGPT | Not relied on: the hand-off copies the question instead | Done |
 
 ## Acceptance
 

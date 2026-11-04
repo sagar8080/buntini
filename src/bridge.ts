@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
@@ -17,8 +17,15 @@ export async function bootstrap(): Promise<Bootstrap> {
   const threads = previewThreads();
   return {
     settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
-    diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
+    diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30, chatgptPlan: previewChatGptPlan(), chatgptAlwaysAllow: localStorage.getItem('buntini-preview-chatgpt-always') === '1' },
   };
+}
+function previewChatGptPlan() {
+  return localStorage.getItem('buntini-preview-chatgpt') === 'usable' ? 'usable' as const : 'none' as const;
+}
+function previewSheet(question: string, tool: string): WebApproval {
+  const chatgpt = tool !== 'web_search';
+  return { id: 'preview-sheet', prompt: question, provider: tool, expiresAt: '', approved: false, tool, arguments: { query: question }, service: chatgpt ? 'ChatGPT' : 'Google in your browser', summary: chatgpt ? 'Only this question is sent.' : 'Search Google in a dedicated tab.', sends: [{ label: chatgpt ? 'Question' : 'Query', value: question }], host: chatgpt ? 'api.openai.com' : 'google.com', usesKey: false };
 }
 function previewOnboarded() {
   try { return localStorage.getItem('buntini-preview-onboarded') === '1' || previewTasks().length > 0; } catch { return true; }
@@ -127,6 +134,10 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'local_setup_status') return { phase: previewLocal, doneBytes: previewLocal === 'idle' ? 0 : 2440000000, totalBytes: 6100000000, message: '' } as T;
     if (name === 'local_setup_start') { previewLocal = 'downloading'; return undefined as T; }
     if (name === 'local_setup_cancel' || name === 'local_setup_remove') { previewLocal = 'idle'; return undefined as T; }
+    // The sheets can be looked at; nothing is sent.
+    if (name === 'plan_ask_chatgpt') return previewSheet(args?.question as string, 'ask_chatgpt') as T;
+    if (name === 'plan_online_request') return previewSheet(args?.prompt as string, previewChatGptPlan() === 'usable' && !args?.webOnly ? 'chatgpt_search' : 'web_search') as T;
+    if (name === 'chatgpt_always_allow_off') { localStorage.removeItem('buntini-preview-chatgpt-always'); return undefined as T; }
     if (name === 'app_list') return previewApps() as T;
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;

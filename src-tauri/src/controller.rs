@@ -334,6 +334,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
                 crate::brain::Plan::Refused => "refused",
             }
             .into(),
+            chatgpt_always_allow: crate::helper::always_allowed(&state),
         },
     })
 }
@@ -755,6 +756,10 @@ fn clean_file_query(prompt: &str) -> String {
     query.trim_matches(['\'', '"']).to_string()
 }
 /// Notes that this turn used a category of local data (see conversation.rs).
+/// `TaskRecord.handoff` when ChatGPT couldn't take an internet question: the app then asks
+/// about the browser route.
+const BROWSER_INSTEAD: &str = "browser";
+
 fn touch(task: &mut TaskRecord, share: privacy::Share) {
     if !task.touched.iter().any(|id| id == share.id()) {
         task.touched.push(share.id().into());
@@ -1425,7 +1430,7 @@ pub async fn continue_task_online(
     app: tauri::AppHandle,
 ) -> Result<TaskRecord, String> {
     let cancel = Arc::new(AtomicBool::new(false));
-    let (mut flow, mut task, settings, _query, call, _claim) = {
+    let (mut flow, mut task, settings, query, call, _claim) = {
         let mut active = state.active.lock().unwrap();
         if !active.is_empty() {
             return Err("Finish or cancel the current task first.".into());
@@ -1504,6 +1509,11 @@ pub async fn continue_task_online(
     task.prices = lookup.prices;
     task.research_report = lookup.research_report;
     flow.refresh_contract();
+    if lookup.handoff.as_deref() == Some(BROWSER_INSTEAD) {
+        offer_browser_instead(&mut flow, &mut task, &query)?;
+        state.store.lock().unwrap().checkpoint(&mut flow, &task)?;
+        return Ok(task);
+    }
     // A standalone lookup already has a validated sourced answer. Do not ask a
     // second model turn to reinterpret it or repeat the successful search.
     let research_finished = result.is_ok()
@@ -1533,7 +1543,16 @@ pub async fn continue_task_online(
                     .filter(|s| s.tool == "look_up_online" && s.state == "succeeded")
                     .count()
                     > 1;
-                let answer = if combined {
+                let answer = if combined && crate::helper::answered(task.research_report.as_ref()) {
+                    // ChatGPT's answers are already written; there are no pages to summarise.
+                    Ok(flow
+                        .steps
+                        .iter()
+                        .filter(|s| s.tool == "look_up_online" && s.state == "succeeded")
+                        .filter_map(|s| s.evidence.as_ref()?["summary"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n\n"))
+                } else if combined {
                     let report = task.research_report.as_mut().unwrap();
                     report.intent =
                         crate::search_intent::SearchIntent::from_lookup(&flow.goal, &flow.goal);
@@ -2555,6 +2574,77 @@ async fn synthesize_research(
     Err("The research answer could not be verified.".into())
 }
 
+/// One approved question to ChatGPT. The user approved ChatGPT, so if it can't take an
+/// internet question, the browser route is offered with its own approval, never just used.
+async fn chatgpt_task(
+    state: &AppState,
+    task: &mut TaskRecord,
+    channel: &Channel<TaskEvent>,
+    cancel: Arc<AtomicBool>,
+    settings: &Settings,
+    call: &integrations::Call,
+) -> Result<(), String> {
+    let question = call.arguments["query"]
+        .as_str()
+        .ok_or("The approved question is missing.")?;
+    phase(channel, &task.id, "working");
+    tool_event(channel, &task.id, &call.tool);
+    state.audit("chatgpt.asked", &task.id);
+    let mut said = false;
+    let task_id = task.id.clone();
+    let sent = state
+        .models
+        .ask_chatgpt(settings, crate::helper::payload(question), cancel, |token| {
+            said = true;
+            emit(channel, "delta", &task_id, Some(token));
+        })
+        .await
+        .and_then(|turn| {
+            if turn.text.trim().is_empty() {
+                Err("ChatGPT didn’t answer that. Try again.".to_string())
+            } else {
+                Ok(turn)
+            }
+        });
+    let turn = match sent {
+        Ok(turn) => turn,
+        Err(message) => {
+            task.research_report = Some(crate::helper::report(&task.prompt, question, vec![], false));
+            if !said && call.tool == crate::helper::SEARCH_TOOL && crate::helper::offers_browser(&message) {
+                crate::helper::pause_search(state, &message);
+                task.handoff = Some(BROWSER_INSTEAD.into());
+            }
+            return Err(message);
+        }
+    };
+    task.answer = turn.text.trim().to_string();
+    let mut sources = std::mem::take(&mut task.sources);
+    for source in crate::helper::sources(turn.raw.as_ref()) {
+        if !sources.iter().any(|known| known.url == source.url) {
+            sources.push(source);
+        }
+    }
+    task.sources = sources.clone();
+    task.research_report = Some(crate::helper::report(&task.prompt, question, sources, true));
+    Ok(())
+}
+
+/// The saved lookup waits again, for the user to approve the browser route.
+fn offer_browser_instead(flow: &mut Workflow, task: &mut TaskRecord, query: &str) -> Result<(), String> {
+    let args = json!({"query":query});
+    flow.begin(
+        "look_up_online",
+        args.clone(),
+        assistant_call("", None, "look_up_online", &args),
+        false,
+        true,
+    )?;
+    task.state = flow.state.clone();
+    task.handoff = Some("online".into());
+    task.answer = "Your task is saved and waiting for approval to look up information online.".into();
+    Ok(())
+}
+
 /// Runs one approved integration call and summarizes its cards with numbered citations.
 async fn integration_task(
     state: &AppState,
@@ -2753,7 +2843,7 @@ async fn execute_with_settings(
             )?;
             task.state = flow.state.clone();
             task.handoff = Some("online".into());
-            task.answer = "Your research task is saved and waiting for approval. I’ll search in the browser, read relevant sources, and use the selected API fallback only if needed.".into();
+            task.answer = "Your research task is saved and waiting for approval.".into();
             state.store.lock().unwrap().checkpoint(&mut flow, task)?;
             return Ok(());
         }
@@ -2925,6 +3015,9 @@ async fn execute_with_settings(
     }
     if detected == "web" {
         let call = approved.ok_or("Approve the online request before anything is sent.")?;
+        if crate::helper::is_tool(&call.tool) {
+            return chatgpt_task(state, task, channel, cancel, &settings, &call).await;
+        }
         if call.tool != "web_search" {
             return integration_task(state, task, channel, cancel, &settings, &call).await;
         }

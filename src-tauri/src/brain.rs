@@ -54,7 +54,7 @@ fn current(settings: &Settings) -> Option<Brain> {
     }
 }
 
-fn with(settings: &Settings, brain: Brain) -> Settings {
+pub(crate) fn with(settings: &Settings, brain: Brain) -> Settings {
     let mut next = settings.clone();
     match brain {
         Brain::Apple => next.model_backend = "apple".into(),

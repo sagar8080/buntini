@@ -535,6 +535,8 @@ pub struct Diagnostics {
     pub chatgpt_account: Option<String>,
     /// "none", "usable" or "refused": what this Mac's ChatGPT sign-in allows.
     pub chatgpt_plan: String,
+    /// Public internet questions go to ChatGPT without the sheet.
+    pub chatgpt_always_allow: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

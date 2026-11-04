@@ -372,6 +372,10 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
                 body["tools"] = tools.iter().map(|tool| json!({"type":"function","name":tool["name"],"description":tool["description"],"parameters":tool["parameters"]})).collect();
                 body["tool_choice"] = "auto".into();
                 body["parallel_tool_calls"] = false.into();
+            } else if payload["web_search"] == true {
+                // Hosted by OpenAI: the reply comes back with it done, not as a tool to run.
+                body["tools"] = json!([{"type":"web_search"}]);
+                body["tool_choice"] = "auto".into();
             }
             let _ = max_tokens; // A reply-length cap isn't accepted on this route.
             Ok(Request {

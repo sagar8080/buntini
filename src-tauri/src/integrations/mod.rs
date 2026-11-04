@@ -107,7 +107,7 @@ pub fn validate(tool_name: &str, arguments: &Value, prompt: &str) -> Result<Call
     let today = chrono::Local::now().date_naive();
     let arguments = match tool_name {
         // Web search keeps the policy that only the user's exact words reach a search engine.
-        "web_search" => {
+        "web_search" | crate::helper::SEARCH_TOOL | crate::helper::ASK_TOOL => {
             let query = prompt.trim();
             if query.is_empty() || query.len() > 2000 {
                 return Err("Web queries must contain 1–2,000 characters.".into());
@@ -137,6 +137,7 @@ pub fn preview(call: &Call, settings: &Settings) -> Preview {
         "places" => places::preview(args),
         "ebay_search" => ebay::preview(args, &settings.ebay_marketplace),
         "flight_search" => duffel::preview(args),
+        tool if crate::helper::is_tool(tool) => crate::helper::preview(args),
         _ => {
             let (provider, host) = if settings.search_provider == "tavily" {
                 ("Tavily", "api.tavily.com")

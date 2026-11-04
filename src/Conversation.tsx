@@ -8,6 +8,7 @@ import { ProgressDetails } from './TaskProgress';
 import { taskRecovery, missingTaskFields } from './taskRecovery';
 import { parse, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
+import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
 import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
 
 type Props = {
@@ -17,10 +18,11 @@ type Props = {
   onOpen: (url: string) => void; onSpeak: (text: string) => void; onStopSpeaking: () => void;
   progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
   onFollowUp: (text: string) => void;
+  chatgptPlan?: ChatGptPlan; onAskChatGpt?: (question: string) => void; onOpenChatGpt?: (question: string) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
@@ -54,11 +56,14 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
       }
       onContinue(item, clarifications[item.id], Object.values(updates));
     };
+    const askedQuestion = askedChatGpt(item);
+    const help = !isLive && item === turns[turns.length - 1] && item.id ? chatGptHelp(item, chatgptPlan, settings) : null;
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
       {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>
+          {askedQuestion !== undefined && <div className="asked-chatgpt"><span>Asked ChatGPT</span>{askedQuestion}</div>}
           {item.answer && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
           {working && !item.answer && <div className="typing" role="status" aria-label={activity || 'Thinking'}><i /><i /><i /><span>{activity}</span></div>}
           {item.system && <SystemCard snapshot={item.system} />}
@@ -80,6 +85,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
         </div>
       </div>
       {listed && !busy && <div className="reply-chips"><button onClick={() => onFollowUp('More like these')}>More like this</button><button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
+      {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? 'Ask ChatGPT' : <><ExternalLink size={12} /> Open in ChatGPT</>}</button></div>}
       {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>
         <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? 'Stop' : 'Read aloud'}</button>
         <button className="text-button" onClick={() => { void navigator.clipboard?.writeText(item.answer).then(() => { setCopied(item.id); setTimeout(() => setCopied(current => current === item.id ? '' : current), 1500); }); }}>{copied === item.id ? <Check size={11} /> : <Copy size={11} />}{copied === item.id ? 'Copied' : 'Copy'}</button>
