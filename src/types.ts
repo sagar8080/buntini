@@ -165,6 +165,7 @@ export interface MacGlance {
   cpuPercent: number;
   hot: boolean;
   history: GlanceSample[];
+  day?: GlanceSample[];
   metric: GlanceMetric;
   apps: GlanceApp[];
   capturedAt: string;

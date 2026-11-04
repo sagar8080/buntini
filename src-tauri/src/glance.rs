@@ -21,6 +21,8 @@ pub const QUIT_TOOL: &str = "quit_app";
 const HISTORY_SECONDS: i64 = 24 * 60 * 60;
 const CARD_SECONDS: i64 = 60 * 60;
 const SAMPLE_SECONDS: u64 = 60;
+/// The 24-hour chart's step: fine enough for its width, and small enough to keep with a turn.
+const DAY_BUCKET_SECONDS: i64 = 600;
 const SIZES_KEY: &str = "mac-folder-sizes";
 const SIZES_SECONDS: i64 = 24 * 60 * 60;
 const HEALTH_SECONDS: u64 = 24 * 60 * 60;
@@ -177,6 +179,9 @@ pub struct Glance {
     pub cpu_percent: f32,
     pub hot: bool,
     pub history: Vec<Sample>,
+    /// The last 24 hours in ten-minute steps. A card saved before this has none.
+    #[serde(default)]
+    pub day: Vec<Sample>,
     pub metric: Metric,
     pub apps: Vec<AppUse>,
     pub captured_at: String,
@@ -316,6 +321,38 @@ fn top_apps(apps: &[AppUse], metric: Metric) -> Vec<AppUse> {
     ranked.into_iter().take(MOST_APPS).cloned().collect()
 }
 
+/// What the card can rank by any measure: the top three of each, starting with `metric`'s.
+fn card_apps(apps: &[AppUse], metric: Metric) -> Vec<AppUse> {
+    let mut chosen = top_apps(apps, metric);
+    let with_energy: Vec<AppUse> = apps.iter().filter(|app| app.energy.is_some()).cloned().collect();
+    for more in [top_apps(apps, Metric::Cpu), top_apps(apps, Metric::Memory), top_apps(&with_energy, Metric::Energy)] {
+        for app in more {
+            if !chosen.iter().any(|kept| kept.name == app.name) {
+                chosen.push(app);
+            }
+        }
+    }
+    chosen
+}
+
+/// Ten-minute steps of a day. Each keeps the step's worst minute, because a spike is what
+/// "why was it slow earlier?" is looking for, and the latest battery level.
+pub fn day_buckets(samples: &[Sample]) -> Vec<Sample> {
+    let mut steps: Vec<Sample> = Vec::new();
+    for sample in samples {
+        match steps.last_mut().filter(|step| step.at / DAY_BUCKET_SECONDS == sample.at / DAY_BUCKET_SECONDS) {
+            Some(step) => {
+                step.at = sample.at;
+                step.cpu = step.cpu.max(sample.cpu);
+                step.pressure = step.pressure.max(sample.pressure);
+                step.battery = sample.battery.or(step.battery);
+            }
+            None => steps.push(*sample),
+        }
+    }
+    steps
+}
+
 /// What's measured, then the rest of what's used. Never more than is used.
 pub fn storage_parts(total: u64, free: u64, sizes: Option<&FolderSizes>) -> Vec<Part> {
     let mut left = total.saturating_sub(free);
@@ -369,11 +406,13 @@ pub fn build(focus: Focus, reading: Reading, samples: Vec<Sample>, sizes: Option
     let focus = if focus == Focus::Battery && reading.battery.is_none() { Focus::Overview } else { focus };
     let metric = metric_for(focus, &reading);
     let verdict = with_question(verdict(&reading, &samples, now_seconds), focus, &reading, metric);
-    let apps = top_apps(&reading.apps, metric);
+    let top = top_apps(&reading.apps, metric);
+    let apps = card_apps(&reading.apps, metric);
+    let day = day_buckets(&samples);
     let history = samples.into_iter().filter(|sample| sample.at > now_seconds - CARD_SECONDS).collect();
     Glance {
         focus,
-        summary: summary(&verdict, &reading, &apps),
+        summary: summary(&verdict, &reading, &top),
         storage: Storage {
             total_bytes: reading.total_bytes,
             free_bytes: reading.free_bytes,
@@ -385,6 +424,7 @@ pub fn build(focus: Focus, reading: Reading, samples: Vec<Sample>, sizes: Option
         battery: reading.battery,
         verdict,
         history,
+        day,
         metric,
         apps,
         captured_at: now(),
@@ -564,17 +604,36 @@ fn battery_health() -> (Option<u8>, Option<u32>) {
     }
 }
 
-/// Reads this Mac now. Blocking: it waits for a CPU sample, and for `top` when it needs energy.
-pub fn read(focus: Focus) -> Result<Reading, String> {
-    use sysinfo::{Disks, ProcessesToUpdate, System};
-    let unreadable = |_| "macOS didn't report this Mac's system information. Try again.".to_string();
-    let mut system = System::new_all().map_err(unreadable)?;
-    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-    system.refresh_cpu_usage();
-    system.refresh_memory();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+/// One reader, kept between reads: refreshing only what the card shows costs far less than
+/// starting over, and each CPU figure then covers the time since the last read.
+static READER: Mutex<Option<(sysinfo::System, Instant)>> = Mutex::new(None);
+/// A read further apart than this is a new question, so it takes a fresh CPU sample.
+const READER_FRESH: Duration = Duration::from_secs(30);
+
+fn processes_now() -> Option<(f32, u64, Vec<Proc>)> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let refresh = |system: &mut System| {
+        system.refresh_cpu_usage();
+        system.refresh_memory();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory().with_exe(UpdateKind::OnlyIfNotSet),
+        );
+    };
+    let mut reader = READER.lock().unwrap();
+    if reader.is_none() {
+        *reader = Some((System::new().ok()?, Instant::now() - READER_FRESH));
+    }
+    let (system, read_at) = reader.as_mut()?;
+    if read_at.elapsed() >= READER_FRESH {
+        refresh(system);
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    }
+    refresh(system);
+    *read_at = Instant::now();
     let cores = system.cpus().len().max(1) as f32;
-    let processes: Vec<Proc> = system
+    let processes = system
         .processes()
         .iter()
         .map(|(pid, process)| Proc {
@@ -585,7 +644,16 @@ pub fn read(focus: Focus) -> Result<Reading, String> {
             memory_bytes: process.memory(),
         })
         .collect();
-    let disks = Disks::new_with_refreshed_list().map_err(unreadable)?;
+    Some((system.global_cpu_usage(), system.total_memory(), processes))
+}
+
+/// Reads this Mac now. Blocking: it waits for a CPU sample, and for `top` when it needs energy:
+/// when asked, or if `when_low` when the battery is low enough for a verdict to need it.
+pub fn read(energy: bool, when_low: bool) -> Result<Reading, String> {
+    use sysinfo::Disks;
+    let unreadable = "macOS didn't report this Mac's system information. Try again.";
+    let (cpu_percent, memory_total, processes) = processes_now().ok_or(unreadable)?;
+    let disks = Disks::new_with_refreshed_list().map_err(|_| unreadable)?;
     let root = disks.iter().find(|disk| disk.mount_point() == Path::new("/")).or_else(|| disks.first());
     let (total_bytes, free_bytes) = root.map(|disk| (disk.total_space(), disk.available_space())).unwrap_or((0, 0));
     let mut battery = battery_now();
@@ -593,7 +661,7 @@ pub fn read(focus: Focus) -> Result<Reading, String> {
         (battery.health_percent, battery.cycles) = battery_health();
     }
     let low = battery.as_ref().is_some_and(|battery| battery.percent < LOW_BATTERY && !battery.charging);
-    let energy = if battery.is_some() && (focus == Focus::Battery || low) {
+    let energy = if battery.is_some() && (energy || (when_low && low)) {
         output_within("/usr/bin/top", &["-l", "2", "-s", "1", "-n", "60", "-o", "power", "-stats", "pid,power"], Duration::from_secs(6))
             .map(|output| parse_top_power(&output))
             .unwrap_or_default()
@@ -602,10 +670,10 @@ pub fn read(focus: Focus) -> Result<Reading, String> {
     };
     let paths: Vec<String> = running_apps().into_iter().map(|app| app.path).collect();
     Ok(Reading {
-        cpu_percent: system.global_cpu_usage(),
+        cpu_percent,
         total_bytes,
         free_bytes,
-        memory_total: system.total_memory(),
+        memory_total,
         swap_bytes: swap_used(),
         pressure: Pressure::from_level(sysctl_level().unwrap_or(1)),
         thermal: thermal_state(),
@@ -878,15 +946,24 @@ pub fn start(app: tauri::AppHandle) {
 
 /// The card for a question, now.
 pub async fn card(state: &crate::controller::AppState, focus: Focus) -> Result<Glance, String> {
-    let reading = tauri::async_runtime::spawn_blocking(move || read(focus))
+    read_card(state, focus, focus == Focus::Battery, true).await
+}
+async fn read_card(state: &crate::controller::AppState, focus: Focus, energy: bool, when_low: bool) -> Result<Glance, String> {
+    let reading = tauri::async_runtime::spawn_blocking(move || read(energy, when_low))
         .await
         .map_err(|_| "System information could not be collected.".to_string())??;
     let now_seconds = chrono::Utc::now().timestamp();
     let (samples, sizes) = {
         let store = state.store.lock().unwrap();
-        (samples_since(&store, now_seconds - CARD_SECONDS)?, folder_sizes(&store)?)
+        (samples_since(&store, now_seconds - HISTORY_SECONDS)?, folder_sizes(&store)?)
     };
     Ok(build(focus, reading, samples, sizes.as_ref(), now_seconds))
+}
+/// The latest card again, while someone is looking at it. It's shown and never saved, and it
+/// only runs `top` while energy is on screen.
+#[tauri::command]
+pub async fn mac_glance_now(focus: Focus, energy: bool, state: tauri::State<'_, crate::controller::AppState>) -> Result<Glance, String> {
+    read_card(&state, focus, energy, false).await
 }
 
 #[cfg(test)]
@@ -1048,6 +1125,43 @@ mod tests {
         let mut many = fine();
         many.apps.push(app("Mail", 1.0, GB, true));
         assert_eq!(build(Focus::Overview, many, vec![], None, NOW).apps.len(), 3);
+    }
+
+    #[test]
+    fn the_card_can_rank_apps_by_any_measure() {
+        let mut reading = fine();
+        reading.apps.push(app("Mail", 1.0, 12 * GB, true));
+        reading.apps.push(app("Slack", 1.0, GB, true));
+        reading.apps[4].energy = Some(90.0);
+        let glance = build(Focus::Overview, reading, vec![], None, NOW);
+        let names: Vec<&str> = glance.apps.iter().map(|app| app.name.as_str()).collect();
+        assert_eq!(&names[..3], [SYSTEM_GROUP, "Google Chrome", "Photos"], "the card's own ranking comes first");
+        assert!(names.contains(&"Mail"), "top for memory");
+        assert!(names.contains(&"Slack"), "top for energy");
+        assert_eq!(names.iter().filter(|name| **name == "Photos").count(), 1, "each app once");
+        assert!(glance.summary.contains("macOS is using the most"));
+    }
+
+    #[test]
+    fn a_day_keeps_each_steps_worst_minute() {
+        let start = NOW - NOW % DAY_BUCKET_SECONDS;
+        let at = |minutes: i64, cpu: f32, pressure: i32, battery: Option<u8>| Sample { at: start + minutes * 60, cpu, pressure, battery };
+        let steps = day_buckets(&[at(0, 10.0, 1, Some(50)), at(1, 95.0, 4, Some(49)), at(2, 20.0, 1, None), at(10, 5.0, 1, Some(47))]);
+        assert_eq!(steps.len(), 2);
+        assert_eq!((steps[0].cpu, steps[0].pressure, steps[0].battery), (95.0, 4, Some(49)));
+        assert_eq!(steps[0].at, start + 120);
+        assert_eq!((steps[1].cpu, steps[1].battery), (5.0, Some(47)));
+        assert!(day_buckets(&[]).is_empty());
+        // A full day stays small enough to keep with a turn.
+        let day: Vec<Sample> = (0..1440).map(|minute| Sample { at: start + minute * 60, cpu: 12.5, pressure: 1, battery: Some(80) }).collect();
+        assert_eq!(day_buckets(&day).len(), 144);
+    }
+
+    #[test]
+    fn a_card_saved_before_the_day_chart_still_opens() {
+        let mut saved = serde_json::to_value(build(Focus::Overview, fine(), vec![], None, NOW)).unwrap();
+        saved.as_object_mut().unwrap().remove("day");
+        assert!(serde_json::from_value::<Glance>(saved).unwrap().day.is_empty());
     }
 
     #[test]
@@ -1256,6 +1370,27 @@ mod tests {
         assert!(each < 60.0, "{each} ms a sample is over the target");
     }
 
+    /// `cargo test --lib glance::tests::measure_live_read_cost -- --ignored --nocapture`. What the
+    /// latest card costs each time it updates, which it does only while it's being looked at.
+    #[test]
+    #[ignore = "reads this Mac; prints what a live update costs"]
+    fn measure_live_read_cost() {
+        fn cpu_ms(who: libc::c_int) -> f64 {
+            let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+            unsafe { libc::getrusage(who, &raw mut usage) };
+            let time = |t: libc::timeval| t.tv_sec as f64 * 1e3 + t.tv_usec as f64 / 1e3;
+            time(usage.ru_utime) + time(usage.ru_stime)
+        }
+        let runs = 10;
+        read(false, false).unwrap();
+        let before = cpu_ms(libc::RUSAGE_SELF) + cpu_ms(libc::RUSAGE_CHILDREN);
+        for _ in 0..runs {
+            read(false, false).unwrap();
+        }
+        let each = (cpu_ms(libc::RUSAGE_SELF) + cpu_ms(libc::RUSAGE_CHILDREN) - before) / runs as f64;
+        println!("live_read_cpu_ms={each:.1} share_of_one_core_at_5s_percent={:.2}", each / 5_000.0 * 100.0);
+    }
+
     /// Opens Chess, which has no work to lose, then asks it to quit for real.
     #[test]
     #[ignore = "opens and quits an app on this Mac"]
@@ -1275,7 +1410,7 @@ mod tests {
     #[test]
     #[ignore = "reads this Mac"]
     fn read_this_mac() {
-        let glance = build(Focus::Battery, read(Focus::Battery).unwrap(), vec![], None, NOW);
+        let glance = build(Focus::Battery, read(true, true).unwrap(), vec![], None, NOW);
         println!("{}", serde_json::to_string_pretty(&glance).unwrap());
     }
 }

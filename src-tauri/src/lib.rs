@@ -289,6 +289,7 @@ pub fn run() {
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
             helper::chatgpt_always_allow_off,
+            glance::mac_glance_now,
             approvals::plan_ask_chatgpt,
             brief::morning_brief,
             brief::day_glance,

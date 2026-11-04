@@ -137,6 +137,8 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     // The sheets can be looked at; nothing is sent.
     if (name === 'plan_ask_chatgpt') return previewSheet(args?.question as string, 'ask_chatgpt') as T;
     if (name === 'plan_online_request') return previewSheet(args?.prompt as string, previewChatGptPlan() === 'usable' && !args?.webOnly ? 'chatgpt_search' : 'web_search') as T;
+    // The card's live updates can be looked at with a reading set by hand.
+    if (name === 'mac_glance_now') return JSON.parse(localStorage.getItem('buntini-preview-glance-now') || 'null') as T;
     if (name === 'chatgpt_always_allow_off') { localStorage.removeItem('buntini-preview-chatgpt-always'); return undefined as T; }
     if (name === 'app_list') return previewApps() as T;
     // Voice controls can be looked at without a microphone; nothing is recorded.
