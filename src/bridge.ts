@@ -6,7 +6,7 @@ const defaults: Settings = {
   assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
-  modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
+  modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
 };
@@ -76,6 +76,7 @@ function previewList(state: PreviewThreads, cursor?: string | null, limit = 30):
   const items = sorted.slice(start, start + limit);
   return { items, nextCursor: start + limit < sorted.length ? items.at(-1)!.id : null };
 }
+let previewLocal: 'idle' | 'downloading' = 'idle';
 export async function saveSettings(settings: Settings): Promise<Settings> {
   if (desktop) return invoke('save_settings', { settings });
   localStorage.setItem('buntini-preview-settings', JSON.stringify(settings));
@@ -121,6 +122,11 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
+    // The preview has no download to run: it shows setup partway through.
+    if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;
+    if (name === 'local_setup_status') return { phase: previewLocal, doneBytes: previewLocal === 'idle' ? 0 : 2440000000, totalBytes: 6100000000, message: '' } as T;
+    if (name === 'local_setup_start') { previewLocal = 'downloading'; return undefined as T; }
+    if (name === 'local_setup_cancel' || name === 'local_setup_remove') { previewLocal = 'idle'; return undefined as T; }
     if (name === 'app_list') return previewApps() as T;
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;

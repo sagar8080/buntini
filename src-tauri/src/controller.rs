@@ -328,6 +328,12 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
                     session.email
                 }
             }),
+            chatgpt_plan: match crate::brain::plan(&state) {
+                crate::brain::Plan::None => "none",
+                crate::brain::Plan::Usable => "usable",
+                crate::brain::Plan::Refused => "refused",
+            }
+            .into(),
         },
     })
 }
@@ -337,7 +343,7 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Settings, String> {
-    let settings = save_settings_in(&state, settings).await?;
+    let settings = save_settings_in(&state, crate::brain::resolved(&state, settings)).await?;
     // Name, personality, allowed apps and the brain all shape the instructions.
     warm_up_soon(&app);
     Ok(settings)
@@ -448,6 +454,7 @@ pub async fn watch_apple(app: tauri::AppHandle) {
         if now_shown != shown {
             let _ = tauri::Emitter::emit(&app, "apple-status", &now_shown);
             shown = now_shown;
+            crate::brain::settle_and_tell(&app).await;
         }
         if !crate::model::apple_may_change(&reason) {
             return;
@@ -3905,6 +3912,8 @@ pub async fn run_task(
         handoff: None,
         action: None,
     };
+    // A brain that became usable while nothing was running takes over from this task on.
+    crate::brain::settle_and_tell(&app).await;
     let cancel = Arc::new(AtomicBool::new(false));
     // A scheduled search may briefly hold the slot; wait for it rather than failing the chat.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);

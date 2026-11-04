@@ -5,6 +5,7 @@ mod advisor;
 mod approvals;
 mod apps;
 mod ax;
+mod brain;
 mod brief;
 mod browser_workspace;
 mod browser_session;
@@ -32,6 +33,7 @@ mod goals;
 mod indexer;
 mod integrations;
 mod local;
+mod local_setup;
 mod login;
 mod mac_settings;
 mod mcp;
@@ -153,6 +155,8 @@ pub fn run() {
             // Learn whether Apple Intelligence can run here before the first chat, and
             // keep checking while it may still become usable.
             tauri::async_runtime::spawn(controller::watch_apple(app.handle().clone()));
+            // A local model setup left unfinished carries on where it stopped.
+            tauri::async_runtime::spawn(local_setup::resume(app.handle().clone()));
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
             browser_workspace::set_app(app.handle().clone());
@@ -271,6 +275,11 @@ pub fn run() {
             apps::check_app,
             apps::accessibility,
             advisor::mac_profile,
+            local_setup::local_setup_plan,
+            local_setup::local_setup_status,
+            local_setup::local_setup_start,
+            local_setup::local_setup_cancel,
+            local_setup::local_setup_remove,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,

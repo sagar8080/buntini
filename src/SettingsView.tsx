@@ -36,6 +36,11 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
   useEffect(() => { if (edited.current) saver.edit(draft); }, [draft]);
   // Open at login is saved as what macOS confirmed: when it refused, the switch says so.
   useEffect(() => saver.subscribeSaved((sent, saved) => {
+    // Left to Buntini, the brain it chose on saving is the one to show.
+    if (sent.modelBackend !== saved.modelBackend || sent.cloudProvider !== saved.cloudProvider) {
+      edited.current = false;
+      setDraft(previous => ({ ...previous, modelBackend: saved.modelBackend, cloudProvider: saved.cloudProvider, cloudModel: saved.cloudModel, cloudInputPrice: saved.cloudInputPrice, cloudOutputPrice: saved.cloudOutputPrice }));
+    }
     if (sent.openAtLogin === saved.openAtLogin) { setLoginProblem(''); return; }
     edited.current = false;
     setDraft(previous => ({ ...previous, openAtLogin: saved.openAtLogin }));

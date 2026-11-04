@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Cloud, Cpu, LoaderCircle } from 'lucide-react';
 import LocalModel from './LocalModel';
+import LocalSetup from './LocalSetup';
 import IntelligenceMark from './IntelligenceMark';
 import Pet from './Pet';
 import { palettes } from './Cat';
-import { appleStatus, cloudProviders } from './brain.ts';
+import { appleStatus, backendLabel, cloudProviders } from './brain.ts';
 import { coats, lookFrom } from './petOptions';
-import { applyAnswers, blocker, defaultCloudBudget, initialAnswers, keysToSave, message, next, previous, questions, reply, steps, type Answers, type Step } from './setupSteps';
+import { applyAnswers, blocker, initialAnswers, message, next, previous, questions, reply, steps, type Answers, type Step } from './setupSteps';
 import { errorMessage } from './bridge';
 import { stillMotion } from './themes.ts';
 import ChatGPTAccount from './ChatGPTAccount';
-import { CloudShares, OpenAppleSettings, UseChatGPT } from './BrainSettings';
-import type { Bootstrap, CatCoat, CloudProvider, KeyProvider, Settings } from './types';
+import { CloudShares, OpenAppleSettings } from './BrainSettings';
+import type { Bootstrap, CatCoat, Settings } from './types';
 
-type Props = { data: Bootstrap; onFinish: (settings: Settings, keys: [KeyProvider, string][]) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void>; toast?: ReactNode };
+type Props = { data: Bootstrap; onFinish: (settings: Settings) => Promise<void>; onSkip: () => Promise<void>; onRefresh: () => Promise<void>; toast?: ReactNode };
 
 /** First-run setup as a conversation: Buntini asks, the user answers with inline controls. */
 export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }: Props) {
@@ -43,7 +44,7 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
       return;
     }
     setSaving(true); setError('');
-    try { await onFinish(applyAnswers(data.settings, answers), keysToSave(answers)); }
+    try { await onFinish(applyAnswers(data.settings, answers)); }
     catch (failure) { setError(errorMessage(failure)); }
     finally { setSaving(false); }
   }
@@ -103,35 +104,38 @@ function Hello({ answers, set }: StepProps) {
 }
 
 function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: Bootstrap; onRefresh: () => Promise<void>; onError: (message: string) => void }) {
-  const apple = appleStatus(data.diagnostics.appleIntelligence);
-  const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
-  const saved = !!data.diagnostics.cloudKeys?.includes(provider.id);
-  const cap = data.settings.cloudBudgetUsd > 0 ? data.settings.cloudBudgetUsd : defaultCloudBudget;
+  const { appleIntelligence: reason, chatgptAccount: account, chatgptPlan: plan } = data.diagnostics;
+  const apple = appleStatus(reason);
+  const auto = data.settings.brainAuto;
+  const checking = reason === 'checking' || reason === undefined;
+  const useChatGPT = () => { set('backend', 'cloud'); set('cloudProvider', 'chatgpt'); };
+  // What the Mac and the sign-in now say moves the choice along, as the rule would.
+  useEffect(() => {
+    if (!auto) return;
+    if (apple.ready) { if (answers.backend !== 'apple') set('backend', 'apple'); return; }
+    if (plan === 'refused' && answers.backend !== 'mlx') set('backend', 'mlx');
+    if (plan === 'usable' && answers.backend === 'apple') useChatGPT();
+  }, [auto, apple.ready, plan]);
+  const row = (icon: ReactNode, title: string, detail: string, ready: boolean) => <div className="brain-status">{icon}<span><strong>{title}</strong><small>{detail}</small></span>{ready && <Check size={14} />}</div>;
+  if (!auto) return row(answers.backend === 'apple' ? <IntelligenceMark size={16} /> : answers.backend === 'mlx' ? <Cpu size={16} /> : <Cloud size={16} />, backendLabel[answers.backend], data.diagnostics.modelReady ? 'Ready' : 'Change it in Settings → Brain', data.diagnostics.modelReady);
+  if (apple.ready || checking) return row(<IntelligenceMark size={16} />, 'Apple Intelligence', apple.label, apple.ready);
   // The same local setup as Settings → Brain, reading and writing the answers instead.
   const local = { ...data.settings, pythonPath: answers.pythonPath, modelPath: answers.modelPath };
   const updateLocal = <K extends keyof Settings>(key: K, value: Settings[K]) => { if (key === 'pythonPath' || key === 'modelPath') set(key, value as string); };
-  const providers = <label>Provider<select value={provider.id} onChange={event => { set('cloudProvider', event.target.value as CloudProvider); set('cloudKey', ''); }}>{cloudProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>;
-  const option = (id: Answers['backend'], icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={answers.backend === id} className={answers.backend === id ? 'active' : ''} onClick={() => set('backend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
   return <>
-    <div className="brain-options" role="radiogroup" aria-label="Brain">
-      {option('apple', <IntelligenceMark size={16} />, 'Apple Intelligence', 'Built in · private', <em className={apple.ready ? 'ready' : ''}>{apple.ready && <Check size={10} />}{apple.label}</em>)}
-      {option('mlx', <Cpu size={16} />, 'Local model', 'Qwen or Gemma')}
-      {option('cloud', <Cloud size={16} />, 'Cloud model', 'ChatGPT, Anthropic, OpenAI or Gemini')}
-    </div>
-    {answers.backend === 'apple' && apple.advice && <div className="field-help">{apple.advice}</div>}
-    {answers.backend === 'apple' && <OpenAppleSettings reason={data.diagnostics.appleIntelligence} onError={onError} />}
-    {answers.backend === 'apple' && <UseChatGPT reason={data.diagnostics.appleIntelligence} onUse={() => { set('backend', 'cloud'); set('cloudProvider', 'chatgpt'); set('cloudKey', ''); }} />}
-    {answers.backend === 'mlx' && <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} />}
-    {answers.backend === 'cloud' && provider.id === 'chatgpt' && <>
-      {providers}
-      <ChatGPTAccount account={data.diagnostics.chatgptAccount} onChange={onRefresh} onError={onError} />
-    </>}
-    {answers.backend === 'cloud' && provider.id !== 'chatgpt' && <>
-      {providers}
-      <label><span className="setup-label">API key <span className="label-status">{saved ? 'Saved in Keychain' : `From ${provider.keys}`}</span></span><div className="key-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={answers.cloudKey} onChange={event => set('cloudKey', event.target.value)} placeholder={saved ? '••••••••••••••••' : `${provider.name} API key`} aria-label={`${provider.name} API key`} /></div></label>
-      <div className="field-help">Monthly cap ${cap}</div>
-    </>}
-    {answers.backend === 'cloud' && <CloudShares name={provider.name} shared={answers.shares} onChange={value => set('shares', value)} setup />}
+    {apple.advice && <div className="field-help">{apple.advice}</div>}
+    <OpenAppleSettings reason={reason} onError={onError} />
+    {plan === 'refused' && <div className="field-help">This ChatGPT account can’t use its plan in other apps.</div>}
+    {answers.backend === 'mlx'
+      ? <>
+        <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} onStart={() => set('localStarted', true)} onStop={() => set('localStarted', false)} />
+        {plan !== 'refused' && <button type="button" className="text-button" onClick={useChatGPT}>Sign in with ChatGPT instead</button>}
+      </>
+      : <>
+        <ChatGPTAccount account={account} onChange={onRefresh} onError={onError} />
+        {account && plan === 'usable' && <CloudShares name="ChatGPT" shared={answers.shares} onChange={value => set('shares', value)} setup />}
+        {!account && <LocalSetup onStart={() => { set('backend', 'mlx'); set('localStarted', true); }} onReady={(python, model) => { set('backend', 'mlx'); set('pythonPath', python); set('modelPath', model); }} onError={onError} />}
+      </>}
   </>;
 }
 

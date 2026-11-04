@@ -809,6 +809,20 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .brain-options small { font-size: 11px; color: var(--muted); }
 .brain-options em { font-style: normal; font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .brain-options em.ready { color: var(--accent); }
+.local-setup { display: flex; flex-direction: column; gap: 8px; }
+.local-setup-start { align-self: stretch; width: 100%; }
+.local-progress { height: 6px; border-radius: 4px; overflow: hidden; background: var(--surface-soft); }
+.local-progress i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s var(--ease-out); }
+.local-setup .row-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+.local-setup-ready { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.local-setup-ready > svg { color: var(--accent); flex-shrink: 0; }
+.local-setup-ready .text-button { margin-left: auto; }
+.brain-status { display: flex; align-items: center; gap: 12px; padding: 11px 12px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; }
+.brain-status > svg { color: var(--muted); flex-shrink: 0; }
+.brain-status > svg:last-child { color: var(--accent); }
+.brain-status span { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.brain-status strong { font-size: 12px; font-weight: 500; }
+.brain-status small { font-size: 11px; color: var(--muted); }
 .cloud-settings { margin-top: 4px; }
 .cloud-settings .field-help .text-button { margin-left: auto; font-size: 11px; }
 .cloud-shares { display: flex; flex-direction: column; gap: 8px; }

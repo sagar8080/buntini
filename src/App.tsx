@@ -314,7 +314,9 @@ export default function App() {
     const subscription = listen('companion-toggle', () => { void expand(true); });
     // Apple Intelligence turned on, finished downloading or got stuck: show it now.
     const apple = listen('apple-status', () => { void refresh().catch(() => {}); });
-    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); };
+    // Buntini moved to the brain that's now usable: say so once.
+    const brain = listen<string>('brain-changed', event => { setNotice(event.payload); void refresh().catch(() => {}); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); };
   }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;
@@ -706,10 +708,9 @@ export default function App() {
     }, 200);
     return () => window.clearInterval(id);
   }, [recording]);
-  async function finishSetup(settings: Settings, keys: [KeyProvider, string][]) {
+  async function finishSetup(settings: Settings) {
     // An edit from before setup must not land on top of the choices just made.
     saver.current!.discard();
-    for (const [provider, key] of keys) await command('set_api_key', { provider, key });
     // A scheduled task may briefly hold the settings; try once more before giving up.
     const saved = await saveSettings(settings).catch(() => new Promise(resolve => setTimeout(resolve, 800)).then(() => saveSettings(settings)));
     await command('finish_onboarding');

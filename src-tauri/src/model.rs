@@ -60,6 +60,20 @@ pub fn backend(settings: &Settings) -> Backend {
 }
 
 /// A local MLX model is usable when its folder holds a `config.json`.
+/// Whether the local model answers when ChatGPT can't. Only when the brain was left to
+/// Buntini, and never for a reply ChatGPT refused on its merits.
+fn local_stands_in(settings: &Settings, message: &str) -> bool {
+    settings.brain_auto
+        && settings.cloud_provider == "chatgpt"
+        && local_ready(settings)
+        && crate::chatgpt::unavailable(message)
+}
+
+/// Whether the local model these settings point at can start.
+pub fn local_ready(settings: &Settings) -> bool {
+    !settings.python_path.trim().is_empty() && mlx_model_present(&settings.model_path)
+}
+
 pub fn mlx_model_present(path: &str) -> bool {
     !path.is_empty() && Path::new(path).join("config.json").is_file()
 }
@@ -101,6 +115,11 @@ impl ModelHub {
     pub fn ready(&self, settings: &Settings) -> Result<(), String> {
         match backend(settings) {
             Backend::Mlx => {
+                if !local_ready(settings) {
+                    if let Some(line) = crate::local_setup::progress_line() {
+                        return Err(line);
+                    }
+                }
                 if settings.python_path.trim().is_empty() {
                     return Err("Choose the Python environment that has MLX installed in Settings → Brain to chat with a local model.".into());
                 }
@@ -319,7 +338,7 @@ impl ModelHub {
         settings: &Settings,
         mut payload: Value,
         cancel: Arc<AtomicBool>,
-        on_token: F,
+        mut on_token: F,
     ) -> Result<Turn, String>
     where
         F: FnMut(String) + Send,
@@ -342,8 +361,27 @@ impl ModelHub {
                     .await
             }
             Backend::Cloud => {
-                self.cloud_generate(settings, payload, cancel, on_token)
-                    .await
+                // Nothing has been shown yet when ChatGPT turns a request away, so a local
+                // model can still answer that one, seeing no more than ChatGPT was given.
+                let mut said = false;
+                let first = self
+                    .cloud_generate(settings, payload.clone(), cancel.clone(), |token| {
+                        said = true;
+                        on_token(token);
+                    })
+                    .await;
+                match first {
+                    Err(message) if !said && local_stands_in(settings, &message) => {
+                        if let Some(notify) = self.notice.get() {
+                            notify("ChatGPT isn’t available right now, so this came from your Mac.".into());
+                        }
+                        payload["model_path"] = settings.model_path.clone().into();
+                        self.mlx
+                            .request(&self.mlx_launch(settings)?, payload, cancel, on_token)
+                            .await
+                    }
+                    other => other,
+                }
             }
         }
     }
@@ -379,6 +417,12 @@ impl ModelHub {
             {
                 Ok((turn, _)) => Ok(turn),
                 Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => {
+                    // This account can't use its plan here: the rule moves on from ChatGPT.
+                    if message == crate::chatgpt::PLAN_NOT_ELIGIBLE {
+                        if let Some(store) = self.ledger.get() {
+                            let _ = store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "1");
+                        }
+                    }
                     Err(message)
                 }
             };
@@ -496,6 +540,27 @@ mod tests {
             whisper_model: String::new(),
             ..Settings::default()
         }
+    }
+
+    #[test]
+    fn a_local_model_stands_in_only_for_an_unavailable_chatgpt_when_left_to_buntini() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), "{}").unwrap();
+        let ready = Settings {
+            brain_auto: true,
+            cloud_provider: "chatgpt".into(),
+            python_path: "/python".into(),
+            model_path: dir.path().to_string_lossy().into(),
+            ..settings("cloud")
+        };
+        let limit = crate::chatgpt::plan_error("subscription_sharing_usage_limit_exceeded", "").unwrap();
+        for message in [limit.as_str(), crate::chatgpt::PLAN_NOT_ELIGIBLE, "Couldn’t reach ChatGPT. Check your internet connection.", "The connection to ChatGPT failed."] {
+            assert!(local_stands_in(&ready, message), "{message}");
+        }
+        assert!(!local_stands_in(&ready, "ChatGPT declined to answer."), "not for a refusal");
+        assert!(!local_stands_in(&Settings { brain_auto: false, ..ready.clone() }, &limit), "a brain the user picked stays");
+        assert!(!local_stands_in(&Settings { cloud_provider: "openai".into(), ..ready.clone() }, &limit));
+        assert!(!local_stands_in(&Settings { model_path: String::new(), ..ready }, &limit), "nothing to stand in");
     }
 
     #[tokio::test]

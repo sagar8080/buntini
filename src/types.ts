@@ -19,6 +19,8 @@ export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
+  /** Buntini chooses the brain until the user picks one. */
+  brainAuto: boolean;
   assistantName: string;
   userName: string;
   personality: string;
@@ -112,6 +114,7 @@ export interface Diagnostics {
   cloudKeys?: string[];
   cloudSpendUsd?: number;
   chatgptAccount?: string | null;
+  chatgptPlan?: 'none' | 'usable' | 'refused';
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 /** Something done on its own at a set time; the morning brief is the built-in one. */

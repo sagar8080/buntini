@@ -17,7 +17,7 @@ type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value
 export default function BrainSettings({ draft, update, diagnostics, onError, onKey, onRefresh, onNotice }: Props) {
   const apple = appleStatus(diagnostics.appleIntelligence);
   const provider = cloudProviders.find(item => item.id === draft.cloudProvider) || cloudProviders[0];
-  const option = (id: ModelBackend, icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={draft.modelBackend === id} className={draft.modelBackend === id ? 'active' : ''} onClick={() => update('modelBackend', id)}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
+  const option = (id: ModelBackend, icon: ReactNode, title: string, detail: string, badge?: ReactNode) => <button type="button" role="radio" aria-checked={draft.modelBackend === id} className={draft.modelBackend === id ? 'active' : ''} onClick={() => { update('modelBackend', id); update('brainAuto', false); }}>{icon}<span><strong>{title}</strong><small>{detail}</small></span>{badge}</button>;
   return <>
     <section className="settings-section">
       <div className="brain-options" role="radiogroup" aria-label="Brain">
@@ -25,6 +25,7 @@ export default function BrainSettings({ draft, update, diagnostics, onError, onK
         {option('mlx', <Cpu size={18} />, 'Local model', 'Qwen or Gemma')}
         {option('cloud', <Cloud size={18} />, 'Cloud model', provider.id === 'chatgpt' ? 'ChatGPT plan' : provider.name, diagnostics.cloudKeys?.includes(provider.id) ? <em className="ready"><Check size={11} />{provider.id === 'chatgpt' ? 'Signed in' : 'Key saved'}</em> : undefined)}
       </div>
+      {!draft.brainAuto && <button type="button" className="text-button" onClick={() => update('brainAuto', true)}>Let Buntini choose</button>}
       {draft.modelBackend === 'apple' && apple.advice && <p className="field-help">{apple.advice}</p>}
       {draft.modelBackend === 'apple' && <OpenAppleSettings reason={diagnostics.appleIntelligence} onError={onError} />}
       {draft.modelBackend === 'apple' && <UseChatGPT reason={diagnostics.appleIntelligence} onUse={() => { update('modelBackend', 'cloud'); update('cloudProvider', 'chatgpt'); update('cloudModel', ''); update('cloudInputPrice', 0); update('cloudOutputPrice', 0); }} />}
