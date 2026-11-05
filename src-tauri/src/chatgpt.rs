@@ -75,7 +75,7 @@ pub fn saved() -> bool {
 const ACCOUNT: &str = "chatgpt-account";
 const NO_PLAN: &str = "chatgpt-no-plan-scope";
 
-fn note(store: &crate::store::Store, session: &Session) -> Result<(), String> {
+pub fn note(store: &crate::store::Store, session: &Session) -> Result<(), String> {
     store.set_preference(ACCOUNT, &session.email)?;
     store.set_preference(NO_PLAN, if session.plan_allowed() { "" } else { "1" })
 }
@@ -88,13 +88,9 @@ pub fn plan_noted(store: &crate::store::Store) -> bool {
     store.preference(NO_PLAN).ok().flatten().is_none_or(|value| value.is_empty())
 }
 
-/// Notes who a sign-in from before these were noted belongs to, once, right after it was used.
-pub fn remember_account(store: &crate::store::Store) {
-    if store.preference(ACCOUNT).ok().flatten().is_none() {
-        if let Some(session) = load() {
-            let _ = note(store, &session);
-        }
-    }
+/// Whether a sign-in from before these were noted still has to be.
+pub fn account_unnoted(store: &crate::store::Store) -> bool {
+    store.preference(ACCOUNT).ok().flatten().is_none()
 }
 
 pub fn load() -> Option<Session> {

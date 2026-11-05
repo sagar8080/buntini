@@ -241,6 +241,10 @@ impl AppState {
 
 #[tauri::command]
 pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
+    bootstrap_in(&state)
+}
+
+fn bootstrap_in(state: &AppState) -> Result<Bootstrap, String> {
     let (settings, tasks, roots, audit, saved_searches, price_watches, os_update_check) = {
         let s = state.store.lock().unwrap();
         (
@@ -283,6 +287,9 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
         .filter(|provider| web::credential_saved(provider.id))
         .map(|provider| provider.id.to_string())
         .collect();
+    // On its own line: a guard taken inside the struct below would be held through all of it,
+    // and the plan needs the same lock. That froze Buntini on opening.
+    let chatgpt_account = crate::chatgpt::account(&state.store.lock().unwrap());
     let limits = crate::budget::search_limits(&settings);
     let model_ready = state.models.ready(&settings).is_ok();
     let worker_status = state.models.status(&settings);
@@ -323,7 +330,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             remaining_budget_usd,
             cloud_keys,
             cloud_spend_usd,
-            chatgpt_account: crate::chatgpt::account(&state.store.lock().unwrap()),
+            chatgpt_account,
             chatgpt_plan: match crate::brain::plan(&state) {
                 crate::brain::Plan::None => "none",
                 crate::brain::Plan::Usable => "usable",
@@ -5530,6 +5537,20 @@ for line in sys.stdin:
         assert!(task.answer.contains("both signatures"), "{}", task.answer);
         assert!(task.touched.iter().any(|share| share == "notes"));
         state.models.reset().await;
+    }
+    /// Opening draws nothing until this returns, so a lock it waits on forever is an app that
+    /// looks open with no window to see.
+    #[test]
+    fn opening_never_waits_on_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().into()).unwrap());
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let opened = bootstrap_in(&state).map(|opened| opened.diagnostics.chatgpt_plan);
+            let _ = done.send(opened);
+        });
+        let opened = finished.recv_timeout(std::time::Duration::from_secs(30)).expect("opening froze");
+        assert!(opened.is_ok(), "{opened:?}");
     }
     #[test]
     fn model_cannot_bypass_policy_or_exfiltrate_files() {
