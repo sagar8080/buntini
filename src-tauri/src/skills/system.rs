@@ -2,7 +2,7 @@
 //! battery?" answered with the Mac at a glance card, instantly and with no model
 //! (glance.rs). "Quit Chrome" proposes the approved `quit_app` action, which is also what
 //! the card's Quit button sends. Anything else about the Mac goes to the model as before.
-use super::{from_verb, without_politeness, Outcome};
+use super::{from_verb, one_of, without_politeness, Outcome};
 use crate::glance::Focus;
 
 #[derive(Debug, PartialEq)]
@@ -13,10 +13,8 @@ pub enum Command {
 
 const OVERVIEW: &[&str] = &[
     "how's my mac",
-    "hows my mac",
     "how is my mac",
     "how's my mac doing",
-    "hows my mac doing",
     "how is my mac doing",
     "is my mac ok",
     "is my mac okay",
@@ -99,7 +97,6 @@ const BATTERY: &[&str] = &[
     "why is my battery draining so fast",
     "why's my battery draining",
     "how's my battery",
-    "hows my battery",
     "how is my battery",
     "how's my battery doing",
     "how is my battery doing",
@@ -120,8 +117,9 @@ pub fn recognise(text: &str) -> Option<Command> {
     let text = text.strip_prefix("hey ").unwrap_or(text);
     let text = text.strip_prefix("buntini ").unwrap_or(text);
     let same_mac = text.replace("my macbook", "my mac").replace("my computer", "my mac").replace("my laptop", "my mac");
+    let question = same_mac.strip_suffix(" right now").or_else(|| same_mac.strip_suffix(" now")).unwrap_or(&same_mac);
     for (focus, phrases) in [(Focus::Overview, OVERVIEW), (Focus::Slow, SLOW), (Focus::Storage, STORAGE), (Focus::Battery, BATTERY)] {
-        if phrases.contains(&same_mac.as_str()) {
+        if one_of(question, phrases) {
             return Some(Command::Look(focus));
         }
     }
@@ -168,6 +166,23 @@ mod tests {
         }
         for prompt in ["What's using my battery?", "what's draining my battery", "How's my battery?", "battery health", "how much battery do I have left?"] {
             assert_eq!(look(prompt), Some(Focus::Battery), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn a_missing_apostrophe_or_a_right_now_changes_nothing() {
+        assert_eq!(look("whats using my battery"), Some(Focus::Battery));
+        assert_eq!(look("Whats draining my battery right now?"), Some(Focus::Battery));
+        assert_eq!(look("hows my mac"), Some(Focus::Overview));
+        assert_eq!(look("whys my mac so slow"), Some(Focus::Slow));
+        assert_eq!(look("what's slowing my mac down now"), Some(Focus::Slow));
+        assert_eq!(look("whats filling my disk"), Some(Focus::Storage));
+    }
+
+    #[test]
+    fn the_photos_skill_leaves_these_alone() {
+        for prompt in ["show my mac", "check my mac", "mac status", "how much storage do i have"] {
+            assert!(look(prompt).is_some(), "{prompt}");
         }
     }
 

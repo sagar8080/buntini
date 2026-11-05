@@ -66,6 +66,8 @@ async fn saved_lookup_approval_covers_browser_first_and_only_selected_api_fallba
         dir.path().into(),
     )
     .unwrap();
+    // This Mac may be signed in to ChatGPT, which would otherwise take the question.
+    state.store.lock().unwrap().set_preference("chatgpt-search-paused-until", "next-sign-in").unwrap();
     let settings = Settings::default();
     let mut task: TaskRecord = serde_json::from_value(json!({"id":"research-approval","prompt":"Google weather forecast","answer":"","state":"running","createdAt":now(),"sources":[],"files":[]})).unwrap();
     execute_with_settings(

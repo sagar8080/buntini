@@ -178,6 +178,15 @@ pub(crate) fn without_politeness(mut text: &str) -> &str {
     }
 }
 
+/// Whether `text` is exactly one of `phrases`, however its apostrophes were typed: people
+/// write "whats" as often as "what's". For fixed phrases only; a song or page name keeps
+/// its own spelling.
+pub(crate) fn one_of(text: &str, phrases: &[&str]) -> bool {
+    let bare = |words: &str| words.chars().filter(|c| *c != '\'').collect::<String>();
+    let text = bare(text);
+    phrases.iter().any(|phrase| bare(phrase) == text)
+}
+
 /// A fast skill must account for the whole request. Compound actions belong to
 /// the durable controller, even when the first clause happens to be recognisable.
 /// Conjunctions inside a duration or title ("one minute and thirty seconds",
@@ -352,6 +361,31 @@ pub(crate) async fn osascript(source: &str, argv: &[&str], seconds: u64) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fixed_phrase_needs_no_apostrophe() {
+        for (typed, proper) in [
+            ("whats playing", "what's playing"),
+            ("whats this song", "what's this song"),
+            ("whats this", "what's this"),
+            ("whats this page about", "what's this page about"),
+            ("whats my day like", "what's my day like"),
+            ("hows my day looking", "how's my day looking"),
+            ("whos waiting for a reply", "who's waiting for a reply"),
+            ("summarise what ive selected", "summarise what i've selected"),
+            ("whats using my battery", "what's using my battery"),
+        ] {
+            let (typed_skill, proper_skill) = (recognise(typed, &[]), recognise(proper, &[]));
+            assert!(proper_skill.is_some(), "{proper}");
+            assert_eq!(format!("{typed_skill:?}"), format!("{proper_skill:?}"), "{typed}");
+        }
+    }
+
+    #[test]
+    fn one_of_matches_whole_phrases_only() {
+        assert!(one_of("whats up", &["what's up"]));
+        assert!(!one_of("whats using my battery in figma", &["what's using my battery"]));
+    }
 
     #[test]
     fn mentions_negations_and_other_targets_do_not_execute_controls() {

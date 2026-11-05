@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react';
+import { useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Check, Copy, ExternalLink, FileText, LoaderCircle, Square, Volume2, VolumeX } from 'lucide-react';
 import Pet from './Pet';
 import { ResultCards } from './Online';
@@ -7,7 +7,7 @@ import { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
 import { ProgressDetails } from './TaskProgress';
 import { taskRecovery, missingTaskFields } from './taskRecovery';
-import { parse, type Span } from './markdown';
+import { parse, withoutTracking, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
 import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
 import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
@@ -47,6 +47,8 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
     const wrote = !!savedProgress?.steps.some(step => step.approvedAt && step.state === 'succeeded');
     const confirmed = done && wrote ? receiptLines(item.answer) : null;
     const listed = done && !wrote && parse(item.answer).some(block => block.kind === 'list');
+    // Your own mail or calendar has no "more like this"; it's what's there.
+    const readOwnItems = !!item.touched?.some(kind => ['mail', 'calendar', 'reminders'].includes(kind));
     const missing = missingTaskFields(savedProgress);
     const continueWithDetails = () => {
       const updates: Record<string, TaskFieldUpdate> = {};
@@ -74,7 +76,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.glance && <MacGlanceCard glance={item.glance} latest={latest} busy={busy} onQuit={app => onFollowUp(`Quit ${app}`)} onPane={pane => onOpenPane?.(pane)} />}
           {!!item.cards?.length && <ResultCards cards={item.cards} onOpen={onOpen} />}
           {item.files.length > 0 && <div className="file-results">{item.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
-          {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={source.url} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(source.url); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
+          {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={withoutTracking(source.url)} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(withoutTracking(source.url)); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
           {!!item.prices?.length && <div className="product-comparison"><div className="section-label">Published offers</div>{item.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? 'Published range' : 'Published offer'}</span></div>{offer.seller && <small>Seller: {offer.seller}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => onOpen(offer.url)}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}</div>}
           {!!item.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {item.research.length} pages</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
           {working && !!item.answer && !!activity && activity !== 'Thinking it over' && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity}</span></div>}
@@ -89,7 +91,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'That didn’t finish. Try again.'}</p>}
         </div>
       </div>
-      {listed && !busy && <div className="reply-chips"><button onClick={() => onFollowUp('More like these')}>More like this</button><button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
+      {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>More like this</button>}<button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
       {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? 'Ask ChatGPT' : <><ExternalLink size={12} /> Open in ChatGPT</>}</button></div>}
       {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>
         <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? 'Stop' : 'Read aloud'}</button>
@@ -105,23 +107,42 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
 }
 
 function Spans({ spans, onOpen }: { spans: Span[]; onOpen: (url: string) => void }) {
-  return <>{spans.map((span, index) => span.href ? <a key={index} href={span.href} onClick={event => { event.preventDefault(); onOpen(span.href!); }}>{span.text}</a>
-    : span.code ? <code key={index}>{span.text}</code> : span.bold ? <strong key={index}>{span.text}</strong> : span.italic ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
+  return <>{spans.map((span, index) => {
+    const open = (event: MouseEvent) => { event.preventDefault(); onOpen(span.href!); };
+    if (span.cite) {
+      const site = span.text.replace(/^www\./, '');
+      return span.href ? <a key={index} className="reply-cite" href={span.href} title={span.href} onClick={open}>{site}</a> : <span key={index} className="reply-cite">{site}</span>;
+    }
+    let words: ReactNode = span.code ? <code>{span.text}</code> : span.text;
+    if (span.italic) words = <em>{words}</em>;
+    if (span.bold) words = <strong>{words}</strong>;
+    return span.href ? <a key={index} href={span.href} onClick={open}>{words}</a> : <span key={index}>{words}</span>;
+  })}</>;
 }
 
 /** A reply with its light formatting shown: paragraphs, lists, headings and emphasis. */
 function Reply({ text, onOpen }: { text: string; onOpen: (url: string) => void }) {
   return <div className="answer-text">{parse(text).map((block, index) => {
-    if (block.kind === 'heading') return <p key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></p>;
+    if (block.kind === 'heading') return <h4 key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></h4>;
+    if (block.kind === 'rule') return <hr key={index} />;
+    if (block.kind === 'code') return <pre key={index} tabIndex={0}><code>{block.text}</code></pre>;
+    if (block.kind === 'quote') return <blockquote key={index}>{block.lines.map((line, at) => <p key={at}><Spans spans={line} onOpen={onOpen} /></p>)}</blockquote>;
+    if (block.kind === 'table') return <div key={index} className="reply-table" tabIndex={0}><table>
+      <thead><tr>{block.header.map((cell, column) => <th key={column} scope="col" style={{ textAlign: block.align[column] }}><Spans spans={cell} onOpen={onOpen} /></th>)}</tr></thead>
+      <tbody>{block.rows.map((row, at) => <tr key={at}>{row.map((cell, column) => <td key={column} style={{ textAlign: block.align[column] }}><Spans spans={cell} onOpen={onOpen} /></td>)}</tr>)}</tbody>
+    </table></div>;
     if (block.kind === 'list') {
+      // Only when every item is one, so a stray plain line keeps its bullet.
+      const named = block.items.every((item, at) => block.depths[at] || (item[0]?.bold && item.length > 1));
       const items = block.items.map((item, at) => {
+        const inset = block.depths[at] ? { marginLeft: block.depths[at] * 16 } : undefined;
         // "**Tea and a book:** the one on your nightstand" reads as a name and a line.
         const [first, ...rest] = item;
-        if (first?.bold && rest.length) {
+        if (named && first?.bold && rest.length) {
           const tail = [{ ...rest[0], text: rest[0].text.replace(/^\s*[:\-–—]\s*/, '') }, ...rest.slice(1)];
-          return <li key={at} className="reply-row"><strong>{first.text.replace(/[:\s]+$/, '')}</strong><span><Spans spans={tail} onOpen={onOpen} /></span></li>;
+          return <li key={at} className="reply-row" style={inset}><Spans spans={[{ ...first, text: first.text.replace(/[:\s]+$/, '') }]} onOpen={onOpen} /><span><Spans spans={tail} onOpen={onOpen} /></span></li>;
         }
-        return <li key={at}><Spans spans={item} onOpen={onOpen} /></li>;
+        return <li key={at} style={inset}><Spans spans={item} onOpen={onOpen} /></li>;
       });
       return block.ordered ? <ol key={index} start={block.start}>{items}</ol> : <ul key={index}>{items}</ul>;
     }

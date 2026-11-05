@@ -4,7 +4,7 @@
 //! Spotify can't search from AppleScript, so Buntini opens its search and presses play on
 //! the best match through the macOS accessibility API, then reports what Spotify is
 //! actually playing.
-use super::{from_verb, without_politeness, Context, Outcome};
+use super::{from_verb, one_of, without_politeness, Context, Outcome};
 use crate::privacy::Share;
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +27,7 @@ const COMPLAINTS: &[&str] = &[
     "didnt play",
     "not playing",
     "isn't playing",
+    "isnt playing",
     "wrong song",
     "wrong track",
     "wrong version",
@@ -39,6 +40,7 @@ const COMPLAINTS: &[&str] = &[
     "not that one",
     "not this one",
     "that's not it",
+    "thats not it",
     "different version",
 ];
 
@@ -112,18 +114,15 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
         .strip_suffix(" right now")
         .or_else(|| question.strip_suffix(" now"))
         .unwrap_or(question);
-    if [
+    if one_of(question, &[
         "what's playing",
-        "whats playing",
         "what is playing",
         "what song is this",
         "what's this song",
         "which song is this",
         "what song is playing",
         "what am i listening to",
-    ]
-    .contains(&question)
-    {
+    ]) {
         return command("now_playing", None);
     }
     if [

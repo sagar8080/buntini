@@ -35,6 +35,9 @@ pub struct TaskContract {
     /// request's words alone can't establish.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub direct_tool: String,
+    /// Which of the user's own apps the model said this question is about. None until asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub own_sources: Option<Vec<String>>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -117,22 +120,46 @@ fn dates(text: &str) -> Vec<String> {
         .map(str::to_owned)
         .collect()
 }
-fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> {
+/// The days a clause names, for calendar reads. Rust resolves them from the task's date, so
+/// a model never has to work out which date "Friday" is.
+pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> {
+    use chrono::Datelike;
+    const WEEKDAYS: [&str; 7] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    let text = text.to_lowercase();
+    let words = tokens(&text);
     let mut result = Vec::new();
-    for word in tokens(text) {
+    let mut add = |day: chrono::NaiveDate| {
+        let day = day.format("%Y-%m-%d").to_string();
+        if !result.contains(&day) {
+            result.push(day);
+        }
+    };
+    let span = |start: i64, days: i64| (0..days).map(move |ahead| base + chrono::Duration::days(start + ahead));
+    let from_monday = i64::from(base.weekday().num_days_from_monday());
+    let pair = |first: &str, second: &str| words.windows(2).any(|pair| pair[0] == first && pair[1] == second);
+    if pair("next", "week") {
+        span(7 - from_monday, 7).for_each(&mut add);
+    } else if pair("this", "week") || pair("my", "week") {
+        span(0, 7 - from_monday).for_each(&mut add);
+    } else if words.iter().any(|word| *word == "weekend") {
+        let saturday = (5 - from_monday).rem_euclid(7);
+        let start = if from_monday == 6 { 0 } else { saturday };
+        span(start, if from_monday == 6 { 1 } else { 2 }).for_each(&mut add);
+    }
+    if ["morning", "afternoon", "evening"].iter().any(|part| pair("this", part)) {
+        add(base);
+    }
+    for word in &words {
         let day = chrono::NaiveDate::parse_from_str(word, "%Y-%m-%d")
             .ok()
-            .or_else(|| match word {
-                "today" => Some(base),
-                "tomorrow" => base.succ_opt(),
+            .or_else(|| match *word {
                 "yesterday" => base.pred_opt(),
+                "today" | "tonight" | "tomorrow" => crate::edit_targets::day(word, base),
+                word if WEEKDAYS.contains(&word) => crate::edit_targets::day(word, base),
                 _ => None,
             });
         if let Some(day) = day {
-            let day = day.format("%Y-%m-%d").to_string();
-            if !result.contains(&day) {
-                result.push(day);
-            }
+            add(day);
         }
     }
     result
@@ -277,6 +304,11 @@ fn clauses(goal: &str) -> Vec<String> {
 /// someone said, wherever it was, rather than reading one app now.
 fn recalls(clause: &str) -> bool {
     let text = clause.to_lowercase();
+    // What someone wrote in an email is in Mail, not in what Buntini remembers.
+    let about_mail = [" write back", " wrote back", " reply", " replied", " respond", " email", " mail", " inbox"].iter().any(|word| text.contains(word));
+    if about_mail {
+        return false;
+    }
     let said = [" say", " said", " tell me", " told me", " mention", " write", " wrote", " send me", " sent me", " ask", " asked"];
     ((text.starts_with("what did ") || text.starts_with("when did ") || text.starts_with("did ") || text.starts_with("where did "))
         && said.iter().any(|word| text.contains(word)))
@@ -284,6 +316,33 @@ fn recalls(clause: &str) -> bool {
             .iter()
             .any(|lead| text.starts_with(lead))
 }
+/// Whether a clause is about what's in the user's own mail, calendar, reminders or notes,
+/// so an answer has to come from reading them. This goes by what the clause talks about
+/// rather than how it starts: nobody should lose a read to "whats" or "hows" or "got any".
+/// What doesn't ask what's in there: how-tos, requests to write or do something, things
+/// said about the app itself, and "don't".
+fn about_own_source(clause: &str, words: &[&str]) -> bool {
+    const SOURCES: [&str; 11] = ["mail", "email", "emails", "inbox", "calendar", "schedule", "meetings", "appointments", "events", "reminders", "notes"];
+    let own = words.contains(&"my") || words.iter().any(|word| ["any", "anything", "unread", "got"].contains(word)) || (words.contains(&"i") && words.contains(&"have"));
+    if !own || !words.iter().any(|word| SOURCES.contains(word)) {
+        return false;
+    }
+    let first = words.first().copied().unwrap_or_default();
+    let how_to = (first == "how" && !matches!(words.get(1).copied(), Some("s" | "is" | "are" | "many" | "much" | "does")))
+        || ["why", "should", "explain", "define", "if", "whether"].contains(&first)
+        || (["can", "could", "would"].contains(&first) && words.get(1) == Some(&"i"));
+    let does_something = [
+        "write", "draft", "send", "email", "mail", "reply", "respond", "forward", "compose", "add", "create", "schedule", "make", "move", "delete", "remove", "cancel", "set", "put", "call", "text", "remind",
+        "remember", "open", "close", "play", "translate", "rewrite", "quit", "go", "don", "dont", "never", "stop", "note",
+    ]
+    .contains(&first)
+        || !crate::completion::requested_actions(clause).0.is_empty();
+    let about_the_app = words.iter().any(|word| {
+        ["app", "apps", "account", "accounts", "password", "broken", "crash", "crashes", "crashing", "setting", "settings", "setup", "sync", "syncing", "hacked", "address"].contains(word)
+    });
+    !how_to && !does_something && !about_the_app
+}
+
 pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     // Online topic words such as "calendar apps" do not authorize local reads.
     if crate::search_intent::explicit_request(clause).is_some() {
@@ -291,6 +350,15 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     }
     if recalls(clause) {
         return vec!["search_memory"];
+    }
+    if crate::recipes::asks_about_inbox(clause) {
+        return vec!["read_mail"];
+    }
+    if crate::recipes::asks_about_calendar(clause) {
+        return vec!["read_calendar"];
+    }
+    if crate::recipes::asks_about_reminders(clause) {
+        return vec!["read_reminders"];
     }
     let words = tokens(clause);
     let document = words.iter().flat_map(|word| word.split('-')).any(|word|["lease","leases","quote","quotes","warranty","warranties","memo","agenda","itinerary","itineraries","document","documents","plan","plans","travel","policy","policies"].contains(&word));
@@ -311,7 +379,7 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     });
     let question = words
         .first()
-        .is_some_and(|word| ["what", "when", "which", "where"].contains(word))
+        .is_some_and(|word| ["what", "whats", "when", "whens", "which", "where", "wheres"].contains(word))
         && has(&["my", "this", "these", "current", "today", "tomorrow"]);
     // "Which shortcuts do I have?" lists the user's own shortcuts.
     if has(&["shortcuts"])
@@ -321,7 +389,7 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     {
         return vec!["list_shortcuts"];
     }
-    if !explicit && !question {
+    if !explicit && !question && !about_own_source(clause, &words) {
         return vec![];
     }
     // Pasted text is already present; a transformation does not authorize an
@@ -348,7 +416,7 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
         vec!["search_files"]
     } else if person && !elsewhere {
         vec!["find_contact"]
-    } else if has(&["calendar", "event", "events", "appointments", "meetings"]) {
+    } else if has(&["calendar", "schedule", "event", "events", "appointments", "meetings"]) {
         vec!["read_calendar"]
     } else if has(&["mail", "email", "emails", "inbox"]) {
         vec!["read_mail"]
@@ -2676,6 +2744,28 @@ mod tests {
             assert_eq!(read_tools(person), vec!["find_contact"], "{person}");
         }
         assert_eq!(read_tools("find the email from ana"), vec!["read_mail"]);
+        for mail in [
+            "whats on my mail", "what's in my inbox", "any new emails", "do i have any new mail", "hows my inbox", "how's my inbox looking", "got any mail", "tell me about my email",
+            "is there anything from ana in my mail", "do my emails need replies", "how many emails do i have", "has ana replied in my inbox", "anything urgent in my email",
+            "give me my inbox", "i wonder what's in my mail", "so what about my email",
+        ] {
+            assert_eq!(read_tools(mail), vec!["read_mail"], "{mail}");
+        }
+        for day in ["whats on my calendar", "hows my schedule looking", "do i have any meetings", "am i free on my calendar", "any appointments today", "got any events tomorrow"] {
+            assert_eq!(read_tools(day), vec!["read_calendar"], "{day}");
+        }
+        assert_eq!(read_tools("did ana write in my mail"), vec!["read_mail"], "what she wrote is in Mail");
+        assert_eq!(read_tools("what did ana say about the lease"), vec!["search_memory"], "a recall stays a recall");
+        assert_eq!(read_tools("hows my reminders"), vec!["read_reminders"]);
+        assert_eq!(read_tools("do i have any reminders"), vec!["read_reminders"]);
+        assert_eq!(read_tools("got anything in my notes"), vec!["find_notes"]);
+        for not_a_read in [
+            "how do i add an email account", "any good email apps", "what is an inbox", "my mail app is broken", "why is my calendar app so slow", "should i use my work email", "email my boss", "draft an email to my boss",
+            "reply to my boss", "add a meeting to my calendar", "schedule a meeting with ana", "put this on my calendar", "don't check my mail", "remember that my inbox is messy", "open my mail", "can i sync my calendar",
+            "write a poem about my inbox", "how much does an email cost",
+        ] {
+            assert!(read_tools(not_a_read).is_empty(), "{not_a_read}: {:?}", read_tools(not_a_read));
+        }
         // A source the user names wins over the words "phone number" or "contact".
         assert_eq!(read_tools("search my inbox for the plumber's phone number"), vec!["read_mail"]);
         assert_eq!(read_tools("check my email for ana's new email address"), vec!["read_mail"]);

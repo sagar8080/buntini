@@ -994,6 +994,113 @@ pub(crate) fn sentences(text: &str) -> Vec<&str> {
     parts.into_iter().filter(|part| !part.trim().is_empty()).collect()
 }
 
+/// A question about the topic in general, or text the user supplied: an answer can say
+/// "you have" or "there are" without it being about their own apps.
+fn may_speak_generally(prompt: &str) -> bool {
+    let asked = prompt.to_lowercase().replace('’', "'");
+    let words: Vec<&str> = asked.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).collect();
+    ["how", "why", "explain", "define", "should"].contains(words.first().unwrap_or(&""))
+        || asked.starts_with("what is a ")
+        || asked.starts_with("what is an ")
+        || asked.starts_with("what does ")
+        || asked.chars().count() > 200
+        || asked.contains(':')
+        || words.iter().any(|word| {
+            ["this", "screen", "selected", "selection", "draft", "write", "compose", "rewrite", "translate", "example", "sample", "template", "story", "pretend", "imagine"].contains(word)
+        })
+}
+
+/// A sentence that states what's on the user's calendar or reminders with no clock time:
+/// "You have a dentist visit tomorrow." Nothing this turn read anything, so it can't know.
+fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
+    const NOUNS: [&str; 10] = ["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments", "reminder", "reminders"];
+    const DAYS: [&str; 11] = ["today", "tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend"];
+    let text = sentence.to_lowercase().replace('’', "'");
+    let asked = prompt.to_lowercase().replace('’', "'");
+    let in_text = |set: &[&str]| text.split(|c: char| !c.is_alphanumeric()).any(|word| set.contains(&word));
+    let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once ", "want me", "would you", "i can "].iter().any(|hedge| text.contains(hedge));
+    if hedged {
+        return false;
+    }
+    let says_you_have = ["you have ", "you've got ", "you got "].iter().any(|claim| text.contains(claim));
+    let there_is = ["there's ", "there is ", "there are ", "coming up", "on your calendar", "on your schedule", "is due", "are due"].iter().any(|claim| text.contains(claim));
+    // A day the user brought up themselves ("I have a dentist visit tomorrow") can be repeated.
+    let day_is_new = DAYS.iter().any(|day| text.split(|c: char| !c.is_alphanumeric()).any(|word| word == *day) && !asked.contains(day));
+    (in_text(&NOUNS) && (says_you_have || there_is)) || (says_you_have && day_is_new)
+}
+
+/// When an answer built on a Mail read names something the read doesn't hold, the read
+/// itself, in place of the answer. The model only saw that read, so a sender or subject
+/// outside it is made up, and so is a count above what it found. The read can't lie;
+/// the sentence around a made-up name can't be trusted, so it isn't repaired.
+fn mail_read_instead(prompt: &str, answer: &str, steps: &[Step]) -> Option<String> {
+    const NOT_NAMES: &[&str] = &[
+        "your", "the", "a", "an", "my", "any", "anything", "these", "those", "this", "that", "it", "them", "each", "all", "some", "one", "more", "what", "which", "how", "who", "whom", "him",
+        "her", "you", "me", "us", "there", "here", "their", "his", "its", "our", "today", "yesterday", "now", "last", "past", "recent", "earlier", "someone", "people", "emails",
+        "email", "mail", "inbox", "day", "days", "week", "weeks", "month", "months", "several", "many",
+    ];
+    const SMALL: [&str; 13] = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    if steps.iter().any(|step| step.effect) {
+        return None;
+    }
+    let read = steps.iter().rev().find(|step| step.tool == "read_mail" && step.state == "succeeded")?.evidence.as_ref()?;
+    let shown = read["text"].as_str().map(str::trim).filter(|text| !text.is_empty())?;
+    let mut known = prompt.to_lowercase();
+    for evidence in steps.iter().filter(|step| step.state == "succeeded").filter_map(|step| step.evidence.as_ref()) {
+        known += " ";
+        known += &evidence["text"].as_str().unwrap_or_default().to_lowercase();
+        for record in evidence["records"].as_array().into_iter().flatten() {
+            for field in ["sender", "subject", "excerpt"] {
+                known += " ";
+                known += &record[field].as_str().unwrap_or_default().to_lowercase();
+            }
+        }
+    }
+    let lower = answer.to_lowercase().replace('’', "'");
+    let words: Vec<&str> = lower.split_whitespace().map(|word| word.trim_matches(|c: char| !c.is_alphanumeric())).filter(|word| !word.is_empty()).collect();
+    let backed = |word: &str| {
+        let stem: String = word.chars().take(4).collect();
+        known.contains(&stem)
+    };
+    let names_outside = words.iter().enumerate().filter(|(_, word)| ["from", "about"].contains(word)).any(|(at, _)| {
+        words[at + 1..].iter().take(3).find(|word| !NOT_NAMES.contains(word) && !SMALL.contains(word)).is_some_and(|name| {
+            name.chars().count() >= 3 && !name.chars().all(|c| c.is_ascii_digit()) && !backed(name)
+        })
+    });
+    let found = read["total"].as_u64().unwrap_or(0).max(read["count"].as_u64().unwrap_or(0));
+    let too_many = words.windows(3).any(|window| {
+        let mail = |word: &str| ["email", "emails", "message", "messages"].contains(&word);
+        let counted = mail(window[1]) || (["new", "unread"].contains(&window[1]) && mail(window[2]));
+        let number = window[0].parse::<u64>().ok().or_else(|| SMALL.iter().position(|small| *small == window[0]).map(|at| at as u64));
+        counted && number.is_some_and(|number| number > found)
+    });
+    (names_outside || too_many).then(|| shown.to_string())
+}
+
+/// Whether an answer says what's in the user's inbox when nothing this turn read anything.
+/// On a real Mac the on-device model answered "whats on my mail" with a made-up message
+/// from the user's boss, with no clock time for the check below to catch. The whole answer
+/// goes, since the sentences around such a claim are made up too. Text the user supplied,
+/// and questions about email in general, can say these things.
+fn invents_inbox(prompt: &str, answer: &str, steps: &[Step]) -> bool {
+    if steps.iter().any(|step| step.state == "succeeded" && !step.effect) || may_speak_generally(prompt) {
+        return false;
+    }
+    sentences(answer).into_iter().any(|sentence| {
+        let text = sentence.to_lowercase().replace('’', "'");
+        let about_mail = text
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| ["email", "emails", "mail", "inbox", "message", "messages"].contains(&word));
+        let states = ["you have ", "you've got ", "you got ", "there's ", "there is ", "there are ", "your inbox has", "your inbox is", "your inbox contains", "waiting", "new message from", "new email from", "email from your", "message from your"]
+            .iter()
+            .any(|claim| text.contains(claim));
+        let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once "]
+            .iter()
+            .any(|hedge| text.contains(hedge));
+        about_mail && states && !hedged
+    })
+}
+
 /// An answer that states what is in the user's calendar, reminders or email at a given
 /// time, when nothing this turn read that app, keeps only what it can stand behind. The
 /// sentences with those claims go; what is left (a greeting, a reply to what was asked)
@@ -1001,6 +1108,12 @@ pub(crate) fn sentences(text: &str) -> Vec<&str> {
 /// and otherwise just answers the person. Times the user wrote themselves don't count,
 /// nor times a file or note read this turn states ("the repair appointment is 14:20").
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    if invents_inbox(prompt, answer, steps) {
+        return "I haven’t looked at your email, so I won’t guess. Ask me “what’s in my inbox?” and I’ll check.".into();
+    }
+    if let Some(read) = mail_read_instead(prompt, answer, steps) {
+        return read;
+    }
     let mut asked = clock_times(prompt);
     for evidence in steps.iter().filter(|s| s.state == "succeeded" && !s.effect).filter_map(|s| s.evidence.as_ref()) {
         let mut read = evidence.as_str().unwrap_or_default().to_string();
@@ -1011,7 +1124,12 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         }
         asked.extend(clock_times(&read));
     }
-    let claims = |text: &str| clock_times(text).into_iter().any(|time| !asked.contains(&time));
+    // Without a read, a day or reminder needs no clock time to be made up.
+    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect) && !may_speak_generally(prompt);
+    let claims = |text: &str| {
+        clock_times(text).into_iter().any(|time| !asked.contains(&time))
+            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence)))
+    };
     let mentions = |text: &str, nouns: &[&str]| {
         text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
     };
@@ -1021,7 +1139,8 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         .map(|(app, nouns, _)| (*app, *nouns))
         .collect();
     let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
-    if !claims(answer) || !unsupported(answer) {
+    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence));
+    if !claims(answer) || (!unsupported(answer) && !stated) {
         return answer.to_string();
     }
     // A claim's sentence goes, and so does any sentence about an app that wasn't read
@@ -1879,6 +1998,89 @@ mod tests {
         )
         .unwrap();
         assert!(!answer.contains("booked"));
+    }
+
+    #[test]
+    fn an_inbox_nobody_read_is_never_described() {
+        // The reply a real Mac gave to "whats on my mail".
+        let invented = "Hey, Sagar!\nI can’t read your inbox directly, but I can help you with a few things:\n\n1. Quick Summary:\n\n* You have a few emails waiting.\n* Some are from friends, and others are from work.\n* There’s a new message from your boss about a project deadline.";
+        for prompt in ["whats on my mail", "More like these"] {
+            let answer = grounded_personal_answer(prompt, invented, &[]);
+            assert!(answer.starts_with("I haven’t looked at your email"), "{prompt}: {answer}");
+        }
+        let mut gate = StreamGate::new("More like these", &[]);
+        let shown = gate.push("Sure. You have a few emails waiting. Some are from work. ").unwrap_or_default();
+        assert_eq!(shown.trim(), "Sure.", "the claim never reaches the screen");
+
+        let read = Step { id: "1".into(), tool: "read_mail".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None, evidence: Some(serde_json::json!({"text":"1. From Ana"})) };
+        assert_eq!(grounded_personal_answer("whats on my mail", "You have a new email from Ana.", &[read]), "You have a new email from Ana.");
+        for (prompt, answer) in [
+            ("how do I filter unread mail", "There are two ways to filter unread messages."),
+            ("what is an inbox", "There is one inbox for your mail."),
+            ("summarise this: you have a new email from Ana", "You have a new email from Ana."),
+            ("hi", "Hi! I can’t read your inbox yet."),
+            ("hi", "If you have unread email, I can help."),
+            ("what's the capital of France", "Paris."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, answer, &[]), answer, "{prompt}");
+        }
+    }
+
+    fn mail_read() -> Step {
+        Step {
+            id: "1".into(), tool: "read_mail".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None,
+            evidence: Some(serde_json::json!({"text":"1. From Ana Silva · Wed 09:00 · unread\n   Subject: Lease renewal\n   Can you sign by Friday","count":2,"total":8,"records":[
+                {"sender":"Ana Silva <ana@x.com>","subject":"Lease renewal","excerpt":"Can you sign by Friday"},{"sender":"Bob","subject":"Invoice"}]})),
+        }
+    }
+
+    #[test]
+    fn a_mail_answer_can_only_name_what_the_read_found() {
+        let read = mail_read();
+        let shown = "1. From Ana Silva · Wed 09:00 · unread\n   Subject: Lease renewal\n   Can you sign by Friday";
+        for made_up in [
+            "There’s a new message from your boss about a project deadline.",
+            "Some are from friends, and others are from work.",
+            "You have an email from Ana about your tax refund.",
+            "You have 20 unread emails.",
+            "You have twelve new messages.",
+        ] {
+            assert_eq!(grounded_personal_answer("anything urgent in my mail", made_up, std::slice::from_ref(&read)), shown, "{made_up}");
+        }
+        for fine in [
+            "You have an email from Ana about the lease renewal.",
+            "Bob sent an invoice, and Ana needs a signature by Friday.",
+            "Nothing urgent. There are 8 emails, and I can tell you more about any of them.",
+            "You have 2 emails from the last two weeks.",
+        ] {
+            assert_eq!(grounded_personal_answer("anything urgent in my mail", fine, std::slice::from_ref(&read)), fine);
+        }
+        assert_eq!(grounded_personal_answer("anything from Sam in my mail", "Nothing from Sam.", std::slice::from_ref(&read)), "Nothing from Sam.");
+    }
+
+    #[test]
+    fn a_day_or_reminder_nobody_read_is_not_stated_even_without_a_time() {
+        for (prompt, made_up) in [
+            ("More like these", "You have a dentist visit tomorrow."),
+            ("More like these", "There’s a meeting with Ana on your calendar."),
+            ("More like these", "You have a reminder to call mum."),
+            ("hm", "You’ve got two appointments on Friday."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, made_up, &[]), "I’m here. What can I do for you?", "{made_up}");
+        }
+        assert_eq!(grounded_personal_answer("hm", "Hi Sagar! You have a dentist visit tomorrow. Anything else?", &[]), "Hi Sagar! Anything else?");
+        let answer = grounded_personal_answer("anything on my calendar tomorrow?", "You have a dentist visit tomorrow.", &[]);
+        assert_eq!(answer, "You have a dentist visit tomorrow.", "the day was asked about, and the read outcome handles this one");
+        for (prompt, fine) in [
+            ("I have a dentist visit tomorrow, what should I bring?", "Since you have a dentist visit tomorrow, bring your insurance card."),
+            ("how do I share a calendar", "There are two ways to share a calendar."),
+            ("hi", "Want me to check your calendar?"),
+            ("hi", "If you have a meeting tomorrow, I can help."),
+            ("what's the capital of France", "Paris."),
+            ("any tips for tomorrow", "You have plenty of time."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, fine, &[]), fine, "{prompt}");
+        }
     }
 
     #[test]

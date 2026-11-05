@@ -28,6 +28,8 @@ import { appearance, panelScale, stillMotion } from './themes.ts';
 import { greeting, invitation, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
+import { speakable } from './markdown';
+import ConnectApps from './ConnectApps';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
@@ -170,6 +172,7 @@ export default function App() {
   const playbackOverride = useRef<{ voiceId: string; rate: number } | null>(null);
   const speechQueue = useRef<SpeechQueue | null>(null);
   if (!speechQueue.current) speechQueue.current = new SpeechQueue({
+    spoken: speakable,
     play: text => playbackOverride.current ? command('preview_voice', { ...playbackOverride.current, text }) : command('speak', { text }),
     stop: () => command('stop_speaking'),
     onActive: active => { speechActive.current = active; setSpeaking(active); endpointer.current?.setSpeaking(active, Date.now()); setPetState(active ? 'speaking' : recordHeld.current ? 'listening' : taskBusy.current ? 'thinking' : 'idle'); },
@@ -859,6 +862,11 @@ export default function App() {
     finally { setAllowing(false); }
   }
   const need = needs && data ? shortcutNeeds(needs, data.settings.apps) : null;
+  async function allowApp(id: string) {
+    if (!data) return;
+    const base = saver.current!.pending() ?? data.settings;
+    if (!base.apps.includes(id)) await saver.current!.saveNow({ ...base, apps: [...base.apps, id] });
+  }
   const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => { setConfirmClear(false); setNeeds(null); }, [page]);
   useEffect(() => { if (needs) document.querySelector('.welcome-allow')?.scrollIntoView({ block: 'nearest' }); }, [needs]);
@@ -898,6 +906,7 @@ export default function App() {
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}{!glance.length && <span>{invitation(new Date())}</span>}</h1>
               {glance.length > 0 && <div className="glance">{glance.map(item => <button key={item.kind} onClick={() => void submit(item.kind === 'event' ? 'What’s on my calendar today?' : 'What are my reminders?')}><i>{item.kind === 'event' ? <CalendarDays /> : <Bell />}</i><span><strong>{item.title}</strong><small>{clockTime(item.time)}{item.place ? ` · ${item.place}` : ''}</small></span></button>)}</div>}
               <div className="welcome-chips">{suggestions(new Date(), usual, data?.settings.apps ?? []).map(item => <button key={item.label} onClick={() => item.prompt ? void submit(item.prompt) : item.shortcut ? shortcut(item.shortcut) : (setMode(item.mode!), inputRef.current?.focus())}>{item.label}</button>)}</div>
+              {data && <ConnectApps allowed={data.settings.apps} disabled={busy || pending} onAllow={allowApp} onConnected={() => void refresh().catch(e => setError(errorMessage(e)))} onPane={pane => void command('open_apple_settings', { pane }).catch(e => setError(errorMessage(e)))} onError={setError} />}
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}

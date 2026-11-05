@@ -3,7 +3,7 @@
 import { appleStatus, cloudProviders } from './brain.ts';
 import { sharedSentence } from './cloudShares.ts';
 import { coats } from './petOptions.ts';
-import type { CatCoat, CloudProvider, Diagnostics, ModelBackend, Settings } from './types';
+import type { AppConnection, AppStatus, CatCoat, CloudProvider, Diagnostics, ModelBackend, Settings } from './types';
 
 // Online lookups need no setup (browser research works without a key), so setup asks
 // only what Buntini can't decide for itself: names, a brain and whether it may roam.
@@ -136,4 +136,23 @@ const shortcutApps: Record<Shortcut, { reads: string[]; apps: string[]; ask: str
 export function shortcutNeeds(shortcut: Shortcut, allowed: string[]): { apps: string[]; ask: string; allow: string } | null {
   const { reads, apps, ask, allow } = shortcutApps[shortcut];
   return reads.some(app => allowed.includes(app)) ? null : { apps, ask, allow };
+}
+
+/** The apps the connect card offers. */
+const CONNECTABLE = ['mail', 'calendar'];
+export type ConnectRow = AppStatus & { state: AppConnection | 'off' };
+/** The card's rows. An app allowed before needs no second look; `found` is what connecting
+ * just found, and null is a try that failed, which can be tried again. */
+export function connectRows(apps: AppStatus[], allowed: string[], found: Record<string, AppConnection | null>): ConnectRow[] {
+  return CONNECTABLE.flatMap(id => {
+    const app = apps.find(item => item.id === id);
+    if (!app?.installed) return [];
+    const known = found[id];
+    return [{ ...app, state: known === null ? 'off' as const : known ?? (allowed.includes(id) ? 'ready' as const : 'off' as const) }];
+  });
+}
+/** Where System Settings can fix a row, if anywhere. */
+export function connectPane(row: ConnectRow) {
+  if (row.state === 'noAccount') return 'accounts';
+  return row.state === 'denied' ? (row.id === 'mail' ? 'automation' : 'calendars') : null;
 }

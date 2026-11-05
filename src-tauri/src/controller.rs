@@ -476,6 +476,9 @@ pub async fn open_apple_settings(pane: String) -> Result<(), String> {
         "language" => "x-apple.systempreferences:com.apple.Localization-Settings.extension",
         "storage" => "x-apple.systempreferences:com.apple.settings.Storage",
         "battery" => "x-apple.systempreferences:com.apple.Battery-Settings.extension",
+        "accounts" => "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension",
+        "automation" => "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation",
+        "calendars" => "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars",
         _ => return Err("Unknown System Settings pane.".into()),
     };
     let status = tokio::process::Command::new("/usr/bin/open").arg(url).status().await.map_err(|e| e.to_string())?;
@@ -3452,6 +3455,47 @@ where
             list.extend(crate::mcp::definitions(&servers, &flow.contract.connector_tools));
         }
     }
+    // A small model on this Mac doesn't reliably route to a read, and answers without it
+    // ("No, Ana did not write back"). So it's asked one narrow thing first: which apps?
+    if flow.steps.is_empty() && flow.contract.own_sources.is_none() {
+        flow.refresh_contract();
+        let earlier = flow.messages.iter().rev().filter(|message| message["role"] == "user").nth(1).and_then(|message| message["content"].as_str());
+        let (mut sources, asked) = crate::personal_answer::source_requests(&flow.contract.current_request, earlier, &flow.contract);
+        if locality == privacy::Locality::OnDevice {
+            for request in asked {
+                phase(channel, &task.id, "thinking");
+                let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
+                if cancel.load(Ordering::Relaxed) {
+                    return Err("Task cancelled.".into());
+                }
+                if let Some(Some(source)) = turn.ok().and_then(|turn| crate::personal_answer::parse_source(&turn.text)) {
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                }
+            }
+        }
+        // It's in the app, not in what Buntini remembers. With the app off, memory still is.
+        let remembers = flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.accepted_tools.iter().all(|tool| tool == "search_memory"));
+        if remembers {
+            sources.retain(|source| offered.contains(source));
+        }
+        if !sources.is_empty() {
+            flow.contract.outcomes.retain(|outcome| !(outcome.kind == "read" && outcome.accepted_tools.iter().all(|tool| tool == "search_memory")));
+        }
+        flow.contract.own_sources = Some(sources);
+    }
+    // Nothing can do a read this needs, so say what would change that rather than ask the model.
+    if flow.steps.is_empty() {
+        let required = flow.contract.outcomes.iter().filter(|outcome| outcome.kind == "read").map(|outcome| outcome.accepted_tools.clone());
+        let named = flow.contract.own_sources.iter().flatten().map(|source| vec![source.clone()]);
+        for tools in required.chain(named) {
+            let tools: Vec<&str> = tools.iter().map(String::as_str).collect();
+            if let Some(message) = crate::personal_answer::unavailable(&tools, &offered, |app| crate::apps::allowed(settings, app)) {
+                return Err(message.into());
+            }
+        }
+    }
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err("Task cancelled.".into());
@@ -3485,6 +3529,55 @@ where
             state.store.lock().unwrap().checkpoint(flow, task)?;
             emit(channel, "delta", &task.id, Some(task.answer.clone()));
             return Ok(());
+        }
+        // Mail, Calendar and Reminders: Rust writes the answer from the records. The model at
+        // most points at the ones that answer the question, and nothing it replies is shown.
+        // A search of memory that found nothing proves nothing. On a real Mac the model
+        // turned one into "Sam did not ask about lunch".
+        let finished: Vec<&crate::workflows::Step> = flow.steps.iter().filter(|step| step.state == "succeeded").collect();
+        if !finished.is_empty() && finished.iter().all(|step| step.tool == "search_memory" && step.evidence.as_ref().is_some_and(crate::personal_answer::nothing_remembered)) {
+            task.answer = "I don’t have anything on that.".into();
+            flow.contract.mark_answer_complete();
+            flow.state = "completed".into();
+            task.state = "completed".into();
+            state.store.lock().unwrap().checkpoint(flow, task)?;
+            emit(channel, "delta", &task.id, Some(task.answer.clone()));
+            return Ok(());
+        }
+        let today = chrono::NaiveDate::parse_from_str(&flow.contract.interpretation_date, "%Y-%m-%d").unwrap_or_else(|_| chrono::Local::now().date_naive());
+        let own_read = crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today);
+        if own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
+            if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
+                let budget = state.models.budget(settings).max_tokens;
+                let now = chrono::Local::now().naive_local();
+                let answer = match crate::personal_answer::direct_answer(&flow.contract.current_request, &reads, now) {
+                    Some(answer) => answer,
+                    None => {
+                        let moment = now.format("%A %Y-%m-%d %H:%M").to_string();
+                        match crate::personal_answer::pick_request(&flow.contract.current_request, &reads, &moment, budget) {
+                            None => crate::personal_answer::everything(&reads),
+                            Some(request) => {
+                                phase(channel, &task.id, "thinking");
+                                let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
+                                if cancel.load(Ordering::Relaxed) {
+                                    return Err("Task cancelled.".into());
+                                }
+                                match turn.ok().and_then(|turn| crate::personal_answer::parse_pick(&turn.text, &reads)) {
+                                    Some(picks) => crate::personal_answer::picked(&reads, &picks),
+                                    None => crate::personal_answer::everything(&reads),
+                                }
+                            }
+                        }
+                    }
+                };
+                task.answer = answer;
+                flow.contract.mark_answer_complete();
+                flow.state = "completed".into();
+                task.state = "completed".into();
+                state.store.lock().unwrap().checkpoint(flow, task)?;
+                emit(channel, "delta", &task.id, Some(task.answer.clone()));
+                return Ok(());
+            }
         }
         // Initial conversational history can be discarded before tool evidence.
         // Keep complete assistant/tool pairs and the original goal.
@@ -3580,6 +3673,7 @@ where
         let stream_answer = !flow.steps.iter().any(|step| step.effect)
             && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete");
         let mut gate = crate::completion::StreamGate::new(&flow.contract.current_request, &flow.steps);
+        let rust_read = own_read.is_some();
         let patched = bound_task_fields(flow)?;
         let clarified = flow.contract.next_outcome().is_some_and(|o| {
             flow.contract
@@ -3587,7 +3681,9 @@ where
                 .iter()
                 .any(|c| c.outcome_id.as_deref() == Some(&o.id) && c.source == "user_clarification")
         });
-        let bound = if patched.is_some() {
+        let bound = if let Some((tool, arguments)) = own_read {
+            Some(crate::planning::BoundAction { tool, arguments, source: json!({"kind":"user_request"}) })
+        } else if patched.is_some() {
             patched
         } else if let Some(query) = flow
             .contract
@@ -3667,8 +3763,9 @@ where
         let turn = if let Some(bound) = &bound {
             // Bind literal user fields or calculate from typed source timestamps.
             // Both enter the usual permission, approval and receipt path.
-            flow.contract
-                .validate_proposal(bound.tool, &bound.arguments, &flow.steps)?;
+            if !rust_read {
+                flow.contract.validate_proposal(bound.tool, &bound.arguments, &flow.steps)?;
+            }
             crate::worker::Turn {
                 text: String::new(),
                 tool: Some(json!({"name":bound.tool,"arguments":bound.arguments})),
@@ -3694,6 +3791,18 @@ where
         if cancel.load(Ordering::Relaxed) {
             return Err("Task cancelled.".into());
         }
+        // The request needs a read and the model answered without it. Whatever it said came
+        // from nowhere, so the read runs anyway and the model answers from that.
+        let turn = match turn.tool {
+            None => match crate::recipes::skipped_read(flow.contract.next_outcome(), &flow.steps, &definitions, &flow.contract.interpretation_date) {
+                Some((tool, arguments)) => {
+                    flow.contract.validate_proposal(tool, &arguments, &flow.steps)?;
+                    crate::worker::Turn { text: String::new(), tool: Some(json!({"name":tool,"arguments":arguments})), raw: None }
+                }
+                None => turn,
+            },
+            Some(_) => turn,
+        };
         let Some(call) = turn.tool else {
             if turn.text.trim().is_empty() {
                 return Err("The model returned an empty answer. Your progress is saved.".into());
@@ -3731,7 +3840,7 @@ where
             call["arguments"]=fields.clone();
         }
         let (name, mut args) = validate_tool(&call, &flow.mode, &task.prompt)?;
-        if !definitions
+        if !rust_read && !definitions
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == name))
         {
@@ -3754,7 +3863,9 @@ where
         } else {
             vec![]
         };
-        flow.contract.validate_proposal(&name, &args, &flow.steps)?;
+        if !rust_read {
+            flow.contract.validate_proposal(&name, &args, &flow.steps)?;
+        }
         // Looking up the person a draft is for is a convenience, not a read the user
         // asked for: if Contacts can't be read, the draft goes ahead without an address.
         let optional_read = name == "find_contact"
@@ -3949,7 +4060,8 @@ where
         let result: Result<Value, String> = if crate::apps::READ_TOOLS.contains(&name.as_str()) {
             match read_app(name.clone(), args.as_object().unwrap().clone()).await {
                 Ok(evidence) => {
-                    crate::apps::validate_evidence(&name, &args, &evidence, name == "read_calendar")
+                    // A day's read must be whole. A look ahead is the soonest events, and says so.
+                    crate::apps::validate_evidence(&name, &args, &evidence, name == "read_calendar" && args.get("until").is_none())
                         .map(|()| evidence)
                 }
                 Err(error) => Err(error),
@@ -4334,6 +4446,9 @@ mod edit_tests;
 #[cfg(test)]
 #[path = "controller_apple_live_tests.rs"]
 mod apple_live_tests;
+#[cfg(test)]
+#[path = "controller_personal_live_tests.rs"]
+mod personal_live_tests;
 
 #[cfg(test)]
 #[path = "controller_file_live_tests.rs"]

@@ -228,7 +228,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     let args = args.as_object().ok_or("Arguments must be an object.")?;
     let allowed: &[&str] = match tool {
         "read_mail" => &["query", "unread", "limit"],
-        "read_calendar" => &["day"],
+        "read_calendar" => &["day", "until"],
         "read_reminders" => &[],
         "find_notes" => &["query"],
         "find_contact" => &["name"],
@@ -274,6 +274,13 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                 return Err("Pick a day within a year of today.".into());
             }
             out.insert("day".into(), day.format("%Y-%m-%d").to_string().into());
+            if let Some(until) = text(args, "until", 10)? {
+                let until = chrono::NaiveDate::parse_from_str(&until, "%Y-%m-%d").map_err(|_| "Use a day like 2026-10-23.")?;
+                if until < day || (until - today).num_days() > 366 {
+                    return Err("Pick days within a year of today.".into());
+                }
+                out.insert("until".into(), until.format("%Y-%m-%d").to_string().into());
+            }
         }
         "find_notes" => {
             out.insert(
@@ -1516,6 +1523,15 @@ pub fn calendar_evidence(day: &str, events: &Agenda<Event>) -> Value {
     result
 }
 
+/// Several days at once, for a question that names none ("when's my dentist appointment").
+/// The soonest events, at most as many as a day's read holds.
+pub fn calendar_range_evidence(from: &str, until: &str, mut events: Agenda<Event>) -> Value {
+    events.items.truncate(40);
+    let mut result = calendar_evidence(from, &events);
+    result["scope"]["until"] = json!(until);
+    result
+}
+
 pub fn reminder_evidence(reminders: &Agenda<Reminder>) -> Value {
     let records = reminders.items.iter().enumerate().map(|(index, reminder)| {
         let date_only = reminder.due_date_only.or_else(|| (!reminder.due.is_empty()).then_some(reminder.due.len() == 10));
@@ -1554,6 +1570,9 @@ pub async fn run_evidence(
                 .get("day")
                 .and_then(Value::as_str)
                 .ok_or("A calendar read needs a date.")?;
+            if let Some(until) = args.get("until").and_then(Value::as_str) {
+                return Ok(calendar_range_evidence(day, until, events_between(helper_path, day, until).await?));
+            }
             Ok(calendar_evidence(day, &events(helper_path, day).await?))
         }
         "read_reminders" => Ok(reminder_evidence(&reminders(helper_path).await?)),
@@ -1702,6 +1721,7 @@ pub fn validate_evidence(
             if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_err()
                 || value["day"] != day
                 || scope["day"] != day
+                || scope.get("until") != args.get("until")
                 || value["events"] != value["records"]
                 || scope["calendars"] != "all_accessible"
                 || scope["limit"] != 40
@@ -2045,6 +2065,14 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Lau
     )
     .await?;
     let found = counted_rows(&output, 6, "Mail")?;
+    // With no account there's no inbox, which isn't the same as an empty one.
+    if found.total == 0 {
+        if let Ok(counted) = osascript_if(COUNT_MAIL_ACCOUNTS, "Mail", launch, &[], 40).await {
+            if matches!(mail_connection(Ok(counted)), Ok(Connection::NoAccount)) {
+                return Err("Mail has no account on this Mac yet. Add one in System Settings → Internet Accounts.".into());
+            }
+        }
+    }
     let selected = select_mail_rows(&found, unread, limit)?;
     let ids: Vec<String> = selected
         .iter()
@@ -3067,9 +3095,101 @@ pub async fn check_app(
     }
 }
 
+/// A real read's evidence, for tests: two of the eight emails an inbox holds.
+#[cfg(test)]
+pub(crate) fn sample_inbox(unread: bool) -> Value {
+    let output = "2026-11-04 10:00\tm2\tfalse\tBob\tInvoice\t102\n2026-11-04 09:00\tm1\tfalse\tAna\tLease\t101\n__buntini_summary__\t8\t2\ttrue";
+    mail_evidence("", unread, 8, counted_rows(output, 6, "Mail").unwrap(), Some("101\tCan you sign by Friday\t22")).unwrap()
+}
+
+/// An inbox as `read_mail` would find it, searched and filtered the way Mail does:
+/// (received, read, sender, subject, opening) rows, newest first.
+#[cfg(test)]
+pub(crate) fn inbox_world(query: &str, unread: bool, limit: usize, inbox: &[(&str, bool, &str, &str, &str)]) -> Value {
+    let wanted = query.to_lowercase();
+    let found: Vec<(usize, &(&str, bool, &str, &str, &str))> = inbox
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| !unread || !row.1)
+        .filter(|(_, row)| wanted.is_empty() || row.2.to_lowercase().contains(&wanted) || row.3.to_lowercase().contains(&wanted))
+        .collect();
+    let mut output: Vec<String> = found.iter().map(|(at, row)| format!("{}\tm{at}\t{}\t{}\t{}\t{at}", row.0, row.1, row.2, row.3)).collect();
+    output.push(format!("__buntini_summary__\t{0}\t{0}\ttrue", found.len()));
+    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", row.4, row.4.len())).collect();
+    mail_evidence(query, unread, limit, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some(&openings.join("\n"))).unwrap()
+}
+
+/// Where an app stands once the user has asked to connect it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Connection {
+    Ready,
+    /// Mail is allowed but has no account to read.
+    NoAccount,
+    /// macOS said no; only System Settings can change that.
+    Denied,
+}
+
+const COUNT_MAIL_ACCOUNTS: &str = "on run argv\n  tell application \"Mail\" to return count of accounts\nend run\n";
+
+fn mail_connection(counted: Result<String, String>) -> Result<Connection, String> {
+    match counted {
+        Ok(count) => match count.trim().parse::<u32>() {
+            Ok(0) => Ok(Connection::NoAccount),
+            Ok(_) => Ok(Connection::Ready),
+            Err(_) => Err("Mail didn’t say which accounts it has. Try again.".into()),
+        },
+        // errAEEventNotPermitted: the Automation switch for Mail is off.
+        Err(error) if error.contains("-1743") || error.contains("Not authorized") => Ok(Connection::Denied),
+        Err(error) => Err(error),
+    }
+}
+
+fn calendar_connection(read: Result<(), String>) -> Result<Connection, String> {
+    match read {
+        Ok(()) => Ok(Connection::Ready),
+        Err(error) if error.starts_with("macOS hasn’t allowed") => Ok(Connection::Denied),
+        Err(error) => Err(error),
+    }
+}
+
+/// Connects Mail or Calendar now, so macOS asks while the user is looking at the card
+/// rather than in the middle of a later request. Connecting Mail may open it.
+#[tauri::command]
+pub async fn connect_app(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<Connection, String> {
+    match id.as_str() {
+        // Long enough to answer the macOS prompt.
+        "mail" => mail_connection(osascript(COUNT_MAIL_ACCOUNTS, &[], 90).await),
+        "calendar" => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            calendar_connection(events(state.models.apple_helper(), &today).await.map(|_| ()))
+        }
+        _ => Err("That app can’t be connected here.".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connecting_mail_tells_no_account_and_refusal_apart_from_a_failure() {
+        assert_eq!(mail_connection(Ok("2\n".into())), Ok(Connection::Ready));
+        assert_eq!(mail_connection(Ok("0".into())), Ok(Connection::NoAccount));
+        assert!(mail_connection(Ok("many".into())).is_err(), "never guessed");
+        assert_eq!(mail_connection(Err("execution error: Not authorized to send Apple events to Mail. (-1743)".into())), Ok(Connection::Denied));
+        assert_eq!(mail_connection(Err("That took too long".into())), Err("That took too long".into()));
+    }
+
+    #[test]
+    fn connecting_calendar_tells_refusal_apart_from_a_failure() {
+        assert_eq!(calendar_connection(Ok(())), Ok(Connection::Ready));
+        assert_eq!(calendar_connection(Err("macOS hasn’t allowed Buntini to read that. Allow it in System Settings.".into())), Ok(Connection::Denied));
+        assert_eq!(calendar_connection(Err("Calendar didn’t answer in time.".into())), Err("Calendar didn’t answer in time.".into()));
+    }
 
     #[test]
     fn unreplied_mail_rows_are_typed_and_sorted_newest_first() {

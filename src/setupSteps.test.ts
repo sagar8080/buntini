@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { applyAnswers, blocker, initialAnswers, message, next, previous, questions, reply, shortcutNeeds, steps } from './setupSteps.ts';
+import { applyAnswers, blocker, connectPane, connectRows, initialAnswers, message, next, previous, questions, reply, shortcutNeeds, steps } from './setupSteps.ts';
 import type { Diagnostics, Settings } from './types';
 
 const settings = {
@@ -112,4 +112,20 @@ test('setup follows the rule: Apple Intelligence, then the ChatGPT plan, then th
   const local = { ...start('deviceNotEligible', 'none'), backend: 'mlx' as const };
   assert.match(blocker('brain', local, plan('deviceNotEligible', 'none')), /Finish setting up/);
   assert.equal(blocker('brain', { ...local, localStarted: true }, plan('deviceNotEligible', 'none')), '', 'setup needn’t wait for a download');
+});
+
+test('the connect card shows where Mail and Calendar stand, and what can fix them', () => {
+  const app = (id: string, installed = true) => ({ id, name: id, can: [], installed, allowed: false });
+  const apps = [app('mail'), app('calendar'), app('notes')];
+  const states = (allowed: string[], found = {}, list = apps) => connectRows(list, allowed, found).map(row => [row.id, row.state]);
+  assert.deepEqual(states([]), [['mail', 'off'], ['calendar', 'off']], 'only these two, whatever else exists');
+  assert.deepEqual(states(['calendar', 'notes']), [['mail', 'off'], ['calendar', 'ready']]);
+  assert.deepEqual(states(['mail'], { mail: 'noAccount' }), [['mail', 'noAccount'], ['calendar', 'off']], 'allowed is not the same as working');
+  assert.deepEqual(states(['mail'], { mail: null }), [['mail', 'off'], ['calendar', 'off']], 'a failed try can be tried again');
+  assert.deepEqual(states([], {}, [app('mail', false), app('calendar')]), [['calendar', 'off']]);
+  const pane = (id: string, found: 'noAccount' | 'denied' | 'ready') => connectPane(connectRows(apps, [id], { [id]: found }).find(row => row.id === id)!);
+  assert.equal(pane('mail', 'noAccount'), 'accounts');
+  assert.equal(pane('mail', 'denied'), 'automation');
+  assert.equal(pane('calendar', 'denied'), 'calendars');
+  assert.equal(pane('mail', 'ready'), null);
 });

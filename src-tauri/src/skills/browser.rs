@@ -3,7 +3,7 @@
 //! you're on so Buntini can summarise it or answer from it. Pages are read from the browser
 //! itself (Safari's own scripting, or the accessibility API for Chrome, Brave, Edge and
 //! Arc), never fetched again online.
-use super::{from_verb, osascript, without_politeness, Context, Outcome};
+use super::{from_verb, one_of, osascript, without_politeness, Context, Outcome};
 use crate::privacy::Share;
 
 #[derive(Debug, PartialEq)]
@@ -129,16 +129,14 @@ pub fn recognise(text: &str) -> Option<Command> {
             page_targets.contains(&target)
                 || (target == "this" && ["summarise", "summarize"].contains(&verb))
         },
-    ) || [
+    ) || one_of(text, &[
         "tldr",
         "tl dr",
         "what's this article about",
         "what is this article about",
         "what's this page about",
         "what is this page about",
-    ]
-    .contains(&text)
-    {
+    ]) {
         return Some(Command::Page);
     }
     if from_verb(text, &["close"]).is_some_and(|(_, rest)| {

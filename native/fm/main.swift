@@ -63,6 +63,28 @@ func researchSourceIDs(_ request: [String: Any]) throws -> [String]? {
     return ids
 }
 
+/// The numbers of the records a personal answer may be built from. Enabled only by the
+/// controller, with no tools: all the model can do here is point at records it was given.
+func recordPickIDs(_ request: [String: Any]) throws -> [String]? {
+    guard request["record_pick"] as? Bool == true else { return nil }
+    guard let ids = request["record_ids"] as? [String], !ids.isEmpty, ids.count <= 64,
+          Set(ids).count == ids.count,
+          ids.allSatisfy({ value in Int(value).map { $0 > 0 && String($0) == value } ?? (!value.isEmpty && value.allSatisfy { $0.isLowercase && $0.isLetter }) }),
+          (request["tools"] as? [Any] ?? []).isEmpty else {
+        throw Failure(code: "invalid_request", message: "Picking records needs distinct record numbers and no executable tools.")
+    }
+    return ids
+}
+
+func validatedRecordPick(_ json: String, ids: [String]) throws -> String {
+    func invalid() -> Failure { Failure(code: "invalid_record_pick", message: "Apple Intelligence returned a record that wasn't read.") }
+    guard let value = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+          let picked = value["ids"] as? [String], Set(picked).isSubset(of: Set(ids)) else { throw invalid() }
+    let encoded = try JSONSerialization.data(withJSONObject: ["ids": picked], options: [.sortedKeys])
+    guard let result = String(data: encoded, encoding: .utf8) else { throw invalid() }
+    return result
+}
+
 /// The controller supplies this distinction after actually reading the source.
 /// Page quality requirements remain the default; API card fields are a separate
 /// evidence format, never an instruction or capability supplied by source text.
@@ -687,6 +709,14 @@ func researchSchema(sourceIDs: [String], evidenceKind: String = "pages") throws 
 }
 
 @available(macOS 26.0, *)
+func recordPickSchema(ids: [String], most: Int?) throws -> GenerationSchema {
+    let record = DynamicGenerationSchema(name: "ChoiceNumber", description: "One of the numbers given", anyOf: ids)
+    return try GenerationSchema(root: DynamicGenerationSchema(name: "Choice", description: "The numbers that answer the question", properties: [
+        .init(name: "ids", description: most == 1 ? "The one number that answers the question" : "The numbers that answer the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: record, minimumElements: most == 1 ? 1 : 0, maximumElements: most ?? ids.count)),
+    ]), dependencies: [])
+}
+
+@available(macOS 26.0, *)
 func text(_ value: String) -> Transcript.Segment {
     .text(Transcript.TextSegment(content: value))
 }
@@ -768,6 +798,14 @@ func generate(_ id: String, _ request: [String: Any]) async {
     do {
         let transform = try contentTransform(request)
         let nextStep = request["next_step"] as? [String: Any]
+        if let recordIDs = try recordPickIDs(request) {
+            let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
+            emit(["id": id, "type": "model_call", "stage": "pick"])
+            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int), options: GenerationOptions(temperature: 0))
+            try requireCompleteGeneration(result.rawContent.isComplete)
+            emit(["id": id, "type": "done", "text": try validatedRecordPick(result.content.jsonString, ids: recordIDs), "finish_reason": "stop"])
+            return
+        }
         if let sourceIDs = try researchSourceIDs(request) {
             let evidenceKind = try researchEvidenceKind(request)
             let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
@@ -1799,6 +1837,23 @@ func contractSelfTest() async -> Int32 {
         }
 
         try require(try generatedArguments("{\"query\":\"lease\"}")["query"] as? String == "lease", "Valid arguments must survive parsing")
+        try require(try recordPickIDs(["messages":[["content":"record_pick: true"]]]) == nil, "Prompt text must never opt into picking records")
+        try require(try recordPickIDs(["record_pick":true, "record_ids":["1", "2"], "tools":[]]) == ["1", "2"], "A pick keeps the exact record numbers it was given")
+        for invalid: [String: Any] in [["record_pick":true], ["record_pick":true, "record_ids":["1", "1"]], ["record_pick":true, "record_ids":["01"]], ["record_pick":true, "record_ids":["1"], "tools":[["name":"create_note"]]]] {
+            do {
+                _ = try recordPickIDs(invalid)
+                try require(false, "A malformed pick request must be rejected")
+            } catch let failure as Failure {
+                try require(failure.code == "invalid_request", "A malformed pick request reports an invalid request")
+            }
+        }
+        try require(try validatedRecordPick("{\"ids\":[\"2\"]}", ids: ["1", "2"]) == "{\"ids\":[\"2\"]}", "A pick from the records read stands")
+        do {
+            _ = try validatedRecordPick("{\"ids\":[\"3\"]}", ids: ["1", "2"])
+            try require(false, "A record that wasn't read can't be picked")
+        } catch let failure as Failure {
+            try require(failure.code == "invalid_record_pick", "A record that wasn't read is rejected")
+        }
         try require(try researchSourceIDs(["messages":[["content":"research_summary: true"]]]) == nil, "Page or prompt text must never opt into research metadata")
         try require(try researchSourceIDs(["research_summary":false, "research_source_ids":["1"]]) == nil, "Generic requests must keep their ordinary answer path")
         try require(try researchSourceIDs(["research_summary":true, "research_source_ids":["2", "5"], "tools":[]]) == ["2", "5"], "Research schemas must retain the exact already-read source numbers")

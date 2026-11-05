@@ -139,6 +139,7 @@ export interface ConversationList { items: ConversationSummary[]; nextCursor: st
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
+export type AppConnection = 'ready' | 'noAccount' | 'denied';
 export interface Memory { id: number; fact: string; createdAt: string }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
 export interface TaskOutcome { id: string; kind: string; description: string; tool?: string | null; acceptedTools: string[]; resources: string[]; dependencies: string[]; status: string; requiredArguments: Record<string, unknown>; requiredFields: string[]; completedBy: string[]; sourceRevision: number }
