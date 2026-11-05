@@ -64,6 +64,39 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Whether this Mac has a sign-in, without reading it.
+pub fn saved() -> bool {
+    crate::web::credential_saved(KEYCHAIN_ID)
+}
+
+/// Not secrets: who is signed in and whether they allowed plan use, noted at sign-in so that
+/// opening Buntini doesn't need the Keychain. A sign-in from before these were noted shows
+/// a plain name until it's next used, and finds out about its plan then.
+const ACCOUNT: &str = "chatgpt-account";
+const NO_PLAN: &str = "chatgpt-no-plan-scope";
+
+fn note(store: &crate::store::Store, session: &Session) -> Result<(), String> {
+    store.set_preference(ACCOUNT, &session.email)?;
+    store.set_preference(NO_PLAN, if session.plan_allowed() { "" } else { "1" })
+}
+
+pub fn account(store: &crate::store::Store) -> Option<String> {
+    saved().then(|| store.preference(ACCOUNT).ok().flatten().filter(|email| !email.is_empty()).unwrap_or_else(|| "your ChatGPT account".into()))
+}
+
+pub fn plan_noted(store: &crate::store::Store) -> bool {
+    store.preference(NO_PLAN).ok().flatten().is_none_or(|value| value.is_empty())
+}
+
+/// Notes who a sign-in from before these were noted belongs to, once, right after it was used.
+pub fn remember_account(store: &crate::store::Store) {
+    if store.preference(ACCOUNT).ok().flatten().is_none() {
+        if let Some(session) = load() {
+            let _ = note(store, &session);
+        }
+    }
+}
+
 pub fn load() -> Option<Session> {
     crate::web::credential(KEYCHAIN_ID)
         .ok()
@@ -637,6 +670,7 @@ pub async fn chatgpt_sign_in(
         .lock()
         .unwrap()
         .set_preference("chatgpt-client-id", &session.client_id)?;
+    note(&state.store.lock().unwrap(), &session)?;
     state.audit("chatgpt.signed_in", "Signed in with ChatGPT");
     state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
     crate::helper::signed_in(&state.store.lock().unwrap())?;

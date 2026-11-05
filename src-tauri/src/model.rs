@@ -137,14 +137,11 @@ impl ModelHub {
             Backend::Cloud => {
                 let provider = cloud::provider(&settings.cloud_provider)
                     .ok_or("Choose a cloud model in Settings → Brain.")?;
+                // Whether a sign-in may use the plan is checked when it's next used.
                 if provider.id == "chatgpt" {
-                    return match crate::chatgpt::load() {
-                        Some(session) if session.plan_allowed() => Ok(()),
-                        Some(_) => Err("Your ChatGPT sign-in doesn’t allow Buntini to use your plan. Sign in again and allow plan usage.".into()),
-                        None => Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()),
-                    };
+                    return if crate::chatgpt::saved() { Ok(()) } else { Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()) };
                 }
-                if crate::web::credential(provider.id).is_err() {
+                if !crate::web::credential_saved(provider.id) {
                     return Err(format!(
                         "Add your {} API key in Settings → Brain to use the cloud model.",
                         provider.name
@@ -420,6 +417,9 @@ impl ModelHub {
         // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
         if provider.id == "chatgpt" {
             let token = crate::chatgpt::access_token().await?;
+            if let Some(store) = self.ledger.get() {
+                crate::chatgpt::remember_account(&store.lock().unwrap());
+            }
             let model = match settings.cloud_model.trim() {
                 "" => crate::chatgpt::models()
                     .await?

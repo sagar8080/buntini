@@ -105,7 +105,7 @@ pub fn tool(name: &str) -> Option<&'static Tool> {
 pub fn available() -> Vec<&'static str> {
     TOOLS
         .iter()
-        .filter(|tool| tool.key.map_or(true, |key| web::credential(key).is_ok()))
+        .filter(|tool| tool.key.map_or(true, web::credential_saved))
         .filter(|tool| tool.name != "travel_time" || maps::helper().is_some())
         .map(|tool| tool.name)
         .collect()

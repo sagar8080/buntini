@@ -134,6 +134,28 @@ pub fn credential(provider: &str) -> Result<String, String> {
             String::from_utf8(bytes).map_err(|_| "Invalid credential encoding.".into())
         })
 }
+/// Whether a key is saved, without reading it. Only reading a secret can make macOS ask for
+/// permission, so nothing should read one just to find out it's there: at launch that was
+/// a row of Keychain prompts before the user had asked anything.
+#[cfg(target_os = "macos")]
+pub fn credential_saved(provider: &str) -> bool {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+    credential_valid(provider).is_ok()
+        && [KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_SERVICE].iter().any(|service| {
+            ItemSearchOptions::new()
+                .class(ItemClass::generic_password())
+                .service(service)
+                .account(provider)
+                .load_attributes(true)
+                .limit(Limit::Max(1))
+                .search()
+                .is_ok_and(|found| !found.is_empty())
+        })
+}
+#[cfg(not(target_os = "macos"))]
+pub fn credential_saved(_provider: &str) -> bool {
+    false
+}
 #[cfg(not(target_os = "macos"))]
 pub fn credential(_provider: &str) -> Result<String, String> {
     Err("API keys require macOS Keychain in this build.".into())
@@ -389,5 +411,18 @@ mod tests {
         assert_eq!(retry_delay(Some("3")).unwrap().as_secs(), 3);
         assert!(retry_delay(Some("4")).is_none());
         assert!(retry_delay(Some("garbage")).is_none());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod saved_tests {
+    /// Run on purpose on a Mac with a sign-in: this test binary is signed differently from the
+    /// app that made it, so it's what a new build sees. A prompt would hold this up.
+    #[test]
+    #[ignore = "looks at this Mac's real Keychain, reading no secret"]
+    fn live_keychain_saved_reads_no_secret() {
+        let started = std::time::Instant::now();
+        let saved = super::credential_saved("chatgpt");
+        eprintln!("SAVED chatgpt={saved} brave={} in {:?}", super::credential_saved("brave"), started.elapsed());
     }
 }

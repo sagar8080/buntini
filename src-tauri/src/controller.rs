@@ -280,7 +280,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
         .spend;
     let cloud_keys = crate::cloud::PROVIDERS
         .iter()
-        .filter(|provider| web::credential(provider.id).is_ok())
+        .filter(|provider| web::credential_saved(provider.id))
         .map(|provider| provider.id.to_string())
         .collect();
     let limits = crate::budget::search_limits(&settings);
@@ -311,10 +311,10 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
                 .map(|(_, reason)| reason)
                 .unwrap_or_else(|| "checking".into()),
             worker_status,
-            brave_configured: web::credential("brave").is_ok(),
-            tavily_configured: web::credential("tavily").is_ok(),
-            ebay_configured: web::credential("ebay").is_ok(),
-            duffel_configured: web::credential("duffel").is_ok(),
+            brave_configured: web::credential_saved("brave"),
+            tavily_configured: web::credential_saved("tavily"),
+            ebay_configured: web::credential_saved("ebay"),
+            duffel_configured: web::credential_saved("duffel"),
             searches_used: usage.month,
             searches_today: usage.today,
             search_limit_month: limits.monthly,
@@ -323,13 +323,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
             remaining_budget_usd,
             cloud_keys,
             cloud_spend_usd,
-            chatgpt_account: crate::chatgpt::load().map(|session| {
-                if session.email.is_empty() {
-                    "your ChatGPT account".into()
-                } else {
-                    session.email
-                }
-            }),
+            chatgpt_account: crate::chatgpt::account(&state.store.lock().unwrap()),
             chatgpt_plan: match crate::brain::plan(&state) {
                 crate::brain::Plan::None => "none",
                 crate::brain::Plan::Usable => "usable",
@@ -3266,7 +3260,7 @@ async fn execute_with_settings(
     // "Use GitHub to list my issues": a request that names a tool the user added goes to
     // that tool alone; its call waits for approval unless the user marked it safe to read.
     if mode == "auto" && !no_tools {
-        let servers = state.store.lock().unwrap().mcp_servers()?;
+        let servers = state.store.lock().unwrap().mcp_servers_without_values()?;
         crate::mcp::route(&mut flow.contract, &servers, &task.prompt, locality, &settings)?;
     }
     // "Remind me about this", "reply to this": recipes fix what the thing on screen
@@ -3449,7 +3443,8 @@ where
         tools::offer(&offered.iter().map(String::as_str).collect::<Vec<_>>());
     // Tools the user added, only for a request that named them and a brain that may see
     // what they return.
-    let servers = state.store.lock().unwrap().mcp_servers()?;
+    // Their values are in the Keychain, so they're only read for a request that names one.
+    let servers = if flow.contract.connector_tools.is_empty() { vec![] } else { state.store.lock().unwrap().mcp_servers()? };
     if privacy::allows(locality, settings, privacy::Share::Connectors) {
         if let Some(list) = available_definitions.as_array_mut() {
             list.extend(crate::mcp::definitions(&servers, &flow.contract.connector_tools));

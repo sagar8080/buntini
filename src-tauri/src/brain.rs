@@ -82,10 +82,12 @@ fn announcement(from: Option<Brain>, to: Brain) -> String {
     }
 }
 
-/// What this Mac's sign-in allows. Reads the Keychain, so it's only asked when it matters.
+/// What this Mac's sign-in allows, from what was noted when it was made. The sign-in itself
+/// stays unread in the Keychain until it's used.
 pub fn plan(state: &AppState) -> Plan {
-    let refused = state.store.lock().unwrap().preference(PLAN_REFUSED).ok().flatten().is_some_and(|value| !value.is_empty());
-    plan_of(crate::chatgpt::load().map(|session| session.plan_allowed()), refused)
+    let store = state.store.lock().unwrap();
+    let refused = store.preference(PLAN_REFUSED).ok().flatten().is_some_and(|value| !value.is_empty());
+    plan_of(crate::chatgpt::saved().then(|| crate::chatgpt::plan_noted(&store)), refused)
 }
 
 fn plan_of(signed_in_with_plan_scope: Option<bool>, refused: bool) -> Plan {
@@ -111,7 +113,6 @@ pub fn resolved(state: &AppState, settings: Settings) -> Settings {
         return settings;
     }
     let apple = apple_state(state);
-    // Only asked when Apple Intelligence isn't the answer, to keep the Keychain out of it.
     let plan = if apple == AppleState::NotReady { plan(state) } else { Plan::None };
     match pick(apple, plan, crate::model::local_ready(&settings)) {
         Some(brain) if current(&settings) != Some(brain) => with(&settings, brain),

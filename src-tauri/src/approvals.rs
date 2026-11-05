@@ -79,7 +79,6 @@ pub(crate) async fn plan(
         integrations::plan(&state, &settings, &prompt, cancel).await
     };
     let (call, note) = planned?;
-    // Only a web search about to be offered is worth asking the Keychain for.
     let chatgpt_ready = call.tool == "web_search" && !web_only && helper::ready(state);
     let call = routed(call, chatgpt_ready, &prompt)?;
     let always = helper::may_skip_sheet(helper::always_allowed(state), &call.tool, &origin, &prompt);

@@ -293,6 +293,14 @@ impl Store {
         };
         rows.iter().map(|data| self.read_mcp_server(data)).collect()
     }
+    /// The saved tools for deciding whether a request names one, with no values from the
+    /// Keychain: reading those can make macOS ask, and every request gets here.
+    pub fn mcp_servers_without_values(&self) -> Result<Vec<McpServer>, String> {
+        let mut stmt = self.db.prepare("SELECT data FROM mcp_servers ORDER BY created_at, id").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let rows: Vec<String> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+        rows.iter().map(|data| serde_json::from_str(data).map_err(|e: serde_json::Error| e.to_string())).collect()
+    }
     pub fn mcp_server(&self, id: &str) -> Result<Option<McpServer>, String> {
         let data: Option<String> = self
             .db
