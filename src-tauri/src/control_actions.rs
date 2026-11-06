@@ -16,9 +16,12 @@ use std::{
     },
 };
 
-pub const TOOLS: [&str; 6] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL, crate::glance::QUIT_TOOL];
+pub const TOOLS: [&str; 7] = ["control_music", "switch_tab", "remember", "set_timer", crate::mac_settings::TOOL, crate::glance::QUIT_TOOL, crate::cart::TOOL];
 
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
+    if tool == crate::cart::TOOL {
+        return crate::cart::validate(args);
+    }
     if matches!(tool, "control_music" | "switch_tab") {
         let out = crate::apps::validate(tool, args)?;
         if tool == "control_music"
@@ -98,6 +101,7 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
             .unwrap_or_default(),
     };
     match tool {
+        crate::cart::TOOL => crate::cart::describe(args),
         crate::mac_settings::TOOL => {
             let id = args.get("setting").and_then(Value::as_str).unwrap_or_default();
             let label = crate::mac_settings::setting(id).map(|s| s.label).unwrap_or("Setting");
@@ -669,6 +673,9 @@ pub async fn execute(
             &args,
             &cancel,
         );
+    }
+    if tool == crate::cart::TOOL {
+        return crate::cart::execute(&args, cancel).await;
     }
     if tool == crate::glance::QUIT_TOOL {
         return quit_receipt(args["app"].as_str().unwrap_or_default().to_string(), cancel).await;

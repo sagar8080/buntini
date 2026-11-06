@@ -37,6 +37,7 @@ const HEADER_LIMIT: usize = 8192;
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static WORKSPACE: tokio::sync::Mutex<Option<Workspace>> = tokio::sync::Mutex::const_new(None);
 static DNS_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static PRICE_READS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub fn set_app(app: AppHandle) {
     let _ = APP.set(app);
@@ -459,6 +460,66 @@ impl Drop for Workspace {
     }
 }
 
+// What a shop page shows about its price. Fixed like the script below: it reads, and nothing
+// clicks or writes. No inputs or editable fields are inspected.
+const READ_PRICE: &str = r#"(() => {
+  try {
+    if (document.readyState === 'loading' || !document.body) return {ready:false};
+    const PRICE = /^(?:[A-Z]{0,3}\s?[$€£¥₹]\s?\d[\d.,]*|[A-Z]{3}\s\d[\d.,]*|\d[\d.,]*\s?(?:[$€£¥₹]|[A-Z]{3}))$/;
+    const NOISE = 'nav,footer,aside,[class*="recommend" i],[class*="carousel" i],[class*="related" i],[class*="similar" i],[class*="upsell" i],[class*="cross-sell" i],[class*="crosssell" i],[class*="sponsor" i],[id*="recommend" i],[class*="financ" i],[class*="installment" i],[class*="monthly" i],[class*="footer" i],[class*="compare" i],[class*="bundle" i],[class*="minicart" i],[class*="mini-cart" i]';
+    const clean = text => (text || '').replace(/\s+/g, ' ').trim();
+    const reading = element => {
+      // "$3,199" and a raised "95" read as one price.
+      const sup = element.querySelector('sup');
+      if (sup && /^\d{2}$/.test(clean(sup.textContent)) && !clean(element.textContent).includes('.')) {
+        const whole = clean(element.textContent);
+        return whole.slice(0, whole.length - 2) + '.' + whole.slice(-2);
+      }
+      return clean(element.textContent).replace(/\s(?=\d)/g, '');
+    };
+    const candidates = [];
+    const elements = document.body.querySelectorAll('li,span,div,p,strong,b,bdi,ins,h1,h2,h3,h4,h5,h6,dd,td,a,data,em,label');
+    let seen = 0;
+    for (const element of elements) {
+      if (++seen > 40000 || candidates.length >= 80) break;
+      if (element.closest('input,textarea,select,[contenteditable],script,style,noscript,svg')) continue;
+      const raw = element.textContent || '';
+      if (raw.length > 40 || !/\d/.test(raw)) continue;
+      const text = reading(element);
+      if (!PRICE.test(text)) continue;
+      if ([...element.children].some(child => PRICE.test(reading(child)))) continue;
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || box.width < 2 || box.height < 2) continue;
+      let struck = !!element.closest('s,del,strike');
+      for (let up = element, level = 0; up && level < 4 && !struck; up = up.parentElement, level++) {
+        struck = getComputedStyle(up).textDecorationLine.includes('line-through');
+      }
+      const parent = element.parentElement;
+      const around = clean(parent && parent.innerText);
+      const hint = /price/i.test(`${element.className} ${element.id} ${element.getAttribute('itemprop') || ''} ${element.getAttribute('data-testid') || ''} ${parent ? parent.className : ''} ${parent ? parent.getAttribute('data-testid') || '' : ''}`);
+      candidates.push({text, size: parseFloat(style.fontSize) || 0, top: Math.round(box.top + scrollY), struck, noise: !!element.closest(NOISE), hint, near: around.length <= 60 ? around : ''});
+    }
+    const heading = document.querySelector('h1');
+    const headingBox = heading ? heading.getBoundingClientRect() : null;
+    const scripts = [];
+    let total = 0;
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      const text = script.textContent || '';
+      if (scripts.length >= 32 || total + text.length > 120000) break;
+      scripts.push(text); total += text.length;
+    }
+    const meta = name => { const tag = document.querySelector(`meta[property="${name}"],meta[name="${name}"],meta[itemprop="${name}"]`); return tag ? clean(tag.getAttribute('content')) : null; };
+    const buttons = [...document.querySelectorAll('button,a[role="button"],[class*="add-to-cart" i],[class*="addtocart" i]')].slice(0, 400).filter(el => { const box = el.getBoundingClientRect(); return box.width > 1 && box.height > 1; }).map(el => clean(el.textContent).slice(0, 60));
+    return {
+      ready: true, url: location.href, title: clean(document.title).slice(0, 300),
+      heading: heading ? clean(heading.textContent).slice(0, 300) : '', headingTop: headingBox ? Math.round(headingBox.top + scrollY) : null,
+      jsonLd: scripts, metaAmount: meta('product:price:amount') || meta('og:price:amount') || meta('price'), metaCurrency: meta('product:price:currency') || meta('og:price:currency') || meta('priceCurrency'),
+      candidates, buy: buttons.some(text => /add to (cart|bag|basket)|buy now|pre-?order/i.test(text)), soldOut: buttons.some(text => /sold out|out of stock|unavailable|notify me/i.test(text))
+    };
+  } catch (_) { return {ready:false}; }
+})()"#;
+
 // A fixed extraction script is the only code Buntini runs in a page. No inputs,
 // passwords, textareas or editable fields are inspected. Nothing clicks or writes.
 const READ_PAGE: &str = r#"(() => {
@@ -592,10 +653,14 @@ fn observation(
 }
 
 async fn snapshot(window: &WebviewWindow) -> Result<String, String> {
+    run_script(window, READ_PAGE).await
+}
+
+async fn run_script(window: &WebviewWindow, script: &str) -> Result<String, String> {
     let (send, receive) = oneshot::channel();
     let sender = Mutex::new(Some(send));
     window
-        .eval_with_callback(READ_PAGE, move |value| {
+        .eval_with_callback(script, move |value| {
             if let Some(send) = sender.lock().unwrap().take() {
                 let _ = send.send(value);
             }
@@ -1120,6 +1185,108 @@ pub async fn execute(
     execute_in_mode(intent_id, args, cancel, ReadPurpose::ApprovedPage).await
 }
 
+/// A blank isolated window behind the verified proxy, ready to navigate. `allow` decides each
+/// navigation. Failure at any step leaves nothing loaded.
+#[cfg(target_os = "macos")]
+async fn open_isolated(
+    app: &AppHandle,
+    profile: Option<[u8; 16]>,
+    approved_origin: String,
+    allow: impl Fn(&reqwest::Url) -> bool + Send + 'static,
+) -> Result<Workspace, String> {
+    let proxy = proxy().await?;
+    let stopped = proxy.stopped.clone();
+    let builder = WebviewWindowBuilder::new(
+        app,
+        format!("buntini-browser-{}", uuid::Uuid::new_v4()),
+        WebviewUrl::External(reqwest::Url::parse("about:blank").unwrap()),
+    )
+    .title("Buntini browser workspace")
+    .inner_size(1100.0, 780.0)
+    .visible(false)
+    .on_navigation(move |url| !stopped.load(Ordering::Acquire) && allow(url))
+    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+    .on_download(|_, _| false);
+    let builder = if let Some(profile) = profile {
+        builder.data_store_identifier(profile)
+    } else {
+        builder.incognito(true)
+    };
+    let window = builder.build().map_err(|_| "The isolated browser window could not be created.".to_string())?;
+    let workspace = Workspace { window, proxy, profile, approved_origin };
+    let stopped = workspace.proxy.stopped.clone();
+    workspace.window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            stopped.store(true, Ordering::Release);
+        }
+    });
+    native::configure(&workspace.window, profile, workspace.proxy.port).await?;
+    Ok(workspace)
+}
+
+/// Loads a page the user chose to watch in a fresh private store with no window on screen,
+/// waits for its scripts to settle, and reads what it shows with a fixed script. Nothing is
+/// clicked, and the model never sees it. Only the page's own site can be navigated to.
+pub async fn read_rendered_price(raw_url: &str, cancel: Arc<AtomicBool>) -> Result<crate::pricing::RenderedPage, String> {
+    let url = crate::research::validate_public_url(raw_url)?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (url, cancel);
+        return Err("Reading this shop needs macOS 14 or later.".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !native::supported() {
+            return Err("Reading this shop needs macOS 14 or later.".into());
+        }
+        let app = APP.get().ok_or("The browser workspace is not initialized.")?;
+        // Its own window and proxy, one read at a time: a check in the background must never
+        // disturb a page the user has open in the workspace.
+        let _turn = PRICE_READS.lock().await;
+        let site = url.host_str().unwrap_or_default().to_string();
+        let workspace = open_isolated(app, None, origin(&url), move |target| {
+            target.as_str() == "about:blank"
+                || (crate::research::validate_public_url(target.as_str()).is_ok()
+                    && crate::research::same_site(&site, target.host_str().unwrap_or_default()))
+        })
+        .await?;
+        workspace.window.navigate(url).map_err(|_| "The shop page could not be opened.".to_string())?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+        let mut last: Option<crate::pricing::RenderedPage> = None;
+        let mut settled_since = tokio::time::Instant::now();
+        loop {
+            if cancel.load(Ordering::Acquire) {
+                return Err("Price check cancelled.".into());
+            }
+            if workspace.proxy.stopped.load(Ordering::Acquire) {
+                return Err("The browser closed before the page could be read.".into());
+            }
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                break;
+            }
+            if let Ok(raw) = run_script(&workspace.window, READ_PRICE).await {
+                if let Ok(page) = serde_json::from_str::<crate::pricing::RenderedPage>(&raw) {
+                    if page.ready {
+                        let same = last.as_ref().is_some_and(|before| before.signature() == page.signature());
+                        if !same {
+                            settled_since = now;
+                        }
+                        let has_something = !page.candidates.is_empty() || !page.json_ld.is_empty() || page.meta_amount.is_some();
+                        last = Some(page);
+                        // Prices hydrate in late, so what's read has to have stopped changing.
+                        if has_something && same && now.duration_since(settled_since) >= Duration::from_millis(2500) {
+                            break;
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        last.ok_or_else(|| "The shop page didn’t finish loading.".to_string())
+    }
+}
+
 async fn execute_in_mode(
     intent_id: &str,
     args: &Map<String, Value>,
@@ -1195,64 +1362,22 @@ async fn execute_in_mode(
         } else {
             None
         };
-        let proxy = match proxy().await {
-            Ok(proxy) => proxy,
-            Err(error) => return failed(ActionOutcome::Failed, error),
-        };
         let scoped_origin = approved_origin.clone();
-        let stopped = proxy.stopped.clone();
         let denied = Arc::new(Mutex::new(None::<String>));
         let denied_navigation = denied.clone();
-        let builder = WebviewWindowBuilder::new(
-            app,
-            format!("buntini-browser-{}", uuid::Uuid::new_v4()),
-            WebviewUrl::External(reqwest::Url::parse("about:blank").unwrap()),
-        )
-        .title("Buntini browser workspace")
-        .inner_size(1100.0, 780.0)
-        .visible(false)
-        .on_navigation(move |url| {
-            let allowed =
-                !stopped.load(Ordering::Acquire) && navigation_allowed(url, &scoped_origin);
+        let opened = open_isolated(app, profile, approved_origin, move |url| {
+            let allowed = navigation_allowed(url, &scoped_origin);
             if !allowed {
                 *denied_navigation.lock().unwrap() =
                     Some("A navigation outside the approved HTTPS origin was blocked.".into());
             }
             allowed
         })
-        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-        .on_download(|_, _| false);
-        let builder = if let Some(profile) = profile {
-            builder.data_store_identifier(profile)
-        } else {
-            builder.incognito(true)
+        .await;
+        let workspace = match opened {
+            Ok(workspace) => workspace,
+            Err(error) => return failed(ActionOutcome::Failed, error),
         };
-        let window = match builder.build() {
-            Ok(window) => window,
-            Err(_) => {
-                return failed(
-                    ActionOutcome::Failed,
-                    "The isolated browser window could not be created.",
-                )
-            }
-        };
-        let workspace = Workspace {
-            window,
-            proxy,
-            profile,
-            approved_origin,
-        };
-        let stopped = workspace.proxy.stopped.clone();
-        workspace.window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                stopped.store(true, Ordering::Release);
-            }
-        });
-        if let Err(error) =
-            native::configure(&workspace.window, profile, workspace.proxy.port).await
-        {
-            return failed(ActionOutcome::Failed, error);
-        }
         if cancel.load(Ordering::Acquire) {
             return failed(
                 ActionOutcome::Failed,

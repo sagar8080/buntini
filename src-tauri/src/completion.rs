@@ -371,6 +371,7 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
             };
             let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
             let tool = match verb {
+                "add" | "put" | "throw" if has(&["cart", "basket"]) || tokens.windows(2).any(|pair| pair[0] == "my" && pair[1] == "bag") => Some(crate::cart::TOOL),
                 "remember" => Some("remember"),
                 // Changing an item the user already has: its id comes from a read.
                 "mark" if has(&["done", "complete", "completed", "finished"]) => {

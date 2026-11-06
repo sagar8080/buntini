@@ -3046,5 +3046,67 @@
         }
       ]
     }
+  },
+  "add_to_cart": {
+    "name": "add_to_cart",
+    "description": "Propose putting one product in the cart in the user's own browser. Buntini opens and reads the page itself, then the user approves what it found. It stops at the cart and can never check out or pay. Give the exact link the user gave, or the shop and item they named; give neither for the page they are looking at. Ask which shop if they named none. Not for watching prices or comparing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 2000,
+          "description": "Exact https:// product page from the user or a verified source."
+        },
+        "shop": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The shop the user named, such as Target or keychron.com."
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The product in the user's own words."
+        }
+      },
+      "additionalProperties": false
+    },
+    "contract": {
+      "resources": [
+        "browser",
+        "shopping"
+      ],
+      "operation": "write",
+      "use_when": [
+        "The user asks to add a product to their cart, bag or basket at a shop."
+      ],
+      "avoid_when": [
+        "The user wants to buy, check out or pay, or only wants prices or a comparison."
+      ],
+      "prerequisites": [
+        "A product link, a named shop and item, or an open product page.",
+        "User approves the item the sheet shows."
+      ],
+      "output_kind": "control_receipt",
+      "success_verifier": "control_receipt",
+      "verification_scope": "The item was read back from the shop's cart page. Price, stock and checkout are not checked.",
+      "retry_policy": "reconcile_before_retry",
+      "examples": [
+        {
+          "request": "Add AirPods 4 to my Target cart.",
+          "arguments": {
+            "shop": "Target",
+            "item": "AirPods 4"
+          }
+        },
+        {
+          "request": "Add this to my cart.",
+          "arguments": {}
+        }
+      ]
+    }
   }
 }

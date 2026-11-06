@@ -1859,7 +1859,7 @@ impl TaskContract {
             "dark", "lock", "open", "app", "wallpaper", "dock", "wi-fi", "screensaver", "appearance", "desktop",
             // Online
             "weather", "forecast", "rain", "raining", "snow", "temperature", "news", "latest", "current", "price",
-            "prices", "cost", "buy", "cheapest", "flight", "flights", "hotel", "exchange", "rate", "convert", "currency",
+            "prices", "cost", "buy", "cheap", "cheapest", "deal", "deals", "sale", "discount", "coupon", "review", "reviews", "flight", "flights", "hotel", "exchange", "rate", "convert", "currency",
             "stock", "score", "near", "nearby", "restaurant", "directions", "search", "look", "find", "online", "web",
             "website", "http", "https", "www", "wikipedia", "who", "where",
         ];

@@ -64,14 +64,14 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Whether this Mac has a sign-in, without reading it.
+/// Whether this Mac has a sign-in that Buntini can use.
 pub fn saved() -> bool {
     crate::web::credential_saved(KEYCHAIN_ID)
 }
 
 /// Not secrets: who is signed in and whether they allowed plan use, noted at sign-in so that
-/// opening Buntini doesn't need the Keychain. A sign-in from before these were noted shows
-/// a plain name until it's next used, and finds out about its plan then.
+/// opening Buntini doesn't have to decode the session. A sign-in from before these were noted
+/// shows a plain name until it's next used, and finds out about its plan then.
 const ACCOUNT: &str = "chatgpt-account";
 const NO_PLAN: &str = "chatgpt-no-plan-scope";
 

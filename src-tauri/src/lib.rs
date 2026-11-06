@@ -23,6 +23,7 @@ mod helper;
 mod glance;
 mod cloud;
 mod completion;
+mod cart;
 mod control_actions;
 mod controller;
 mod conversation;

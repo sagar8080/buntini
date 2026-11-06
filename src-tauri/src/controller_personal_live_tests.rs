@@ -240,6 +240,28 @@ const QUESTIONS: &[Question] = &[
     q("how should I prepare for an interview", NONE, &[], &["Priya", "Dentist"]),
     q("what should I name my cat", NONE, &[], &["Priya", "Dentist"]),
     q("explain how email works", NONE, &[], &["Priya"]),
+    // Shopping, which went to Mail on a real Mac. It's about shops, never the user's apps.
+    q("Nikon Z8 camera deals", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("nikon z8 camera deals", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("best price for airpods pro", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("cheapest mechanical keyboard under $120", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("sony wh-1000xm5 reviews", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("where can I buy a nikon z8", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("is the nikon z8 worth it", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("black friday tv deals", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("I asked you to search for nikon z8 deals", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("are you sure nikon z8 for $1499?", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("search for Nikon Z8 camera deals every hour", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("search for Apple AirPods Pro 2 at Walmart every hour", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("search for mechanical keyboards under $120 every hour", NONE, &[], &["Priya", "Dentist", "matches"]),
+    // Carts go to the shop, never to the user's own apps; buying is never done for them.
+    q("add AirPods 4 to my Target cart", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("add this to my cart", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("put https://www.keychron.com/products/keychron-q1-max-qmk-via-wireless-custom-mechanical-keyboard in my cart", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("add a mechanical keyboard to my basket at Best Buy", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("add a keyboard to my cart", NONE, &[], &["Priya", "Dentist", "matches"]),
+    q("buy me AirPods 4 from Target", NONE, &[], &["Priya", "Dentist", "matches", "purchased", "I bought"]),
+    q("add milk to my shopping list", NONE, &[], &["Priya", "Dentist", "matches"]),
 ];
 
 fn world_inbox(today: &str, yesterday: &str) -> [(String, bool, &'static str, &'static str, &'static str); 12] {

@@ -479,6 +479,7 @@ pub fn fixed_fields(tool: &str) -> &'static [&'static str] {
     match tool {
         "reply_email" => &["message", "message_id", "to", "answers"],
         crate::glance::QUIT_TOOL => &["app"],
+        crate::cart::TOOL => &["url", "item", "browser", "price"],
         _ => &[],
     }
 }

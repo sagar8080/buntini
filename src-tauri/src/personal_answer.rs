@@ -101,7 +101,7 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
         }
         requests.push(json!({
             "messages": [
-                {"role":"system","content":"Decide what the user's message needs.\nmail: something in emails they received, or whether someone wrote or replied to them.\ncalendar: their own events, meetings, appointments, plans or free time.\nreminders: their own tasks, to-dos and what's due.\ngeneral: everything else, including greetings, chit-chat, facts about the world, advice, cooking, jokes, weather, time zones, how things work. Most messages are general.\n\nExamples:\ndid Marco reply yet -> mail\nany word from the bank -> mail\nhas my order shipped -> mail\nwhat time is my haircut -> calendar\nam I busy Sunday morning -> calendar\nanything on Monday -> calendar\ndo I have something at 2 on Friday -> calendar\nwho am I seeing on Friday -> calendar\nwhat's on my list for today -> reminders\nwhat needs doing this week -> reminders\ndo I need to buy anything -> reminders\nis there anything I have to pay -> reminders\nwhat's the weather tomorrow -> general\nhi there -> general\nhello buntini -> general\nhow do calendars sync -> general\nwhat is a spam filter -> general\nrecommend a mail app -> general\nwhat is the capital of France -> general\nhow many weeks are in a year -> general\nwhat should I make for dinner -> general\nwhat's the difference between to and cc -> general\nwhat time is it in Paris -> general\nwhat's my favourite colour -> general\ntell me a funny story about meetings -> general\n\nReply only with JSON in this form: {\"ids\":[\"general\"]}"},
+                {"role":"system","content":"Decide what the user's message needs.\nmail: something in emails they received, or whether someone wrote or replied to them.\ncalendar: their own events, meetings, appointments, plans or free time.\nreminders: their own tasks, to-dos and what's due.\ngeneral: everything else, including greetings, chit-chat, facts about the world, advice, cooking, jokes, weather, time zones, how things work. Most messages are general.\n\nExamples:\ndid Marco reply yet -> mail\nany word from the bank -> mail\nhas my order shipped -> mail\nwhat time is my haircut -> calendar\nam I busy Sunday morning -> calendar\nanything on Monday -> calendar\ndo I have something at 2 on Friday -> calendar\nwho am I seeing on Friday -> calendar\nwhat's on my list for today -> reminders\nwhat needs doing this week -> reminders\ndo I need to buy anything -> reminders\nis there anything I have to pay -> reminders\nwhat's the weather tomorrow -> general\nhi there -> general\nhello buntini -> general\nhow do calendars sync -> general\nwhat is a spam filter -> general\nrecommend a mail app -> general\nsony headphones deals -> general\ncheap flights to Rome -> general\niphone reviews -> general\nwhat is the capital of France -> general\nhow many weeks are in a year -> general\nwhat should I make for dinner -> general\nwhat's the difference between to and cc -> general\nwhat time is it in Paris -> general\nwhat's my favourite colour -> general\ntell me a funny story about meetings -> general\n\nReply only with JSON in this form: {\"ids\":[\"general\"]}"},
                 {"role":"user","content":format!("{earlier}Their message: {clause}")},
             ],
             "tools": [],
@@ -112,6 +112,17 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
         }));
     }
     (settled, requests)
+}
+
+/// Whether only the model's guess sent this request to `tool`: the words didn't name that app
+/// and nothing else requires it. A guess that can't be read isn't the user's problem.
+pub fn only_a_guess(goal: &str, contract: &TaskContract, tool: &str) -> bool {
+    let required = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.accepted_tools.iter().any(|name| name == tool));
+    let settled = goal.split(" and ").flat_map(|part| part.split(',')).any(|clause| {
+        settled_source(clause) == Some(tool) || (tool == "read_mail" && (recipes::asks_about_mail_thing(clause) || recipes::asks_if_someone_wrote(clause)))
+    });
+    let named = contract.own_sources.iter().flatten().any(|source| source == tool);
+    named && !required && !settled && !names_an_app(goal)
 }
 
 /// The app the model named, if any. None when its reply isn't a choice.
@@ -954,6 +965,31 @@ mod tests {
         day.arguments = json!({"day":"2026-11-07"});
         assert_eq!(next_read(goal, &contract, std::slice::from_ref(&day), today), None);
         assert!(direct_answer(goal, &[&day], morning()).unwrap().contains("Climbing"));
+    }
+
+    #[test]
+    fn shopping_is_not_about_the_users_own_apps() {
+        for goal in ["Nikon Z8 camera deals", "nikon z8 camera deals", "best price for airpods", "cheapest mechanical keyboard"] {
+            let (settled, asked) = source_requests(goal, None, &TaskContract::from_request(goal));
+            assert!(settled.is_empty() && asked.is_empty(), "{goal}");
+        }
+        let goal = "any deals in my email";
+        let (settled, asked) = source_requests(goal, None, &TaskContract::from_request(goal));
+        assert!(!settled.is_empty() || !asked.is_empty(), "{goal}");
+    }
+
+    #[test]
+    fn a_guess_is_not_the_users_request() {
+        let goal = "anything on the lease";
+        let mut contract = TaskContract::from_request(goal);
+        contract.own_sources = Some(vec!["read_calendar".into()]);
+        assert!(only_a_guess(goal, &contract, "read_calendar"));
+        // What the user named is theirs, however it turns out.
+        for (goal, tool) in [("whats on my mail", "read_mail"), ("what's on my calendar today", "read_calendar"), ("did Ana write back", "read_mail")] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.own_sources = Some(vec![tool.into()]);
+            assert!(!only_a_guess(goal, &contract, tool), "{goal}");
+        }
     }
 
     #[test]

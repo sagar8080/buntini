@@ -417,7 +417,6 @@ impl ModelHub {
         // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
         if provider.id == "chatgpt" {
             let token = crate::chatgpt::access_token().await?;
-            // Read with nothing locked: macOS may be asking the user about it.
             if let Some(store) = self.ledger.get() {
                 let unnoted = crate::chatgpt::account_unnoted(&store.lock().unwrap());
                 if unnoted {

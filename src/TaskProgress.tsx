@@ -1,3 +1,4 @@
+import { stillOpen } from './taskRecovery';
 import type { BackgroundStatus, HeadsUp, PendingApprovalSummary, TaskProgress } from './types';
 
 /** Saved proposals from any conversation. Review opens the sheet; nothing is approved from here.
@@ -24,16 +25,16 @@ const steps: Record<string, string> = {
   read_mail: 'Read your email', read_calendar: 'Read your calendar', read_reminders: 'Read your reminders', find_notes: 'Find notes', search_files: 'Search your files',
   search_memory: 'Look through what I remember', read_page: 'Read the page', read_source: 'Read a source', read_evidence: 'Check what was found',
   add_reminder: 'Add a reminder', add_calendar_event: 'Add a calendar event', create_note: 'Write a note', draft_email: 'Draft an email', reply_email: 'Reply to an email', send_message: 'Send a text', start_call: 'Start a call', set_timer: 'Set a timer', change_mac_setting: 'Change a setting',
-  open_link: 'Open a link', open_app: 'Open an app', run_shortcut: 'Run a shortcut', create_saved_search: 'Save a search', create_price_watch: 'Watch a price', create_routine: 'Set up a routine', create_goal: 'Set up a goal',
+  open_link: 'Open a link', open_app: 'Open an app', run_shortcut: 'Run a shortcut', create_saved_search: 'Save a search', create_price_watch: 'Watch a price', add_to_cart: 'Add to cart', create_routine: 'Set up a routine', create_goal: 'Set up a goal',
   complete_reminder: 'Mark a reminder done', reschedule_reminder: 'Move a reminder', update_calendar_event: 'Change a calendar event', append_to_note: 'Add to a note', list_shortcuts: 'Look through your shortcuts',
 };
 export const stepLabel = (tool: string) => tool.startsWith('mcp_') ? 'Use a tool you added' : steps[tool] ?? (words => words.charAt(0).toUpperCase() + words.slice(1))(tool.replaceAll('_', ' '));
 
 export function ProgressDetails({ progress }: { progress?: TaskProgress }) {
-  // A plain chat reply did nothing worth showing; details appear once a tool ran.
-  if (!progress || !progress.steps.length) return null;
+  // A finished answer speaks for itself; this is for what stopped one finishing.
+  if (!progress || !stillOpen(progress)) return null;
   const contract = progress.contract;
-  return <details className="research-evidence task-progress"><summary>{(contract?.outcomes.length ? contract.outcomes.every(outcome => outcome.status === 'complete') : progress.steps.every(step => step.state === 'succeeded' || step.state === 'superseded')) ? 'How I did this' : 'What’s still open'}</summary>
+  return <details className="research-evidence task-progress"><summary>What’s still open</summary>
     {!!contract?.outcomes.length && <><p>Requested results</p><ol>{contract.outcomes.map(outcome => <li key={outcome.id}><strong>{outcome.description}</strong><span> · {labels[outcome.status] || (outcome.status === 'pending' ? 'Still to do' : outcome.status.replaceAll('_', ' '))}</span></li>)}</ol></>}
     {!!contract?.unresolvedFields.length && <ul>{contract.unresolvedFields.filter(field => field.status === 'missing').map(field => <li key={`${field.outcomeId}-${field.field}`}>{field.reason}</li>)}</ul>}
     <ol>{progress.steps.map(step => <li key={step.id}><strong>{stepLabel(step.tool)}</strong><span> · {labels[step.state] || step.state}</span>

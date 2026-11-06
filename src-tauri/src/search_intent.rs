@@ -177,7 +177,27 @@ fn direct_request<'a>(prompt: &'a str, verbs: &[&str]) -> Option<(String, &'a st
     None
 }
 
+/// A question whose answer is what shops are charging today: "Nikon Z8 camera deals", "best
+/// price for AirPods". A model can only make that up, and on a real Mac it did, so these look
+/// online like any other search. Not one about the user's own things, or what a word means.
+fn asks_what_shops_charge(prompt: &str) -> bool {
+    const SHOPPING: [&str; 10] = ["deals", "sale", "discount", "discounts", "coupon", "coupons", "cheap", "cheapest", "price", "prices"];
+    const OWN: [&str; 16] = ["my", "me", "mine", "our", "this", "these", "that", "email", "emails", "mail", "inbox", "calendar", "reminder", "reminders", "meeting", "note"];
+    let lower = prompt.to_lowercase().replace('’', "'");
+    if lower.chars().count() > 140 || lower.contains(':') || lower.contains('\n') {
+        return false;
+    }
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
+    let about_a_word = words.starts_with(&["what", "is", "a"]) || words.starts_with(&["what", "is", "an"]) || words.starts_with(&["how", "do"]) || words.starts_with(&["how", "does"]) || words.contains(&"mean") || words.contains(&"define");
+    let shopping = words.iter().any(|word| SHOPPING.contains(word)) || lower.contains("where can i buy") || lower.contains("black friday");
+    shopping && !about_a_word && !words.iter().any(|word| OWN.contains(word)) && crate::completion::requested_actions(prompt) == (vec![], false)
+}
+
 fn parsed_search(prompt: &str) -> Option<(&'static str, &str)> {
+    asked_to_search(prompt).or_else(|| asks_what_shops_charge(prompt).then(|| ("search", prompt.trim())))
+}
+
+fn asked_to_search(prompt: &str) -> Option<(&'static str, &str)> {
     let (verb, rest) = direct_request(prompt, &["google", "search", "look", "find", "research"])?;
     if verb == "google" {
         return (!rest.is_empty()).then_some(("google", rest));
@@ -542,5 +562,21 @@ mod tests {
         )
         .requirements
         .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod shop_tests {
+    use super::*;
+
+    #[test]
+    fn what_shops_charge_is_looked_up_never_made_up() {
+        for prompt in ["Nikon Z8 camera deals", "nikon z8 camera deals", "best price for airpods pro", "cheapest mechanical keyboard under $120", "where can I buy a nikon z8", "black friday tv deals"] {
+            assert!(explicit_request(prompt).is_some(), "{prompt}");
+            assert_eq!(explicit_request(prompt).unwrap().query, prompt, "{prompt}");
+        }
+        for prompt in ["any deals in my email", "what is a coupon", "what does price elasticity mean", "what's the deal with the contract", "when's the design review", "how do prices work", "track this product hourly below $50", "is the price on my calendar event right", "hello"] {
+            assert!(!asks_what_shops_charge(prompt), "{prompt}");
+        }
     }
 }

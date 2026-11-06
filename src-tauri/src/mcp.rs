@@ -242,21 +242,16 @@ mod secrets {
 
     #[cfg(all(target_os = "macos", not(test)))]
     mod keychain {
-        use security_framework::passwords::*;
+        use crate::web::keychain;
         const SERVICE: &str = "app.buntini.companion.tools";
         pub fn save(id: &str, text: &str) -> Result<(), ()> {
-            set_generic_password(SERVICE, id, text.as_bytes()).map_err(|_| ())
+            keychain::save(SERVICE, id, text.as_bytes())
         }
         pub fn load(id: &str) -> Option<String> {
-            get_generic_password(SERVICE, id).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+            keychain::read(SERVICE, id).and_then(|bytes| String::from_utf8(bytes).ok())
         }
         pub fn delete(id: &str) -> Result<(), ()> {
-            match delete_generic_password(SERVICE, id) {
-                Ok(()) => Ok(()),
-                // errSecItemNotFound: already gone.
-                Err(error) if error.code() == -25300 => Ok(()),
-                Err(_) => Err(()),
-            }
+            keychain::remove(SERVICE, id)
         }
     }
     /// Tests (and other systems) keep the values in memory, never in the user's Keychain.

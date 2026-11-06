@@ -13,7 +13,8 @@ use std::{
     time::Duration,
 };
 
-pub const MAX_HTML_BYTES: usize = 1_048_576;
+/// Shop pages commonly run to several megabytes of scripts around a short product record.
+pub const MAX_HTML_BYTES: usize = 16 * 1_048_576;
 const MAX_TEXT_CHARS: usize = 12_000;
 const MAX_DOM_NODES: usize = 100_000;
 const MAX_DNS_ADDRESSES: usize = 64;
@@ -67,6 +68,45 @@ pub async fn fetch_public_html(raw_url: &str) -> Result<HtmlPage, String> {
     tokio::time::timeout(Duration::from_secs(15), fetch_inner(raw_url))
         .await
         .map_err(|_| "The public page took too long to respond. Try again later.".to_string())?
+}
+
+/// A page the user chose to watch, following its redirects within the same site: shops
+/// forward to a regional or tidied address all the time. Each hop gets the same checks as the
+/// first, including fresh DNS. Research never follows one: it reads only the sources it listed.
+pub async fn fetch_watched_html(raw_url: &str) -> Result<HtmlPage, String> {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let mut url = raw_url.to_string();
+        for _ in 0..=MAX_REDIRECTS {
+            match fetch_once(&url).await? {
+                Fetched::Page(page) => return Ok(page),
+                Fetched::Redirect(location) => url = redirect_target(&url, &location)?.to_string(),
+            }
+        }
+        Err("This page redirects too many times to read.".to_string())
+    })
+    .await
+    .map_err(|_| "The public page took too long to respond. Try again later.".to_string())?
+}
+
+const MAX_REDIRECTS: usize = 5;
+
+/// Where a redirect leads, if it stays on the site the user chose and is a page Buntini may read.
+fn redirect_target(from: &str, location: &str) -> Result<Url, String> {
+    let from = Url::parse(from).map_err(|_| "The page URL is invalid.".to_string())?;
+    let next = from.join(location).map_err(|_| "This page redirects to an invalid address.".to_string())?;
+    let next = validate_public_url(next.as_str())?;
+    let (a, b) = (from.host_str().unwrap_or_default(), next.host_str().unwrap_or_default());
+    if !same_site(a, b) {
+        return Err(format!("This page redirects to {b}. Watch that page’s own address instead."));
+    }
+    Ok(next)
+}
+
+/// Whether two hosts are one site: the same, or one under the other (www, a regional name).
+pub(crate) fn same_site(a: &str, b: &str) -> bool {
+    let name = |host: &str| host.trim_start_matches("www.").to_ascii_lowercase();
+    let (a, b) = (name(a), name(b));
+    a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
 }
 
 /// Syntactic validation is also useful when saving a watch. Public DNS is
@@ -210,7 +250,19 @@ async fn resolve_public(url: &Url) -> Result<Vec<SocketAddr>, String> {
         .map_err(|_| "The public page host lookup failed.".to_string())?
 }
 
+enum Fetched {
+    Page(HtmlPage),
+    Redirect(String),
+}
+
 async fn fetch_inner(raw_url: &str) -> Result<HtmlPage, String> {
+    match fetch_once(raw_url).await? {
+        Fetched::Page(page) => Ok(page),
+        Fetched::Redirect(_) => Err("This page redirects to another address. Select its final HTTPS URL to read it.".into()),
+    }
+}
+
+async fn fetch_once(raw_url: &str) -> Result<Fetched, String> {
     let url = validate_public_url(raw_url)?;
     let addresses = resolve_public(&url).await?;
     let host = url.host_str().ok_or("The page URL has no host.")?;
@@ -246,12 +298,17 @@ async fn fetch_inner(raw_url: &str) -> Result<HtmlPage, String> {
     if !is_public_ip(peer.ip()) || !addresses.iter().any(|address| address.ip() == peer.ip()) {
         return Err("The page connection did not use a verified public address.".into());
     }
+    if response.status().is_redirection() {
+        if let Some(location) = response.headers().get(header::LOCATION).and_then(|value| value.to_str().ok()) {
+            return Ok(Fetched::Redirect(location.to_string()));
+        }
+    }
     let html = read_html_response(response).await?;
-    Ok(HtmlPage {
+    Ok(Fetched::Page(HtmlPage {
         url: url.to_string(),
         html,
         retrieved_at: crate::types::now(),
-    })
+    }))
 }
 
 async fn read_html_response(response: reqwest::Response) -> Result<String, String> {
@@ -303,14 +360,14 @@ async fn read_html_response(response: reqwest::Response) -> Result<String, Strin
         .content_length()
         .is_some_and(|length| length > MAX_HTML_BYTES as u64)
     {
-        return Err("The HTML page exceeds the 1 MiB reading limit.".into());
+        return Err("This page is too large to read.".into());
     }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| "The page response was interrupted.".to_string())?;
         if bytes.len().saturating_add(chunk.len()) > MAX_HTML_BYTES {
-            return Err("The HTML page exceeds the 1 MiB reading limit.".into());
+            return Err("This page is too large to read.".into());
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -577,6 +634,29 @@ mod tests {
             .unwrap()
     }
 
+    #[test]
+    fn a_watch_follows_redirects_only_within_its_site_to_pages_it_may_read() {
+        let from = "https://www.shop.example.com/p/1";
+        for (location, to) in [
+            ("/us/p/1", "https://www.shop.example.com/us/p/1"),
+            ("https://shop.example.com/p/1", "https://shop.example.com/p/1"),
+            ("https://us.shop.example.com/p/1", "https://us.shop.example.com/p/1"),
+        ] {
+            assert_eq!(redirect_target(from, location).unwrap().as_str(), to);
+        }
+        for location in [
+            "https://elsewhere.example.org/p/1",
+            "https://notshop.example.com.evil.example/p/1",
+            "http://www.shop.example.com/p/1",
+            "https://127.0.0.1/p/1",
+            "https://169.254.169.254/latest",
+            "https://user:pass@www.shop.example.com/",
+            "https://localhost/p/1",
+        ] {
+            assert!(redirect_target(from, location).is_err(), "{location}");
+        }
+    }
+
     #[tokio::test]
     async fn http_fixtures_enforce_mime_redirect_encoding_and_body_limits() {
         let response = fixture_response(
@@ -622,7 +702,7 @@ mod tests {
         assert!(read_html_response(response)
             .await
             .unwrap_err()
-            .contains("1 MiB"));
+            .contains("too large"));
         let response = fixture_response(
             "200 OK",
             "Content-Type: text/html; charset=iso-8859-1",
