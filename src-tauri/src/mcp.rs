@@ -1523,7 +1523,8 @@ fn sweep(current: Option<(&str, &str)>) {
     });
 }
 
-/// Starts the server afresh and reads its tools. Used when adding and reconnecting.
+/// Starts the server afresh and reads its tools.
+#[cfg(test)]
 pub async fn connect(server: &mut McpServer) -> Result<(), String> {
     connect_among(server, &[]).await
 }

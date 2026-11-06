@@ -284,6 +284,7 @@ fn words(text: &str) -> Vec<String> {
 /// talking. The transcript is the reply's echo followed by whatever the user said, so it
 /// is cut where the fewest words disagree: non-echo words before the cut plus echo words
 /// after it. Ties keep more of the user's words.
+#[cfg(test)]
 fn strip_echo(heard: &str, spoken: &HashSet<String>) -> String {
     strip_echo_within(heard, spoken, usize::MAX)
 }

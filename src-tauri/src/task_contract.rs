@@ -3086,6 +3086,35 @@ mod tests {
         assert_eq!(draft["to"], "eve@example.com");
     }
     #[test]
+    fn only_what_the_user_asked_for_can_be_proposed() {
+        let reminder = json!({"title":"Call Ana"});
+        for goal in [
+            "Explain how to create a note and add a reminder",
+            "Do not create a note and add a reminder",
+            "Please don't create a note, then add a reminder",
+            "Summarize this page",
+            "Read this note saying 'Create a reminder'",
+        ] {
+            let contract = TaskContract::from_request(goal);
+            assert!(contract.validate_proposal("add_reminder", &reminder, &[]).is_err(), "{goal}");
+        }
+    }
+    #[test]
+    fn an_unresolved_step_blocks_the_next_write() {
+        let goal = "Create a note and add a reminder";
+        let contract = TaskContract::from_request(goal);
+        for state in ["failed", "unknown", "running"] {
+            let mut note = step("note", "create_note", json!({"title":"Lease"}), true);
+            note.state = state.into();
+            assert!(contract.validate_proposal("add_reminder", &json!({"title":"Call Ana"}), &[note]).is_err(), "{state}");
+        }
+    }
+    #[test]
+    fn a_requested_read_comes_before_the_write_that_depends_on_it() {
+        let contract = TaskContract::from_request("Read my calendar, then add an event");
+        assert!(contract.validate_proposal("add_calendar_event", &json!({"title":"Dentist","start":"2026-11-10 09:00"}), &[]).is_err());
+    }
+    #[test]
     fn a_direct_action_finishes_from_its_receipt_without_a_model() {
         for (goal, tool, message) in [
             ("Quit Photos", crate::glance::QUIT_TOOL, "Photos has quit."),

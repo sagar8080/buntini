@@ -95,7 +95,7 @@ async fn saved_lookup_approval_covers_browser_first_and_only_selected_api_fallba
     assert_eq!(approval.provider, settings.search_provider);
     assert!(approval
         .host
-        .contains(crate::browser_workspace::SEARCH_HOST));
+        .contains(crate::browser_session::SEARCH_HOST));
     assert!(approval.host.contains("only if needed"));
     assert!(approval.sends.iter().any(|f| f.label == "Page reads"));
     assert!(!approval.approved);

@@ -257,6 +257,7 @@ pub fn is_named_recipient(goal: &str, name: &str) -> bool {
 /// named. Only a complete read with one person, whose name has every word the user
 /// wrote, and one address decides the recipient; anything else is offered as choices,
 /// and a model's own guess never enters either.
+#[cfg(test)]
 pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
     contact_recipient_for("draft_email", goal, steps)
 }

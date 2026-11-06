@@ -486,6 +486,7 @@ pub(crate) fn singular_search_term(term: &str) -> Option<String> {
     Some(lower[..lower.len() - drop].to_string())
 }
 
+#[cfg(test)]
 pub fn search(
     roots: &[String],
     query: &str,

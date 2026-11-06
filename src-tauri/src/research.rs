@@ -38,16 +38,6 @@ pub struct HtmlPage {
     pub retrieved_at: String,
 }
 
-/// An exact source-list match is required before any DNS lookup or connection.
-/// The controller supplies source URLs from its own stored search result, not
-/// a model-generated or UI-supplied replacement source list.
-pub async fn fetch_selected(
-    selected_urls: &[String],
-    requested_url: &str,
-) -> Result<ResearchContent, String> {
-    extract_content(fetch_selected_html(selected_urls, requested_url).await?)
-}
-
 /// Read once when the controller needs both article text and published offers.
 pub async fn fetch_selected_html(
     selected_urls: &[String],
@@ -543,17 +533,19 @@ mod tests {
 
     #[tokio::test]
     async fn selected_result_allowlist_is_exact_and_precedes_network_access() {
-        assert!(fetch_selected(
+        assert!(fetch_selected_html(
             &["https://example.com/allowed".into()],
             "https://example.com/other"
         )
         .await
-        .unwrap_err()
+        .err()
+        .unwrap()
         .contains("selected"));
         assert!(
-            fetch_selected(&["https://127.0.0.1/".into()], "https://127.0.0.1/")
+            fetch_selected_html(&["https://127.0.0.1/".into()], "https://127.0.0.1/")
                 .await
-                .unwrap_err()
+                .err()
+                .unwrap()
                 .contains("blocked")
         );
     }

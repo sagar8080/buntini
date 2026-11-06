@@ -23,7 +23,6 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
     /// Actions proposed by the model and waiting for the user's approval.
-    pub pending_actions: Mutex<HashMap<String, PendingAction>>,
     /// Stops a memory index refresh that is running (Delete everything, Clear history).
     pub index_cancel: Arc<AtomicBool>,
     /// Counts Delete everything runs, so a settings save queued behind one never writes
@@ -34,13 +33,6 @@ pub struct AppState {
     /// Routine runs holding the slot, by task id, each with the flag it sets when it gave
     /// way to the user. Locked only while `active` is held.
     pub background: Mutex<HashMap<String, Arc<AtomicBool>>>,
-}
-pub struct PendingAction {
-    tool: String,
-    prompt: String,
-    backend: String,
-    touched: Vec<String>,
-    expires: std::time::Instant,
 }
 
 /// Holds the same execution slot as chats and monitors until an approved action
@@ -119,53 +111,6 @@ fn action_allowed(settings: &Settings, name: &str, args: &serde_json::Map<String
         || crate::apps::permits(settings, name, args)
 }
 
-fn claim_action<'a>(
-    state: &'a AppState,
-    id: &str,
-    args: &Value,
-) -> Result<
-    (
-        PendingAction,
-        serde_json::Map<String, Value>,
-        ActionClaim<'a>,
-    ),
-    String,
-> {
-    let mut proposals = state.pending_actions.lock().unwrap();
-    let pending = proposals
-        .get(id)
-        .ok_or("That request expired. Ask again and I’ll set it up.")?;
-    if pending.expires < std::time::Instant::now() {
-        proposals.remove(id);
-        return Err("That request expired. Ask again and I’ll set it up.".into());
-    }
-    // An invalid edit or a busy slot leaves the sheet usable. Consume approval
-    // only once everything is ready to begin; execution failures cannot replay it.
-    let args = crate::actions::validate(&pending.tool, args)?;
-    let mut active = state.active.lock().unwrap();
-    if !active.is_empty() {
-        return Err("Buntini is still finishing another task. Try again in a moment.".into());
-    }
-    // Hold the policy-change gate (the active map) across the fresh permission
-    // check and claim, so revocation cannot slip between them.
-    let settings = state.store.lock().unwrap().settings()?;
-    if !crate::apps::permits(&settings, &pending.tool, &args) {
-        return Err(
-            "That app isn’t allowed any more. You can allow it again in Settings → Apps.".into(),
-        );
-    }
-    let claim_id = format!("action-{id}");
-    active.insert(claim_id.clone(), Arc::new(AtomicBool::new(false)));
-    let pending = proposals.remove(id).unwrap();
-    Ok((
-        pending,
-        args,
-        ActionClaim {
-            state,
-            id: claim_id,
-        },
-    ))
-}
 impl AppState {
     pub fn new(data: PathBuf, cache: PathBuf, resources: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
@@ -231,7 +176,6 @@ impl AppState {
             config_gate: tokio::sync::Mutex::new(()),
             data_dir: data,
             cache_dir,
-            pending_actions: Mutex::new(HashMap::new()),
             index_cancel: Arc::new(AtomicBool::new(false)),
             erasures: std::sync::atomic::AtomicU64::new(0),
             stopped_early: Mutex::new(std::collections::HashSet::new()),
@@ -862,37 +806,7 @@ pub async fn run_action(
         crate::notifications::announce_waiting(&app, &task).await;
         return Ok(task);
     }
-    let (pending, args, _claim) = claim_action(&state, &id, &args)?;
-    state.audit(&format!("action.{}", pending.tool), "Approved by the user");
-    let result = crate::actions::run(&pending.tool, &args).await;
-    let (status, answer) = match result {
-        Ok(answer) => ("completed", answer),
-        Err(error) => {
-            state.audit("action.failed", &format!("{}: {error}", pending.tool));
-            ("error", error)
-        }
-    };
-    let task = TaskRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        prompt: pending.prompt,
-        answer,
-        state: status.into(),
-        created_at: now(),
-        sources: vec![],
-        files: vec![],
-        system: None,
-        glance: None,
-        research: vec![],
-        research_report: None,
-        prices: vec![],
-        cards: vec![],
-        backend: pending.backend,
-        touched: pending.touched,
-        handoff: None,
-        action: None,
-    };
-    state.store.lock().unwrap().save_task(&task)?;
-    Ok(task)
+    Err("That request expired. Ask again and I’ll set it up.".into())
 }
 
 fn finish_workflow(
@@ -1642,7 +1556,6 @@ pub fn quit_app(app: tauri::AppHandle) {
 
 #[tauri::command]
 pub fn cancel_action(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.pending_actions.lock().unwrap().remove(&id);
     crate::notifications::withdraw_approval(&id);
     let flow = state.store.lock().unwrap().workflow(&id)?;
     if let Some(flow) = flow {
@@ -5124,102 +5037,6 @@ for line in sys.stdin:
         store.checkpoint(&mut flow, &task).unwrap();
         let error = open_approval_in(&store, &id).unwrap_err();
         assert!(error.contains("already handled"));
-    }
-
-    fn pending_action(tool: &str) -> PendingAction {
-        PendingAction {
-            tool: tool.into(),
-            prompt: "Open the project site".into(),
-            backend: "apple".into(),
-            touched: vec!["mail".into()],
-            expires: std::time::Instant::now() + std::time::Duration::from_secs(60),
-        }
-    }
-
-    #[test]
-    fn action_approval_survives_invalid_edits_and_contention_but_runs_only_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = AppState::new(
-            dir.path().join("data"),
-            dir.path().join("cache"),
-            dir.path().into(),
-        )
-        .unwrap();
-        state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .insert("proposal".into(), pending_action("open_link"));
-        assert!(claim_action(&state, "proposal", &json!({"url":"file:///private.txt"})).is_err());
-        assert!(state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .contains_key("proposal"));
-        state
-            .active
-            .lock()
-            .unwrap()
-            .insert("chat".into(), Arc::new(AtomicBool::new(false)));
-        assert!(claim_action(&state, "proposal", &json!({"url":"https://example.com/"})).is_err());
-        assert!(state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .contains_key("proposal"));
-        state.active.lock().unwrap().clear();
-        let (pending, args, claim) =
-            claim_action(&state, "proposal", &json!({"url":"https://example.com/"})).unwrap();
-        assert_eq!(
-            pending.touched,
-            ["mail"],
-            "derived action data retains its privacy provenance"
-        );
-        assert_eq!(args["url"], "https://example.com/");
-        assert!(!state.active.lock().unwrap().is_empty());
-        assert!(
-            claim_action(&state, "proposal", &json!({"url":"https://example.com/"})).is_err(),
-            "the same approval cannot execute twice"
-        );
-        drop(claim);
-        assert!(
-            state.active.lock().unwrap().is_empty(),
-            "error returns also release the execution slot"
-        );
-    }
-
-    #[test]
-    fn action_claim_rechecks_revocation_and_expiration() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = AppState::new(
-            dir.path().join("data"),
-            dir.path().join("cache"),
-            dir.path().into(),
-        )
-        .unwrap();
-        state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .insert("reminder".into(), pending_action("add_reminder"));
-        assert!(
-            claim_action(&state, "reminder", &json!({"title":"Call Ana"})).is_err(),
-            "Reminders is no longer allowed"
-        );
-        assert!(state.active.lock().unwrap().is_empty());
-        let mut expired = pending_action("open_link");
-        expired.expires = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .insert("expired".into(), expired);
-        assert!(claim_action(&state, "expired", &json!({"url":"https://example.com/"})).is_err());
-        assert!(!state
-            .pending_actions
-            .lock()
-            .unwrap()
-            .contains_key("expired"));
     }
 
     #[test]

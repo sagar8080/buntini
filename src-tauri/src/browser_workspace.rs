@@ -28,11 +28,9 @@ use tokio::{
 };
 
 pub const TOOLS: [&str; 1] = ["browse_page"];
-pub const SEARCH_HOST: &str = "www.google.com";
 const TEXT_LIMIT: usize = 6000;
 const RESPONSE_LIMIT: usize = 192_000;
 const LINK_LIMIT: usize = 32;
-const SEARCH_RESULT_LIMIT: usize = 10;
 const HEADER_LIMIT: usize = 8192;
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static WORKSPACE: tokio::sync::Mutex<Option<Workspace>> = tokio::sync::Mutex::const_new(None);
@@ -672,286 +670,6 @@ async fn run_script(window: &WebviewWindow, script: &str) -> Result<String, Stri
         .map_err(|_| "The page closed before readback.".to_string())
 }
 
-/// Browser research is controller-owned: the model cannot choose a transport,
-/// inject extraction scripts, or navigate arbitrary result URLs through this API.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserSearch {
-    pub query: String,
-    pub search_url: String,
-    pub retrieved_at: String,
-    pub sources: Vec<crate::types::Source>,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReadPurpose {
-    ApprovedPage,
-    ResearchSearch,
-    ResearchSource,
-}
-
-fn search_url(query: &str) -> Result<reqwest::Url, String> {
-    search_url_for_host(query, SEARCH_HOST)
-}
-
-fn search_url_for_host(query: &str, host: &str) -> Result<reqwest::Url, String> {
-    if query.trim().is_empty() || query.len() > 2000 || query.chars().any(char::is_control) {
-        return Err("Enter a web query of up to 2,000 characters.".into());
-    }
-    if !["www.google.com", "www.bing.com", "search.brave.com"].contains(&host) {
-        return Err("Unknown browser search engine.".into());
-    }
-    let mut url = reqwest::Url::parse(&format!("https://{host}/search")).unwrap();
-    url.query_pairs_mut().append_pair("q", query);
-    Ok(url)
-}
-
-fn search_sources(query: &str, evidence: &Value) -> Result<BrowserSearch, String> {
-    search_sources_for_host(query, evidence, SEARCH_HOST)
-}
-
-fn result_target(raw: &str, search_host: &str) -> Option<reqwest::Url> {
-    use base64::Engine;
-    let observed = crate::research::validate_public_url(raw).ok()?;
-    let observed_host = observed.host_str()?;
-    let target = if observed_host == "www.google.com" && observed.path() == "/url" {
-        let destinations: Vec<_> = observed
-            .query_pairs()
-            .filter(|(key, _)| ["q", "url"].contains(&key.as_ref()))
-            .collect();
-        if destinations.len() != 1 {
-            return None;
-        }
-        crate::research::validate_public_url(&destinations[0].1).ok()?
-    } else if observed_host == "www.bing.com" && observed.path() == "/ck/a" {
-        let destinations: Vec<_> = observed
-            .query_pairs()
-            .filter(|(key, _)| key == "u")
-            .collect();
-        if destinations.len() != 1 {
-            return None;
-        }
-        let encoded = destinations[0].1.strip_prefix("a1")?;
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(encoded)
-            .ok()?;
-        let decoded = String::from_utf8(decoded).ok()?;
-        crate::research::validate_public_url(&decoded).ok()?
-    } else {
-        observed
-    };
-    let host = target.host_str()?;
-    if host == search_host
-        || host.ends_with(&format!(".{search_host}"))
-        || ["www.google.com", "www.bing.com", "search.brave.com"].contains(&host)
-    {
-        return None;
-    }
-    Some(target)
-}
-
-fn search_sources_for_host(
-    query: &str,
-    evidence: &Value,
-    host: &str,
-) -> Result<BrowserSearch, String> {
-    let expected = search_url_for_host(query, host)?;
-    let url = evidence["url"]
-        .as_str()
-        .and_then(|raw| crate::research::validate_public_url(raw).ok())
-        .ok_or("The browser search returned no verified search URL.")?;
-    if host == "www.google.com"
-        && origin(&url) == origin(&expected)
-        && url.path().starts_with("/sorry/")
-    {
-        return Err("Google is showing an unusual-traffic verification screen instead of search results. No challenge was submitted; the approved API fallback can be used.".into());
-    }
-    let queries: Vec<_> = url.query_pairs().filter(|(name, _)| name == "q").collect();
-    if origin(&url) != origin(&expected)
-        || url.path() != expected.path()
-        || queries.len() != 1
-        || queries[0].1 != query
-    {
-        return Err(
-            "The browser search changed its query or destination; its results were not accepted."
-                .into(),
-        );
-    }
-    let page_text = evidence["text"].as_str().unwrap_or_default().to_lowercase();
-    if [
-        "verifying you're not a bot",
-        "switch to traditional captcha",
-        "verify you are human",
-        "checking your browser",
-    ]
-    .iter()
-    .any(|message| page_text.contains(message))
-    {
-        return Err("Browser search is showing a bot-verification screen instead of search results. No challenge was submitted.".into());
-    }
-    let links: Vec<ObservedLink> = serde_json::from_value(evidence["links"].clone())
-        .map_err(|_| "The browser search did not return result links.")?;
-    if links.len() > LINK_LIMIT {
-        return Err("The browser search returned too many result links.".into());
-    }
-    let retrieved_at = crate::types::now();
-    let mut seen = std::collections::HashSet::new();
-    let sources: Vec<_> = links
-        .into_iter()
-        .filter_map(|link| {
-            if link.title.trim().is_empty()
-                || link.title.chars().count() > 300
-                || link.description.chars().count() > 700
-            {
-                return None;
-            }
-            // Only observed direct targets or the explicit target parameter
-            // of a known search redirect are used. Every target is independently
-            // validated; no redirect is clicked and no destination is guessed.
-            let target = result_target(&link.url, host)?;
-            if !seen.insert(target.to_string()) {
-                return None;
-            }
-            Some(crate::types::Source {
-                title: link.title,
-                url: target.to_string(),
-                snippet: link.description,
-                retrieved_at: retrieved_at.clone(),
-            })
-        })
-        .take(SEARCH_RESULT_LIMIT + 1)
-        .collect();
-    if sources.is_empty() {
-        return Err("The browser search did not yield readable public result links. It may be blocked, require sign-in, or use an unsupported page layout.".into());
-    }
-    let truncated = evidence["linksTruncated"].as_bool().unwrap_or(false)
-        || sources.len() > SEARCH_RESULT_LIMIT;
-    Ok(BrowserSearch {
-        query: query.into(),
-        search_url: url.to_string(),
-        retrieved_at,
-        sources: sources.into_iter().take(SEARCH_RESULT_LIMIT).collect(),
-        truncated,
-    })
-}
-
-fn verified_evidence(receipt: ActionReceipt) -> Result<Value, String> {
-    if receipt.outcome != ActionOutcome::Succeeded {
-        return Err(receipt.error.unwrap_or(receipt.message));
-    }
-    Ok(receipt.evidence)
-}
-
-/// Run only after the controller has authorized online research. Each operation
-/// uses a fresh, nonpersistent data store and cannot inherit signed-in browsing.
-pub async fn search(query: &str, cancel: Arc<AtomicBool>) -> Result<BrowserSearch, String> {
-    let url = search_url(query)?;
-    let args = json!({"url":url.as_str()}).as_object().unwrap().clone();
-    let evidence = verified_evidence(
-        execute_in_mode(
-            "research-search",
-            &args,
-            cancel,
-            ReadPurpose::ResearchSearch,
-        )
-        .await,
-    )?;
-    search_sources(query, &evidence)
-}
-
-/// The controller supplies URLs from its stored result list. Requiring an exact
-/// match before any navigation prevents model-supplied replacements from silently
-/// extending research consent to another destination.
-pub async fn read_selected(
-    selected_urls: &[String],
-    requested_url: &str,
-    cancel: Arc<AtomicBool>,
-) -> Result<crate::research::ResearchContent, String> {
-    if !selected_urls.iter().any(|url| url == requested_url) {
-        return Err("This page is not one of the selected search results.".into());
-    }
-    let args = validate("browse_page", &json!({"url":requested_url}))?;
-    let evidence = verified_evidence(
-        execute_in_mode(
-            "research-source",
-            &args,
-            cancel,
-            ReadPurpose::ResearchSource,
-        )
-        .await,
-    )?;
-    let text = evidence["text"].as_str().unwrap_or_default();
-    if text.trim().is_empty() {
-        return Err("The browser page did not return readable source text.".into());
-    }
-    Ok(crate::research::ResearchContent {
-        url: evidence["url"].as_str().unwrap_or_default().into(),
-        title: evidence["title"].as_str().unwrap_or_default().into(),
-        text: text.into(),
-        retrieved_at: crate::types::now(),
-        truncated: evidence["truncated"].as_bool().unwrap_or(true),
-    })
-}
-
-/// Opt-in public-network smoke host, deliberately separate from the real app's
-/// settings, private app permissions, model, database, and persistent profiles.
-/// Run with `cargo run --example public_browser_smoke`; ordinary tests never run
-/// this check and it is absent from release builds.
-#[cfg(debug_assertions)]
-pub fn run_public_smoke(mut context: tauri::Context<tauri::Wry>) {
-    context.config_mut().app.windows.clear();
-    context.config_mut().identifier = "app.buntini.public-browser-smoke".into();
-    let completed = Arc::new(AtomicBool::new(false));
-    let task_completed = completed.clone();
-    tauri::Builder::default()
-        .setup(move |app| {
-            let handle = app.handle().clone();
-            set_app(handle.clone());
-            tauri::async_runtime::spawn(async move {
-                let cancel = Arc::new(AtomicBool::new(false));
-                let query = "Rust programming language official documentation";
-                let host = std::env::var("BUNTINI_SMOKE_SEARCH_HOST").unwrap_or_else(|_| SEARCH_HOST.into());
-                let args = json!({"url":search_url_for_host(query, &host).expect("Use a supported public smoke engine").as_str()}).as_object().unwrap().clone();
-                let search_receipt = execute_in_mode("research-search", &args, cancel.clone(), ReadPurpose::ResearchSearch).await;
-                let search_snapshot = search_receipt.evidence.clone();
-                let searched = verified_evidence(search_receipt).and_then(|evidence| search_sources_for_host(query, &evidence, &host));
-                // This fixed public URL is an explicit smoke fixture. Reading it
-                // also checks native isolation if a search engine blocks bots.
-                let url = "https://doc.rust-lang.org/book/";
-                let read = read_selected(&[url.into()], url, cancel).await;
-                let search_ok = searched.is_ok();
-                let read_ok = read.as_ref().is_ok_and(|page| {
-                    page.text.len() > 100 && page.text.to_lowercase().contains("rust")
-                });
-                let report = json!({
-                    "kind":"public_browser_smoke",
-                    "observedAt":crate::types::now(),
-                    "query":query,
-                    "searchHost":host,
-                    "searchSnapshot":search_snapshot,
-                    "search":match searched { Ok(result) => json!({"status":"succeeded","result":result}), Err(error) => json!({"status":"failed","error":error}) },
-                    "read":match read { Ok(page) => json!({"status":if read_ok {"succeeded"} else {"insufficient_evidence"},"page":page}), Err(error) => json!({"status":"failed","error":error}) },
-                    "isolation":"fresh_nonpersistent_store_required",
-                    "passed":search_ok && read_ok
-                });
-                println!("{}", serde_json::to_string_pretty(&report).unwrap());
-                task_completed.store(true, Ordering::Release);
-                handle.exit(if search_ok && read_ok { 0 } else { 1 });
-            });
-            Ok(())
-        })
-        .build(context)
-        .expect("Public browser smoke host could not start")
-        .run(move |_, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                if !completed.load(Ordering::Acquire) {
-                    api.prevent_exit();
-                }
-            }
-        });
-}
-
 #[cfg(target_os = "macos")]
 mod native {
     use super::*;
@@ -1182,7 +900,7 @@ pub async fn execute(
     args: &Map<String, Value>,
     cancel: Arc<AtomicBool>,
 ) -> ActionReceipt {
-    execute_in_mode(intent_id, args, cancel, ReadPurpose::ApprovedPage).await
+    read_approved_page(intent_id, args, cancel).await
 }
 
 /// A blank isolated window behind the verified proxy, ready to navigate. `allow` decides each
@@ -1287,11 +1005,10 @@ pub async fn read_rendered_price(raw_url: &str, cancel: Arc<AtomicBool>) -> Resu
     }
 }
 
-async fn execute_in_mode(
+async fn read_approved_page(
     intent_id: &str,
     args: &Map<String, Value>,
     cancel: Arc<AtomicBool>,
-    purpose: ReadPurpose,
 ) -> ActionReceipt {
     let args = match validate("browse_page", &Value::Object(args.clone())) {
         Ok(args) => args,
@@ -1305,7 +1022,7 @@ async fn execute_in_mode(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (intent_id, args, purpose);
+        let _ = (intent_id, args);
         return failed(
             ActionOutcome::Failed,
             "The isolated browser currently requires macOS 14 or later.",
@@ -1354,13 +1071,9 @@ async fn execute_in_mode(
                 )
             }
         };
-        let profile = if purpose == ReadPurpose::ApprovedPage {
-            match profile_id(&directory, &approved_origin) {
-                Ok(id) => Some(id),
-                Err(error) => return failed(ActionOutcome::Failed, error),
-            }
-        } else {
-            None
+        let profile = match profile_id(&directory, &approved_origin) {
+            Ok(id) => Some(id),
+            Err(error) => return failed(ActionOutcome::Failed, error),
         };
         let scoped_origin = approved_origin.clone();
         let denied = Arc::new(Mutex::new(None::<String>));
@@ -1391,7 +1104,6 @@ async fn execute_in_mode(
             return failed(ActionOutcome::Unknown, "The browser page may have loaded, but its window could not be shown. No website action was performed by Buntini.");
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
-        let mut search_ready_at = None;
         let result = loop {
             if cancel.load(Ordering::Acquire) {
                 break Err(
@@ -1414,22 +1126,7 @@ async fn execute_in_mode(
                     if let Ok(raw) = snapshot(&workspace.window).await {
                         let current_url = workspace.window.url().unwrap_or(native_url);
                         match observation(&raw, &current_url, &workspace.approved_origin) {
-                            Ok(Some(observed)) => {
-                                // Search results may hydrate after readyState is
-                                // complete. Give the fixed extraction a bounded
-                                // grace period; opening a page is never success.
-                                if purpose == ReadPurpose::ResearchSearch
-                                    && observed.links.is_empty()
-                                {
-                                    let ready_at = search_ready_at
-                                        .get_or_insert_with(tokio::time::Instant::now);
-                                    if ready_at.elapsed() < Duration::from_secs(3) {
-                                        tokio::time::sleep(Duration::from_millis(150)).await;
-                                        continue;
-                                    }
-                                }
-                                break Ok(observed);
-                            }
+                            Ok(Some(observed)) => break Ok(observed),
                             Ok(None) => {}
                             Err(error)
                                 if error.starts_with("The page changed during readback")
@@ -1455,7 +1152,7 @@ async fn execute_in_mode(
                 evidence: json!({"intentId":intent_id,"url":observed.url,"title":observed.title,"text":observed.text,"truncated":observed.truncated,"links":observed.links,"linksTruncated":observed.links_truncated,"sourceKind":"untrusted_web_page","verification":"native_url_and_bounded_page_snapshot","authentication":"not_verified","websiteActionsPerformed":false,"profileScope":workspace.approved_origin}), error: None },
             Err(error) => failed(ActionOutcome::Unknown, error),
         };
-        if cancel.load(Ordering::Acquire) || purpose != ReadPurpose::ApprovedPage {
+        if cancel.load(Ordering::Acquire) {
             drop(workspace);
         } else {
             *slot = Some(workspace);
@@ -1480,91 +1177,6 @@ mod tests {
         assert!(verify_store_identity(Some(id), false, Some(&name)).is_err());
         assert!(verify_store_identity(Some(id), true, None).is_err());
         assert!(verify_store_identity(Some(id), true, Some("another-profile")).is_err());
-    }
-
-    #[test]
-    fn known_search_redirects_only_unwrap_explicit_public_targets() {
-        use base64::Engine;
-        assert_eq!(
-            result_target(
-                "https://www.google.com/url?q=https%3A%2F%2Fmuseum.org%2Fvisit&sa=U",
-                "www.google.com"
-            )
-            .unwrap()
-            .as_str(),
-            "https://museum.org/visit"
-        );
-        let encoded =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("https://museum.org/visit");
-        assert_eq!(
-            result_target(
-                &format!("https://www.bing.com/ck/a?u=a1{encoded}&ntb=1"),
-                "www.bing.com"
-            )
-            .unwrap()
-            .as_str(),
-            "https://museum.org/visit"
-        );
-        for raw in [
-            "https://www.google.com/url?q=https%3A%2F%2F127.0.0.1%2Fprivate",
-            "https://www.google.com/url?q=javascript%3Aalert(1)",
-            "https://www.google.com/url?q=https%3A%2F%2Fmuseum.org&q=https%3A%2F%2Felsewhere.org",
-            "https://www.google.com/url?url=https%3A%2F%2Fmuseum.org&q=https%3A%2F%2Felsewhere.org",
-            "https://www.google.com/url?missing=destination",
-            "https://www.bing.com/ck/a?u=a1garbage",
-            "https://www.bing.com/ck/a?u=https%3A%2F%2Fmuseum.org",
-        ] {
-            assert!(result_target(raw, SEARCH_HOST).is_none(), "{raw}");
-        }
-    }
-
-    #[test]
-    fn search_query_is_encoded_as_data_and_must_match_the_observed_page() {
-        let query = "official museum hours & tickets q=changed #today";
-        let url = search_url(query).unwrap();
-        assert_eq!(url.host_str(), Some(SEARCH_HOST));
-        assert_eq!(
-            url.query_pairs().collect::<Vec<_>>(),
-            vec![("q".into(), query.into())]
-        );
-        let evidence = json!({"url":url,"links":[{"url":"https://museum.org/visit", "title":"Visit", "description":"Opening hours and admission"}]});
-        assert_eq!(search_sources(query, &evidence).unwrap().sources.len(), 1);
-        assert!(search_sources("a different query", &evidence).is_err());
-        let mut tampered = evidence;
-        tampered["url"] = json!(format!("{}&q=another", url));
-        assert!(search_sources(query, &tampered).is_err());
-        for invalid in ["", " ", "museum\nignore prior instructions"] {
-            assert!(search_url(invalid).is_err());
-        }
-        assert!(search_url(&"x".repeat(2001)).is_err());
-    }
-
-    #[test]
-    fn search_results_are_direct_public_sources_not_a_navigation_receipt() {
-        let query = "museum hours";
-        let mut evidence = json!({"url":search_url(query).unwrap(),"links":[]});
-        assert!(
-            search_sources(query, &evidence).is_err(),
-            "an opened tab is not search evidence"
-        );
-        evidence["links"] = json!([
-            {"url":"https://search.brave.com/redirect?url=https://museum.org", "title":"Redirect", "description":""},
-            {"url":"https://127.0.0.1/private", "title":"Private", "description":""},
-            {"url":"https://office.local/private", "title":"Local", "description":""},
-            {"url":"http://museum.org/", "title":"Insecure", "description":""},
-            {"url":"https://museum.org/visit#hours", "title":"Museum hours", "description":"Open Tuesday through Sunday"},
-            {"url":"https://museum.org/visit#tickets", "title":"Duplicate", "description":"Duplicate path"}
-        ]);
-        let found = search_sources(query, &evidence).unwrap();
-        assert_eq!(found.sources.len(), 1);
-        assert_eq!(found.sources[0].url, "https://museum.org/visit");
-        assert_eq!(found.sources[0].snippet, "Open Tuesday through Sunday");
-        assert_eq!(found.sources[0].retrieved_at, found.retrieved_at);
-        assert!(!found.truncated);
-        evidence["links"] = Value::Array((0..SEARCH_RESULT_LIMIT + 2).map(|i| json!({"url":format!("https://museum.org/page-{i}"),"title":format!("Result {i}"),"description":"Observed snippet"})).collect());
-        let found = search_sources(query, &evidence).unwrap();
-        assert_eq!(found.sources.len(), SEARCH_RESULT_LIMIT);
-        assert!(found.truncated);
     }
 
     #[test]
@@ -1809,32 +1421,4 @@ mod tests {
         assert_eq!(receipt.outcome, ActionOutcome::Failed);
     }
 
-    #[tokio::test]
-    async fn research_rejects_unselected_or_private_destinations_and_cancellation_before_navigation(
-    ) {
-        let cancelled = Arc::new(AtomicBool::new(true));
-        assert!(search("museum hours", cancelled.clone())
-            .await
-            .unwrap_err()
-            .contains("cancelled"));
-        let missing = read_selected(&[], "https://museum.org/visit", cancelled.clone())
-            .await
-            .unwrap_err();
-        assert!(missing.contains("not one of the selected"));
-        let private = "https://127.0.0.1/private";
-        assert!(
-            read_selected(&[private.into()], private, Arc::new(AtomicBool::new(false)))
-                .await
-                .unwrap_err()
-                .contains("blocked")
-        );
-        assert!(read_selected(
-            &["https://museum.org/visit".into()],
-            "https://museum.org/visit",
-            cancelled
-        )
-        .await
-        .unwrap_err()
-        .contains("cancelled"));
-    }
 }

@@ -88,11 +88,6 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
-pub fn run_public_browser_smoke() {
-    browser_workspace::run_public_smoke(app_context());
-}
-
-#[cfg(debug_assertions)]
 pub fn run_public_desktop_browser_smoke() {
     browser_session::run_public_smoke();
 }

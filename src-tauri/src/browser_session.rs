@@ -61,11 +61,7 @@ pub struct ResearchSession {
 
 #[derive(Debug)]
 pub struct BrowserSearch {
-    pub query: String,
-    pub search_url: String,
-    pub retrieved_at: String,
     pub sources: Vec<Source>,
-    pub truncated: bool,
     pub session: ResearchSession,
 }
 
@@ -742,11 +738,7 @@ pub async fn search(
     let snapshot = read_tab(&mut session, url.as_str(), Some(query), cancel).await?;
     let found = sources(&snapshot).map_err(|e| failure(e, true, true))?;
     Ok(BrowserSearch {
-        query: query.into(),
-        search_url: snapshot.url,
-        retrieved_at: crate::types::now(),
         sources: found,
-        truncated: snapshot.truncated || snapshot.links.len() > MAX_SOURCES,
         session,
     })
 }
@@ -839,7 +831,7 @@ pub fn run_public_smoke() {
             let Some(url)=selected else{return serde_json::json!({"stage":"selection","browser":target,"query":query,"sources":found.sources,"error":"No observed official Rust documentation result."});};
             let selected_urls=found.sources.iter().map(|source|source.url.clone()).collect::<Vec<_>>();
             match read_selected(&mut found.session,&selected_urls,&url,cancel).await {
-                Ok(page)=>serde_json::json!({"stage":"complete","browser":target,"query":query,"searchUrl":found.search_url,"sources":found.sources,"page":{"url":page.url,"title":page.title,"characters":page.text.chars().count(),"excerpt":page.text.chars().take(300).collect::<String>(),"truncated":page.truncated}}),
+                Ok(page)=>serde_json::json!({"stage":"complete","browser":target,"query":query,"sources":found.sources,"page":{"url":page.url,"title":page.title,"characters":page.text.chars().count(),"excerpt":page.text.chars().take(300).collect::<String>(),"truncated":page.truncated}}),
                 Err(error)=>serde_json::json!({"stage":"read","browser":target,"query":query,"sources":found.sources,"error":error}),
             }
         }),

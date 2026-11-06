@@ -326,6 +326,7 @@ pub fn indexed_candidates(
     Ok(result)
 }
 
+#[cfg(test)]
 pub fn verify_candidates(
     roots: &[String],
     candidates: &[IndexCandidate],
@@ -448,6 +449,7 @@ pub(crate) fn verify_candidate_group(
     Ok(local::prefer_literal(hits, fallback))
 }
 
+#[cfg(test)]
 pub fn query_index(
     db: &Connection,
     roots: &[String],

@@ -1686,6 +1686,7 @@ end run"#;
 
 /// Execute exactly one approved intent. The caller journals its idempotency key
 /// before calling this, and must preserve Unknown receipts across restarts.
+#[cfg(any(test, debug_assertions))]
 pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
     execute_with(tool, args, Path::new("")).await
 }
@@ -1837,17 +1838,6 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
             dispatched_receipt(tool, command, 15, format!("macOS accepted the request to open {url}. The page contents have not been verified."), json!({"verification":"launch_services_accepted", "url":url})).await
         }
         _ => ActionReceipt::failure(tool, ActionOutcome::Failed, "Unknown action."),
-    }
-}
-
-/// Compatibility for direct callers that only display text. Durable task runners
-/// should retain the complete receipt from execute instead.
-pub async fn run(tool: &str, args: &Map<String, Value>) -> Result<String, String> {
-    let receipt = execute(tool, args).await;
-    if receipt.outcome == ActionOutcome::Succeeded {
-        Ok(receipt.message)
-    } else {
-        Err(receipt.message)
     }
 }
 

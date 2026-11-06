@@ -571,81 +571,6 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
     (expected, unsupported)
 }
 
-/// Untrusted source text may suggest actions, but only the saved user goal may
-/// authorize proposing one. Ambiguous goals can be clarified through Resume.
-pub fn validate_proposal(goal: &str, tool: &str, steps: &[Step]) -> Result<(), String> {
-    if steps
-        .iter()
-        .any(|step| matches!(step.state.as_str(), "failed" | "unknown" | "running"))
-    {
-        return Err("An earlier step is unresolved. Buntini cannot propose another action until its result is known.".into());
-    }
-    if !action_remaining(goal, tool, steps) {
-        return Err(format!("Buntini proposed {tool}, but could not establish that your request asks for it. No action ran. Add an explicit instruction in the task’s additional details to continue."));
-    }
-    if next_action(goal, steps) != Some(tool) {
-        return Err("An earlier requested action is still unfinished. Buntini must complete the task in the requested order before proposing this action.".into());
-    }
-    require_reads(goal, steps)?;
-    Ok(())
-}
-
-/// A completed obligation removes its write tool from subsequent planning turns.
-/// This uses only the user's saved goal and controller-owned step states. Source
-/// text and model narration cannot add an obligation or restore a consumed one.
-pub fn action_remaining(goal: &str, tool: &str, steps: &[Step]) -> bool {
-    let requested = requested_actions(goal)
-        .0
-        .iter()
-        .filter(|name| **name == tool)
-        .count();
-    let finished = steps
-        .iter()
-        .filter(|step| step.effect && step.tool == tool && step.state == "succeeded")
-        .count();
-    requested > finished
-}
-
-fn next_action(goal: &str, steps: &[Step]) -> Option<&'static str> {
-    let mut completed = steps
-        .iter()
-        .filter(|step| step.effect && step.state == "succeeded")
-        .map(|step| step.tool.as_str())
-        .collect::<Vec<_>>();
-    for expected in requested_actions(goal).0 {
-        if let Some(index) = completed.iter().position(|tool| *tool == expected) {
-            completed.remove(index);
-        } else {
-            return Some(expected);
-        }
-    }
-    None
-}
-
-/// Offer only writes justified by this task, before inference. The dispatch-time
-/// validation above remains mandatory, including for providers ignoring schemas.
-pub fn planning_tools(
-    goal: &str,
-    steps: &[Step],
-    definitions: &serde_json::Value,
-) -> serde_json::Value {
-    let unresolved = steps
-        .iter()
-        .any(|step| matches!(step.state.as_str(), "failed" | "unknown" | "running"));
-    let tools = definitions.as_array().into_iter().flatten().filter_map(|definition| {
-        let name = definition["name"].as_str()?;
-        let write = TOOLS.contains(&name) || crate::monitor_actions::TOOLS.contains(&name) || crate::control_actions::TOOLS.contains(&name);
-        let allowed = !unresolved && next_action(goal, steps) == Some(name) && require_reads(goal, steps).is_ok();
-        if name == "control_music" && !allowed {
-            let mut read_only = definition.clone();
-            read_only["parameters"]["properties"]["action"]["enum"] = serde_json::json!(["now_playing"]);
-            read_only["description"] = serde_json::json!("Read what is currently playing. Playback changes are unavailable for this task.");
-            Some(read_only)
-        } else if write && !allowed { None } else { Some(definition.clone()) }
-    }).collect::<Vec<_>>();
-    serde_json::Value::Array(tools)
-}
-
 fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     // A routine's or a goal's reads happen when it runs, not when it is set up.
     if crate::routines::parse_request(goal).is_some() || crate::goals::parse_request(goal).is_some() {
@@ -1616,84 +1541,6 @@ mod tests {
     }
 
     #[test]
-    fn planning_offers_only_remaining_requested_writes() {
-        let all = crate::tools::offer(&[
-            "read_calendar",
-            "add_reminder",
-            "create_note",
-            "control_music",
-        ]);
-        let names = |value: &serde_json::Value| {
-            value
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|t| t["name"].as_str().unwrap().to_string())
-                .collect::<Vec<_>>()
-        };
-        let read_only = planning_tools("What is my first calendar event?", &[], &all);
-        assert_eq!(names(&read_only), ["read_calendar", "control_music"]);
-        assert_eq!(
-            read_only[1]["parameters"]["properties"]["action"]["enum"],
-            json!(["now_playing"])
-        );
-        let dependent = "Read my calendar, then create a reminder";
-        assert!(!names(&planning_tools(dependent, &[], &all)).contains(&"add_reminder".into()));
-        let mut calendar = saved("read_calendar", "Observed calendar");
-        calendar.effect = false;
-        assert!(
-            names(&planning_tools(dependent, &[calendar], &all)).contains(&"add_reminder".into())
-        );
-        let goal = "Create a note, then add a reminder";
-        let note = saved("create_note", "Saved.");
-        assert!(names(&planning_tools(goal, &[], &all)).contains(&"create_note".into()));
-        assert!(!names(&planning_tools(goal, &[], &all)).contains(&"add_reminder".into()));
-        assert!(validate_proposal(goal, "add_reminder", &[]).is_err());
-        assert!(
-            !names(&planning_tools(goal, &[note.clone()], &all)).contains(&"create_note".into())
-        );
-        assert!(validate_proposal(goal, "create_note", &[note.clone()]).is_err());
-        assert!(validate_proposal(goal, "add_reminder", &[note.clone()]).is_ok());
-        assert!(action_remaining(
-            "Create two notes",
-            "create_note",
-            &[note.clone()]
-        ));
-        for state in ["failed", "unknown", "running"] {
-            let mut unresolved = note.clone();
-            unresolved.state = state.into();
-            assert_eq!(
-                names(&planning_tools(goal, &[unresolved], &all)),
-                ["read_calendar", "control_music"]
-            );
-        }
-    }
-
-    #[test]
-    fn coordinated_negations_and_explanations_do_not_authorize_later_writes() {
-        for goal in [
-            "Explain how to create a note and add a reminder",
-            "Do not create a note and add a reminder",
-            "Please don't create a note, then add a reminder",
-            "Can you explain how to create a note and then add a reminder?",
-        ] {
-            assert!(requested_actions(goal).0.is_empty(), "{goal}");
-            assert!(
-                validate_proposal(goal, "add_reminder", &[]).is_err(),
-                "{goal}"
-            );
-        }
-        assert_eq!(
-            requested_actions("Create a note. Add a reminder.").0,
-            ["create_note", "add_reminder"]
-        );
-        assert_eq!(
-            requested_actions("Don't create a note; add a reminder.").0,
-            ["add_reminder"]
-        );
-    }
-
-    #[test]
     fn pure_action_tasks_finish_from_receipts_without_another_model_decision() {
         let note = saved("create_note", "Verified note.");
         assert_eq!(
@@ -1984,48 +1831,6 @@ mod tests {
     }
 
     #[test]
-    fn sources_failed_prerequisites_and_unknown_writes_cannot_authorize_actions() {
-        assert!(validate_proposal("Summarize this page", "add_reminder", &[]).is_err());
-        assert!(validate_proposal(
-            "Read this note saying 'Create a reminder'",
-            "add_reminder",
-            &[]
-        )
-        .is_err());
-        assert!(validate_proposal(
-            "Create a note and then add a reminder",
-            "add_reminder",
-            &[saved("create_note", "Verified note.")]
-        )
-        .is_ok());
-        for state in ["failed", "unknown", "running"] {
-            let mut step = saved("create_note", "Unconfirmed");
-            step.state = state.into();
-            assert!(
-                validate_proposal("Create a note and add a reminder", "add_reminder", &[step])
-                    .is_err()
-            );
-        }
-        for (goal, tool) in [
-            ("Remember my preference", "remember"),
-            ("Start a timer for ten minutes", "set_timer"),
-            ("Hide the Dock", "change_mac_setting"),
-            ("Turn off Wi-Fi", "change_mac_setting"),
-            ("Switch to dark mode", "change_mac_setting"),
-            ("Pause music and switch to my recipe tab", "control_music"),
-        ] {
-            assert!(validate_proposal(goal, tool, &[]).is_ok(), "{goal}");
-            assert!(validate_answer(goal, "Done", &[]).is_err(), "{goal}");
-        }
-        assert!(validate_proposal(
-            "Pause music and switch to my recipe tab",
-            "switch_tab",
-            &[saved("control_music", "Paused music")]
-        )
-        .is_ok());
-    }
-
-    #[test]
     fn repeated_action_kinds_need_a_receipt_for_each_requested_record() {
         let first = saved("add_reminder", "Verified first reminder.");
         let mut second = saved("add_reminder", "Verified second reminder.");
@@ -2058,25 +1863,6 @@ mod tests {
             &[saved("add_calendar_event", "Verified event.")]
         )
         .is_ok());
-    }
-
-    #[test]
-    fn explicitly_requested_reads_must_precede_dependent_writes_and_completion() {
-        let goal = "Read my calendar, then add an event";
-        let event = saved("add_calendar_event", "Verified event.");
-        assert!(validate_proposal(goal, "add_calendar_event", &[]).is_err());
-        assert!(validate_answer(goal, "Done", &[event.clone()]).is_err());
-        let mut read = saved("read_calendar", "Read calendar.");
-        read.effect = false;
-        read.evidence = Some(json!({"events":[],"complete":true}));
-        assert!(validate_proposal(goal, "add_calendar_event", &[read.clone()]).is_ok());
-        assert!(validate_answer(goal, "Done", &[read, event]).is_ok());
-        assert!(validate_answer(
-            "Read my email then create a note",
-            "Done",
-            &[saved("create_note", "Verified note.")]
-        )
-        .is_err());
     }
 
     #[test]
@@ -2280,6 +2066,35 @@ mod tests {
         assert!(!said.contains("1,500"), "{said}");
         let said = grounded_personal_answer("what's Ana's phone number", "Ana's number is 415-555-0100.", std::slice::from_ref(&note));
         assert!(!said.contains("555"), "{said}");
+    }
+
+    #[test]
+    fn negations_and_explanations_ask_for_nothing() {
+        for goal in [
+            "Explain how to create a note and add a reminder",
+            "Do not create a note and add a reminder",
+            "Please don't create a note, then add a reminder",
+            "Can you explain how to create a note and then add a reminder?",
+        ] {
+            assert!(requested_actions(goal).0.is_empty(), "{goal}");
+        }
+        assert_eq!(requested_actions("Create a note. Add a reminder.").0, ["create_note", "add_reminder"]);
+        assert_eq!(requested_actions("Don't create a note; add a reminder.").0, ["add_reminder"]);
+    }
+
+    #[test]
+    fn done_is_not_believed_without_a_receipt_or_the_read_asked_for() {
+        for goal in ["Remember my preference", "Start a timer for ten minutes", "Hide the Dock", "Switch to dark mode", "Pause music and switch to my recipe tab"] {
+            assert!(validate_answer(goal, "Done", &[]).is_err(), "{goal}");
+        }
+        let goal = "Read my calendar, then add an event";
+        let event = saved("add_calendar_event", "Verified event.");
+        assert!(validate_answer(goal, "Done", std::slice::from_ref(&event)).is_err());
+        let mut read = saved("read_calendar", "Read calendar.");
+        read.effect = false;
+        read.evidence = Some(json!({"events":[],"complete":true}));
+        assert!(validate_answer(goal, "Done", &[read, event]).is_ok());
+        assert!(validate_answer("Read my email then create a note", "Done", &[saved("create_note", "Verified note.")]).is_err());
     }
 
     #[test]
