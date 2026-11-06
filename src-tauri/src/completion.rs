@@ -335,6 +335,12 @@ pub(crate) fn unjoined(clause: &str, original: &str) -> String {
     clause.into()
 }
 
+/// Writes that always wait for a sheet, so words in them never run a direct command.
+pub(crate) const NOT_A_DIRECT_COMMAND: [&str; 14] = [
+    "add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "send_message", "start_call",
+    "update_calendar_event", "reschedule_reminder", "complete_reminder", "append_to_note", "set_timer", "create_saved_search", "create_price_watch",
+];
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
     // "Follow up with Ana until she replies" asks for a goal now; each follow-up is a
     // check-in's own task.
@@ -372,6 +378,8 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
             let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
             let tool = match verb {
                 "add" | "put" | "throw" if has(&["cart", "basket"]) || tokens.windows(2).any(|pair| pair[0] == "my" && pair[1] == "bag") => Some(crate::cart::TOOL),
+                // Before the Mac-setting words below: "set a reminder to turn on dark mode".
+                "set" | "add" | "create" | "make" if tokens.iter().take(3).any(|token| *token == "reminder") => Some("add_reminder"),
                 "remember" => Some("remember"),
                 // Changing an item the user already has: its id comes from a read.
                 "mark" if has(&["done", "complete", "completed", "finished"]) => {
@@ -491,9 +499,15 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("run_shortcut")
                 }
+                // Answering an invite through Buntini isn't possible; "Accept Saturday" in a
+                // draft's instructions isn't this.
+                "accept" | "decline" if has(&["invite", "invitation", "invites", "invitations", "meeting", "event"]) => {
+                    unsupported = true;
+                    None
+                }
                 "send" | "email" | "text" | "post" | "publish" | "book" | "reserve" | "buy"
                 | "purchase" | "order" | "pay" | "delete" | "cancel" | "move" | "update"
-                | "change" => {
+                | "change" | "forward" | "archive" | "unsubscribe" | "rsvp" | "trash" => {
                     unsupported = true;
                     None
                 }
@@ -726,7 +740,19 @@ pub(crate) fn claims_own_write(text: &str) -> bool {
         "emailed",
         "set",
         "enabled",
+        "forwarded",
+        "archived",
+        "unsubscribed",
+        "accepted",
+        "declined",
+        "replied",
+        "trashed",
+        "blocked",
+        "marked",
     ];
+    if tokens.first().is_some_and(|first| *first == "done") && tokens.len() <= 4 {
+        return true;
+    }
     for (index, token) in tokens.iter().enumerate() {
         if !["i", "i've", "we", "we've"].contains(token) {
             continue;
@@ -978,6 +1004,82 @@ fn clock_times(text: &str) -> Vec<String> {
 }
 
 /// Sentences and lines of an answer, each with its own punctuation.
+/// Every number in a text, ignoring commas and a whole number's ".00", so "$1,299.00" and
+/// "1299" are the same number.
+pub(crate) fn numbers(text: &str) -> std::collections::HashSet<String> {
+    number_spans(text).into_iter().map(|(number, ..)| number).collect()
+}
+
+fn number_spans(text: &str) -> Vec<(String, Option<char>, Option<char>)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].is_ascii_digit() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len() && (chars[at].is_ascii_digit() || (matches!(chars[at], ',' | '.') && chars.get(at + 1).is_some_and(char::is_ascii_digit))) {
+            at += 1;
+        }
+        let raw: String = chars[start..at].iter().filter(|c| **c != ',').collect();
+        let number = raw.strip_suffix(".00").map(str::to_string).unwrap_or(raw);
+        found.push((number, start.checked_sub(1).map(|before| chars[before]), chars.get(at).copied()));
+    }
+    found
+}
+
+/// The numbers an answer states as facts: amounts and percentages of any size, and others
+/// long enough to be a code, a phone number or a count. Part of a name ("WH-1000XM5"), a
+/// citation marker or a year isn't one.
+pub(crate) fn stated_figures(text: &str) -> Vec<String> {
+    number_spans(text)
+        .into_iter()
+        .filter(|(number, before, after)| {
+            let in_a_name = before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic) || *before == Some('-') && after.is_some_and(char::is_alphabetic);
+            let marker = *before == Some('[') && *after == Some(']');
+            let money = before.is_some_and(|c| "$€£¥".contains(c)) || *after == Some('%');
+            let digits = number.chars().filter(char::is_ascii_digit).count();
+            let year = digits == 4 && (number.starts_with("19") || number.starts_with("20"));
+            !in_a_name && !marker && (money || (digits >= 3 && !year))
+        })
+        .map(|(number, ..)| number)
+        .collect()
+}
+
+/// Sentences from a model's answer about the user's notes, contacts, files or memory that
+/// state a number or address nothing it read holds. Those are where a made-up amount or
+/// phone number does harm, and no record-written answer covers them.
+fn without_unread_details(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let reads: Vec<&Step> = steps
+        .iter()
+        .filter(|step| step.state == "succeeded" && ["find_notes", "find_contact", "search_files", "search_memory"].contains(&step.tool.as_str()))
+        .collect();
+    if reads.is_empty() {
+        return answer.to_string();
+    }
+    let held = reads.iter().filter_map(|step| step.evidence.as_ref()).map(serde_json::Value::to_string).chain([prompt.to_string()]).collect::<Vec<_>>().join("\n");
+    let held_numbers = numbers(&held);
+    let lower = held.to_lowercase();
+    let made_up = |sentence: &str| {
+        stated_figures(sentence).iter().any(|figure| !held_numbers.contains(figure))
+            || sentence.split_whitespace().any(|word| {
+                let word = word.trim_matches(|c: char| !c.is_alphanumeric());
+                word.contains('@') && !lower.contains(&word.to_lowercase())
+            })
+    };
+    if !sentences(answer).into_iter().any(|sentence| made_up(sentence)) {
+        return answer.to_string();
+    }
+    let kept: String = sentences(answer).into_iter().filter(|sentence| !made_up(sentence)).collect::<String>().trim().to_string();
+    if kept.chars().any(char::is_alphabetic) {
+        kept
+    } else {
+        "I couldn’t find that in what I read.".into()
+    }
+}
+
 pub(crate) fn sentences(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     for line in text.split_inclusive('\n') {
@@ -1022,6 +1124,10 @@ fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
     let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once ", "want me", "would you", "i can "].iter().any(|hedge| text.contains(hedge));
     if hedged {
         return false;
+    }
+    // "You're free" says as much about a calendar as "you have a meeting".
+    if ["you're free", "you are free", "you're clear", "you are clear", "is clear", "are clear", "wide open", "you're not busy", "you are not busy", "nothing on ", "no meetings", "no events", "nothing scheduled", "you have nothing", "you've got nothing"].iter().any(|claim| text.contains(claim)) {
+        return true;
     }
     let says_you_have = ["you have ", "you've got ", "you got "].iter().any(|claim| text.contains(claim));
     let there_is = ["there's ", "there is ", "there are ", "coming up", "on your calendar", "on your schedule", "is due", "are due"].iter().any(|claim| text.contains(claim));
@@ -1109,6 +1215,7 @@ fn invents_inbox(prompt: &str, answer: &str, steps: &[Step]) -> bool {
 /// and otherwise just answers the person. Times the user wrote themselves don't count,
 /// nor times a file or note read this turn states ("the repair appointment is 14:20").
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let answer = &without_unread_details(prompt, answer, steps);
     if invents_inbox(prompt, answer, steps) {
         return "I haven’t looked at your email, so I won’t guess. Ask me “what’s in my inbox?” and I’ll check.".into();
     }
@@ -1155,7 +1262,9 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     if kept.chars().any(char::is_alphabetic) {
         return kept;
     }
-    match unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app) {
+    let asks_if_free = ["free", "busy", "available", "clear"].iter().any(|word| prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|said| said == *word));
+    let about = unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app).or_else(|| (asks_if_free && unread.iter().any(|(app, _)| *app == "calendar")).then_some("calendar"));
+    match about {
         Some(app) => {
             let example = match app {
                 "calendar" => "what’s on my calendar today?",
@@ -2121,6 +2230,56 @@ mod tests {
         for prompt in ["Call me when it's done", "Call the API again", "Call Raj on WhatsApp", "Remind me to call Ana", "phone number for Ana", "video call"] {
             assert!(!requested_actions(prompt).0.contains(&"start_call"), "{prompt}");
         }
+    }
+
+    #[test]
+    fn writes_that_wait_for_a_sheet_are_never_direct_commands() {
+        for prompt in ["Set a reminder at 5 to check the volume", "Set a reminder to turn on dark mode tonight", "Remind me to lock my screen at 6"] {
+            assert!(requested_actions(prompt).0.iter().any(|tool| NOT_A_DIRECT_COMMAND.contains(tool)), "{prompt}");
+        }
+        for prompt in ["set the volume to 30", "turn on dark mode", "lock my screen", "play Hey There Delilah", "open github.com"] {
+            assert!(!requested_actions(prompt).0.iter().any(|tool| NOT_A_DIRECT_COMMAND.contains(tool)), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn saying_youre_free_takes_a_read_of_the_calendar() {
+        let said = grounded_personal_answer("am I free at 3pm", "Yes, you're free at 3pm.", &[]);
+        assert!(!said.contains("you're free") && said.contains("calendar"), "{said}");
+        let said = grounded_personal_answer("is my afternoon clear", "Your afternoon is clear.", &[]);
+        assert!(!said.contains("is clear"), "{said}");
+        assert_eq!(grounded_personal_answer("what's a free API for weather", "Open-Meteo has a free API.", &[]), "Open-Meteo has a free API.");
+    }
+
+    #[test]
+    fn what_buntini_cant_do_is_never_announced_as_done() {
+        for prompt in ["forward Ana's email to Sam", "archive that email", "unsubscribe me from this", "accept the invite"] {
+            assert!(requested_actions(prompt).1, "{prompt}");
+        }
+        assert!(!requested_actions("Accept Saturday at 2pm and mention a vegetarian dish").1);
+        for said in ["I forwarded Ana's email to Sam.", "I archived it.", "Done, archived.", "Done."] {
+            assert!(claims_own_write(said), "{said}");
+        }
+    }
+
+    #[test]
+    fn figures_are_compared_as_numbers() {
+        assert!(numbers("Now $1,299.00 or 3 for 40").contains("1299"));
+        assert_eq!(stated_figures("It's $249 at Best Buy [1], about 12% off the WH-1000XM5 from 2026, with 3 left."), ["249", "12"]);
+        assert_eq!(stated_figures("Call 415-555-0100."), ["415", "555", "0100"]);
+    }
+
+    #[test]
+    fn a_number_nothing_read_holds_doesnt_reach_the_user() {
+        let mut note = saved("find_notes", "");
+        note.effect = false;
+        note.evidence = Some(json!({"records":[{"title":"Lease","text":"The deposit is $1,200, paid in May."}]}));
+        let fine = "Your deposit is $1,200.";
+        assert_eq!(grounded_personal_answer("what's my deposit", fine, std::slice::from_ref(&note)), fine);
+        let said = grounded_personal_answer("what's my deposit", "Your deposit is $1,500.", std::slice::from_ref(&note));
+        assert!(!said.contains("1,500"), "{said}");
+        let said = grounded_personal_answer("what's Ana's phone number", "Ana's number is 415-555-0100.", std::slice::from_ref(&note));
+        assert!(!said.contains("555"), "{said}");
     }
 
     #[test]

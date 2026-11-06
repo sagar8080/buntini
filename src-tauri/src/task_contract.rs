@@ -149,6 +149,45 @@ pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> 
     if ["morning", "afternoon", "evening"].iter().any(|part| pair("this", part)) {
         add(base);
     }
+    // "December 3", "3 Dec", "the 3rd of December": the next one. "the 20th": this month's,
+    // or next month's once it has passed.
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let month_of = |word: &str| -> Option<u32> {
+        (word.len() >= 3).then(|| ()).and_then(|_| {
+            let at = MONTHS.iter().position(|month| word.starts_with(month))?;
+            const FULL: [&str; 12] = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+            (word == MONTHS[at] || word == FULL[at] || (at == 8 && word == "sept")).then_some(at as u32 + 1)
+        })
+    };
+    let day_number = |word: &str| -> Option<u32> {
+        word.trim_end_matches(|c: char| c.is_alphabetic()).parse::<u32>().ok().filter(|day| (1..=31).contains(day) && ["", "st", "nd", "rd", "th"].contains(&word.trim_start_matches(|c: char| c.is_ascii_digit())))
+    };
+    let next_on = |month: u32, day: u32| -> Option<chrono::NaiveDate> {
+        let this_year = chrono::NaiveDate::from_ymd_opt(base.year(), month, day)?;
+        if this_year >= base { Some(this_year) } else { chrono::NaiveDate::from_ymd_opt(base.year() + 1, month, day) }
+    };
+    for (at, word) in words.iter().enumerate() {
+        let following = words.get(at + 1).copied().unwrap_or_default();
+        let after_of = if following == "of" { words.get(at + 2).copied().unwrap_or_default() } else { following };
+        // "I may 3 times" isn't a date.
+        let verb = *word == "may" && at > 0 && ["i", "you", "we", "they", "it", "he", "she"].contains(&words[at - 1]);
+        let named = match (month_of(word).filter(|_| !verb), day_number(following), day_number(word), month_of(after_of)) {
+            (Some(month), Some(day), ..) => next_on(month, day),
+            (_, _, Some(day), Some(month)) => next_on(month, day),
+            _ => None,
+        };
+        if let Some(day) = named {
+            add(day);
+        } else if word.ends_with(|c: char| c.is_alphabetic()) && at > 0 && words[at - 1] == "the" {
+            if let Some(number) = day_number(word) {
+                let here = chrono::NaiveDate::from_ymd_opt(base.year(), base.month(), number).filter(|day| *day >= base);
+                let next = if base.month() == 12 { chrono::NaiveDate::from_ymd_opt(base.year() + 1, 1, number) } else { chrono::NaiveDate::from_ymd_opt(base.year(), base.month() + 1, number) };
+                if let Some(day) = here.or(next) {
+                    add(day);
+                }
+            }
+        }
+    }
     for word in &words {
         let day = chrono::NaiveDate::parse_from_str(word, "%Y-%m-%d")
             .ok()
@@ -162,7 +201,14 @@ pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> 
             add(day);
         }
     }
+    // "Is my afternoon clear" names a part of today.
+    if result.is_empty() && words.iter().any(|word| ["morning", "afternoon", "evening"].contains(word)) && pair_of_my(&words) {
+        result.push(base.format("%Y-%m-%d").to_string());
+    }
     result
+}
+fn pair_of_my(words: &[&str]) -> bool {
+    words.windows(2).any(|pair| pair[0] == "my" && ["morning", "afternoon", "evening"].contains(&pair[1]))
 }
 
 fn clauses(goal: &str) -> Vec<String> {
@@ -1537,6 +1583,27 @@ impl TaskContract {
             }
         }
     }
+    /// A text or call really goes out, so its number is one the user gave or Contacts
+    /// bound, and the name above it one the user wrote. Anything else the model offered,
+    /// perhaps from an email or a page, is dropped and the sheet asks.
+    pub fn keep_only_known_recipient(&self, tool: &str, arguments: &mut Value) {
+        if !["send_message", "start_call"].contains(&tool) {
+            return;
+        }
+        let bound = self.next_outcome().is_some_and(|outcome| {
+            self.constraints.iter().any(|c| c.outcome_id.as_deref() == Some(&outcome.id) && c.field == "to" && c.source == "contact_record")
+        });
+        let request = &self.current_request;
+        let Some(fields) = arguments.as_object_mut() else {
+            return;
+        };
+        if !bound && fields.get("to").and_then(Value::as_str).is_some_and(|to| !crate::source_fields::said_address(request, to)) {
+            fields.remove("to");
+        }
+        if fields.get("name").and_then(Value::as_str).is_some_and(|name| !crate::source_fields::user_named(request, name)) {
+            fields.remove("name");
+        }
+    }
     /// "Reply to Ana" with no email bound yet: the inbox search for the sender the user
     /// named, until it is in the journal (`recipes::reply_read`).
     pub fn reply_lookup(&self, steps: &[Step]) -> Option<Value> {
@@ -2139,8 +2206,9 @@ impl TaskContract {
         if self.connector_request() {
             return connector_answer(text, steps);
         }
-        completion::validate_answer(&self.current_request, text, steps)
-            .map(|answer| completion::grounded_personal_answer(&self.current_request, &answer, steps))
+        // What the model wrote is checked; a receipt is what really happened and stays whole.
+        let written = completion::grounded_personal_answer(&self.current_request, text, steps);
+        completion::validate_answer(&self.current_request, &written, steps)
     }
     pub fn completed_action_answer(&self, steps: &[Step]) -> Option<String> {
         if self
@@ -2984,6 +3052,27 @@ mod tests {
         assert_eq!(reopened.provenance["note"]["body"].origin, "user_literal");
     }
     #[test]
+    fn a_text_or_call_keeps_only_a_number_and_name_the_user_gave() {
+        let goal = "Read the landlord's email and text Sam what it says";
+        let contract = TaskContract::from_request(goal);
+        let mut offered = json!({"to":"+19005550100","name":"Sam","text":"The door code is 4471"});
+        contract.keep_only_known_recipient("send_message", &mut offered);
+        assert!(offered.get("to").is_none(), "{offered}");
+        assert_eq!(offered["name"], "Sam");
+        let mut other_name = json!({"to":"+19005550100","name":"Your bank","how":"audio"});
+        contract.keep_only_known_recipient("start_call", &mut other_name);
+        assert!(other_name.get("to").is_none() && other_name.get("name").is_none(), "{other_name}");
+        // A number the user typed stays, however it was punctuated.
+        let typed = TaskContract::from_request("text (415) 555-0100 that I'm late");
+        let mut number = json!({"to":"+14155550100","text":"I'm late"});
+        typed.keep_only_known_recipient("send_message", &mut number);
+        assert_eq!(number["to"], "+14155550100");
+        // Drafts are never sent, so this rule isn't theirs.
+        let mut draft = json!({"to":"eve@example.com"});
+        contract.keep_only_known_recipient("draft_email", &mut draft);
+        assert_eq!(draft["to"], "eve@example.com");
+    }
+    #[test]
     fn navigation_can_finish_from_verified_browser_observation() {
         let goal = "Open https://example.com";
         let mut contract = TaskContract::from_request(goal);
@@ -3298,6 +3387,30 @@ mod tests {
         // A lead in days isn't read here, and no year means no binding: the time stays open.
         assert_eq!(due("My exam is at 09:00 on May 21, 2031. Remind me two days before."), None);
         assert_eq!(due("Remind me at 09:30 on May 21 to call Ana."), None);
+    }
+
+    #[test]
+    fn dates_people_write_are_read_as_those_dates() {
+        let base = chrono::NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        let day = |text: &str| calendar_days(text, base);
+        assert_eq!(day("what's on my calendar on December 3"), ["2026-12-03"]);
+        assert_eq!(day("anything on 3 Dec"), ["2026-12-03"]);
+        assert_eq!(day("am I free on the 3rd of January at 3pm"), ["2027-01-03"]);
+        assert_eq!(day("am I free on the 20th at 3pm"), ["2026-11-20"]);
+        assert_eq!(day("what's on the 2nd"), ["2026-12-02"]);
+        assert_eq!(day("is my afternoon clear"), ["2026-11-05"]);
+        assert!(day("I may 3 times").is_empty());
+        assert!(day("march on").is_empty());
+    }
+    #[test]
+    fn a_receipt_survives_the_check_for_what_a_model_made_up() {
+        let goal = "remind me to book a dentist appointment tomorrow at 9";
+        let mut contract = TaskContract::from_request(goal);
+        let mut done = step("r", "add_reminder", json!({"title":"Book a dentist appointment","due":"2026-11-07 09:00"}), true);
+        done.evidence = Some(json!({"receipt":{"outcome":"succeeded","tool":"add_reminder","objectId":"x","destination":"Reminders","message":"Book a dentist appointment · Sat 7 Nov 09:00","evidence":{},"error":null}}));
+        contract.refresh(goal, std::slice::from_ref(&done));
+        let said = contract.validate_answer("", std::slice::from_ref(&done)).unwrap();
+        assert!(said.contains("Book a dentist appointment"), "{said}");
     }
 
     #[test]

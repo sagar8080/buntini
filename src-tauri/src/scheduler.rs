@@ -280,6 +280,8 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
                 "Saved search update",
                 if task.state == "error" {
                     "A saved search needs attention. Open Buntini to review it."
+                } else if task.sources.is_empty() {
+                    "A saved search found nothing this time. Open Buntini to review it."
                 } else {
                     "A saved search has new results. Open Buntini to review them."
                 },

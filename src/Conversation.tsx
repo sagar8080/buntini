@@ -106,17 +106,23 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
   </div>;
 }
 
+function hostOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+}
+
 function Spans({ spans, onOpen }: { spans: Span[]; onOpen: (url: string) => void }) {
   return <>{spans.map((span, index) => {
     const open = (event: MouseEvent) => { event.preventDefault(); onOpen(span.href!); };
+    // Where a link goes comes from the address, never from words someone else wrote.
+    const host = span.href ? hostOf(span.href) : '';
     if (span.cite) {
-      const site = span.text.replace(/^www\./, '');
+      const site = host || span.text.replace(/^www\./, '');
       return span.href ? <a key={index} className="reply-cite" href={span.href} title={span.href} onClick={open}>{site}</a> : <span key={index} className="reply-cite">{site}</span>;
     }
     let words: ReactNode = span.code ? <code>{span.text}</code> : span.text;
     if (span.italic) words = <em>{words}</em>;
     if (span.bold) words = <strong>{words}</strong>;
-    return span.href ? <a key={index} href={span.href} onClick={open}>{words}</a> : <span key={index}>{words}</span>;
+    return span.href ? <span key={index}><a href={span.href} title={span.href} onClick={open}>{words}</a>{!span.text.toLowerCase().includes(host) && <span className="reply-cite">{host}</span>}</span> : <span key={index}>{words}</span>;
   })}</>;
 }
 

@@ -25,6 +25,8 @@ const SEARCH_PAUSE_MINUTES: i64 = 10;
 const MOST_SOURCES: usize = 10;
 /// Longer than this, a question goes past the sheet only if it's looked at first.
 const LONGEST_UNREVIEWED: usize = 300;
+/// A question lifted from a letter someone pasted isn't one they wrote to send.
+const LONGEST_GOAL: usize = 600;
 const INSTRUCTIONS: &str = "Answer the question. Search the web when the answer depends on current or specific public information. Be brief.";
 
 pub fn is_tool(name: &str) -> bool {
@@ -138,7 +140,16 @@ pub fn may_skip_sheet(always: bool, tool: &str, origin: &Origin, question: &str)
         && origin.attended
         && origin.touched.is_empty()
         && question.chars().count() <= LONGEST_UNREVIEWED
+        && origin.goal.chars().count() <= LONGEST_GOAL
+        && !looks_private(question)
         && own_words(&origin.goal, question)
+}
+
+/// An address, a long number or a password isn't a public question, whoever typed it.
+fn looks_private(question: &str) -> bool {
+    let digits = question.split(|c: char| !c.is_ascii_digit()).any(|run| run.len() >= 7);
+    let spaced = question.chars().filter(char::is_ascii_digit).count() >= 9;
+    question.contains('@') || digits || spaced || crate::memory_index::looks_secret(question)
 }
 
 /// Everything ChatGPT receives for one question.
@@ -342,6 +353,17 @@ mod tests {
         set_always_allowed(&state, true).unwrap();
         state.store.lock().unwrap().erase_everything().unwrap();
         assert!(!always_allowed(&state), "Delete everything");
+    }
+
+    #[test]
+    fn private_details_always_show_the_sheet() {
+        for question in ["ana@example.com sign in problem", "who owns 415 555 0100 1234", "what is 4155550100", "my password is hunter2 is it strong"] {
+            assert!(!may_skip_sheet(true, SEARCH_TOOL, &origin(question), question), "{question}");
+        }
+        let plain = "who won the world cup in 2022";
+        assert!(may_skip_sheet(true, SEARCH_TOOL, &origin(plain), plain));
+        let pasted = format!("look this up {}", "word ".repeat(200));
+        assert!(!may_skip_sheet(true, SEARCH_TOOL, &origin(&pasted), "look this up word"));
     }
 
     #[test]

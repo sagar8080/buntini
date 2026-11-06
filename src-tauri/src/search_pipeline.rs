@@ -368,6 +368,27 @@ pub fn validate_answer(answer: &str, report: &Report) -> Result<(), String> {
         }
         rest = &rest[end + 1..];
     }
+    // A citation proves the page was read, so what's claimed from it has to be on it. This
+    // is where a made-up price would otherwise pass: "$249 at Best Buy [1]".
+    for sentence in crate::completion::sentences(answer) {
+        let figures = crate::completion::stated_figures(sentence);
+        if figures.is_empty() {
+            continue;
+        }
+        let cited_pages: Vec<&ResearchContent> = report
+            .sources
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| sentence.contains(&format!("[{}]", index + 1)))
+            .flat_map(|(_, source)| report.pages.iter().filter(|page| page.url == source.url).collect::<Vec<_>>())
+            .collect();
+        let pages = if cited_pages.is_empty() { report.pages.iter().collect() } else { cited_pages };
+        let shown = pages.iter().map(|page| page.text.as_str()).collect::<Vec<_>>().join("\n");
+        let on_the_page = crate::completion::numbers(&shown);
+        if figures.iter().any(|figure| !on_the_page.contains(figure)) {
+            return Err("The summary states a figure the pages it cites don't show.".into());
+        }
+    }
     if cited.len()
         < if report.intent.purpose == "compare" {
             2
@@ -517,6 +538,13 @@ mod site_comparison_tests {
         );
         assert!(enough(&report));
         assert!(validate_answer("Product A [1] differs from product B [2].", &report).is_ok());
+        // A price has to be on the page that's cited for it.
+        let mut priced = report.clone();
+        priced.pages[0].text = "Now $299.00, in stock.".into();
+        priced.pages[1].text = "Sale price 249 dollars.".into();
+        assert!(validate_answer("It's $299 at the first [1] and the second [2] differs.", &priced).is_ok());
+        assert!(validate_answer("It's $249 at the first [1]. The second differs [2].", &priced).is_err());
+        assert!(validate_answer("It's $1,499 at the first [1] and the second [2] differs.", &priced).is_err());
         assert!(validate_answer("Product A [1] differs from product B [1].", &report).is_err());
         let mut duplicate = report.clone();
         duplicate.pages[1] = duplicate.pages[0].clone();

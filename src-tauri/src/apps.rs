@@ -2597,7 +2597,7 @@ fn tabs_evidence(
                     } else {
                         ""
                     },
-                    tab["title"].as_str().unwrap_or(""),
+                    crate::personal_answer::no_links(tab["title"].as_str().unwrap_or("")),
                     tab["url"].as_str().unwrap_or("")
                 )
             })

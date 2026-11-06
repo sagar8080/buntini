@@ -287,6 +287,9 @@ where
     if let Err(error) = state.voice.clear_cache() {
         failures.push(error);
     }
+    if let Err(error) = crate::controller::remove_made_images(&state.cache_dir) {
+        failures.push(error);
+    }
     state.models.reset().await;
     if let Err(error) = std::fs::remove_dir_all(state.data_dir.join("logs")) {
         if error.kind() != std::io::ErrorKind::NotFound {

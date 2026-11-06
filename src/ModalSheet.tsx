@@ -16,7 +16,8 @@ export default function ModalSheet({ className, labelledBy, children }: { classN
     const outside = [...(backdrop.parentElement?.children ?? []), document.querySelector('.pet-dock')]
       .filter((node): node is HTMLElement => node instanceof HTMLElement && node !== backdrop && !node.matches('.toast, [aria-live]') && !node.inert);
     for (const node of outside) node.inert = true;
-    if (!element.contains(document.activeElement)) (element.querySelector<HTMLElement>(focusable) ?? element).focus();
+    // The sheet itself, so a key still on its way from typing can't press Allow.
+    if (!element.contains(document.activeElement)) element.focus();
     return () => {
       for (const node of outside) node.inert = false;
       // Back to where the user was, or to the composer if that is gone or still disabled.

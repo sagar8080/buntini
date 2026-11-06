@@ -134,7 +134,7 @@ pub fn compose(
         Some(events) if events.is_empty() && day.calendar_coverage.is_none() => lines.push("Your calendar is clear today.".into()),
         Some(events) => {
             let first = events.iter().take(5).map(|(time, title)| if time.is_empty() { title.clone() } else { format!("{title} at {time}") }).collect::<Vec<_>>();
-            lines.push(format!("On your calendar: {}{}.", list(&first), if events.len() > 5 { format!(" and {} more", events.len() - 5) } else { String::new() }));
+            lines.push(crate::personal_answer::no_links(&format!("On your calendar: {}{}.", list(&first), if events.len() > 5 { format!(" and {} more", events.len() - 5) } else { String::new() })));
         }
         None if !day.calendar_allowed => lines.push("Allow Calendar in Settings → Apps and I’ll include your day here.".into()),
         None => lines.push("I couldn’t read your calendar. Check Calendar access in System Settings → Privacy & Security, then try again.".into()),

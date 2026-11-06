@@ -670,7 +670,7 @@ pub async fn chatgpt_sign_in(
     state.audit("chatgpt.signed_in", "Signed in with ChatGPT");
     state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
     crate::helper::signed_in(&state.store.lock().unwrap())?;
-    crate::brain::settle_and_tell(&app).await;
+    crate::brain::settle_after_sign_in(&app).await;
     if !session.plan_allowed() {
         return Err("You’re signed in, but Buntini wasn’t allowed to use your ChatGPT plan. Sign in again and allow plan usage.".into());
     }

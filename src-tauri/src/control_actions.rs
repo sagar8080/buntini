@@ -983,6 +983,16 @@ mod tests {
         cancel_task.await.unwrap();
     }
     #[test]
+    fn a_mac_setting_survives_the_sheet_and_cannot_be_aimed_elsewhere() {
+        let proposed = json!({"setting":"dock_autohide","value":"on"});
+        assert!(validate(crate::mac_settings::TOOL, &proposed).is_ok());
+        // The sheet only sends the value back.
+        let sent = crate::actions::keep_fixed(crate::mac_settings::TOOL, &proposed, &json!({"value":"on","setting":"something_else"}));
+        assert_eq!(sent["setting"], "dock_autohide");
+        assert!(validate(crate::mac_settings::TOOL, &sent).is_ok());
+    }
+
+    #[test]
     fn control_intents_are_exported_and_erased_with_their_local_objects() {
         let store = store();
         let cancel = AtomicBool::new(false);

@@ -619,6 +619,8 @@ impl Store {
         tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
             UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');
             DELETE FROM nudges;
+            DELETE FROM search_cache;
+            UPDATE audit SET detail='';
             DELETE FROM goals WHERE json_extract(data,'$.state') IN ('done','ended');
             UPDATE goals SET data=json_remove(data,'$.lastTaskId','$.note');").map_err(|e| e.to_string())?;
         // Heads-ups name events, reminders and emails, so they go with the history. What

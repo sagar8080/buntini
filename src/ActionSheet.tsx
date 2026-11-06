@@ -64,6 +64,6 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
       })}
     </form>
     {shownError && <p role="alert">{shownError}</p>}
-    <div><button className="secondary-button" disabled={running} onClick={onCancel}>Not now</button><button className="primary-button" disabled={running} autoFocus onClick={allow}>{running ? 'Working…' : verbs[proposal.tool] ?? (proposal.tool.startsWith('mcp_') ? 'Run' : 'Allow')}</button></div>
+    <div><button className="secondary-button" disabled={running} onClick={onCancel}>Not now</button><button className="primary-button" disabled={running} onClick={allow}>{running ? 'Working…' : verbs[proposal.tool] ?? (proposal.tool.startsWith('mcp_') ? 'Run' : 'Allow')}</button></div>
   </ModalSheet>;
 }

@@ -72,6 +72,20 @@ const DIRECT: &[&str] = &["text", "message", "imessage", "call", "facetime", "ri
 /// say exactly one: "Draft an email to Ana Silva", "reply to Ana's email", "write back to
 /// Sam", "text mom that I'm late". Nothing when they gave an address, named several
 /// people or only a role.
+/// Whether the user wrote this phone number or address themselves.
+pub fn said_address(goal: &str, address: &str) -> bool {
+    let digits = |text: &str| text.chars().filter(char::is_ascii_digit).collect::<String>();
+    let wanted = digits(address);
+    if address.contains('@') || wanted.len() < 7 {
+        return goal.to_lowercase().contains(&address.to_lowercase());
+    }
+    // However it was punctuated, and with or without the country code it gained.
+    goal.split(|c: char| c.is_alphabetic() || c == ',' || c == ';').any(|part| {
+        let said = digits(part);
+        said.len() >= 7 && wanted.ends_with(&said)
+    })
+}
+
 pub fn named_recipient(goal: &str) -> Option<String> {
     let text = outside_quotes(goal);
     if text.contains('@') {

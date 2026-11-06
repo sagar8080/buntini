@@ -688,12 +688,11 @@ fn visible_price(text: &str, currency: &str) -> Option<String> {
 /// can never say a price the page doesn't show, and when it can't tell it doesn't choose.
 pub fn offer_from_rendered(page: &RenderedPage, currency: &str) -> Result<PriceOffer, String> {
     let product = label(if page.heading.is_empty() { &page.title } else { &page.heading }, 180);
-    let availability = if page.buy {
-        Some("InStock".to_string())
-    } else if page.sold_out {
-        Some("OutOfStock".to_string())
-    } else {
-        None
+    // A "sold out" and an "add to cart" together may be about other products on the page.
+    let availability = match (page.buy, page.sold_out) {
+        (true, false) => Some("InStock".to_string()),
+        (false, true) => Some("OutOfStock".to_string()),
+        _ => None,
     };
     let offer = |price: String, availability: Option<String>| PriceOffer { product: product.clone(), url: page.url.clone(), price, currency: currency.to_string(), availability, seller: None, is_aggregate: false, high_price: None };
     if !page.json_ld.is_empty() {
@@ -703,7 +702,7 @@ pub fn offer_from_rendered(page: &RenderedPage, currency: &str) -> Result<PriceO
         }
     }
     if let Some(amount) = page.meta_amount.as_deref().and_then(|amount| canonical_decimal(&amount.replace(',', ""))) {
-        if page.meta_currency.as_deref().is_none_or(|meta| meta.eq_ignore_ascii_case(currency)) && amount != "0" {
+        if page.meta_currency.as_deref().is_some_and(|meta| meta.eq_ignore_ascii_case(currency)) && amount != "0" {
             return Ok(offer(amount, availability));
         }
     }
@@ -741,6 +740,16 @@ mod rendered_tests {
     }
     fn page(candidates: Vec<PriceOnPage>) -> RenderedPage {
         RenderedPage { ready: true, url: "https://shop.example.com/p/1".into(), heading: "Billy bookcase".into(), buy: true, candidates, ..Default::default() }
+    }
+
+    #[test]
+    fn a_page_that_says_both_doesnt_say_whether_its_in_stock() {
+        let mut both = page(vec![price("$129.00", 32.0)]);
+        both.sold_out = true;
+        assert_eq!(offer_from_rendered(&both, "USD").unwrap().availability, None);
+        let mut foreign = page(vec![]);
+        foreign.meta_amount = Some("219".into());
+        assert!(offer_from_rendered(&foreign, "USD").is_err(), "a price with no currency isn't dollars");
     }
 
     #[test]

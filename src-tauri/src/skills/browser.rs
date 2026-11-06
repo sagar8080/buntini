@@ -229,6 +229,11 @@ fn open_address(address: &str) -> Option<Command> {
     if address.chars().any(char::is_whitespace) {
         return None;
     }
+    // "open lease.zip" means the file, even though .zip and .mov are real web domains.
+    const FILES: [&str; 18] = ["zip", "mov", "pdf", "doc", "docx", "txt", "png", "jpg", "jpeg", "gif", "csv", "xls", "xlsx", "pages", "numbers", "key", "dmg", "pkg"];
+    if !address.contains("://") && address.rsplit('.').next().is_some_and(|ending| FILES.contains(&ending.to_lowercase().as_str())) {
+        return None;
+    }
     let url = if address.contains("://") {
         address.to_string()
     } else {
@@ -557,6 +562,8 @@ mod tests {
             Some(Command::SwitchTab("gmail".into()))
         );
         assert_eq!(ask("open my lease pdf"), None, "files go to the model");
+        assert_eq!(ask("open lease.zip"), None, "a file, though .zip is a real domain");
+        assert_eq!(ask("open trailer.mov"), None);
         assert_eq!(
             ask("search for my tax return"),
             None,

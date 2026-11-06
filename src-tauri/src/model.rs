@@ -280,7 +280,9 @@ impl ModelHub {
                         pong["reason"].as_str().unwrap_or("unavailable").to_string(),
                     )
                 }
-                Err(_) => (false, "unsupported".to_string()),
+                // Before macOS 26 there's no Apple Intelligence for it to reach.
+                Err(_) if sysinfo::System::os_version().unwrap_or_default().split('.').next().and_then(|major| major.parse::<u32>().ok()).is_some_and(|major| major < 26) => (false, "unsupported".to_string()),
+                Err(_) => (false, "helperFailed".to_string()),
             },
         };
         *self.apple_state.lock().unwrap() = Some(status.clone());

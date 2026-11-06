@@ -87,6 +87,13 @@ fn overlap(label: &str, item: &str) -> f32 {
     wanted.iter().filter(|word| seen.contains(word)).count() as f32 / wanted.len() as f32
 }
 
+/// Whether a label names this item: most of its words, and every word with a digit in it,
+/// since "AirPods 4" isn't "AirPods Pro 2" however many other words they share.
+fn names(label: &str, item: &str) -> bool {
+    let seen = words(label);
+    overlap(label, item) >= 0.5 && words(item).iter().filter(|word| word.chars().any(|c| c.is_ascii_digit())).all(|word| seen.contains(word))
+}
+
 fn refused(label: &str) -> bool {
     let lower = format!("{} ", label.to_lowercase());
     NOT_PRESSED.iter().any(|name| lower.contains(name))
@@ -121,26 +128,43 @@ fn pick_add(controls: &[Control], item: &str) -> Pick {
     Pick::Missing
 }
 
-/// Recommendations name products too, so a cart holds the item only when something can
-/// take it out again.
-fn cart_state(page: &Page, item: &str) -> CartState {
-    let removing: Vec<&Control> = page.controls.iter().filter(|control| {
+fn removes(control: &Control) -> bool {
+    let lower = control.label.to_lowercase();
+    !refused(&control.label) && ["remove", "delete", "decrease quantity"].iter().any(|verb| lower.starts_with(verb))
+}
+
+/// How many things the shop's cart link says it holds: "cart 0 items", "Cart 1 item".
+fn cart_count(controls: &[Control]) -> Option<u32> {
+    controls.iter().find_map(|control| {
         let lower = control.label.to_lowercase();
-        !refused(&control.label) && ["remove", "delete", "decrease quantity"].iter().any(|verb| lower.starts_with(verb))
-    }).collect();
-    if removing.iter().any(|control| overlap(&control.label, item) >= 0.5)
-        || (!removing.is_empty() && page.controls.iter().any(|control| control.link && overlap(&control.label, item) >= 0.5))
-    {
+        let short = lower.len() < 30 && ["cart", "bag", "basket", "shopping cart"].iter().any(|name| lower.starts_with(name));
+        short.then(|| lower.split(|c: char| !c.is_ascii_digit()).find(|part| !part.is_empty()).and_then(|part| part.parse().ok())).flatten()
+    })
+}
+
+/// Recommendations name products too, so a cart holds the item only when a control takes
+/// that item out: one that names it, or one in the row right after a link that names it.
+fn cart_state(page: &Page, item: &str) -> CartState {
+    let named_row = page.controls.iter().enumerate().any(|(at, control)| {
+        (removes(control) && names(&control.label, item))
+            || (control.link && names(&control.label, item) && page.controls[at + 1..].iter().take(8).any(removes))
+    });
+    if named_row {
         return CartState::Holds;
     }
     let text = page.text.to_lowercase();
     let says_empty = ["cart is empty", "bag is empty", "cart is currently empty", "nothing in your cart", "no items in your cart"].iter().any(|phrase| text.contains(phrase));
-    let counts_none = page.controls.iter().any(|control| control.label.eq_ignore_ascii_case("cart 0 items"));
-    if says_empty || counts_none {
+    if says_empty || cart_count(&page.controls) == Some(0) {
         CartState::Empty
     } else {
         CartState::Unclear
     }
+}
+
+/// The shop's count going up, when it shows one both times, is what proves the press took:
+/// the item may have been in the cart already.
+fn press_took(before: Option<u32>, after: Option<u32>) -> bool {
+    !matches!((before, after), (Some(before), Some(after)) if after <= before)
 }
 
 fn human_check(page: &Page) -> bool {
@@ -162,21 +186,33 @@ fn same_shop(left: &str, right: &str) -> bool {
     let (left, right) = (shop_name(left), shop_name(right));
     !left.is_empty() && (left == right || left.ends_with(&format!(".{right}")) || right.ends_with(&format!(".{left}")))
 }
-fn same_page(left: &str, right: &str) -> bool {
+fn same_path(left: &str, right: &str) -> bool {
     match (reqwest::Url::parse(left), reqwest::Url::parse(right)) {
         (Ok(left), Ok(right)) => same_shop(left.as_str(), right.as_str()) && left.path().trim_end_matches('/') == right.path().trim_end_matches('/'),
         _ => false,
     }
 }
+/// The page approved, down to its query, which is often the variant.
+fn same_page(left: &str, right: &str) -> bool {
+    same_path(left, right) && reqwest::Url::parse(left).ok().map(|url| url.query().map(str::to_string)) == reqwest::Url::parse(right).ok().map(|url| url.query().map(str::to_string))
+}
 
+/// The cart itself, not `/cart/change`, `/cart/clear`, `/cart/123:1` or checkout.
 fn cart_path(url: &str) -> bool {
     reqwest::Url::parse(url).is_ok_and(|url| {
-        let path = url.path().to_lowercase();
-        !path.contains("checkout") && path.split('/').any(|part| ["cart", "cart.html", "bag", "basket", "shoppingcart"].contains(&part))
+        url.path().to_lowercase().trim_end_matches('/').rsplit('/').next().is_some_and(|part| ["cart", "cart.html", "bag", "basket", "shoppingcart"].contains(&part))
     })
 }
 fn cart_link(page: &Page) -> Option<usize> {
-    page.controls.iter().position(|control| control.link && cart_path(&control.url) && same_shop(&control.url, &page.url))
+    page.controls.iter().position(|control| {
+        control.link
+            && !refused(&control.label)
+            && !removes(control)
+            && !adds_to_cart(&control.label)
+            && cart_path(&control.url)
+            && same_shop(&control.url, &page.url)
+            && reqwest::Url::parse(&control.url).is_ok_and(|url| url.query().is_none())
+    })
 }
 
 /// Where the item's words sit together in a label, if they do. "MX Master 3S" names the
@@ -195,7 +231,7 @@ fn result_link(page: &Page, item: &str) -> Option<usize> {
     page.controls
         .iter()
         .enumerate()
-        .filter(|(_, control)| control.link && overlap(&control.label, item) >= 0.8 && same_shop(&control.url, &page.url) && !cart_path(&control.url) && !same_page(&control.url, &page.url))
+        .filter(|(_, control)| control.link && overlap(&control.label, item) >= 0.8 && same_shop(&control.url, &page.url) && !cart_path(&control.url) && !same_path(&control.url, &page.url))
         .min_by_key(|(at, control)| (phrase_at(&control.label, item).unwrap_or(usize::MAX), *at))
         .map(|(at, _)| at)
 }
@@ -358,6 +394,30 @@ pub fn validate(args: &Value) -> Result<Map<String, Value>, String> {
     Ok(out)
 }
 
+/// Opening a page happens before the sheet, so a model may only aim it at what the user's
+/// own words named. Anything it read could otherwise send it, and whatever else it read,
+/// to any site in the user's signed-in browser. Nothing named means the page in front.
+pub fn named_by_user(args: &Map<String, Value>, request: &str) -> bool {
+    let get = |key: &str| args.get(key).and_then(Value::as_str);
+    let url_said = get("url").is_none_or(|url| {
+        request.split_whitespace().any(|word| {
+            let word = word.trim_end_matches(['.', ',', '!', '?', ')']);
+            crate::research::validate_public_url(word).is_ok_and(|said| said.as_str() == url)
+        })
+    });
+    let request_lower = request.to_lowercase();
+    let said = words(request);
+    url_said
+        && get("shop").is_none_or(|shop| request_lower.contains(&shop.to_lowercase()))
+        && get("item").is_none_or(|item| words(item).iter().all(|word| said.contains(word)))
+}
+
+/// The browser may have been turned off since the sheet was shown.
+pub fn permitted(settings: &crate::types::Settings, args: &Map<String, Value>) -> bool {
+    let browser = args.get("browser").and_then(Value::as_str).unwrap_or_default();
+    BROWSERS.iter().any(|(bundle, id)| *bundle == browser && crate::apps::allowed(settings, id))
+}
+
 pub fn describe(args: &Map<String, Value>) -> (String, Vec<Field>, String) {
     let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
     let shown = |key: &str, label: &str, value: String| Field { key: key.into(), label: label.into(), value, kind: "fixed" };
@@ -487,7 +547,10 @@ mod live {
     fn wait_for(app: &Element, seconds: u64, cancel: &AtomicBool, wanted: impl Fn(&str) -> bool) -> Result<Element, String> {
         let deadline = Instant::now() + Duration::from_secs(seconds);
         loop {
-            app.ask_for_tree();
+            // Asking again rebuilds the page view, so only while the browser is still starting.
+            if app.list("AXWindows").is_empty() {
+                app.ask_for_tree();
+            }
             if let Some(area) = showing(app, &wanted) {
                 return Ok(area);
             }
@@ -505,7 +568,14 @@ mod live {
         // A browser that was closed takes a moment to start after the page is opened.
         for _ in 0..40 {
             if let Some(pid) = crate::ax::pid(bundle) {
-                return Ok(Element::app(pid));
+                let app = Element::app(pid);
+                // A browser whose Accessibility has gone wrong calls every window the whole
+                // app. Nothing can be read or pressed until it restarts, so say that at once.
+                let windows = app.list("AXWindows");
+                if !windows.is_empty() && windows.iter().all(|window| window.text("AXRole") != "AXWindow") {
+                    return Err(format!("{0} has stopped answering me. Quit and reopen {0}, then ask again.", browser_name(bundle)));
+                }
+                return Ok(app);
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -515,7 +585,7 @@ mod live {
     pub const CHECKED: &str = "wants to check you're a person. That tab is yours, and you can add it there.";
 
     /// Opens the page, or uses the one showing, and reads what's on it.
-    pub fn look(bundle: &str, url: Option<&str>, search: Option<(&str, &str)>, cancel: &AtomicBool) -> Result<(String, String), String> {
+    pub fn look(bundle: &str, url: Option<&str>, search: Option<(&str, &str)>, cancel: &AtomicBool) -> Result<(String, String, String), String> {
         if url.is_some() || search.is_some() {
             let target = url.or(search.map(|(page, _)| page)).unwrap_or_default();
             open(bundle, target)?;
@@ -551,7 +621,7 @@ mod live {
             };
             // A results page must never be taken for the product: its first Add to Cart
             // would be whatever the shop ranked first.
-            if wait_for(&app, 8, cancel, |seen| same_shop(seen, results) && !same_page(seen, results)).is_err() {
+            if wait_for(&app, 8, cancel, |seen| same_shop(seen, results) && !same_path(seen, results)).is_err() {
                 open(bundle, &result)?;
                 wait_for(&app, 15, cancel, |seen| same_page(seen, &result)).map_err(|_| format!("I couldn't open {item} at {shop}."))?;
             }
@@ -560,7 +630,7 @@ mod live {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let area = match &target {
-                Some(target) => wait_for(&app, 15, cancel, |seen| same_shop(seen, target) && !search.is_some_and(|(results, _)| same_page(seen, results)))?,
+                Some(target) => wait_for(&app, 15, cancel, |seen| same_shop(seen, target) && !search.is_some_and(|(results, _)| same_path(seen, results)))?,
                 None => area.clone(),
             };
             let (page, _) = read(&area);
@@ -570,7 +640,7 @@ mod live {
             let name = product_name(&page);
             let pick = pick_add(&page.controls, &name);
             if matches!(pick, Pick::Press(_)) {
-                return Ok((page.url, name));
+                return Ok((page.url, name, page.text));
             }
             if Instant::now() > deadline {
                 return Err(match pick {
@@ -599,13 +669,17 @@ mod live {
             Err(error) => return failed(error),
         };
         let deadline = Instant::now() + Duration::from_secs(20);
-        let press = loop {
+        let (press, count_before) = loop {
             let (page, elements) = read(&area);
             if human_check(&page) {
                 return failed(format!("{shop} {CHECKED}"));
             }
+            // A page can change after the sheet named it.
+            if !names(&product_name(&page), item) {
+                return failed(format!("That {shop} page no longer shows {item}, so I didn't add anything. The page is open."));
+            }
             match pick_add(&page.controls, item) {
-                Pick::Press(at) => break elements[at].clone(),
+                Pick::Press(at) => break (elements[at].clone(), cart_count(&page.controls)),
                 _ if Instant::now() < deadline => {
                     if pause(1.0, cancel).is_err() {
                         return failed("Cancelled before anything was added.".into());
@@ -649,6 +723,9 @@ mod live {
                     return unsure(format!("I pressed Add to Cart, but {shop} {CHECKED}"), cart_url);
                 }
                 last = cart_state(&page, item);
+                if last == CartState::Holds && !press_took(count_before, cart_count(&page.controls)) {
+                    last = CartState::Unclear;
+                }
                 if last == CartState::Holds {
                     return receipt(
                         ActionOutcome::Succeeded,
@@ -694,13 +771,18 @@ pub async fn look(settings: &crate::types::Settings, args: &Map<String, Value>, 
         return Err(format!("Allow {} in Settings → Apps, then ask again.", browser.name));
     }
     let url = args.get("url").and_then(Value::as_str).map(str::to_string);
+    if url.is_none() && !args.contains_key("shop") {
+        // "This" is whatever is in front, and a private window isn't Buntini's to read.
+        let app = crate::apps::app(id).ok_or("That browser isn't available.")?;
+        crate::apps::ensure_public_window(app).await?;
+    }
     let wanted = args.get("item").and_then(Value::as_str).map(str::to_string);
     let results = match (&url, args.get("shop").and_then(Value::as_str), &wanted) {
         (None, Some(shop), Some(item)) => Some(search_url(shop, item)?),
         (None, Some(shop), None) => return Err(format!("What should I add from {shop}?")),
         _ => None,
     };
-    let (found_url, name) = {
+    let (found_url, name, page_text) = {
         let (bundle, url, results, wanted, cancel) = (bundle.clone(), url.clone(), results.clone(), wanted.clone(), cancel.clone());
         tokio::task::spawn_blocking(move || {
             let search = results.as_deref().zip(wanted.as_deref());
@@ -713,7 +795,7 @@ pub async fn look(settings: &crate::types::Settings, args: &Map<String, Value>, 
     out.insert("url".into(), json!(crate::research::validate_public_url(&found_url)?.to_string()));
     out.insert("item".into(), json!(if name.is_empty() { wanted.unwrap_or_else(|| shop_name(&found_url)) } else { name }));
     out.insert("browser".into(), json!(bundle));
-    if let Some(price) = published_price(&found_url).await {
+    if let Some(price) = published_price(&found_url).await.filter(|price| price_on_page(price, &page_text)) {
         out.insert("price".into(), json!(price));
     }
     Ok(out)
@@ -722,6 +804,13 @@ pub async fn look(settings: &crate::types::Settings, args: &Map<String, Value>, 
 #[cfg(not(target_os = "macos"))]
 pub async fn look(_: &crate::types::Settings, _: &Map<String, Value>, _: Arc<AtomicBool>) -> Result<Map<String, Value>, String> {
     Err("Adding to a cart needs macOS.".into())
+}
+
+/// The published price is fetched apart from the browser, so it only counts if the page
+/// the user will see shows it too.
+fn price_on_page(price: &str, text: &str) -> bool {
+    let number: String = price.chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == ',').collect();
+    !number.is_empty() && (text.contains(&number) || number.strip_suffix(".00").is_some_and(|whole| text.contains(whole)))
 }
 
 /// The one price the shop publishes for this page, if it publishes exactly one.
@@ -808,6 +897,69 @@ mod tests {
     }
 
     #[test]
+    fn something_else_in_the_cart_is_not_this_item() {
+        // A cart holding another thing, with this item recommended further down.
+        let page = Page {
+            controls: vec![
+                link("USB-C Cable", "https://shop.example/p/cable"),
+                button("Remove", true),
+                link("Apple AirPods Pro 2 Wireless Earbuds", "https://shop.example/p/pro"),
+            ],
+            ..Page::default()
+        };
+        assert_eq!(cart_state(&page, "Apple AirPods Pro 2 Wireless Earbuds"), CartState::Unclear);
+        // The same family with a different number is a different product.
+        let other = Page { controls: vec![button("Remove Apple AirPods 4 Wireless Earbuds from cart", true)], ..Page::default() };
+        assert_eq!(cart_state(&other, "Apple AirPods Pro 2 Wireless Earbuds"), CartState::Unclear);
+    }
+
+    #[test]
+    fn the_shops_own_count_can_overrule_a_row_that_was_already_there() {
+        let cart = |label: &str| vec![link(label, "https://shop.example/cart")];
+        assert_eq!(cart_count(&cart("cart 0 items")), Some(0));
+        assert_eq!(cart_count(&cart("Cart 1 item")), Some(1));
+        assert_eq!(cart_count(&cart("cart, 12 items")), Some(12));
+        assert_eq!(cart_count(&cart("Cart")), None);
+        assert!(press_took(Some(0), Some(1)));
+        assert!(press_took(None, Some(1)));
+        assert!(press_took(Some(1), None));
+        assert!(!press_took(Some(1), Some(1)));
+    }
+
+    #[test]
+    fn only_what_the_user_named_can_open_before_the_sheet() {
+        let args = |value: Value| value.as_object().unwrap().clone();
+        let asked = "add AirPods 4 to my Target cart";
+        assert!(named_by_user(&args(json!({"shop":"Target","item":"AirPods 4"})), asked));
+        assert!(named_by_user(&args(json!({})), "add this to my cart"));
+        assert!(!named_by_user(&args(json!({"shop":"evil.example","item":"AirPods 4"})), asked));
+        assert!(!named_by_user(&args(json!({"shop":"Target","item":"AirPods door code 4471"})), asked));
+        assert!(!named_by_user(&args(json!({"url":"https://evil.example/p?d=secret"})), "Check Ana's email and add the keyboard to my cart"));
+        assert!(named_by_user(&args(json!({"url":"https://www.keychron.com/products/q1"})), "add https://www.keychron.com/products/q1, thanks"));
+    }
+
+    #[test]
+    fn the_approved_page_includes_its_variant() {
+        assert!(same_page("https://shop.example/p?id=1", "https://shop.example/p?id=1"));
+        assert!(!same_page("https://shop.example/p?id=2", "https://shop.example/p?id=1"));
+        assert!(same_path("https://shop.example/p?id=2", "https://shop.example/p?id=1"));
+    }
+
+    #[test]
+    fn a_published_price_must_also_be_on_the_page() {
+        assert!(price_on_page("$129.00", "Now $129"));
+        assert!(price_on_page("$1,299.50", "Price $1,299.50 today"));
+        assert!(!price_on_page("$9.99", "Now $999.00"));
+    }
+
+    #[test]
+    fn numbers_tell_products_apart() {
+        assert!(names("Sony - WH-1000XM5 Wireless Noise Cancelling Over-the-Ear Headphones - Black", "Sony WH 1000XM5 Wireless Noise Cancelling Over the Ear Headphones Black"));
+        assert!(names("remove MX Master 3S Bluetooth Edition", "MX Master 3s Wireless Mouse"));
+        assert!(!names("Apple AirPods 4 Wireless Earbuds", "Apple AirPods Pro 2 Wireless Earbuds"));
+    }
+
+    #[test]
     fn a_human_check_is_noticed_but_ordinary_pages_are_not_one() {
         let page = |title: &str, text: &str| Page { title: title.into(), text: text.into(), ..Page::default() };
         assert!(human_check(&page("Just a moment...", "")));
@@ -820,6 +972,11 @@ mod tests {
         let page = |controls| Page { url: "https://www.keychron.com/products/q1".into(), controls, ..Page::default() };
         assert_eq!(cart_link(&page(vec![link("Checkout", "https://www.keychron.com/cart/checkout"), link("Cart", "https://www.keychron.com/cart")])), Some(1));
         assert_eq!(cart_link(&page(vec![link("Cart", "https://evil.example/cart")])), None);
+        // Links that change the cart or skip to buying, whatever they call themselves.
+        for url in ["https://www.keychron.com/cart/change?line=1&quantity=0", "https://www.keychron.com/cart/clear", "https://www.keychron.com/cart/12345:1", "https://www.keychron.com/cart?add=1"] {
+            assert_eq!(cart_link(&page(vec![link("Cart", url)])), None, "{url}");
+        }
+        assert_eq!(cart_link(&page(vec![link("Remove", "https://www.keychron.com/cart")])), None);
     }
 
     #[test]
@@ -941,7 +1098,7 @@ mod tests {
                     None => live::look(&bundle, Some(&url), None, &cancel),
                 }).await.unwrap()
             };
-            let Ok((page, item)) = found else {
+            let Ok((page, item, _)) = found else {
                 println!("{url}\n  look: {}", found.unwrap_err());
                 continue;
             };

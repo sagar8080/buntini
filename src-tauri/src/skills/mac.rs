@@ -161,11 +161,12 @@ pub fn recognise(text: &str) -> Option<Command> {
         }
         // "volume to 30%", "volume at 50", "volume 70": the word right after.
         let words: Vec<&str> = text.split(' ').collect();
-        let level = words.windows(2).find_map(|pair| {
-            (["to", "at", "volume"].contains(&pair[0]) && !["a", "an"].contains(&pair[1]))
-                .then(|| number(pair[1]))
-                .flatten()
-        });
+        let after = words.iter().position(|word| *word == "volume").map(|at| &words[at + 1..]).unwrap_or(&[]);
+        let level = match after {
+            [first, second, ..] if ["to", "at"].contains(first) => number(second),
+            [first, ..] => number(first),
+            [] => None,
+        };
         if let Some(level) = level.filter(|level| *level <= 100 && text.contains("volume")) {
             return Some(Command::Volume(Volume::Set(level as u8)));
         }
@@ -425,6 +426,15 @@ mod tests {
 
     fn ask(prompt: &str) -> Option<Command> {
         recognise(&words(prompt))
+    }
+
+    #[test]
+    fn the_word_volume_elsewhere_in_a_sentence_sets_nothing() {
+        assert_eq!(recognise("set a reminder at 5 to check the volume"), None);
+        assert_eq!(recognise("change my 3pm volume meeting to 4"), None);
+        assert!(matches!(recognise("set the volume to 30"), Some(Command::Volume(Volume::Set(30)))));
+        assert!(matches!(recognise("volume 70"), Some(Command::Volume(Volume::Set(70)))));
+        assert!(matches!(recognise("set volume at 50"), Some(Command::Volume(Volume::Set(50)))));
     }
 
     #[test]

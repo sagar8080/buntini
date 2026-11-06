@@ -98,10 +98,18 @@ fn plan_of(signed_in_with_plan_scope: Option<bool>, refused: bool) -> Plan {
     }
 }
 
+/// Apple Intelligence still downloading, or its helper failing this once, says nothing
+/// about whether this Mac has it.
+fn passing(reason: &str) -> bool {
+    ["modelNotReady", "helperFailed"].contains(&reason)
+}
+
 fn apple_state(state: &AppState) -> AppleState {
     match state.models.apple_status() {
         None => AppleState::Unknown,
         Some((true, _)) => AppleState::Ready,
+        // A passing problem doesn't send anyone's words to a cloud model.
+        Some((false, reason)) if passing(&reason) => AppleState::Unknown,
         Some((false, _)) => AppleState::NotReady,
     }
 }
@@ -132,6 +140,25 @@ pub async fn settle(state: &AppState) -> Option<String> {
     crate::controller::save_settings_in(state, next).await.ok()?;
     state.audit("brain.switched", &format!("{to:?}"));
     Some(announcement(from, to))
+}
+
+/// Signing in is the user saying ChatGPT may answer, so while Apple Intelligence isn't
+/// ready, for whatever reason, it does.
+pub async fn settle_after_sign_in(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+    let state = app.state::<AppState>();
+    let Ok(settings) = state.store.lock().unwrap().settings() else { return };
+    let waiting = matches!(state.models.apple_status(), Some((false, reason)) if passing(&reason));
+    let onboarded = state.store.lock().unwrap().onboarded().unwrap_or(false);
+    if waiting && onboarded && settings.brain_auto && plan(&state) == Plan::Usable && current(&settings) != Some(Brain::ChatGpt) {
+        let from = current(&settings);
+        if crate::controller::save_settings_in(&state, with(&settings, Brain::ChatGpt)).await.is_ok() {
+            state.audit("brain.switched", "ChatGpt");
+            let _ = app.emit("brain-changed", announcement(from, Brain::ChatGpt));
+        }
+        return;
+    }
+    settle_and_tell(app).await;
 }
 
 /// `settle`, telling the app about any change.
@@ -246,6 +273,12 @@ mod tests {
         state.models.set_apple_status(true, "available".into());
         assert_eq!(resolved(&state, elsewhere()).model_backend, "apple", "left to Buntini");
         assert_eq!(resolved(&state, Settings { brain_auto: false, ..elsewhere() }).model_backend, "mlx", "the pick that turned it off");
+    }
+
+    #[test]
+    fn only_a_lasting_reason_counts_as_no_apple_intelligence() {
+        assert!(passing("modelNotReady") && passing("helperFailed"));
+        assert!(!passing("deviceNotEligible") && !passing("appleIntelligenceNotEnabled") && !passing("unavailable"));
     }
 
     #[test]

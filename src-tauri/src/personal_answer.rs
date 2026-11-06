@@ -292,10 +292,13 @@ fn wants_everything(goal: &str, reads: &[&Step]) -> bool {
     whole || found_by_search
 }
 
-/// A time of day in a question, in minutes: "3pm", "3 pm", "3:30pm", "15:00".
+/// A time of day in a question, in minutes: "3pm", "3 pm", "3:30pm", "15:00". Only when
+/// the question has exactly one and it can only mean one thing: "from 2pm to 4pm" is a
+/// range, and "3:30" with no am or pm could be either.
 fn clock_in(goal: &str) -> Option<u32> {
     let lower = goal.to_lowercase();
     let words: Vec<&str> = lower.split_whitespace().map(|word| word.trim_matches(|c: char| !c.is_alphanumeric() && c != ':')).collect();
+    let mut found = Vec::new();
     for (at, word) in words.iter().enumerate() {
         let digits = word.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(word.len());
         let (number, suffix) = word.split_at(digits);
@@ -308,6 +311,9 @@ fn clock_in(goal: &str) -> Option<u32> {
         if minute >= 60 || (!has_colon && suffix.is_empty()) {
             continue;
         }
+        if suffix.is_empty() && (1..=12).contains(&hour) && !number.starts_with('0') {
+            return None;
+        }
         let hour = match suffix {
             "pm" if hour < 12 => hour + 12,
             "am" if hour == 12 => 0,
@@ -315,15 +321,13 @@ fn clock_in(goal: &str) -> Option<u32> {
             _ => continue,
         };
         if hour < 24 {
-            return Some(hour * 60 + minute);
+            found.push(hour * 60 + minute);
         }
     }
-    None
-}
-
-fn minutes_of(stamp: &str) -> Option<u32> {
-    let (hour, minute) = stamp.get(11..)?.split_once(':')?;
-    Some(hour.parse::<u32>().ok()? * 60 + minute.parse::<u32>().ok()?)
+    match found.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    }
 }
 
 fn clock_label(minutes: u32) -> String {
@@ -349,19 +353,24 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
         let Some(at) = clock_in(goal) else {
             return Some(everything(reads));
         };
+        // Whole timestamps, since an event can run past midnight or across days.
+        let asked_days = crate::task_contract::calendar_days(goal, now.date());
+        let read_days: Vec<String> = reads.iter().filter_map(|step| step.evidence.as_ref()?["scope"]["day"].as_str().map(str::to_string)).collect();
+        let days = if !asked_days.is_empty() { asked_days } else if !read_days.is_empty() { read_days } else { vec![now.date().format("%Y-%m-%d").to_string()] };
+        let stamps: Vec<String> = days.iter().map(|day| format!("{day} {}", clock_label(at))).collect();
         let during: Vec<String> = records
             .iter()
             .filter(|(_, record, _)| {
-                record["all_day"] == true
-                    || match (minutes_of(record["startLocal"].as_str().unwrap_or_default()), minutes_of(record["endLocal"].as_str().unwrap_or_default())) {
-                        (Some(start), Some(end)) => start <= at && at < end,
-                        _ => false,
-                    }
+                let (start, end) = (record["startLocal"].as_str().unwrap_or_default(), record["endLocal"].as_str().unwrap_or_default());
+                record["all_day"] != true && !start.is_empty() && !end.is_empty() && stamps.iter().any(|stamp| start <= stamp.as_str() && stamp.as_str() < end)
             })
             .map(|(number, ..)| number.clone())
             .collect();
         if during.is_empty() {
-            return Some(format!("Nothing on your calendar at {}.\n\n{}", clock_label(at), everything(reads)));
+            // A holiday or a trip all day doesn't say whether that hour is taken.
+            let all_day = records.iter().any(|(_, record, _)| record["all_day"] == true);
+            let lead = if all_day { format!("Nothing timed at {}, only all-day events.", clock_label(at)) } else { format!("Nothing on your calendar at {}.", clock_label(at)) };
+            return Some(format!("{lead}\n\n{}", everything(reads)));
         }
         return Some(format!("Not at {}.\n\n{}", clock_label(at), picked(reads, &during)));
     }
@@ -371,6 +380,9 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
         let upcoming = records.iter().find(|(_, record, _)| record["startLocal"].as_str().is_some_and(|start| start >= stamp.as_str()));
         return Some(match upcoming {
             Some((number, ..)) => picked(reads, std::slice::from_ref(number)),
+            None if partly_read(reads).is_some() => everything(reads),
+            // Only the days it read: "next meeting tomorrow" read one.
+            None if reads.iter().any(|step| step.evidence.as_ref().is_some_and(|evidence| evidence["scope"]["until"].is_null())) => everything(reads),
             None => "Nothing coming up on your calendar in the next 30 days.".into(),
         });
     }
@@ -392,6 +404,9 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
                 .map(|(number, ..)| number.clone())
                 .collect();
             if due.is_empty() {
+                if partly_read(reads).is_some() {
+                    return Some(everything(reads));
+                }
                 return Some(format!("Nothing due {}.", days.iter().map(|day| day_label(day)).collect::<Vec<_>>().join(" or ")));
             }
             return Some(picked(reads, &due));
@@ -400,11 +415,18 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
     // "Is anything overdue?"
     if reads.iter().all(|step| step.tool == "read_reminders") && says("overdue") {
         let today = now.date().format("%Y-%m-%d").to_string();
+        let moment = now.format("%Y-%m-%d %H:%M").to_string();
         let late: Vec<String> = records
             .iter()
-            .filter(|(_, record, _)| record["dueLocal"].as_str().and_then(|due| due.get(..10)).is_some_and(|on| on < today.as_str()))
+            .filter(|(_, record, _)| {
+                // A time today that has passed is overdue too.
+                record["dueLocal"].as_str().is_some_and(|due| if due.len() > 10 { due < moment.as_str() } else { due < today.as_str() })
+            })
             .map(|(number, ..)| number.clone())
             .collect();
+        if late.is_empty() && partly_read(reads).is_some() {
+            return Some(everything(reads));
+        }
         return Some(if late.is_empty() { "Nothing overdue.".into() } else { picked(reads, &late) });
     }
     // A record that has the word the question is asking about.
@@ -416,7 +438,15 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
     let mail_only = reads.iter().all(|step| step.tool == "read_mail");
     if mail_only {
         // Who wrote on a day: the dates decide it.
-        let days = crate::task_contract::calendar_days(goal, now.date());
+        let today = now.date();
+        // Email has already arrived, so "Monday" is the last one, not the next.
+        let days: Vec<String> = crate::task_contract::calendar_days(goal, today)
+            .into_iter()
+            .map(|day| match chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
+                Ok(date) if date > today => (date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string(),
+                _ => day,
+            })
+            .collect();
         if !days.is_empty() {
             let on_day: Vec<String> = records
                 .iter()
@@ -424,7 +454,15 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
                 .map(|(number, ..)| number.clone())
                 .collect();
             if on_day.is_empty() {
-                return Some(format!("No email on {}.", days.iter().map(|day| day_label(day)).collect::<Vec<_>>().join(" or ")));
+                let named = days.iter().map(|day| day_label(day)).collect::<Vec<_>>().join(" or ");
+                // Only the newest few were read, so it can only speak for the days they reach.
+                let oldest = records.iter().filter_map(|(_, record, _)| record["receivedLocal"].as_str().and_then(|at| at.get(..10))).min();
+                let earliest = days.iter().map(String::as_str).min().unwrap_or_default();
+                let all_of_it = reads.iter().all(|step| step.evidence.as_ref().is_some_and(|evidence| evidence["complete"] != false && evidence["count"].as_u64().unwrap_or(0) < 8));
+                if !all_of_it && oldest.is_some_and(|oldest| oldest >= earliest) {
+                    return Some(format!("I only read your newest {} emails, back to {}, so I can’t say about {named}.", records.len(), day_label(oldest.unwrap_or_default())));
+                }
+                return Some(format!("No email on {named}."));
             }
             return Some(picked(reads, &on_day));
         }
@@ -434,7 +472,8 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
         // A search that found nothing says so. A model asked to choose still chose something,
         // and showed Priya for "has the bank emailed".
         if !words.is_empty() {
-            return Some(format!("No email in your inbox from the last four months matches “{}”.", words.iter().map(|word| plain(word)).collect::<Vec<_>>().join("” or “")));
+            let unread = reads.iter().any(|step| step.arguments["unread"] == true);
+            return Some(format!("No {}email in your inbox from the last four months has “{}” in its sender or subject.", if unread { "unread " } else { "" }, words.iter().map(|word| plain(word)).collect::<Vec<_>>().join("” or “")));
         }
         return None;
     }
@@ -458,7 +497,7 @@ fn numbered<'a>(reads: &[&'a Step]) -> Vec<(String, &'a Value, &'a Step)> {
     for step in reads {
         for record in step.evidence.iter().flat_map(|evidence| evidence["records"].as_array()).flatten() {
             // A search can find an email the newest ones already hold.
-            if !record["id"].is_null() && found.iter().any(|(_, seen, read)| read.tool == step.tool && seen["id"] == record["id"]) {
+            if !record["id"].is_null() && found.iter().any(|(_, seen, read)| read.tool == step.tool && seen["id"] == record["id"] && seen["startLocal"] == record["startLocal"]) {
                 continue;
             }
             number += 1;
@@ -543,6 +582,12 @@ pub fn parse_pick(reply: &str, reads: &[&Step]) -> Option<Vec<String>> {
 
 /// Text from an email or an event, shown as written: nothing in it can become a link or
 /// styling in the reply.
+/// Text from an email, invite or tab, shown in a reply: its words stay, but it can't draw
+/// a link in Buntini's own bubble.
+pub(crate) fn no_links(text: &str) -> String {
+    text.replace("](", "] (")
+}
+
 fn plain(text: &str) -> String {
     let mut out = String::new();
     for c in one_line(text).chars() {
@@ -715,6 +760,11 @@ pub fn picked(reads: &[&Step], picks: &[String]) -> String {
         // The model missing an email can't hide it: Mail's few are shown. The others can run
         // to weeks of events that have nothing to do with the question.
         return if reads.iter().all(|step| step.tool == "read_mail") {
+            format!("I didn’t find one that fits. This is what I read:\n\n{}", everything(reads))
+        } else if partly_read(reads).is_some() {
+            // Not all of it was read, so "not there" isn't known. What was read says so.
+            everything(reads)
+        } else if false {
             format!("I didn’t find one that fits. This is what I read:\n\n{}", everything(reads))
         } else if reads.iter().all(|step| step.tool == "read_reminders") {
             "I didn’t find that in your reminders.".into()
@@ -952,7 +1002,7 @@ mod tests {
         opened.arguments = newest;
         let both = [searched.clone(), opened.clone()];
         assert_eq!(next_read(goal, &with_mail, &both, today), None, "Mail is where someone writes, so no other app is read");
-        assert_eq!(direct_answer(goal, &[&searched, &opened], morning()).unwrap(), "No email in your inbox from the last four months matches “Ana”.");
+        assert_eq!(direct_answer(goal, &[&searched, &opened], morning()).unwrap(), "No email in your inbox from the last four months has “Ana” in its sender or subject.");
     }
 
     #[test]
@@ -1069,6 +1119,60 @@ mod tests {
         let shown = everything(&[&reminders(many)]);
         assert!(shown.contains("That’s the first 20 of 30."), "{shown}");
         assert!(!shown.contains("Task 20"), "{shown}");
+    }
+
+    #[test]
+    fn someone_elses_text_cannot_draw_a_link() {
+        let subject = "Invoice [View on chase.com](https://evil.example/login)";
+        assert!(!no_links(subject).contains("]("));
+        assert!(no_links(subject).contains("View on chase.com"));
+    }
+
+    #[test]
+    fn a_day_the_read_doesnt_reach_is_not_a_day_with_no_email() {
+        let today: Vec<[&str; 5]> = vec![["2026-11-05 07:00", "m", "Sam <sam@example.com>", "Hello", "1"]; 8];
+        let newest = step("read_mail", crate::apps::mail_fixture("", &today, 300));
+        let said = direct_answer("did anyone email me yesterday", &[&newest], morning()).unwrap();
+        assert!(said.contains("only read your newest") && !said.starts_with("No email"), "{said}");
+        // One older than the day proves the day was covered.
+        let older = step("read_mail", crate::apps::mail_fixture("", &[["2026-11-05 07:00", "m", "Sam <sam@example.com>", "Hello", "1"], ["2026-11-01 07:00", "n", "Ana <ana@example.com>", "Hi", "2"]], 2));
+        assert!(direct_answer("did anyone email me yesterday", &[&older], morning()).unwrap().starts_with("No email on"));
+        // Email has already arrived: Thursday's "Monday" is the one that just went.
+        let monday = step("read_mail", crate::apps::mail_fixture("", &[["2026-11-02 07:00", "n", "Ana <ana@example.com>", "Hi", "2"]], 1));
+        assert!(direct_answer("did anyone email me on Monday", &[&monday], morning()).unwrap().contains("Ana"));
+    }
+
+    #[test]
+    fn every_day_of_a_repeating_event_is_its_own_record() {
+        let series = step("read_calendar", json!({"records":[
+            {"id":"standup","title":"Standup","startLocal":"2026-11-05 09:00","endLocal":"2026-11-05 09:15"},
+            {"id":"standup","title":"Standup","startLocal":"2026-11-06 09:00","endLocal":"2026-11-06 09:15"},
+        ]}));
+        assert_eq!(numbered(&[&series]).len(), 2);
+        let mail = step("read_mail", json!({"records":[{"id":"m1"},{"id":"m1"}]}));
+        assert_eq!(numbered(&[&mail]).len(), 1, "a search can find an email twice");
+    }
+
+    #[test]
+    fn events_past_midnight_and_across_days_still_take_the_time() {
+        let party = calendar("2026-11-05", vec![event("Party", "2026-11-05 22:00", "2026-11-06 00:00", "")]);
+        let busy = direct_answer("am I free tonight at 10:30pm", &[&party], morning()).unwrap();
+        assert!(busy.starts_with("Not at 22:30"), "{busy}");
+        let flight = calendar("2026-11-07", vec![event("Flight", "2026-11-06 22:00", "2026-11-07 06:30", "")]);
+        let busy = direct_answer("am I free on Saturday at 5am", &[&flight], morning()).unwrap();
+        assert!(busy.starts_with("Not at 05:00"), "{busy}");
+    }
+
+    #[test]
+    fn a_time_that_could_mean_two_things_is_not_answered_as_one() {
+        assert_eq!(clock_in("am I free at 3:30"), None);
+        assert_eq!(clock_in("am I free from 2pm to 4pm"), None);
+        assert_eq!(clock_in("am I free at 3:30pm"), Some(15 * 60 + 30));
+        assert_eq!(clock_in("am I free at 15:30"), Some(15 * 60 + 30));
+        assert_eq!(clock_in("am I free at 09:30"), Some(9 * 60 + 30));
+        let day = calendar("2026-11-05", vec![event("Review", "2026-11-05 15:30", "2026-11-05 16:00", "")]);
+        let said = direct_answer("am I free at 3:30", &[&day], morning()).unwrap();
+        assert!(said.contains("Review") && !said.contains("Nothing"), "{said}");
     }
 
     #[test]
