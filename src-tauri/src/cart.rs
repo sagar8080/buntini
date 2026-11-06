@@ -211,7 +211,7 @@ fn cart_link(page: &Page) -> Option<usize> {
             && !adds_to_cart(&control.label)
             && cart_path(&control.url)
             && same_shop(&control.url, &page.url)
-            && reqwest::Url::parse(&control.url).is_ok_and(|url| url.query().is_none())
+            && reqwest::Url::parse(&control.url).is_ok_and(|url| url.scheme() == "https" && url.query().is_none())
     })
 }
 
@@ -231,7 +231,7 @@ fn result_link(page: &Page, item: &str) -> Option<usize> {
     page.controls
         .iter()
         .enumerate()
-        .filter(|(_, control)| control.link && overlap(&control.label, item) >= 0.8 && same_shop(&control.url, &page.url) && !cart_path(&control.url) && !same_path(&control.url, &page.url))
+        .filter(|(_, control)| control.link && control.url.starts_with("https://") && overlap(&control.label, item) >= 0.8 && same_shop(&control.url, &page.url) && !cart_path(&control.url) && !same_path(&control.url, &page.url))
         .min_by_key(|(at, control)| (phrase_at(&control.label, item).unwrap_or(usize::MAX), *at))
         .map(|(at, _)| at)
 }
@@ -402,7 +402,7 @@ pub fn named_by_user(args: &Map<String, Value>, request: &str) -> bool {
     let url_said = get("url").is_none_or(|url| {
         request.split_whitespace().any(|word| {
             let word = word.trim_end_matches(['.', ',', '!', '?', ')']);
-            crate::research::validate_public_url(word).is_ok_and(|said| said.as_str() == url)
+            word == url || crate::research::validate_public_url(word).is_ok_and(|said| Some(said.as_str()) == crate::research::validate_public_url(url).ok().as_ref().map(reqwest::Url::as_str))
         })
     });
     let request_lower = request.to_lowercase();
@@ -977,6 +977,7 @@ mod tests {
             assert_eq!(cart_link(&page(vec![link("Cart", url)])), None, "{url}");
         }
         assert_eq!(cart_link(&page(vec![link("Remove", "https://www.keychron.com/cart")])), None);
+        assert_eq!(cart_link(&page(vec![link("Cart", "http://www.keychron.com/cart")])), None);
     }
 
     #[test]

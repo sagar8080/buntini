@@ -86,7 +86,7 @@ impl Default for Settings {
     fn default() -> Self {
         // Product defaults never point at a particular Mac. Developers can preset local
         // model folders with environment variables before the first launch.
-        let preset = |name: &str| std::env::var(name).unwrap_or_default();
+        let preset = |name: &str| if cfg!(debug_assertions) { std::env::var(name).unwrap_or_default() } else { String::new() };
         Self {
             model_backend: "apple".into(),
             brain_auto: true,

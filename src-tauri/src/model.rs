@@ -223,7 +223,8 @@ impl ModelHub {
         }
         Ok(Launch {
             program: PathBuf::from(&settings.python_path),
-            args: vec!["-u".into(), self.mlx_script.to_string_lossy().into_owned()],
+            // -I: no user site-packages, environment or working folder on the import path.
+            args: vec!["-I".into(), "-u".into(), self.mlx_script.to_string_lossy().into_owned()],
             env: vec![("PYTHONUNBUFFERED", "1".into()), ("HF_HUB_OFFLINE", "1".into()), ("TRANSFORMERS_OFFLINE", "1".into())],
             key: format!("{}\u{0}{}", settings.python_path, settings.model_path),
             start_error: "Cannot start Python. Select your existing MLX virtual environment’s Python executable in Settings → Brain.".into(),

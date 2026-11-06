@@ -361,7 +361,7 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
                 return Err("To lock the screen for you, allow Buntini under System Settings → Privacy & Security → Accessibility, then ask again.".into());
             }
             osascript(LOCK, &[], 10).await?;
-            "Locked your screen.".to_string()
+            "Locking your screen.".to_string()
         }
         Command::Timer { seconds } => {
             let app = APP

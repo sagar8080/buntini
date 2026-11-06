@@ -332,8 +332,11 @@ pub fn page_text(pid: i32, cap: usize) -> Option<String> {
         }
     }
     let title = area.text("AXTitle");
-    (!text.trim().is_empty())
-        .then(|| format!("{title}\n{}", text.chars().take(cap).collect::<String>()))
+    let cut = text.len() > cap;
+    (!text.trim().is_empty()).then(|| {
+        let shown: String = text.chars().take(cap).collect();
+        format!("{title}\n{shown}{}", if cut { crate::apps::PAGE_CUT } else { "" })
+    })
 }
 
 const RESEARCH_NODE_CAP: usize = 12_000;

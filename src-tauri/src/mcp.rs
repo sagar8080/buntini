@@ -166,6 +166,11 @@ fn shown_command(program: &str, args: &[String]) -> String {
         let at = rest[..end].rfind('@')?;
         Some(format!("{scheme}://{name}:{HIDDEN}{}", &rest[at..]))
     };
+    // "https://x/sse?token=abc": a secret in an address's query.
+    let hide_query = |arg: &str| -> Option<String> {
+        let (address, query) = arg.split_once('?').filter(|(address, _)| address.contains("://"))?;
+        query.split('&').any(|pair| pair.split_once('=').is_some_and(|(name, _)| secret_name(name))).then(|| format!("{address}?{HIDDEN}"))
+    };
     let mut shown = vec![quote(program)];
     let mut hide_next = false;
     for arg in args {
@@ -174,12 +179,17 @@ fn shown_command(program: &str, args: &[String]) -> String {
             HIDDEN.to_string()
         } else if let Some(url) = hide_userinfo(arg) {
             url
-        } else if token_shaped(arg) {
+        } else if token_shaped(arg) || arg.to_lowercase().starts_with("bearer ") || arg.to_lowercase().starts_with("basic ") {
             HIDDEN.to_string()
         } else if let Some((name, _)) = arg.split_once('=').filter(|(name, _)| secret_name(name)) {
             format!("{name}={HIDDEN}")
+        } else if let Some(url) = hide_query(arg) {
+            url
+        } else if let Some((name, _)) = arg.split_once(':').filter(|(name, _)| secret_name(name) && !name.contains('/')) {
+            // "Authorization: Bearer abc123", the value of a --header.
+            format!("{name}: {HIDDEN}")
         } else {
-            hide_next = arg.starts_with('-') && secret_name(arg);
+            hide_next = arg.starts_with('-') && (secret_name(arg) || ["-h", "--header", "--headers"].contains(&arg.to_lowercase().as_str()));
             arg.clone()
         };
         shown.push(quote(&word));
@@ -199,8 +209,10 @@ fn quote(word: &str) -> String {
 // Storage
 
 /// Removes the Keychain values of servers that are being erased.
-pub fn forget_secrets(ids: &[String]) -> Result<(), String> {
-    ids.iter().try_for_each(|id| secrets::delete(id))
+/// Tries every one, so one that can't go doesn't leave the rest behind. Returns those that
+/// couldn't go, with why.
+pub fn forget_secrets(ids: &[String]) -> Vec<(String, String)> {
+    ids.iter().filter_map(|id| secrets::delete(id).err().map(|error| (id.clone(), error))).collect()
 }
 
 pub fn initialize(db: &Connection) -> Result<(), String> {
@@ -343,11 +355,13 @@ impl Store {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+    /// The values first: with the row gone, nothing could find them to try again.
     pub fn delete_mcp_server(&self, id: &str) -> Result<(), String> {
+        secrets::delete(id)?;
         self.db
             .execute("DELETE FROM mcp_servers WHERE id=?1", [id])
-            .map_err(|e| e.to_string())?;
-        secrets::delete(id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     /// For the export: how each server starts and which environment names it has,
     /// never their values.

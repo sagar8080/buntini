@@ -22,7 +22,7 @@ if __package__ in {None, ""}:
 from worker.protocol import (
     Cancelled, MAX_GENERATION_TOKENS, MAX_LINE_BYTES, MAX_OUTPUT_CHARS,
     MAX_PROMPT_TOKENS, PROTOCOL_VERSION, QwenStreamParser, WorkerError,
-    adapt_messages, local_model_path, request_id, selected_tools, validate_messages,
+    adapt_messages, without_template_markers, local_model_path, request_id, selected_tools, validate_messages,
 )
 from worker.voice import SileroVAD, dependency_diagnostics, vad_model_path, whisper_model_path
 
@@ -148,6 +148,7 @@ class MLXBackend:
         # them described in the system message instead.
         template = getattr(self.tokenizer, "chat_template", None)
         native_tools = not isinstance(template, str) or "tools" in template
+        messages = without_template_markers(messages, self.tokenizer)
         messages = adapt_messages(messages, tools, native_tools)
         try:
             prompt = self.tokenizer.apply_chat_template(

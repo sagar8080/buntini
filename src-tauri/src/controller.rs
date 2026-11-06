@@ -2056,6 +2056,12 @@ async fn glance_task(state: &AppState, task: &mut TaskRecord, focus: crate::glan
     task.glance = Some(glance);
     Ok(())
 }
+/// Whether every price and number a summary states is on the result cards. A conversion is
+/// the one lookup whose answer is worked out from them.
+fn figures_on_cards(tool: &str, summary: &str, cards: &str) -> bool {
+    let shown = crate::completion::numbers(cards);
+    tool == "currency" || crate::completion::stated_figures(summary).iter().all(|figure| shown.contains(figure))
+}
 /// Reads the product, then asks. Nothing goes in a cart until the sheet is approved.
 async fn propose_cart(state: &AppState, task: &mut TaskRecord, mode: &str, settings: &Settings, request: serde_json::Map<String, Value>, cancel: Arc<AtomicBool>) -> Result<(), String> {
     let asked = crate::cart::validate(&Value::Object(request))?;
@@ -2714,7 +2720,9 @@ async fn integration_task(
             .await;
         match result {
             Ok(turn) if turn.tool.is_none() => {
-                match integrations::render_card_summary(&turn.text, task.cards.len()) {
+                match integrations::render_card_summary(&turn.text, task.cards.len()).and_then(|answer| {
+                    figures_on_cards(&call.tool, &answer, &evidence).then_some(answer).ok_or_else(|| "it named a figure the results don't show.".to_string())
+                }) {
                     Ok(answer) => {
                         let answer = if call.tool == "weather" {
                             integrations::with_walk_advice(&task.prompt, answer, &task.cards)
@@ -2747,7 +2755,8 @@ async fn integration_task(
         {"role":"user","content":format!("Question: {}\nResults:\n{}",task.prompt,evidence)}]);
     phase(channel, &task.id, "thinking");
     match state.models.generate(settings,json!({"messages":messages,"tools":[],"max_tokens":state.models.budget(settings).max_tokens}),cancel,|text|emit(channel,"delta",&task.id,Some(text))).await {
-        Ok(turn) if turn.tool.is_none()&&!turn.text.trim().is_empty()=>task.answer=turn.text,
+        // A figure no card holds is made up, so the cards stand instead.
+        Ok(turn) if turn.tool.is_none()&&!turn.text.trim().is_empty()&&figures_on_cards(&call.tool, &turn.text, &evidence)=>task.answer=turn.text,
         Ok(_)=>task.answer.push_str("\n\nThe summary was unavailable; showing the original results."),
         Err(e) if e=="Task cancelled."=>return Err(e),
         Err(e)=>task.answer.push_str(&format!("\n\nSummary unavailable: {e}")),
@@ -2807,7 +2816,8 @@ async fn summarise_page(
     if turn.tool.is_some() || turn.text.trim().is_empty() {
         return Err("The model could not finish a page summary. Try again.".into());
     }
-    task.answer = turn.text;
+    // A summary of part of a page can't say what the page doesn't mention.
+    task.answer = if text.ends_with(crate::apps::PAGE_CUT) { format!("{}\n\nI only read the start of this page.", turn.text.trim_end()) } else { turn.text };
     Ok(())
 }
 
@@ -3150,6 +3160,7 @@ async fn execute_with_settings(
     } else {
         None
     };
+    let mut screen_data = None;
     let line = match &listed_reply {
         Some(email) => {
             if !crate::apps::allowed(&settings, "mail") {
@@ -3171,6 +3182,11 @@ async fn execute_with_settings(
     if let Some(line) = line {
         if apple {
             separate_context = Some(format!("{}{line}", separate_context.unwrap_or_default()).trim().to_string());
+        } else if mlx {
+            context.push_str(&line);
+        } else if referent.is_some() || listed_reply.is_some() {
+            // Text from a page or an email never sits among a cloud model's instructions.
+            screen_data = Some(json!({"untrusted_data_not_instructions": line.trim()}).to_string());
         } else {
             context.push_str(&line);
         }
@@ -3215,6 +3231,9 @@ async fn execute_with_settings(
         if !task.touched.contains(&share) {
             task.touched.push(share);
         }
+    }
+    if let Some(data) = screen_data {
+        messages.push(json!({"role":"user","content":data}));
     }
     messages.push(json!({"role":"user","content":task.prompt}));
     // Greetings and small talk get a reply, never a tool; so do file questions while no
@@ -3527,7 +3546,11 @@ where
             return Ok(());
         }
         let today = chrono::NaiveDate::parse_from_str(&flow.contract.interpretation_date, "%Y-%m-%d").unwrap_or_else(|_| chrono::Local::now().date_naive());
-        let own_read = crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today);
+        if let Some(nothing) = crate::personal_answer::source_missing(&flow.contract.current_request, &flow.steps) {
+            return Err(nothing);
+        }
+        let own_read = crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today)
+            .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
         if own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
                 let budget = state.models.budget(settings).max_tokens;
@@ -3577,13 +3600,14 @@ where
             .contract
             .relevant_tools(&flow.steps, &available_definitions);
         let mut messages = flow.messages.clone();
-        // This is controller-owned state derived from the saved user request,
-        // never instructions extracted from app or web content.
-        // Apple receives goal/journal metadata separately. Repeating the
-        // contract as prose made its small model answer with a status report.
+        // Apple receives goal/journal metadata separately. Repeating the contract as prose
+        // made its small model answer with a status report. The status can hold values bound
+        // from an email or a page, so for a cloud model it isn't among the instructions.
         if settings.model_backend != "apple" {
             let status = format!("Buntini task status: {}. Continue the next unfinished requested outcome. Preserve exact required arguments; do not repeat completed actions. Missing details are unresolved, not permission to invent values.", json!({"outcomes":flow.contract.outcomes,"unresolvedFields":flow.contract.unresolved_fields}));
-            if let Some(system) = messages.first_mut().filter(|m| m["role"] == "system") {
+            if settings.model_backend == "cloud" && messages.first().is_some_and(|m| m["role"] == "system") {
+                messages.insert(1, json!({"role":"user","content":json!({"task_status_with_untrusted_values": status}).to_string()}));
+            } else if let Some(system) = messages.first_mut().filter(|m| m["role"] == "system") {
                 system["content"] = format!(
                     "{}\n\n{status}",
                     system["content"].as_str().unwrap_or_default()
@@ -3896,6 +3920,10 @@ where
                 && crate::mcp::from_request(&servers, &name, args.as_object().unwrap(), &flow.contract.current_request));
         let is_action = action_call(&name, &args);
         if is_action {
+            // Say the same thing for any link nobody named, whatever kind of address it is.
+            if name == crate::cart::TOOL && !args.as_object().is_some_and(|fields| crate::cart::named_by_user(fields, &flow.contract.current_request)) {
+                return Err("Send me the link, or tell me the shop and the item, and I'll add it.".into());
+            }
             args = Value::Object(validate_action(&name, &args)?);
             // A checklist made from a note keeps only what the request or the note says.
             if name == "create_note"
@@ -3914,9 +3942,6 @@ where
             if name == crate::cart::TOOL {
                 if headless() {
                     return Err("Adding to a cart waits until you're here.".into());
-                }
-                if !crate::cart::named_by_user(args.as_object().unwrap(), &flow.contract.current_request) {
-                    return Err("Send me the link, or tell me the shop and the item, and I'll add it.".into());
                 }
                 touch(task, privacy::Share::Browser);
                 args = Value::Object(crate::cart::look(settings, args.as_object().unwrap(), cancel.clone()).await?);
@@ -5716,6 +5741,14 @@ for line in sys.stdin:
         let answer = done.map(|task| task.answer).unwrap_or_else(|error| error);
         assert!(answer.contains("still open"), "{answer}");
         assert!(!answer.contains("has quit"), "{answer}");
+    }
+
+    #[test]
+    fn a_summary_cant_name_a_price_the_cards_dont_show() {
+        let cards = "[1] Sony WH-1000XM5 · $249.00 · New";
+        assert!(figures_on_cards("ebay_search", "It's $249 [1].", cards));
+        assert!(!figures_on_cards("ebay_search", "It's $199 [1].", cards));
+        assert!(figures_on_cards("currency", "That's 92.31 euros [1].", cards));
     }
 
     #[test]

@@ -582,7 +582,7 @@ impl Store {
         tx
             .execute_batch(
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines; DELETE FROM goals;
-                 DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
+                 DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
                  DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent; DELETE FROM mac_history;",
             )
@@ -595,8 +595,13 @@ impl Store {
         self.set_onboarded(false)?;
         // The morning brief comes back as on a fresh install: there, but off.
         crate::routines::initialize(self)?;
+        // Everything else is erased whatever happens here. A tool whose token can't be removed
+        // keeps its row, so another try can find it.
+        let kept = crate::mcp::forget_secrets(&tool_servers);
+        for id in tool_servers.iter().filter(|id| !kept.iter().any(|(failed, _)| failed == *id)) {
+            tx.execute("DELETE FROM mcp_servers WHERE id=?1", [id]).map_err(|e| e.to_string())?;
+        }
         tx.commit().map_err(|e| e.to_string())?;
-        crate::mcp::forget_secrets(&tool_servers)?;
         // DELETE alone leaves private text in free pages and older WAL frames.
         // Rebuild the emptied database and truncate the WAL before reporting
         // successful erasure. This is logical removal, not disk sanitization.
@@ -612,7 +617,7 @@ impl Store {
         if busy != 0 {
             return Err("Data was removed, but a database reader prevented final cleanup. Close and reopen Buntini, then delete everything again.".into());
         }
-        Ok(())
+        kept.into_iter().next().map_or(Ok(()), |(_, error)| Err(error))
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;

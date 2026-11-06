@@ -962,9 +962,9 @@ pub(crate) fn stated_figures(text: &str) -> Vec<String> {
     number_spans(text)
         .into_iter()
         .filter(|(number, before, after)| {
-            let in_a_name = before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic) || *before == Some('-') && after.is_some_and(char::is_alphabetic);
+            let money = before.is_some_and(|c| "$€£¥₹".contains(c)) || *after == Some('%');
+            let in_a_name = !money && (before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic));
             let marker = *before == Some('[') && *after == Some(']');
-            let money = before.is_some_and(|c| "$€£¥".contains(c)) || *after == Some('%');
             let digits = number.chars().filter(char::is_ascii_digit).count();
             let year = digits == 4 && (number.starts_with("19") || number.starts_with("20"));
             !in_a_name && !marker && (money || (digits >= 3 && !year))
@@ -979,7 +979,12 @@ pub(crate) fn stated_figures(text: &str) -> Vec<String> {
 fn without_unread_details(prompt: &str, answer: &str, steps: &[Step]) -> String {
     let reads: Vec<&Step> = steps
         .iter()
-        .filter(|step| step.state == "succeeded" && ["find_notes", "find_contact", "search_files", "search_memory"].contains(&step.tool.as_str()))
+        .filter(|step| {
+            let live_results = step.tool == "look_up_online"
+                // A conversion's answer is worked out from its rate, so isn't on the card.
+                && step.evidence.as_ref().is_some_and(|evidence| evidence["cards"].as_array().is_some_and(|cards| !cards.is_empty() && !cards.iter().any(|card| card["kind"] == "rate")));
+            step.state == "succeeded" && (live_results || ["find_notes", "find_contact", "search_files", "search_memory"].contains(&step.tool.as_str()))
+        })
         .collect();
     if reads.is_empty() {
         return answer.to_string();
@@ -1040,7 +1045,7 @@ fn may_speak_generally(prompt: &str) -> bool {
 
 /// A sentence that states what's on the user's calendar or reminders with no clock time:
 /// "You have a dentist visit tomorrow." Nothing this turn read anything, so it can't know.
-fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
+fn states_day_or_reminder(prompt: &str, sentence: &str, known_times: &[String]) -> bool {
     const NOUNS: [&str; 10] = ["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments", "reminder", "reminders"];
     const DAYS: [&str; 11] = ["today", "tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend"];
     let text = sentence.to_lowercase().replace('’', "'");
@@ -1052,6 +1057,14 @@ fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
     }
     // "You're free" says as much about a calendar as "you have a meeting".
     if ["you're free", "you are free", "you're clear", "you are clear", "is clear", "are clear", "wide open", "you're not busy", "you are not busy", "nothing on ", "no meetings", "no events", "nothing scheduled", "you have nothing", "you've got nothing"].iter().any(|claim| text.contains(claim)) {
+        return true;
+    }
+    // "Your dentist is tomorrow at 15:00" with nothing read this turn may be stale or made up.
+    let new_time = clock_times(&text).iter().any(|time| !known_times.contains(time));
+    let said: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
+    // "Leave by 6:30" answers "when should I leave"; it doesn't claim to know their day.
+    let advice = asked.split(|c: char| !c.is_alphanumeric()).any(|word| word == "should") || ["should", "could", "might", "try", "recommend", "suggest", "aim"].iter().any(|word| said.contains(word));
+    if new_time && !advice && said.iter().any(|word| ["your", "you"].contains(word)) {
         return true;
     }
     let says_you_have = ["you have ", "you've got ", "you got "].iter().any(|claim| text.contains(claim));
@@ -1147,10 +1160,21 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     if let Some(read) = mail_read_instead(prompt, answer, steps) {
         return read;
     }
+    // An answer from the web is about the web, unless the request was about the user or
+    // something of theirs was read too.
+    let about_the_user = prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| ["my", "i", "me", "mine", "our", "we", "us"].contains(&word));
+    let looked_online = steps.iter().any(|step| step.state == "succeeded" && step.tool == "look_up_online");
+    let read_theirs = steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online");
+    if looked_online && !about_the_user && !read_theirs {
+        return answer.to_string();
+    }
     let mut asked = clock_times(prompt);
     for evidence in steps.iter().filter(|s| s.state == "succeeded" && !s.effect).filter_map(|s| s.evidence.as_ref()) {
         let mut read = evidence.as_str().unwrap_or_default().to_string();
         read += evidence["text"].as_str().unwrap_or_default();
+        // A live lookup's results and summary are what it read.
+        read += evidence["summary"].as_str().unwrap_or_default();
+        read += &evidence["cards"].to_string();
         for record in evidence["records"].as_array().into_iter().flatten() {
             read += " ";
             read += record["excerpt"].as_str().unwrap_or_default();
@@ -1158,10 +1182,10 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         asked.extend(clock_times(&read));
     }
     // Without a read, a day or reminder needs no clock time to be made up.
-    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect) && !may_speak_generally(prompt);
+    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online") && !may_speak_generally(prompt);
     let claims = |text: &str| {
         clock_times(text).into_iter().any(|time| !asked.contains(&time))
-            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence)))
+            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence, &asked)))
     };
     let mentions = |text: &str, nouns: &[&str]| {
         text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
@@ -1172,7 +1196,7 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         .map(|(app, nouns, _)| (*app, *nouns))
         .collect();
     let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
-    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence));
+    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence, &asked));
     if !claims(answer) || (!unsupported(answer) && !stated) {
         return answer.to_string();
     }
@@ -2095,6 +2119,45 @@ mod tests {
         read.evidence = Some(json!({"events":[],"complete":true}));
         assert!(validate_answer(goal, "Done", &[read, event]).is_ok());
         assert!(validate_answer("Read my email then create a note", "Done", &[saved("create_note", "Verified note.")]).is_err());
+    }
+
+    #[test]
+    fn a_time_for_the_user_takes_a_read_this_turn() {
+        let said = grounded_personal_answer("when's the dentist", "Your dentist is tomorrow at 15:00.", &[]);
+        assert!(!said.contains("15:00"), "{said}");
+        let fine = "The store opens at 9:00 AM.";
+        assert_eq!(grounded_personal_answer("when does the store open", fine, &[]), fine);
+        // An answer from the web is about the web, whatever nouns it has.
+        let mut online = saved("look_up_online", "");
+        online.effect = false;
+        let web = "The Fed meeting ends at 2:00 PM.";
+        assert_eq!(grounded_personal_answer("when does the Fed meeting end", web, std::slice::from_ref(&online)), web);
+        // The web doesn't excuse a claim about the user's own day.
+        let said = grounded_personal_answer("when's my dentist", "Your dentist is tomorrow at 15:00.", std::slice::from_ref(&online));
+        assert!(!said.contains("15:00"), "{said}");
+        let advice = "You should try to sleep by 11pm.";
+        assert_eq!(grounded_personal_answer("when should I sleep", advice, &[]), advice);
+        let leave = "Leave by 6:30 AM so you have time.";
+        assert_eq!(grounded_personal_answer("what time should I leave for my 9am flight", leave, &[]), leave);
+        // A live lookup's own results count as read.
+        let mut flights = saved("look_up_online", "");
+        flights.effect = false;
+        flights.evidence = Some(json!({"summary":"You can fly at 10:30 AM on ITA for $399 [1].","cards":[{"title":"ITA 10:30 AM"}]}));
+        let summary = "You can fly at 10:30 AM on ITA for $399 [1].";
+        assert_eq!(grounded_personal_answer("find me flights to Rome on Friday", summary, std::slice::from_ref(&flights)), summary);
+        let made_up = grounded_personal_answer("find me flights to Rome on Friday", "You can fly at 7:15 AM on ITA for $199 [1].", std::slice::from_ref(&flights));
+        assert!(!made_up.contains("$199"), "{made_up}");
+        let echoed = "Your dentist is at 3pm, so leave by 2.";
+        assert_eq!(grounded_personal_answer("my dentist is at 3pm, when should I leave", echoed, &[]), echoed);
+    }
+
+    #[test]
+    fn a_conversion_can_state_what_it_worked_out() {
+        let mut rate = saved("look_up_online", "");
+        rate.effect = false;
+        rate.evidence = Some(json!({"cards":[{"kind":"rate","title":"1 USD = 0.9231 EUR"}],"summary":""}));
+        let said = "That's about 92.31 euros.";
+        assert_eq!(grounded_personal_answer("what's 100 dollars in euros", said, std::slice::from_ref(&rate)), said);
     }
 
     #[test]

@@ -269,6 +269,108 @@ pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chr
     None
 }
 
+/// "Read the landlord's email and text Sam what it says", "draft an email to Ana about my
+/// lease note": writing from something that has to be read first. On the real model the
+/// read got skipped and the message was made up, so Rust reads it before any writing. The
+/// name is who or what the source is about, if it says; "my unread emails" names nobody.
+fn source_named(goal: &str) -> Option<(&'static str, Option<String>)> {
+    let writes = crate::completion::requested_actions(goal).0;
+    if !writes.iter().any(|tool| ["send_message", "start_call", "draft_email", "create_note"].contains(tool)) {
+        return None;
+    }
+    let said: Vec<String> = crate::completion::unquoted(goal)
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’').to_lowercase().replace('’', "'"))
+        .collect();
+    let at = |index: usize| said.get(index).map(String::as_str).unwrap_or_default();
+    const NOT_NAMES: [&str; 26] = [
+        "a", "an", "the", "this", "that", "these", "those", "my", "new", "latest", "last", "next", "first", "unread", "recent", "old", "work", "personal",
+        "today", "today's", "yesterday", "yesterday's", "tomorrow", "morning", "evening", "afternoon",
+    ];
+    let name = |word: &str| -> Option<String> { (!word.is_empty() && !NOT_NAMES.contains(&word)).then(|| word.to_string()) };
+    for index in 0..said.len() {
+        let previous = if index == 0 { "" } else { at(index - 1) };
+        let owned = index >= 2 && ["my", "the"].contains(&at(index - 2));
+        match at(index) {
+            "email" | "mail" | "emails" => {
+                // An address to send to: "draft an email to my work email", "her email address".
+                if at(index + 1) == "address" || (index >= 3 && at(index - 3) == "to") {
+                    continue;
+                }
+                let mut from = index + 2;
+                while ["the", "my"].contains(&at(from)) {
+                    from += 1;
+                }
+                if let Some(owner) = previous.strip_suffix("'s") {
+                    return Some(("read_mail", name(owner)));
+                }
+                if at(index + 1) == "from" {
+                    return Some(("read_mail", name(at(from).trim_end_matches("'s"))));
+                }
+                if owned || previous == "my" {
+                    return Some(("read_mail", name(previous)));
+                }
+            }
+            "note" | "notes" if !writes.contains(&"create_note") => {
+                let mut about = index + 2;
+                while ["the", "my"].contains(&at(about)) {
+                    about += 1;
+                }
+                if previous.ends_with("'s") {
+                    return Some(("find_notes", name(previous.trim_end_matches("'s"))));
+                }
+                if ["my", "the"].contains(&previous) && ["about", "on"].contains(&at(index + 1)) {
+                    return Some(("find_notes", name(at(about))));
+                }
+                if owned {
+                    return Some(("find_notes", name(previous)));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The read to run before writing from a source the request names. Mail's own search only
+/// looks at senders and subjects, so finding nothing is followed by the newest emails.
+pub fn source_read(goal: &str, steps: &[Step]) -> Option<(&'static str, Value)> {
+    let (tool, name) = source_named(goal)?;
+    let reads: Vec<&Step> = steps.iter().filter(|step| step.tool == tool).collect();
+    let newest = json!({"limit":8,"unread":false});
+    match (tool, name, reads.as_slice()) {
+        ("read_mail", None, []) => Some((tool, newest)),
+        ("read_mail", Some(name), []) => Some((tool, json!({"limit":8,"unread":false,"query":name}))),
+        ("read_mail", Some(_), [search]) if search.state == "succeeded" && holds_nothing(search) => Some((tool, newest)),
+        ("find_notes", name, []) => Some((tool, json!({"query":name.unwrap_or_default()}))),
+        _ => None,
+    }
+}
+
+fn holds_nothing(step: &Step) -> bool {
+    step.evidence.as_ref().is_none_or(|evidence| evidence["records"].as_array().is_none_or(Vec::is_empty) && evidence["count"].as_u64().unwrap_or(0) == 0)
+}
+
+/// What to say when those reads found nothing to write from.
+pub fn source_missing(goal: &str, steps: &[Step]) -> Option<String> {
+    let (tool, name) = source_named(goal)?;
+    if source_read(goal, steps).is_some() {
+        return None;
+    }
+    let reads: Vec<&Step> = steps.iter().filter(|step| step.tool == tool && step.state == "succeeded").collect();
+    if reads.is_empty() {
+        return None;
+    }
+    let found = reads.iter().any(|step| {
+        !holds_nothing(step) && name.as_ref().is_none_or(|name| step.arguments.get("query").is_some() || step.evidence.as_ref().is_some_and(|evidence| evidence.to_string().to_lowercase().contains(name.as_str())))
+    });
+    if found {
+        return None;
+    }
+    let what = if tool == "read_mail" { "email" } else { "note" };
+    Some(format!("I couldn’t find {} {what}, so I haven’t written anything.", name.map_or("that".to_string(), |name| format!("a “{name}”"))))
+}
+
 /// The finished reads an answer is built from, when reading Mail, Calendar or Reminders is
 /// all this request needed.
 pub fn reads<'a>(goal: &str, steps: &'a [Step]) -> Option<Vec<&'a Step>> {
@@ -1173,6 +1275,63 @@ mod tests {
         let day = calendar("2026-11-05", vec![event("Review", "2026-11-05 15:30", "2026-11-05 16:00", "")]);
         let said = direct_answer("am I free at 3:30", &[&day], morning()).unwrap();
         assert!(said.contains("Review") && !said.contains("Nothing"), "{said}");
+    }
+
+    #[test]
+    fn writing_from_something_reads_it_first() {
+        let read = |goal: &str| source_read(goal, &[]).map(|(tool, args)| (tool, args["query"].as_str().unwrap_or_default().to_string()));
+        assert_eq!(read("Read the landlord's email and text Sam what it says"), Some(("read_mail", "landlord".to_string())));
+        assert_eq!(read("Read the email from Keychron and text Sam about it"), Some(("read_mail", "keychron".to_string())));
+        assert_eq!(read("Summarise the bank email and text it to Sam"), Some(("read_mail", "bank".to_string())));
+        assert_eq!(read("draft an email to Ana about my lease note"), Some(("find_notes", "lease".to_string())));
+        assert_eq!(read("text Ana what my note about the deposit says"), Some(("find_notes", "deposit".to_string())));
+        // Nothing to read first.
+        for goal in ["draft an email to Ana about Friday", "text Sam that I'm late", "create a note about the lease", "what does the bank email say", "call Ana"] {
+            assert_eq!(read(goal), None, "{goal}");
+        }
+    }
+
+    #[test]
+    fn normal_requests_arent_refused_over_ordinary_words() {
+        let read = |goal: &str| source_read(goal, &[]).map(|(tool, args)| (tool, args["query"].as_str().unwrap_or_default().to_string()));
+        // These read the newest emails, with nobody's name to search for.
+        for goal in ["Summarise my unread emails and text Sam", "Read my work emails and create a note", "Read the email from yesterday and text Sam what it says", "Read the email from this morning and text Sam"] {
+            assert_eq!(read(goal), Some(("read_mail", String::new())), "{goal}");
+        }
+        // These aren't sources at all.
+        for goal in ["draft an email to my work email about the report", "text Sam a note about dinner"] {
+            assert_eq!(read(goal), None, "{goal}");
+        }
+    }
+
+    #[test]
+    fn nothing_found_means_nothing_is_written() {
+        let goal = "Read the landlord's email and text Sam what it says";
+        let searched = |rows: &[[&str; 5]]| {
+            let mut read = step("read_mail", crate::apps::mail_fixture("landlord", rows, rows.len()));
+            read.state = "succeeded".into();
+            read.arguments = json!({"limit":8,"unread":false,"query":"landlord"});
+            read
+        };
+        let newest = |rows: &[[&str; 5]]| {
+            let mut read = step("read_mail", crate::apps::mail_fixture("", rows, rows.len()));
+            read.state = "succeeded".into();
+            read.arguments = json!({"limit":8,"unread":false});
+            read
+        };
+        // Mail's search only looks at senders and subjects, so the newest emails come next.
+        let empty = searched(&[]);
+        assert_eq!(source_missing(goal, std::slice::from_ref(&empty)), None);
+        assert!(source_read(goal, std::slice::from_ref(&empty)).is_some_and(|(_, args)| args.get("query").is_none()));
+        // Neither has it.
+        let other = newest(&[["2026-11-05 07:00", "m", "Sam <s@example.com>", "Lunch", "1"]]);
+        assert!(source_missing(goal, &[empty.clone(), other]).unwrap().contains("landlord"));
+        // One does.
+        let mentioned = newest(&[["2026-11-05 07:00", "m", "John Smith <j@example.com>", "From your landlord", "1"]]);
+        assert_eq!(source_missing(goal, &[empty, mentioned]), None);
+        let found = searched(&[["2026-11-05 07:00", "m", "Landlord <l@example.com>", "Door", "1"]]);
+        assert_eq!(source_missing(goal, std::slice::from_ref(&found)), None);
+        assert_eq!(source_read(goal, std::slice::from_ref(&found)), None);
     }
 
     #[test]

@@ -282,6 +282,40 @@ def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, An
     return validate_tool_call({"name": name, "arguments": arguments}, allowed)
 
 
+# Turn markers a page or an email could write to pose as a real turn of the conversation.
+TEMPLATE_MARKERS = r"<\|[^|<>\s]{1,40}\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
+MARKER_PASSES = 8
+
+
+def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> list[dict[str, Any]]:
+    """Text from outside can't become a turn: only the template adds real markers. Every
+    message is cleaned, since the system message carries values bound from emails and pages.
+    Removing an inner marker can join the text around it into a new one, so this repeats,
+    and input built to outlast the passes loses every marker's brackets instead."""
+    named = set(getattr(tokenizer, "all_special_tokens", None) or [])
+    added = getattr(tokenizer, "get_added_vocab", None)
+    if callable(added):
+        try:
+            # Some models list ordinary HTML such as <b> as added tokens; those aren't turns.
+            named.update(token for token in added() if token.startswith("<") and token.endswith(">") and ("|" in token or "turn" in token))
+        except Exception:
+            pass
+    pattern = re.compile("|".join([TEMPLATE_MARKERS, *(re.escape(token) for token in sorted(named, key=len, reverse=True) if token)]))
+
+    def clean(text: str) -> str:
+        for _ in range(MARKER_PASSES):
+            cleaned = pattern.sub("", text)
+            if cleaned == text:
+                return text
+            text = cleaned
+        return pattern.sub("", text).replace("<|", "").replace("|>", "")
+
+    return [
+        {**message, "content": clean(message["content"])} if isinstance(message.get("content"), str) else message
+        for message in messages
+    ]
+
+
 def adapt_messages(messages: list[dict[str, Any]], tools: list[dict[str, Any]], native_tools: bool) -> list[dict[str, Any]]:
     """Fit the conversation to the model's chat template.
 

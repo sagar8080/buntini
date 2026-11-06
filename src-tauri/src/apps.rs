@@ -884,6 +884,11 @@ const NOT_RUNNING_SENTINEL: &str = "__buntini_not_running__";
 pub const NOT_RUNNING: &str = "isn’t open, so I left it closed.";
 
 /// Whether a read failed only because its app was closed and was left that way.
+/// A background read that stopped short of an app without trying: closed, or not allowed yet.
+pub fn left_alone(error: &str) -> bool {
+    is_not_running(error) || error.ends_with(NOT_ALLOWED_YET)
+}
+
 pub fn is_not_running(error: &str) -> bool {
     error.ends_with(NOT_RUNNING)
 }
@@ -904,6 +909,96 @@ fn guarded(source: &'static str, app: &str, launch: Launch) -> std::borrow::Cow<
 }
 
 /// Runs a script that `guarded` may stop early, as an `Err` naming the closed app.
+const NOT_ALLOWED_YET: &str = "hasn’t been allowed to answer Buntini yet.";
+
+/// Whether macOS already lets Buntini script an app, asked without showing anything.
+mod automation {
+    /// macOS's own answer: allowed, not allowed, or it would have to ask.
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub enum Consent {
+        Allowed,
+        WouldAsk,
+        Denied,
+        NotRunning,
+    }
+
+    pub(super) fn consent_from(status: i32) -> Consent {
+        match status {
+            0 => Consent::Allowed,
+            -1744 => Consent::WouldAsk,
+            -1743 => Consent::Denied,
+            -600 => Consent::NotRunning,
+            // Anything unexpected might mean a prompt, so it counts as one.
+            _ => Consent::WouldAsk,
+        }
+    }
+
+    fn bundle(app: &str) -> Option<&'static str> {
+        match app {
+            "Mail" => Some("com.apple.mail"),
+            "Notes" => Some("com.apple.Notes"),
+            "Calendar" => Some("com.apple.iCal"),
+            "Reminders" => Some("com.apple.reminders"),
+            "Contacts" => Some("com.apple.AddressBook"),
+            "Music" => Some("com.apple.Music"),
+            "TV" => Some("com.apple.TV"),
+            "Spotify" => Some("com.spotify.client"),
+            "Safari" => Some("com.apple.Safari"),
+            _ => None,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn consent(bundle: &str) -> Consent {
+        use std::ffi::c_void;
+        // Carbon's own layout: two-byte packing, so the handle sits right after the type.
+        #[repr(C, packed(2))]
+        struct AEDesc {
+            descriptor_type: u32,
+            data_handle: *mut c_void,
+        }
+        #[link(name = "CoreServices", kind = "framework")]
+        extern "C" {
+            fn AECreateDesc(kind: u32, data: *const c_void, size: isize, result: *mut AEDesc) -> i16;
+            fn AEDisposeDesc(desc: *mut AEDesc) -> i16;
+            fn AEDeterminePermissionToAutomateTarget(target: *const AEDesc, class: u32, id: u32, ask: u8) -> i32;
+        }
+        const BUNDLE_ID: u32 = u32::from_be_bytes(*b"bund");
+        const ANY: u32 = u32::from_be_bytes(*b"****");
+        let mut target = AEDesc { descriptor_type: 0, data_handle: std::ptr::null_mut() };
+        unsafe {
+            if AECreateDesc(BUNDLE_ID, bundle.as_ptr().cast(), bundle.len() as isize, &mut target) != 0 {
+                return Consent::WouldAsk;
+            }
+            let status = AEDeterminePermissionToAutomateTarget(&target, ANY, ANY, 0);
+            AEDisposeDesc(&mut target);
+            consent_from(status)
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn consent(_: &str) -> Consent {
+        Consent::NotRunning
+    }
+
+    /// True when scripting this app can't raise a prompt. A closed app is the script's own
+    /// guard to handle, and an app with no known bundle keeps today's behaviour.
+    pub fn may_ask_silently(app: &str) -> bool {
+        bundle(app).is_none_or(|bundle| matches!(consent(bundle), Consent::Allowed | Consent::NotRunning))
+    }
+}
+
+/// Stops a read nobody is here for that macOS would have to ask about. Its answer can be
+/// slow, and that mustn't hold up the app.
+async fn no_prompt_unasked(app: &str) -> Result<(), String> {
+    let name = app.to_string();
+    let asked = tokio::task::spawn_blocking(move || automation::may_ask_silently(&name));
+    match tokio::time::timeout(std::time::Duration::from_secs(5), asked).await {
+        Ok(Ok(true)) => Ok(()),
+        _ => Err(format!("{app} {NOT_ALLOWED_YET}")),
+    }
+}
+
 async fn osascript_if(
     source: &'static str,
     app: &str,
@@ -911,6 +1006,11 @@ async fn osascript_if(
     argv: &[String],
     seconds: u64,
 ) -> Result<String, String> {
+    // A read nobody asked for never puts "Buntini wants to control Mail" on screen. The
+    // first request that needs it asks instead.
+    if matches!(launch, Launch::IfRunning) {
+        no_prompt_unasked(app).await?;
+    }
     let output = osascript(&guarded(source, app, launch), argv, seconds).await?;
     if output.trim() == NOT_RUNNING_SENTINEL {
         return Err(format!("{app} {NOT_RUNNING}"));
@@ -1594,11 +1694,19 @@ pub async fn run_evidence(
             } else {
                 get("app")
             };
+            if crate::controller::headless() {
+                no_prompt_unasked(player_script(selected).0).await?;
+            }
             let output = osascript(player_script(selected).1, &["read_evidence".into(), String::new()], 20).await?;
             music_evidence(selected, &output)
         }
         "browser_tabs" => browser_tabs_evidence(&browsers_for(settings, args), get("query")).await,
-        "read_page" => page_evidence(&osascript(SAFARI_PAGE, &[], 20).await?),
+        "read_page" => {
+            if crate::controller::headless() {
+                no_prompt_unasked("Safari").await?;
+            }
+            page_evidence(&osascript(SAFARI_PAGE, &[], 20).await?)
+        }
         // Mutating controls retain their action receipt flow. They are not reads.
         _ => run(tool, args, helper_path, settings).await.map(|text| {
             evidence(
@@ -2689,9 +2797,14 @@ fn parse_page(output: &str) -> Result<Option<PageSnapshot>, String> {
 /// The compatibility view retains the larger 8,000-character snapshot used by
 /// the browser skill. The model-facing read below advertises its smaller bound.
 pub(crate) async fn safari_page() -> Result<Option<(String, String, String)>, String> {
-    Ok(parse_page(&osascript(SAFARI_PAGE, &[], 20).await?)?
-        .map(|page| (page.title, page.url, page.text)))
+    Ok(parse_page(&osascript(SAFARI_PAGE, &[], 20).await?)?.map(|page| {
+        let cut = page.original_length > 8000;
+        (page.title, page.url, if cut { format!("{}{PAGE_CUT}", page.text) } else { page.text })
+    }))
 }
+
+/// Ends the text of a page that was longer than what was read.
+pub(crate) const PAGE_CUT: &str = "\n\n[The rest of this page wasn't read.]";
 
 /// The email selected in Mail, for "this". Mail must be allowed in Settings → Apps.
 #[derive(Debug, Clone, PartialEq)]
@@ -2844,7 +2957,7 @@ pub(crate) async fn recent_mail(
         match mail_openings(batch, launch).await {
             Ok(found) => openings.extend(found),
             // Mail was quit part-way through; reading on would open it again.
-            Err(error) if is_not_running(&error) => return Err(error),
+            Err(error) if left_alone(&error) => return Err(error),
             Err(error) => {
                 missed.extend(batch.iter().cloned());
                 failed = Some(error);
@@ -4009,6 +4122,26 @@ mod tests {
         }
         assert!(is_not_running(&format!("Mail {NOT_RUNNING}")));
         assert!(!is_not_running("Mail returned incomplete data. Please try again."));
+    }
+
+    #[test]
+    fn macoss_answer_about_scripting_an_app_is_read_right() {
+        use automation::{consent_from, Consent};
+        assert_eq!(consent_from(0), Consent::Allowed);
+        assert_eq!(consent_from(-1744), Consent::WouldAsk);
+        assert_eq!(consent_from(-1743), Consent::Denied);
+        assert_eq!(consent_from(-600), Consent::NotRunning);
+        assert_eq!(consent_from(-50), Consent::WouldAsk, "an unexpected answer never lets a read go ahead");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn asking_macos_about_scripting_shows_nothing_and_returns() {
+        // Whatever the answer on this Mac, it comes back at once with no dialog.
+        let started = std::time::Instant::now();
+        let _ = automation::consent("com.apple.mail");
+        let _ = automation::consent("com.apple.Notes");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
