@@ -2206,6 +2206,9 @@ impl TaskContract {
         if self.connector_request() {
             return connector_answer(text, steps);
         }
+        if let Some(receipt) = self.direct_receipt(steps) {
+            return Ok(receipt);
+        }
         // What the model wrote is checked; a receipt is what really happened and stays whole.
         let written = completion::grounded_personal_answer(&self.current_request, text, steps);
         completion::validate_answer(&self.current_request, &written, steps)
@@ -2218,7 +2221,17 @@ impl TaskContract {
         {
             return None;
         }
-        completion::completed_action_answer(&self.current_request, steps)
+        self.direct_receipt(steps).or_else(|| completion::completed_action_answer(&self.current_request, steps))
+    }
+    /// What a direct action's verified receipt says. It's the whole answer, so no model is
+    /// needed to word it and a Mac with none available still gets a true one.
+    fn direct_receipt(&self, steps: &[Step]) -> Option<String> {
+        if self.direct_tool.is_empty() {
+            return None;
+        }
+        let done = steps.iter().rev().find(|step| step.tool == self.direct_tool && verified_write(step))?;
+        let receipt: ActionReceipt = serde_json::from_value(done.evidence.as_ref()?.get("receipt")?.clone()).ok()?;
+        Some(receipt.message)
     }
     pub fn terminal_receipt_answer(&self, steps: &[Step]) -> Option<String> {
         // What an added tool replied is answered from, never summarised by its receipt.
@@ -3071,6 +3084,28 @@ mod tests {
         let mut draft = json!({"to":"eve@example.com"});
         contract.keep_only_known_recipient("draft_email", &mut draft);
         assert_eq!(draft["to"], "eve@example.com");
+    }
+    #[test]
+    fn a_direct_action_finishes_from_its_receipt_without_a_model() {
+        for (goal, tool, message) in [
+            ("Quit Photos", crate::glance::QUIT_TOOL, "Photos has quit."),
+            ("add AirPods 4 to my Target cart", crate::cart::TOOL, "AirPods 4 is in your target.com cart, open in Chrome. Checkout is yours."),
+            ("buy me AirPods 4 from Target", crate::cart::TOOL, "AirPods 4 is in your target.com cart, open in Chrome. Checkout is yours."),
+        ] {
+            let mut contract = TaskContract::from_request(goal);
+            contract.direct(tool);
+            let mut done = step("d", tool, json!({}), true);
+            done.evidence = Some(json!({"receipt":{"outcome":"succeeded","tool":tool,"objectId":"x","destination":"x","message":message,"evidence":{},"error":null}}));
+            contract.record_proposal("d", &json!({}), None);
+            contract.refresh(goal, std::slice::from_ref(&done));
+            assert_eq!(contract.completed_action_answer(std::slice::from_ref(&done)).as_deref(), Some(message), "{goal}");
+            assert_eq!(contract.validate_answer("", std::slice::from_ref(&done)).as_deref(), Ok(message), "{goal}");
+        }
+        // Until it has happened there is nothing to say.
+        let mut waiting = TaskContract::from_request("Quit Photos");
+        waiting.direct(crate::glance::QUIT_TOOL);
+        waiting.refresh("Quit Photos", &[]);
+        assert_eq!(waiting.completed_action_answer(&[]), None);
     }
     #[test]
     fn navigation_can_finish_from_verified_browser_observation() {
