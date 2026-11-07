@@ -269,102 +269,107 @@ pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chr
     None
 }
 
-/// Writing that mentions an email or note beyond the one being written: on the real model
-/// the read got skipped and the message was made up, so Rust reads it first. Reading one too
-/// many is harmless, so anything that might be a source is read. It only stops the task when
-/// the request plainly says to read it ("read", "summarise", "what it says").
+/// Writing from an email or note the request plainly points at: on the real model the read
+/// got skipped and the message was made up, so Rust reads it first, and if it can't, nothing
+/// is written. Only a few rigid forms count, because any looser reading catches words in the
+/// message itself ("text Ana that I haven't read my email"): a clause that starts by reading
+/// ("read the bank email"), "a summary of my last email", "what my note says", and "about my
+/// lease note". Anything else goes to the model and the approval sheet.
 struct Source {
     tool: &'static str,
     about: Option<String>,
-    told_to_read: bool,
+    /// "Sam's email" or "the email from Sam" names who to find; "the long email" may not.
+    named_person: bool,
+    unread: bool,
 }
 
 fn source_named(goal: &str) -> Option<Source> {
-    let writes = crate::completion::requested_actions(goal).0;
+    let asked = goal.split("Additional details:").next().unwrap_or(goal);
+    let writes = crate::completion::requested_actions(asked).0;
     if !writes.iter().any(|tool| ["send_message", "start_call", "draft_email", "create_note"].contains(tool)) {
         return None;
     }
-    let said: Vec<String> = crate::completion::unquoted(goal)
-        .split_whitespace()
-        .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’').to_lowercase().replace('’', "'"))
-        .collect();
-    let at = |index: usize| said.get(index).map(String::as_str).unwrap_or_default();
-    const NOT_NAMES: [&str; 28] = [
-        "a", "an", "the", "this", "that", "these", "those", "my", "our", "new", "latest", "last", "next", "first", "unread", "recent", "old", "work", "personal",
-        "today", "today's", "yesterday", "yesterday's", "tomorrow", "morning", "evening", "afternoon", "now",
+    const NOT_NAMES: [&str; 50] = [
+        "a", "an", "the", "this", "that", "these", "those", "my", "our", "her", "his", "him", "them", "their", "your", "me", "new", "latest", "last", "next", "first",
+        "previous", "unread", "recent", "old", "long", "short", "work", "personal", "school", "other", "week", "today", "yesterday", "tomorrow", "morning", "evening",
+        "afternoon", "now", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "read", "check", "summarise", "summarize",
     ];
-    const READS: [&str; 9] = ["read", "summarise", "summarize", "summarising", "summarizing", "summary", "check", "forward", "quote"];
-    let name = |word: &str| -> Option<String> { (!word.is_empty() && !NOT_NAMES.contains(&word)).then(|| word.trim_end_matches("'s").to_string()) };
-    let after_the_cue = |index: usize| {
-        let mut next = index + 2;
-        while ["the", "my"].contains(&at(next)) {
-            next += 1;
-        }
-        at(next).to_string()
-    };
-    for index in 0..said.len() {
-        let previous = if index == 0 { "" } else { at(index - 1) };
-        let word = at(index);
-        let email = ["email", "emails", "mail"].contains(&word);
-        let note = ["note", "notes"].contains(&word);
-        if !email && !note {
-            continue;
-        }
-        // What's being written isn't a source: "draft an email", "create a note", "a note about dinner".
-        if ["a", "an"].contains(&previous) {
-            continue;
-        }
-        // An address: "to my work email", "her email address", "from my work email".
-        if at(index + 1) == "address" || (index >= 3 && ["to", "from"].contains(&at(index - 3)) && ["my", "her", "his", "their"].contains(&at(index - 2))) {
-            continue;
-        }
-        let told_to_read = said[..index].iter().any(|word| READS.contains(&word.as_str())) || said[index + 1..].iter().any(|word| ["says", "say", "said"].contains(&word.as_str()));
-        // "Create a trip note", "draft the email to Ana": that's what's being written.
-        if !told_to_read && ((note && writes.contains(&"create_note")) || (email && writes.contains(&"draft_email") && at(index + 1) == "to")) {
-            continue;
-        }
-        let about = if previous.ends_with("'s") {
-            name(previous)
-        } else if at(index + 1) == "from" || ["about", "on"].contains(&at(index + 1)) {
-            name(&after_the_cue(index))
-        } else {
-            name(previous)
+    const OPENS_BY_READING: [&str; 12] = ["read", "summarise", "summarize", "check", "review", "use", "get", "find", "pull", "take", "grab", "copy"];
+    let unquoted = crate::completion::unquoted(asked).to_lowercase().replace('’', "'");
+    for clause in unquoted.split([',', ';', '.', '\n']).flat_map(|part| part.split(" and ")).flat_map(|part| part.split(" then ")) {
+        let clause = crate::completion::request_clause(clause);
+        let said: Vec<&str> = clause.split_whitespace().map(|word| word.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')).collect();
+        let at = |index: usize| said.get(index).copied().unwrap_or_default();
+        let name = |word: &str| -> Option<String> {
+            let word = word.trim_end_matches("'s");
+            (!word.is_empty() && !NOT_NAMES.contains(&word)).then(|| word.to_string())
         };
-        if email {
-            return Some(Source { tool: "read_mail", about, told_to_read });
-        }
-        // Notes can only be searched for something.
-        if let Some(about) = about {
-            return Some(Source { tool: "find_notes", about: Some(about), told_to_read });
-        }
-        if told_to_read {
-            return Some(Source { tool: "find_notes", about: None, told_to_read });
+        let opens_by_reading = OPENS_BY_READING.contains(&at(0));
+        for index in 0..said.len() {
+            let word = at(index);
+            let email = ["email", "emails", "mail"].contains(&word);
+            let note = ["note", "notes"].contains(&word);
+            if !email && !note {
+                continue;
+            }
+            let previous = if index == 0 { "" } else { at(index - 1) };
+            if ["a", "an", "to", "will", "i'll", "your", "her", "his", "their"].contains(&previous) {
+                continue;
+            }
+            let of_mine = ["my", "the"].contains(&previous) || (index >= 2 && ["my", "the"].contains(&at(index - 2)));
+            let summary_of = said[..index].windows(2).any(|pair| pair == ["summary", "of"]) || said[..index].iter().any(|word| ["summarising", "summarizing"].contains(word));
+            let what_it_says = said[..index].contains(&"what") && said[index + 1..].iter().any(|word| ["says", "say", "said"].contains(word));
+            let named_after = ["on", "about", "for"].contains(&at(index + 1));
+            let about_mine = (index >= 3 && at(index - 3) == "about" && at(index - 2) == "my" && (index + 1 == said.len() || named_after))
+                || (index >= 2 && at(index - 2) == "about" && previous == "my" && named_after);
+            if !(opens_by_reading || (of_mine && (summary_of || what_it_says)) || about_mine) {
+                continue;
+            }
+            if at(0) == "use" && !said[..index].contains(&"from") {
+                continue;
+            }
+            let (about, named_person) = if previous.ends_with("'s") {
+                (name(previous), true)
+            } else if at(index + 1) == "from" {
+                let mut next = index + 2;
+                while ["the", "my"].contains(&at(next)) {
+                    next += 1;
+                }
+                (name(at(next)), true)
+            } else if ["about", "on"].contains(&at(index + 1)) {
+                let mut next = index + 2;
+                while ["the", "my"].contains(&at(next)) {
+                    next += 1;
+                }
+                (name(at(next)), false)
+            } else {
+                (name(previous), false)
+            };
+            let unread = said[..index].iter().any(|word| ["unread", "new"].contains(word));
+            if email {
+                return Some(Source { tool: "read_mail", about, named_person, unread });
+            }
+            // A note can only be searched for something. With nothing to go on, this isn't for Rust.
+            return crate::explicit_fields::read_query(asked).or(about).map(|about| Source { tool: "find_notes", about: Some(about), named_person, unread: false });
         }
     }
     None
 }
 
-/// The read to run before writing from a source the request names. A read that failed
-/// doesn't count, so "Try again" reads it again rather than leaving the model to invent it.
-/// Mail's own search only looks at senders and subjects, so finding nothing is followed by
-/// the newest emails.
+/// The read to run before writing from that source. A read that failed doesn't count, so
+/// "Try again" reads it again. Mail's own search only looks at senders and subjects, so
+/// finding nothing is followed by the newest emails.
 pub fn source_read(goal: &str, steps: &[Step]) -> Option<(&'static str, Value)> {
     let source = source_named(goal)?;
     let reads: Vec<&Step> = steps.iter().filter(|step| step.tool == source.tool && step.state == "succeeded").collect();
-    let newest = json!({"limit":8,"unread":false});
+    let newest = json!({"limit":8,"unread":source.unread});
     match (source.tool, source.about, reads.as_slice()) {
         ("read_mail", None, []) => Some(("read_mail", newest)),
-        ("read_mail", Some(name), []) => Some(("read_mail", json!({"limit":8,"unread":false,"query":name}))),
+        ("read_mail", Some(name), []) => Some(("read_mail", json!({"limit":8,"unread":source.unread,"query":name}))),
         ("read_mail", Some(_), [search]) if holds_nothing(search) => Some(("read_mail", newest)),
         ("find_notes", Some(name), []) => Some(("find_notes", json!({"query":name}))),
         _ => None,
     }
-}
-
-/// Whether this read is only a guess at a source, so failing or being unavailable isn't the
-/// end of the task.
-pub fn source_is_a_guess(goal: &str) -> bool {
-    source_named(goal).is_some_and(|source| !source.told_to_read)
 }
 
 fn holds_nothing(step: &Step) -> bool {
@@ -378,16 +383,10 @@ fn record_mentions(record: &Value, name: &str) -> bool {
     })
 }
 
-/// What to say when it was told to read something and it isn't there. A request that names
-/// no findable note asks which.
+/// What to say when the source isn't there, so there's nothing true to write from. A word
+/// that may only describe the email ("the long email") doesn't have to be found in it.
 pub fn source_missing(goal: &str, steps: &[Step]) -> Option<String> {
     let source = source_named(goal)?;
-    if !source.told_to_read {
-        return None;
-    }
-    if source.tool == "find_notes" && source.about.is_none() {
-        return Some("Which note? Tell me what it’s about and I’ll read it.".into());
-    }
     if source_read(goal, steps).is_some() {
         return None;
     }
@@ -395,13 +394,14 @@ pub fn source_missing(goal: &str, steps: &[Step]) -> Option<String> {
     let found = reads.iter().any(|step| {
         let searched = step.arguments.get("query").is_some();
         let records = step.evidence.iter().flat_map(|evidence| evidence["records"].as_array()).flatten();
-        !holds_nothing(step) && source.about.as_ref().is_none_or(|name| searched || records.into_iter().any(|record| record_mentions(record, name)))
+        !holds_nothing(step) && (!source.named_person || source.about.as_ref().is_none_or(|name| searched || records.into_iter().any(|record| record_mentions(record, name))))
     });
     if found || reads.is_empty() {
         return None;
     }
-    let what = if source.tool == "read_mail" { "email" } else { "note" };
-    Some(format!("I couldn’t find {} {what}, so I haven’t written anything.", source.about.map_or("that".to_string(), |name| format!("a “{name}”"))))
+    let what = if source.tool == "read_mail" { "an email" } else { "a note" };
+    let about = source.about.map_or(String::new(), |name| format!(" about “{name}”"));
+    Some(format!("I couldn’t find {what}{about}, so I haven’t written anything."))
 }
 
 /// The finished reads an answer is built from, when reading Mail, Calendar or Reminders is
@@ -1320,36 +1320,71 @@ mod tests {
             ("Summarise my unread emails and text Sam", "read_mail", ""),
             ("Read the email and text Sam what it says", "read_mail", ""),
             ("Read the email from yesterday and text Sam what it says", "read_mail", ""),
+            ("Read the email from Tuesday and text Sam what it says", "read_mail", ""),
+            ("Read the email from him and text Sam what it says", "read_mail", ""),
+            ("Check email and text Sam if anything is urgent", "read_mail", ""),
+            ("Summarise emails and text them to Sam", "read_mail", ""),
             ("Draft an email to Sam with a summary of my last email", "read_mail", ""),
             ("Use the details from the latest email and text them to Sam", "read_mail", ""),
+            ("Get the tracking number from the Amazon email and text it to Sam", "read_mail", "amazon"),
+            ("Read the total from my bank email and text it to Sam", "read_mail", "bank"),
+            ("Summarise the invoice from my landlord's email and text it to Sam", "read_mail", "landlord"),
             ("draft an email to Ana about my lease note", "find_notes", "lease"),
             ("Draft an email to Sam summarizing my notes on the lease", "find_notes", "lease"),
             ("Draft an email to Ana about my notes on the lease", "find_notes", "lease"),
             ("Draft an email to Ana about my lease note for the landlord", "find_notes", "lease"),
             ("text Ana what my note about the deposit says", "find_notes", "deposit"),
+            ("Read the note called Lease and text it to Sam", "find_notes", "lease"),
         ] {
-            assert_eq!(read(goal), Some((tool, about.to_string())), "{goal}");
+            assert_eq!(read(goal).map(|(tool, about)| (tool, about.to_lowercase())), Some((tool, about.to_string())), "{goal}");
         }
-        // Nothing to read first.
-        for goal in ["draft an email to Ana about Friday", "text Sam that I'm late", "create a note about the lease", "what does the bank email say", "call Ana", "text Sam a note about dinner", "draft an email to my work email about the report", "Draft an email to Sam from my work email", "Create a trip note, then add a reminder to buy the train ticket", "draft the email to Ana"] {
+        // Nothing to read first, and so nothing opened or refused.
+        for goal in [
+            "draft an email to Ana about Friday",
+            "text Sam that I'm late",
+            "create a note about the lease",
+            "Create a trip note, then add a reminder to buy the train ticket",
+            "Make a note to email Sam tomorrow",
+            "Create a note to email Ana the invoice",
+            "Call Ana about the email",
+            "Call Ana about my email",
+            "text Sam a note about dinner",
+            "Text Ana about my notes",
+            "draft an email to my work email about the report",
+            "Draft an email to Sam from my work email",
+            "Draft an email to Sam from my school email",
+            "Draft an email to Sam about the marketing email campaign",
+            "Draft an email to Ana about the sticky note on her desk",
+            "Draft an email to Ana asking her to use my work email from now on",
+            "Text Ana to read my notes",
+            "Draft an email to Ana and say I'll check my email tonight",
+            "Text Ana and say I can't check my email until tonight",
+            "Draft an email to Ana saying I haven't read her email yet",
+            "Draft an email to Ana asking if she could read the email I sent",
+            "Call Ana about the email she said she sent",
+            "Create a note called Check email",
+            "Make a note: check my email tomorrow",
+            "Text Ana I haven't read my notes yet",
+            "Text Ana that the notes say 3pm",
+            "Draft an email to Ana asking if she can check my notes",
+            "text Ana what my latest note says",
+            "what does the bank email say",
+            "call Ana",
+        ] {
             assert_eq!(read(goal), None, "{goal}");
+            assert_eq!(source_missing(goal, &[]), None, "{goal}");
         }
     }
 
     #[test]
-    fn only_a_request_to_read_can_stop_the_task() {
-        // A maybe-source that isn't there just isn't used.
-        let nothing = |goal: &str| {
-            let mut empty = step("read_mail", crate::apps::mail_fixture("marketing", &[], 0));
-            empty.state = "succeeded".into();
-            source_missing(goal, std::slice::from_ref(&empty))
-        };
-        for goal in ["Draft an email to Sam about the marketing email campaign", "Draft an email to Ana asking her to use my work email from now on"] {
-            assert_eq!(nothing(goal), None, "{goal}");
-            assert!(source_is_a_guess(goal), "{goal}");
-        }
-        assert!(!source_is_a_guess("Read the landlord's email and text Sam what it says"));
-        assert!(source_missing("text Ana what my latest note says", &[]).unwrap().contains("Which note"));
+    fn unread_stays_unread_and_a_description_doesnt_have_to_match() {
+        let (_, args) = source_read("Summarise my unread emails and text Sam", &[]).unwrap();
+        assert_eq!(args["unread"], true);
+        // "The long email" describes it, so a full inbox isn't "couldn't find".
+        let goal = "Read the short email and text Sam what it says";
+        let mut newest = step("read_mail", crate::apps::mail_fixture("", &[["2026-11-05 07:00", "m", "Sam <s@example.com>", "Lunch", "1"]], 1));
+        newest.state = "succeeded".into();
+        assert_eq!(source_missing(goal, std::slice::from_ref(&newest)), None);
     }
 
     #[test]

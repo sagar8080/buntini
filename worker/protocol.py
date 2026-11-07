@@ -308,10 +308,14 @@ def template_cleaner(tokenizer: Any):
         except Exception:
             pass
     pattern = re.compile("|".join([*(re.escape(token) for token in sorted(named, key=len, reverse=True)), TEMPLATE_MARKERS]))
+    # Tokens with no brackets, like [INST], go first: another marker's match could hide them.
+    bare = [token for token in sorted(named, key=len, reverse=True) if not token.startswith("<")]
+    bare_pattern = re.compile("|".join(re.escape(token) for token in bare)) if bare else None
 
     def clean(value: Any) -> Any:
         if isinstance(value, str):
-            return pattern.sub(lambda found: _disarmed(found.group(0)), value)
+            text = bare_pattern.sub(lambda found: _disarmed(found.group(0)), value) if bare_pattern else value
+            return pattern.sub(lambda found: _disarmed(found.group(0)), text)
         if isinstance(value, list):
             return [clean(item) for item in value]
         if isinstance(value, dict):

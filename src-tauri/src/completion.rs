@@ -941,6 +941,7 @@ struct NumberSpan {
     after: Option<char>,
     word_before: String,
     word_after: String,
+    symbol_beside: bool,
 }
 
 fn number_spans(text: &str) -> Vec<NumberSpan> {
@@ -978,6 +979,8 @@ fn number_spans(text: &str) -> Vec<NumberSpan> {
         }
         let raw: String = chars[start..at].iter().filter(|c| **c != ',').collect();
         let number = raw.strip_suffix(".00").map(str::to_string).unwrap_or(raw);
+        let spaced_symbol = |index: Option<usize>| index.and_then(|index| chars.get(index)).is_some_and(|c| "$€£¥₹".contains(*c));
+        let symbol_beside = (chars.get(at) == Some(&' ') && spaced_symbol(Some(at + 1))) || (start >= 2 && chars[start - 1] == ' ' && spaced_symbol(Some(start - 2)));
         let skip_space = |index: usize| if chars.get(index) == Some(&' ') { index + 1 } else { index };
         let before_index = if start >= 2 && chars[start - 1] == ' ' { start - 2 } else { start.saturating_sub(1) };
         found.push(NumberSpan {
@@ -986,6 +989,7 @@ fn number_spans(text: &str) -> Vec<NumberSpan> {
             after: chars.get(at).copied(),
             word_before: if start == 0 { String::new() } else { word_at(before_index, false) },
             word_after: word_at(skip_space(at), true),
+            symbol_beside,
         });
     }
     found
@@ -1003,8 +1007,7 @@ pub(crate) fn stated_figures(text: &str) -> Vec<String> {
         .filter(|span| {
             let money = span.before.is_some_and(|c| SYMBOLS.contains(c))
                 || span.after.is_some_and(|c| SYMBOLS.contains(c) || c == '%')
-                || (span.after == Some(' ') && text.contains(&format!("{} ", span.number)) && SYMBOLS.chars().any(|c| text.contains(&format!("{} {c}", span.number))))
-                || (span.before == Some(' ') && SYMBOLS.chars().any(|c| text.contains(&format!("{c} {}", span.number))))
+                || span.symbol_beside
                 || AFTER.contains(&span.word_after.as_str())
                 || BEFORE.contains(&span.word_before.as_str());
             let in_a_name = !money && (span.before.is_some_and(char::is_alphabetic) || span.after.is_some_and(char::is_alphabetic));
@@ -2117,6 +2120,8 @@ mod tests {
         for amount in ["It's 99 dollars.", "It's $ 99.", "It's USD99.", "It's 99 USD.", "It's 99€.", "It's 99 €.", "It's 49 GBP.", "It's Rs 99.", "It's 5 million dollars."] {
             assert_eq!(stated_figures(amount), [if amount.contains("49") { "49" } else if amount.contains("million") { "5" } else { "99" }], "{amount}");
         }
+        assert_eq!(stated_figures("It's 2,000 €."), ["2000"]);
+        assert_eq!(stated_figures("It's $ 2,000."), ["2000"]);
         for not_money in ["Ships to 5 European countries.", "Book a chauffeur 24 hours ahead."] {
             assert!(stated_figures(not_money).is_empty(), "{not_money}");
         }
