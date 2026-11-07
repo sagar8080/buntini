@@ -259,7 +259,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                 Some(limit) => limit
                     .as_u64()
                     .ok_or("limit must be a positive whole number.")?
-                    .clamp(1, 8),
+                    .clamp(1, 20),
             };
             out.insert("limit".into(), json!(limit));
         }
@@ -3766,7 +3766,7 @@ mod tests {
     fn calls_are_checked_and_normalised() {
         let mail = validate("read_mail", &json!({"query":" invoice ","limit":40})).unwrap();
         assert_eq!(mail["query"], "invoice");
-        assert_eq!(mail["limit"], 8, "at most eight messages");
+        assert_eq!(mail["limit"], 20, "at most twenty messages");
         assert!(
             validate("read_mail", &json!({"folder":"Sent"})).is_err(),
             "unknown keys are refused"

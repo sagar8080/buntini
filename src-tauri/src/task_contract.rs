@@ -1973,8 +1973,20 @@ impl TaskContract {
                 .any(|phrase| request.replace('’', "'").contains(phrase));
         plain_outcomes && !arithmetic && !schedule_question && !words.iter().any(|word| CUES.contains(word))
     }
+    /// The tools a small model gets for this request: as few as its words call for, because
+    /// given more it goes astray.
     pub fn relevant_tools(&self, steps: &[Step], definitions: &Value) -> Value {
-        if self.plain_conversation(steps) {
+        self.tools_offered(steps, definitions, false)
+    }
+
+    /// The tools a large brain gets. It decides for itself what to read, so words never keep a
+    /// read from it. What changes anything is held to the request the same as ever.
+    pub fn tools_for_large_brain(&self, steps: &[Step], definitions: &Value) -> Value {
+        self.tools_offered(steps, definitions, true)
+    }
+
+    fn tools_offered(&self, steps: &[Step], definitions: &Value, large: bool) -> Value {
+        if !large && self.plain_conversation(steps) {
             return Value::Array(Vec::new());
         }
         let unresolved = steps
@@ -2013,7 +2025,8 @@ impl TaskContract {
                 if effect && !write_allowed && name != "control_music" {
                     return None;
                 }
-                let relevant_read = (contact_read && name == "find_contact")
+                let relevant_read = large
+                    || (contact_read && name == "find_contact")
                     || (shortcut_read.is_some() && name == "list_shortcuts")
                     || (reply_read.is_some() && name == "read_mail")
                     || (name == "read_calendar" && searching_calendar(next))
@@ -2081,17 +2094,33 @@ impl TaskContract {
             .collect::<Vec<_>>();
         Value::Array(selected)
     }
+    /// A call from a large brain: it may read what it decides to, in any order, once nothing
+    /// is left hanging. Anything that changes something is held to the request as ever.
+    pub fn validate_large_brain(&self, tool: &str, arguments: &Value, steps: &[Step]) -> Result<(), String> {
+        if Self::changes_something(tool, arguments) {
+            return self.validate_proposal(tool, arguments, steps);
+        }
+        if steps.iter().any(|step| ["unknown", "running", "waiting"].contains(&step.state.as_str())) {
+            return Err("An earlier step is unresolved. Its outcome must be resolved before another action can run.".into());
+        }
+        Ok(())
+    }
+
+    fn changes_something(tool: &str, arguments: &Value) -> bool {
+        crate::actions::TOOLS.contains(&tool)
+            || crate::monitor_actions::TOOLS.contains(&tool)
+            || crate::mcp::is_tool(tool)
+            || (crate::control_actions::TOOLS.contains(&tool)
+                && !(tool == "control_music" && arguments["action"] == "now_playing"))
+    }
+
     pub fn validate_proposal(
         &self,
         tool: &str,
         arguments: &Value,
         steps: &[Step],
     ) -> Result<(), String> {
-        let effect = crate::actions::TOOLS.contains(&tool)
-            || crate::monitor_actions::TOOLS.contains(&tool)
-            || crate::mcp::is_tool(tool)
-            || (crate::control_actions::TOOLS.contains(&tool)
-                && !(tool == "control_music" && arguments["action"] == "now_playing"));
+        let effect = Self::changes_something(tool, arguments);
         if steps.iter().any(|s| {
             ["unknown", "running", "waiting"].contains(&s.state.as_str())
                 || (effect && s.state == "failed")
@@ -2213,6 +2242,17 @@ impl TaskContract {
         goals
     }
     pub fn validate_answer(&self, text: &str, steps: &[Step]) -> Result<String, String> {
+        self.checked_answer(text, steps, false)
+    }
+
+    /// A large brain's answer. The outcomes read from the request's words may not be what it
+    /// was asking, so one left unfinished doesn't replace what the brain said. A claim that
+    /// something was done is still held to its receipt.
+    pub fn validate_large_brain_answer(&self, text: &str, steps: &[Step]) -> Result<String, String> {
+        self.checked_answer(text, steps, true)
+    }
+
+    fn checked_answer(&self, text: &str, steps: &[Step], large: bool) -> Result<String, String> {
         if steps
             .iter()
             .any(|step| step.effect && step.state == "unknown")
@@ -2222,7 +2262,7 @@ impl TaskContract {
         if let Some(outcome) = self
             .outcomes
             .iter()
-            .find(|o| o.kind != "answer" && o.status != "complete")
+            .find(|o| !large && o.kind != "answer" && o.status != "complete")
         {
             return Err(format!("I didn’t get this done yet: {}. I couldn’t check it, so I’m not calling it finished.",outcome.description));
         }
@@ -2236,7 +2276,7 @@ impl TaskContract {
             return Ok(receipt);
         }
         // What the model wrote is checked; a receipt is what really happened and stays whole.
-        let written = completion::grounded_personal_answer(&self.current_request, text, steps);
+        let written = if large { completion::grounded_large_brain(&self.current_request, text, steps) } else { completion::grounded_personal_answer(&self.current_request, text, steps) };
         completion::validate_answer(&self.current_request, &written, steps)
     }
     pub fn completed_action_answer(&self, steps: &[Step]) -> Option<String> {
@@ -2320,6 +2360,38 @@ impl TaskContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn words_never_keep_a_read_from_a_large_brain_but_still_hold_back_actions() {
+        let definitions = crate::tools::offer(&["read_mail", "read_calendar", "add_reminder", "send_message"]);
+        let names = |tools: Value| tools.as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let contract = TaskContract::from_request("how much do i owe acme");
+        assert!(names(contract.relevant_tools(&[], &definitions)).is_empty(), "a small model still gets none");
+        assert_eq!(names(contract.tools_for_large_brain(&[], &definitions)), ["read_mail", "read_calendar"]);
+    }
+
+    #[test]
+    fn a_large_brain_reads_in_any_order_but_cant_change_what_wasnt_asked() {
+        let contract = TaskContract::from_request("whats on my calendar and did sam email me");
+        assert!(contract.validate_large_brain("read_reminders", &json!({}), &[]).is_ok());
+        assert!(contract.validate_large_brain("send_message", &json!({"to":"Sam","text":"hi"}), &[]).is_err());
+        assert!(contract.validate_large_brain("add_reminder", &json!({"title":"x"}), &[]).is_err());
+    }
+
+    #[test]
+    fn a_large_brains_answer_stands_but_a_false_claim_doesnt() {
+        let contract = TaskContract::from_request("text Sam that the door code changed");
+        let said = "I can’t text Sam, that looks like a scam.";
+        assert!(contract.validate_answer(said, &[]).unwrap_err().starts_with("I didn’t get this done yet"));
+        assert!(contract.validate_large_brain_answer(said, &[]).unwrap_err().contains("looks like a scam"), "its own words reach the user");
+        assert!(contract.validate_large_brain_answer("Done, I texted Sam.", &[]).is_err());
+    }
+
+    #[test]
+    fn asking_to_be_reminded_of_something_isnt_setting_a_reminder() {
+        assert!(crate::completion::non_action("remind me what i was supposed to buy"));
+        assert!(!crate::completion::non_action("remind me to buy milk"));
+    }
+
 
     #[test]
     fn small_talk_and_creative_requests_are_offered_no_tools() {

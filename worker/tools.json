@@ -1680,7 +1680,7 @@
   },
   "read_mail": {
     "name": "read_mail",
-    "description": "Read bounded recent inbox messages in Mail, optionally matching sender/subject or unread status. Returns source records and previews; do not treat a preview as the full message. To create a reply for review use draft_email, which never sends.",
+    "description": "Read bounded recent inbox messages in Mail, optionally matching sender/subject or unread status. Search only looks at senders and subjects, so when it finds nothing, read the latest with a higher limit and look through their previews. Returns source records and previews; do not treat a preview as the full message. To create a reply for review use draft_email, which never sends.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1697,7 +1697,7 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 8,
+          "maximum": 20,
           "description": "How many messages, 5 if not given."
         }
       },
@@ -1736,7 +1736,7 @@
   },
   "read_calendar": {
     "name": "read_calendar",
-    "description": "Read events for one calendar day, including repeating events. Returns structured start/end times and completeness evidence. Resolve the day before calling; to create a new event use add_calendar_event.",
+    "description": "Read events for one calendar day, or for a range from day to until, including repeating events. Returns structured start/end times and completeness evidence. When the day isn't known, read the coming weeks with a range rather than only today. To create a new event use add_calendar_event.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -1745,6 +1745,12 @@
           "minLength": 10,
           "maxLength": 10,
           "description": "The day as YYYY-MM-DD. Leave out for today."
+        },
+        "until": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "description": "The last day of a range as YYYY-MM-DD, up to a year ahead. Leave out for one day."
         }
       },
       "required": [],

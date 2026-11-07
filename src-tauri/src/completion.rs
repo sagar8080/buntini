@@ -102,6 +102,8 @@ pub(crate) fn request_clause(mut clause: &str) -> &str {
 
 pub(crate) fn non_action(clause: &str) -> bool {
     is_explanation(clause)
+        // "Remind me what I was supposed to buy" asks; "remind me to buy milk" doesn't.
+        || ["remind me what", "remind me who", "remind me when", "remind me where", "remind me which", "remind me whether", "remind me if"].iter().any(|s| clause.starts_with(s))
         || ["don't ", "do not ", "never ", "no need to "]
             .iter()
             .any(|s| clause.starts_with(s))
@@ -1036,7 +1038,8 @@ fn without_unread_details(prompt: &str, answer: &str, steps: &[Step]) -> String 
     if reads.is_empty() {
         return answer.to_string();
     }
-    let held = reads.iter().filter_map(|step| step.evidence.as_ref()).map(serde_json::Value::to_string).chain([prompt.to_string()]).collect::<Vec<_>>().join("\n");
+    // Any read counts as backing, not only the kinds checked: an email can hold the number.
+    let held = steps.iter().filter(|step| step.state == "succeeded").filter_map(|step| step.evidence.as_ref()).map(serde_json::Value::to_string).chain([prompt.to_string()]).collect::<Vec<_>>().join("\n");
     let held_numbers = numbers(&held);
     let lower = held.to_lowercase();
     let made_up = |sentence: &str| {
@@ -1193,12 +1196,24 @@ fn invents_inbox(prompt: &str, answer: &str, steps: &[Step]) -> bool {
 /// and otherwise just answers the person. Times the user wrote themselves don't count,
 /// nor times a file or note read this turn states ("the repair appointment is 14:20").
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    grounded(prompt, answer, steps, false)
+}
+
+/// The same for a large brain. A word after "from" or "about" is too blunt a test for what it
+/// writes ("my dog hates the mail carrier"), so that one check stays with small models.
+pub fn grounded_large_brain(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    grounded(prompt, answer, steps, true)
+}
+
+fn grounded(prompt: &str, answer: &str, steps: &[Step], large: bool) -> String {
     let answer = &without_unread_details(prompt, answer, steps);
     if invents_inbox(prompt, answer, steps) {
         return "I haven’t looked at your email, so I won’t guess. Ask me “what’s in my inbox?” and I’ll check.".into();
     }
-    if let Some(read) = mail_read_instead(prompt, answer, steps) {
-        return read;
+    if !large {
+        if let Some(read) = mail_read_instead(prompt, answer, steps) {
+            return read;
+        }
     }
     // An answer from the web is about the web, unless the request was about the user or
     // something of theirs was read too.
@@ -1304,6 +1319,7 @@ pub fn unknown_personal_fact(prompt: &str, known: &str, steps: &[Step]) -> Optio
 /// shown or spoken. After the first such sentence nothing more streams; the checked final
 /// answer replaces what was shown when the task finishes.
 pub struct StreamGate {
+    large: bool,
     prompt: String,
     steps: Vec<Step>,
     held: String,
@@ -1312,7 +1328,11 @@ pub struct StreamGate {
 
 impl StreamGate {
     pub fn new(prompt: &str, steps: &[Step]) -> Self {
-        Self { prompt: prompt.into(), steps: steps.to_vec(), held: String::new(), stopped: false }
+        Self { large: false, prompt: prompt.into(), steps: steps.to_vec(), held: String::new(), stopped: false }
+    }
+
+    pub fn for_large_brain(prompt: &str, steps: &[Step]) -> Self {
+        Self { large: true, ..Self::new(prompt, steps) }
     }
 
     /// The text ready to show after `token` arrives: whole sentences that pass.
@@ -1338,7 +1358,7 @@ impl StreamGate {
     fn release(&mut self, ready: String) -> Option<String> {
         let mut shown = String::new();
         for part in sentences(&ready) {
-            if grounded_personal_answer(&self.prompt, part, &self.steps) != part {
+            if grounded(&self.prompt, part, &self.steps, self.large) != part {
                 self.stopped = true;
                 break;
             }
