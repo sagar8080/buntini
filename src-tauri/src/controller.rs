@@ -439,6 +439,16 @@ pub fn warm_up_soon(app: &tauri::AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move { warm_up(&app.state::<AppState>()).await });
 }
+/// Checks the user's own server from Settings: what address it means, what it offers, and
+/// whether that address can only be this Mac.
+#[tauri::command]
+pub async fn check_server(address: String) -> Result<Value, String> {
+    let base = crate::cloud::server_base(&address)?;
+    let key = crate::web::credential("custom").unwrap_or_default();
+    let models = crate::cloud::server_models(&base, &key).await?;
+    Ok(json!({"base":base,"models":models,"onThisMac":crate::cloud::server_is_this_mac(&base)}))
+}
+
 #[tauri::command]
 pub async fn set_api_key(
     provider: String,
@@ -3473,7 +3483,7 @@ where
         flow.refresh_contract();
         let earlier = flow.messages.iter().rev().filter(|message| message["role"] == "user").nth(1).and_then(|message| message["content"].as_str());
         let (mut sources, asked) = crate::personal_answer::source_requests(&flow.contract.current_request, earlier, &flow.contract);
-        if locality == privacy::Locality::OnDevice {
+        if state.models.small(settings) {
             for request in asked {
                 phase(channel, &task.id, "thinking");
                 let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
@@ -3488,7 +3498,7 @@ where
             }
         }
         // Told "general" about the user's own things, a small model makes up the answer.
-        if locality == privacy::Locality::OnDevice && sources.is_empty() && crate::personal_answer::about_own_things(&flow.contract.current_request, &flow.contract) {
+        if state.models.small(settings) && sources.is_empty() && crate::personal_answer::about_own_things(&flow.contract.current_request, &flow.contract) {
             sources = crate::personal_answer::every_source();
         }
         // It's in the app, not in what Buntini remembers. With the app off, memory still is.
@@ -3515,7 +3525,7 @@ where
             }
         }
         // Nothing it could read, so nothing true to say. A model would answer anyway.
-        let wanted_own = locality == privacy::Locality::OnDevice && crate::personal_answer::about_own_things(&goal, &flow.contract);
+        let wanted_own = state.models.small(settings) && crate::personal_answer::about_own_things(&goal, &flow.contract);
         if wanted_own && flow.contract.own_sources.iter().flatten().count() > 0 && flow.contract.own_sources.iter().flatten().all(|source| guessed_off.contains(source)) {
             return Err("I can’t check that yet. Allow Mail, Calendar or Reminders in Settings → Apps and ask again.".into());
         }

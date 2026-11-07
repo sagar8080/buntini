@@ -35,6 +35,8 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
   { id: 'gemini', name: 'Google Gemini', model: 'gemini-2.5-flash', input: 0.3, output: 2.5, keys: 'aistudio.google.com' },
   // Your own ChatGPT plan through Sign in with ChatGPT: no key, no per-token price.
   { id: 'chatgpt', name: 'ChatGPT', model: '', input: 0, output: 0, keys: 'chatgpt.com' },
+  // The user's own server at an address they give: Ollama, LM Studio and the like.
+  { id: 'custom', name: 'Your server', model: '', input: 0, output: 0, keys: '' },
 ];
 
 export const backendLabel: Record<ModelBackend, string> = { apple: 'Apple Intelligence', mlx: 'Local MLX model', cloud: 'Cloud model' };

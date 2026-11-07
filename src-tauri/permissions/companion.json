@@ -38,6 +38,7 @@
           "local_setup_remove",
           "choose_local_folder",
           "chatgpt_sign_in",
+          "check_server",
           "chatgpt_cancel_sign_in",
           "chatgpt_sign_out",
           "chatgpt_always_allow_off",

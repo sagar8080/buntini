@@ -8,7 +8,7 @@ const defaults: Settings = {
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
-  cloudProvider: 'anthropic', cloudModel: '', cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
+  cloudProvider: 'anthropic', cloudModel: '', cloudUrl: '', cloudOnThisMac: false, cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
 };
 export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');
@@ -131,6 +131,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
+    if (name === 'check_server') return { base: 'http://localhost:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
     // The preview has no download to run: it shows setup partway through.
     if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;

@@ -410,7 +410,8 @@ mod tests {
                 "anthropic",
                 "openai",
                 "gemini",
-                "chatgpt"
+                "chatgpt",
+                "custom"
             ]
         );
         assert!(state.store.lock().unwrap().memories().unwrap().is_empty());
@@ -519,7 +520,7 @@ mod tests {
         }
         assert_eq!(
             calls.borrow().len(),
-            8,
+            9,
             "a failed credential never skips the remaining services"
         );
         assert!(state.store.lock().unwrap().memories().unwrap().is_empty());

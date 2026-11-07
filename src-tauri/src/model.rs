@@ -51,6 +51,14 @@ pub struct ModelHub {
     notice: OnceLock<Box<dyn Fn(String) + Send + Sync>>,
 }
 
+/// The user's own server counts as this Mac only when its address can only be this Mac and
+/// they said nothing goes further: a local port can still forward to the cloud.
+pub fn on_this_mac(settings: &Settings) -> bool {
+    settings.cloud_provider == "custom"
+        && settings.cloud_on_this_mac
+        && cloud::server_base(&settings.cloud_url).is_ok_and(|base| cloud::server_is_this_mac(&base))
+}
+
 pub fn backend(settings: &Settings) -> Backend {
     match settings.model_backend.as_str() {
         "apple" => Backend::Apple,
@@ -106,9 +114,16 @@ impl ModelHub {
 
     pub fn locality(&self, settings: &Settings) -> Locality {
         match backend(settings) {
+            Backend::Cloud if on_this_mac(settings) => Locality::OnDevice,
             Backend::Cloud => Locality::External,
             Backend::Mlx | Backend::Apple => Locality::OnDevice,
         }
+    }
+
+    /// Whether this brain is too small to route questions or work with tools by itself, so
+    /// that Rust does it. Separate from `locality`: a big model on this Mac is private, not small.
+    pub fn small(&self, settings: &Settings) -> bool {
+        matches!(backend(settings), Backend::Mlx | Backend::Apple)
     }
 
     /// Whether the chosen backend can answer right now, with advice when it cannot.
@@ -140,6 +155,10 @@ impl ModelHub {
                 // Whether a sign-in may use the plan is checked when it's next used.
                 if provider.id == "chatgpt" {
                     return if crate::chatgpt::saved() { Ok(()) } else { Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()) };
+                }
+                if provider.id == "custom" {
+                    cloud::server_base(&settings.cloud_url).map_err(|_| "Add your server’s address in Settings → Brain.".to_string())?;
+                    return if settings.cloud_model.trim().is_empty() { Err("Choose a model on your server in Settings → Brain.".into()) } else { Ok(()) };
                 }
                 if !crate::web::credential_saved(provider.id) {
                     return Err(format!(
@@ -417,6 +436,15 @@ impl ModelHub {
     {
         let provider = cloud::provider(&settings.cloud_provider)
             .ok_or("Choose a cloud provider in Settings → Brain.")?;
+        // The user's own server isn't billed by Buntini's count, and its key is optional.
+        if provider.id == "custom" {
+            let base = cloud::server_base(&settings.cloud_url)?;
+            let key = crate::web::credential(provider.id).unwrap_or_default();
+            return match cloud::generate(provider, settings.cloud_model.trim(), &key, &payload, Some(&base), cancel, on_token).await {
+                Ok((turn, _)) => Ok(turn),
+                Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => Err(message),
+            };
+        }
         // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
         if provider.id == "chatgpt" {
             let token = crate::chatgpt::access_token().await?;
@@ -437,7 +465,7 @@ impl ModelHub {
                     .ok_or("Your ChatGPT plan didn’t list any models.")?,
                 chosen => chosen.to_string(),
             };
-            return match cloud::generate(provider, &model, &token, &payload, cancel, on_token).await
+            return match cloud::generate(provider, &model, &token, &payload, None, cancel, on_token).await
             {
                 Ok((turn, _)) => Ok(turn),
                 Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => {
@@ -474,6 +502,7 @@ impl ModelHub {
             &Self::cloud_model(settings),
             &key,
             &payload,
+            None,
             cancel,
             on_token,
         )

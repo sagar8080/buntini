@@ -77,6 +77,10 @@ pub struct Settings {
     /// the person name; the suggested model uses `cloud::PROVIDERS` (see `cloud_prices`).
     pub cloud_provider: String,
     pub cloud_model: String,
+    /// The user's own server (`custom`): its address, and whether they said it runs only on
+    /// this Mac. Until they do, it's treated like any other cloud brain.
+    pub cloud_url: String,
+    pub cloud_on_this_mac: bool,
     pub cloud_budget_usd: f64,
     pub cloud_input_price: f64,
     pub cloud_output_price: f64,
@@ -136,6 +140,8 @@ impl Default for Settings {
             apps: Vec::new(),
             cloud_provider: "anthropic".into(),
             cloud_model: String::new(),
+            cloud_url: String::new(),
+            cloud_on_this_mac: false,
             cloud_budget_usd: 5.0,
             cloud_input_price: crate::cloud::PROVIDERS[0].input_per_m,
             cloud_output_price: crate::cloud::PROVIDERS[0].output_per_m,
@@ -275,6 +281,9 @@ impl Settings {
         }
         if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
             return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
+        }
+        if !self.cloud_url.trim().is_empty() {
+            crate::cloud::server_base(&self.cloud_url)?;
         }
         if crate::cloud::provider(&self.cloud_provider).is_none()
             || !crate::cloud::model_valid(self.cloud_model.trim())

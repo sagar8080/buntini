@@ -283,6 +283,7 @@ pub fn run() {
             local_setup::local_setup_remove,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,
+            controller::check_server,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
             helper::chatgpt_always_allow_off,

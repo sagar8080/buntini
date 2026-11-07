@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Check, Cloud, Cpu, KeyRound, LoaderCircle } from 'lucide-react';
+import { Check, Cloud, Cpu, KeyRound, LoaderCircle, Server } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
@@ -56,6 +56,11 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
   }
   const providers = <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{cloudProviders.map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.name}</button>)}</div>;
   const shares = <CloudShares name={provider.name} shared={draft.externalShares} onChange={value => update('externalShares', value)} />;
+  if (provider.id === 'custom') return <div className="cloud-settings">
+    {providers}
+    <ServerSettings draft={draft} update={update} saved={saved} onError={onError} onKey={onKey} />
+    {!draft.cloudOnThisMac && shares}
+  </div>;
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
     {providers}
     <ChatGPTAccount account={diagnostics.chatgptAccount} onChange={onRefresh} onError={onError} onNotice={onNotice} />
@@ -74,6 +79,31 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
     {shares}
     {named && <div className="row-actions"><span className="field-help">Using {named}</span><button type="button" className="text-button" onClick={() => { update('cloudModel', ''); update('cloudInputPrice', provider.input); update('cloudOutputPrice', provider.output); }}>Use default</button></div>}
   </div>;
+}
+
+/** The user's own server: its address, which of its models, and whether it stays on this Mac. */
+function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'draft' | 'update' | 'onError' | 'onKey'> & { saved: boolean }) {
+  const [address, setAddress] = useState(draft.cloudUrl);
+  const [found, setFound] = useState<{ base: string; models: string[]; onThisMac: boolean } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [key, setKey] = useState('');
+  async function connect() {
+    setChecking(true);
+    try {
+      if (key) { await onKey('custom', key); setKey(''); }
+      const server = await command<{ base: string; models: string[]; onThisMac: boolean }>('check_server', { address });
+      setFound(server); setAddress(server.base); update('cloudUrl', server.base);
+      if (!server.onThisMac) update('cloudOnThisMac', false);
+      if (!server.models.includes(draft.cloudModel.trim())) update('cloudModel', server.models[0]);
+    } catch (error) { setFound(null); onError(errorMessage(error)); } finally { setChecking(false); }
+  }
+  return <>
+    <div className="key-input"><Server size={14} /><input autoComplete="off" spellCheck={false} value={address} onChange={event => setAddress(event.target.value)} placeholder="localhost:11434" aria-label="Server address" /><button type="button" disabled={checking || !address.trim()} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : 'Connect'}</button></div>
+    <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? 'Key saved' : 'API key (optional)'} aria-label="Server API key" /></div>
+    {found && <div className="chip-row" role="radiogroup" aria-label="Model">{found.models.map(model => <button type="button" key={model} role="radio" aria-checked={model === draft.cloudModel.trim()} className={model === draft.cloudModel.trim() ? 'active' : ''} onClick={() => update('cloudModel', model)}>{model}</button>)}</div>}
+    {!found && draft.cloudModel.trim() && <span className="field-help">Using {draft.cloudModel.trim()}</span>}
+    {(found?.onThisMac || (!found && draft.cloudOnThisMac)) && <Toggle label="Only runs on this Mac" checked={draft.cloudOnThisMac} onChange={value => update('cloudOnThisMac', value)} />}
+  </>;
 }
 
 /** What this cloud brain may see, asked where it is picked. */
