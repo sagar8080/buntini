@@ -134,7 +134,7 @@ pub fn compose(
         Some(events) if events.is_empty() && day.calendar_coverage.is_none() => lines.push("Your calendar is clear today.".into()),
         Some(events) => {
             let first = events.iter().take(5).map(|(time, title)| if time.is_empty() { title.clone() } else { format!("{title} at {time}") }).collect::<Vec<_>>();
-            lines.push(format!("On your calendar: {}{}.", list(&first), if events.len() > 5 { format!(" and {} more", events.len() - 5) } else { String::new() }));
+            lines.push(crate::personal_answer::no_links(&format!("On your calendar: {}{}.", list(&first), if events.len() > 5 { format!(" and {} more", events.len() - 5) } else { String::new() })));
         }
         None if !day.calendar_allowed => lines.push("Allow Calendar in Settings → Apps and I’ll include your day here.".into()),
         None => lines.push("I couldn’t read your calendar. Check Calendar access in System Settings → Privacy & Security, then try again.".into()),
@@ -154,7 +154,7 @@ pub fn compose(
     match &day.mail {
         Some(triage) => lines.extend(crate::triage::brief_line(triage)),
         None if day.mail_skipped => lines.push("Mail isn’t open, so I skipped your inbox.".into()),
-        None if day.mail_allowed => lines.push("I couldn’t check your email. Check Mail is open and allowed under System Settings → Privacy & Security → Automation.".into()),
+        None if day.mail_allowed => lines.push("I couldn’t check your email this time. Ask me “what’s in my inbox?” and I’ll try again. Check Mail is open and allowed under System Settings → Privacy & Security → Automation.".into()),
         None => {}
     }
     if battery_low {
@@ -209,7 +209,11 @@ pub async fn morning_brief(
         }
     };
     let day = tokio::select! {
-        day = crate::brief::gather(state.models.apple_helper(), &settings, launch) => day,
+        day = async {
+            let reading = crate::brief::gather(state.models.apple_helper(), &settings, launch);
+            // "My day" was asked for. The automatic brief wasn't, so it never raises a prompt.
+            if automatic.unwrap_or(false) { reading.await } else { crate::apps::asked_for(reading).await }
+        } => day,
         () = stopped => return Err("Morning brief cancelled.".into()),
     };
     if cancel.load(Ordering::Relaxed) {
@@ -227,6 +231,7 @@ pub async fn morning_brief(
         sources: vec![],
         files: vec![],
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],

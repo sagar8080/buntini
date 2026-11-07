@@ -3,7 +3,7 @@
 //! you're on so Buntini can summarise it or answer from it. Pages are read from the browser
 //! itself (Safari's own scripting, or the accessibility API for Chrome, Brave, Edge and
 //! Arc), never fetched again online.
-use super::{from_verb, osascript, without_politeness, Context, Outcome};
+use super::{from_verb, one_of, osascript, without_politeness, Context, Outcome};
 use crate::privacy::Share;
 
 #[derive(Debug, PartialEq)]
@@ -129,16 +129,14 @@ pub fn recognise(text: &str) -> Option<Command> {
             page_targets.contains(&target)
                 || (target == "this" && ["summarise", "summarize"].contains(&verb))
         },
-    ) || [
+    ) || one_of(text, &[
         "tldr",
         "tl dr",
         "what's this article about",
         "what is this article about",
         "what's this page about",
         "what is this page about",
-    ]
-    .contains(&text)
-    {
+    ]) {
         return Some(Command::Page);
     }
     if from_verb(text, &["close"]).is_some_and(|(_, rest)| {
@@ -229,6 +227,11 @@ pub fn recognise(text: &str) -> Option<Command> {
 
 fn open_address(address: &str) -> Option<Command> {
     if address.chars().any(char::is_whitespace) {
+        return None;
+    }
+    // "open lease.zip" means the file, even though .zip and .mov are real web domains.
+    const FILES: [&str; 18] = ["zip", "mov", "pdf", "doc", "docx", "txt", "png", "jpg", "jpeg", "gif", "csv", "xls", "xlsx", "pages", "numbers", "key", "dmg", "pkg"];
+    if !address.contains("://") && address.rsplit('.').next().is_some_and(|ending| FILES.contains(&ending.to_lowercase().as_str())) {
         return None;
     }
     let url = if address.contains("://") {
@@ -559,6 +562,8 @@ mod tests {
             Some(Command::SwitchTab("gmail".into()))
         );
         assert_eq!(ask("open my lease pdf"), None, "files go to the model");
+        assert_eq!(ask("open lease.zip"), None, "a file, though .zip is a real domain");
+        assert_eq!(ask("open trailer.mov"), None);
         assert_eq!(
             ask("search for my tax return"),
             None,

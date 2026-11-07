@@ -797,6 +797,7 @@ pub fn open(store: &Store, id: &str, now: DateTime<Local>) -> Result<Opened, Str
         sources: vec![],
         files: vec![],
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],

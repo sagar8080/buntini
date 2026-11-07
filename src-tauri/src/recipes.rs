@@ -58,37 +58,9 @@ impl Recipe for FirstCalendarEvent {
     }
 }
 
-/// "What's on my calendar tomorrow?": the day in the words of the verified read. On a
-/// real Mac the small on-device model read the records' UTC times as local ones (an event
-/// at 16:00 became "8:00 PM, all day"), while the read's own summary was right.
-struct DayAgenda;
-impl Recipe for DayAgenda {
-    fn id(&self) -> &'static str {
-        "day_agenda"
-    }
-    fn answer(&self, plan: &Plan) -> Result<Option<String>, String> {
-        if !asks_for_a_day(plan.goal) {
-            return Ok(None);
-        }
-        let finished: Vec<&Step> = plan.steps.iter().filter(|step| step.state == "succeeded").collect();
-        let [read] = finished[..] else {
-            return Ok(None);
-        };
-        if read.tool != "read_calendar" || read.effect {
-            return Ok(None);
-        }
-        Ok(read
-            .evidence
-            .as_ref()
-            .and_then(|evidence| evidence["text"].as_str())
-            .map(|text| text.trim().to_string())
-            .filter(|text| !text.is_empty()))
-    }
-}
-
 /// A question about one whole day of the calendar and nothing more: "what's on my calendar
 /// tomorrow", "tell me what I have on Friday". "After 3", "free" or "this week" ask more.
-fn asks_for_a_day(goal: &str) -> bool {
+pub(crate) fn asks_for_a_day(goal: &str) -> bool {
     let text = goal.trim().to_lowercase().replace('’', "'");
     let mut text = text.trim_end_matches(['?', '.', '!']).trim();
     for polite in ["please ", "can you ", "could you ", "tell me ", "show me "] {
@@ -118,6 +90,103 @@ fn asks_for_a_day(goal: &str) -> bool {
                 || (word.len() == 10 && chrono::NaiveDate::parse_from_str(word, "%Y-%m-%d").is_ok())
         })
         && !(words.contains(&"this") && !words.iter().any(|word| word.ends_with("day")))
+}
+
+/// A question about what's in the inbox and nothing more, however it's typed or spoken:
+/// "whats on my mail", "hows my inbox", "got any new emails?". It names the inbox as the
+/// user's own, and every other word is one that asks rather than adds: "is my mail broken"
+/// and "any good email apps" say something else, so they aren't this.
+pub(crate) fn asks_about_inbox(goal: &str) -> bool {
+    const INBOX: [&str; 4] = ["mail", "email", "emails", "inbox"];
+    const MINE: [&str; 6] = ["my", "any", "new", "unread", "got", "have"];
+    let text = crate::skills::words(goal).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    !asks_how(&words)
+        && words.iter().any(|word| INBOX.contains(word))
+        && words.iter().any(|word| MINE.contains(word))
+        && words.iter().all(|word| INBOX.contains(word) || MINE.contains(word) || ASKING.contains(word))
+}
+
+/// Words that ask about a source rather than add to it.
+const ASKING: [&str; 52] = [
+    "what", "whats", "hows", "how", "s", "is", "are", "was", "there", "theres", "on", "in", "at", "to", "for", "the", "a", "me", "i", "you", "do", "did", "can", "could",
+    "would", "will", "please", "hey", "buntini", "tell", "show", "see", "check", "read", "look", "looking", "summarise", "summarize", "summary", "latest", "recent", "anything", "today", "going",
+    "happening", "up", "like", "know", "want", "about", "with", "many",
+];
+
+/// "How do I check my inbox" asks how, not what's in it.
+fn asks_how(words: &[&str]) -> bool {
+    words.first() == Some(&"how") && words.get(1).is_some_and(|word| ["do", "does", "did", "can", "could", "to", "should", "would"].contains(word))
+}
+
+/// Something that arrives by email: "how much was the acme invoice", "did my order ship",
+/// "is my parcel here". Only the user's own: "what is an invoice" is about invoices.
+pub(crate) fn asks_about_mail_thing(goal: &str) -> bool {
+    const THINGS: [&str; 19] = [
+        "invoice", "invoices", "bill", "bills", "receipt", "receipts", "order", "orders", "payment", "payments", "booking", "reservation", "delivery", "parcel", "package", "subscription", "refund", "shipment", "statement",
+    ];
+    let text = crate::skills::words(goal).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    !asks_how(&words)
+        && words.iter().enumerate().any(|(at, word)| {
+            THINGS.contains(word) && words[at.saturating_sub(3)..at].iter().any(|before| ["my", "the", "that"].contains(before))
+        })
+}
+
+/// "Did Sam ask about lunch", "has Ana replied", "anything from the bank": whether someone wrote.
+pub(crate) fn asks_if_someone_wrote(goal: &str) -> bool {
+    const WROTE: [&str; 15] = ["ask", "asked", "say", "said", "write", "wrote", "written", "reply", "replied", "respond", "responded", "answer", "answered", "email", "emailed"];
+    let text = crate::skills::words(goal).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    let wrote = ["did", "has", "have"].contains(words.first().unwrap_or(&"")) && !["i", "you"].contains(words.get(1).unwrap_or(&"")) && words.iter().skip(2).take(2).any(|word| WROTE.contains(word));
+    // "Was there anything about energy use", "what's the news from Priya".
+    let heard = words.windows(2).any(|pair| ["anything", "any", "news", "word"].contains(&pair[0]) && ["about", "from"].contains(&pair[1]));
+    wrote || heard
+}
+
+/// A question about all of one day of the calendar, however it's typed or spoken: "my
+/// schedule on friday", "whats on my calendar tomorrow", "what do i have tomorrow".
+pub(crate) fn asks_about_calendar(goal: &str) -> bool {
+    const CALENDAR: [&str; 6] = ["calendar", "schedule", "agenda", "events", "meetings", "appointments"];
+    const DAYS: [&str; 13] = ["tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "this", "next", "week", "weekend"];
+    let text = crate::skills::words(goal).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    !asks_how(&words) && asks_for_a_day(goal)
+        || (!asks_how(&words) && words.iter().any(|word| CALENDAR.contains(word))
+            && words.iter().any(|word| ["my", "have", "any"].contains(word))
+            && words.iter().all(|word| CALENDAR.contains(word) || DAYS.contains(word) || ["my", "have", "any", "got", "looks", "look"].contains(word) || ASKING.contains(word)))
+}
+
+/// A question about all the user's open reminders. One about a day ("reminders for today")
+/// asks for some of them, so it isn't this.
+pub(crate) fn asks_about_reminders(goal: &str) -> bool {
+    const REMINDERS: [&str; 4] = ["reminders", "todos", "todo", "to-dos"];
+    let text = crate::skills::words(goal).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    !asks_how(&words)
+        && words.iter().any(|word| REMINDERS.contains(word))
+        && words.iter().any(|word| ["my", "have", "any", "got"].contains(word))
+        && words.iter().all(|word| REMINDERS.contains(word) || ["my", "have", "any", "got", "open", "list"].contains(word) || (ASKING.contains(word) && *word != "today"))
+}
+
+/// The read to run when the model answered without the one this request needs: the app
+/// reads that can start with nothing but what the request fixed. Once only, so a read that
+/// failed stays failed. Finding a note needs words to look for, so that one stays the model's.
+pub fn skipped_read(next: Option<&Outcome>, steps: &[Step], offered: &Value, today: &str) -> Option<(&'static str, Value)> {
+    let next = next.filter(|outcome| outcome.kind == "read")?;
+    let tool = ["read_mail", "read_calendar", "read_reminders"]
+        .into_iter()
+        .find(|tool| next.accepted_tools.iter().any(|accepted| accepted == tool))?;
+    let is_offered = offered.as_array().is_some_and(|tools| tools.iter().any(|definition| definition["name"] == tool));
+    if !is_offered || steps.iter().any(|step| step.tool == tool) {
+        return None;
+    }
+    let mut arguments = if next.required_arguments.is_object() { next.required_arguments.clone() } else { json!({}) };
+    // A calendar read is of one day. A question that names none starts with today.
+    if tool == "read_calendar" && arguments.get("day").is_none() {
+        arguments["day"] = json!(today);
+    }
+    Some((tool, arguments))
 }
 
 /// "Create a note titled X with body Y"
@@ -498,7 +567,6 @@ fn reply_subject(subject: &str) -> String {
 static RECIPES: &[&dyn Recipe] = &[
     &EditItem,
     &FirstCalendarEvent,
-    &DayAgenda,
     &LiteralNote,
     &LiteralReminder,
     &EventPreparation,
@@ -540,6 +608,24 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn inbox_questions_are_recognised_however_they_are_typed() {
+        for goal in [
+            "whats on my mail", "What’s on my mail?", "what's in my inbox", "Check my email please", "any new emails?", "Do I have any new mail?", "can you check my inbox",
+            "what emails do I have", "summarize my inbox", "show me my unread emails", "hows my inbox", "how's my email looking", "got any mail", "got mail?", "read me my emails",
+            "anything in my mail", "is there anything in my inbox", "what's going on in my email", "Hey Buntini, tell me about my inbox", "my inbox", "my email please", "whats up with my mail",
+            "do i have mail", "any mail today", "whats the latest in my inbox",
+        ] {
+            assert!(asks_about_inbox(goal), "{goal}");
+        }
+        for goal in [
+            "how do I add an email account", "any good email apps", "my mail is broken", "check my email for ana's address", "whats on my calendar", "draft an email to ana", "more like these",
+            "what is an inbox", "what is email", "how do i read my mail on my phone", "is my email hacked", "don't check my mail", "email my boss",
+        ] {
+            assert!(!asks_about_inbox(goal), "{goal}");
+        }
+    }
+
     fn mail(sender: &str, subject: &str) -> Referent {
         Referent::Mail(crate::apps::SelectedMail {
             id: "7".into(),
@@ -554,26 +640,23 @@ mod tests {
     }
 
     #[test]
-    fn a_calendar_day_is_answered_in_the_reads_own_words() {
-        for goal in ["Tell me what’s on my calendar tomorrow", "what's on my calendar tomorrow?", "What do I have on Friday", "what is on my schedule on 2026-11-02"] {
-            assert!(asks_for_a_day(goal), "{goal}");
+    fn a_whole_day_of_the_calendar_is_recognised() {
+        for goal in ["Tell me what’s on my calendar tomorrow", "what's on my calendar tomorrow?", "What do I have on Friday", "what is on my schedule on 2026-11-02", "whats on my calendar", "my schedule on friday", "any meetings tomorrow"] {
+            assert!(asks_about_calendar(goal), "{goal}");
         }
-        for goal in ["what's on my calendar after 3pm tomorrow", "what's on my calendar this week", "what do I have free tomorrow", "what's on my calendar"] {
-            assert!(!asks_for_a_day(goal), "{goal}");
+        for goal in ["what's on my calendar after 3pm tomorrow", "what do I have free tomorrow", "when is my dentist appointment", "how do i share my calendar", "add a meeting tomorrow"] {
+            assert!(!asks_about_calendar(goal), "{goal}");
         }
-        let text = "Calendar for Saturday 31 October:\n- all day: Halloween\n- 16:00–16:45: Planning at Room 4";
-        let read = Step {
-            id: "1".into(), tool: "read_calendar".into(), arguments: json!({"day":"2026-10-31"}), state: "succeeded".into(),
-            effect: false, proposed_at: String::new(), approved_at: None, finished_at: None,
-            evidence: Some(json!({"text": text, "records": []})),
-        };
-        let offered = json!([]);
-        let steps = [read.clone()];
-        let plan = Plan { goal: "Tell me what's on my calendar tomorrow", steps: &steps, offered: &offered };
-        assert_eq!(answer(&plan).unwrap().as_deref(), Some(text));
-        // A question that needs more than the day's list is left to the model.
-        let plan = Plan { goal: "what's on my calendar after 3pm tomorrow", steps: &steps, offered: &offered };
-        assert_eq!(DayAgenda.answer(&plan).unwrap(), None);
+    }
+
+    #[test]
+    fn all_open_reminders_are_recognised() {
+        for goal in ["what are my reminders", "whats on my reminders", "show me my reminders", "do i have any reminders", "my todos"] {
+            assert!(asks_about_reminders(goal), "{goal}");
+        }
+        for goal in ["what reminders do i have today", "which of my reminders are about the car", "add a reminder", "how do reminders work"] {
+            assert!(!asks_about_reminders(goal), "{goal}");
+        }
     }
 
     #[test]

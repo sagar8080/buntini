@@ -4,6 +4,8 @@ import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from 
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import { ApprovalSheet, ResultCards } from './Online';
+import Toggle from './Toggle';
+import { askChatGptQuestion, CHATGPT_URL } from './chatgptHelp';
 import { backendLabel } from './brain.ts';
 import { lookFrom } from './petOptions';
 import { feelingFor } from './petMood';
@@ -26,6 +28,8 @@ import { appearance, panelScale, stillMotion } from './themes.ts';
 import { greeting, invitation, mergeTurns, mergeConversationTurns } from './thread';
 import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
+import { speakable } from './markdown';
+import ConnectApps from './ConnectApps';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
@@ -60,11 +64,12 @@ const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: strin
 ];
 // What the activity line says while a skill (skills/ in the Rust app) is working.
 const skillActivity: Record<string, string> = {
+  chatgpt_search: 'Asking ChatGPT', ask_chatgpt: 'Asking ChatGPT',
   music: 'Getting your music going', browser: 'Working in your browser', mac: 'Adjusting your Mac',
   read_reminders: 'Checking your reminders', read_calendar: 'Checking your calendar', read_mail: 'Checking your email',
   find_notes: 'Looking through your notes', search_files: 'Searching your files', search_memory: 'Thinking back',
   find_contact: 'Looking in Contacts', list_shortcuts: 'Checking your shortcuts', web_search: 'Searching the web',
-  weather: 'Checking the weather', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
+  photos: 'Looking through your photos', weather: 'Checking the weather', places: 'Looking at the map', travel_time: 'Checking the route', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
 };
 
 export default function App() {
@@ -109,6 +114,7 @@ export default function App() {
   const [speaking, setSpeaking] = useState(false);
   const [menu, setMenu] = useState(false);
   const [approval, setApproval] = useState<WebApproval | null>(null);
+  const runAllowed = useRef<(allowed: WebApproval, taskId?: string) => Promise<void>>(async () => {});
   const [approving, setApproving] = useState(false);
   const [proposal, setProposal] = useState<ActionProposal | null>(null);
   // A welcome shortcut on a fresh install asks for its app in place rather than failing.
@@ -166,6 +172,7 @@ export default function App() {
   const playbackOverride = useRef<{ voiceId: string; rate: number } | null>(null);
   const speechQueue = useRef<SpeechQueue | null>(null);
   if (!speechQueue.current) speechQueue.current = new SpeechQueue({
+    spoken: speakable,
     play: text => playbackOverride.current ? command('preview_voice', { ...playbackOverride.current, text }) : command('speak', { text }),
     stop: () => command('stop_speaking'),
     onActive: active => { speechActive.current = active; setSpeaking(active); endpointer.current?.setSpeaking(active, Date.now()); setPetState(active ? 'speaking' : recordHeld.current ? 'listening' : taskBusy.current ? 'thinking' : 'idle'); },
@@ -312,8 +319,12 @@ export default function App() {
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
-    return () => { void subscription.then(unlisten => unlisten()); };
-  }, [expand]);
+    // Apple Intelligence turned on, finished downloading or got stuck: show it now.
+    const apple = listen('apple-status', () => { void refresh().catch(() => {}); });
+    // Buntini moved to the brain that's now usable: say so once.
+    const brain = listen<string>('brain-changed', event => { setNotice(event.payload); void refresh().catch(() => {}); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); };
+  }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
@@ -403,9 +414,26 @@ export default function App() {
     const planId = crypto.randomUUID();
     activeId.current = planId;
     setError(''); setPlanning(true); setPetState('thinking');
-    try { const next = taskId ? await command<WebApproval>('plan_task_online', { taskId, planId, webOnly }) : await command<WebApproval>('plan_online_request', { prompt, planId, webOnly }); setOnlineTaskId(taskId || ''); setApproval(next); setPetState('approval'); }
+    let allowed: WebApproval | null = null;
+    try {
+      const next = taskId ? await command<WebApproval>('plan_task_online', { taskId, planId, webOnly }) : await command<WebApproval>('plan_online_request', { prompt, planId, webOnly });
+      if (next.approved) allowed = next;
+      else { setOnlineTaskId(taskId || ''); setApproval(next); setPetState('approval'); }
+    }
     catch (error) { const message = errorMessage(error); if (message !== 'Task cancelled.') setError(message); setPetState('idle'); }
     finally { planningBusy.current = false; setPlanning(false); if (activeId.current === planId) activeId.current = ''; }
+    if (allowed) await runAllowed.current(allowed, taskId).catch(error => { setError(errorMessage(error)); setPetState('idle'); });
+  }, []);
+  const askChatGpt = useCallback(async (question: string) => {
+    if (planningBusy.current || taskBusy.current || actionBusy.current) return;
+    try { const next = await command<WebApproval>('plan_ask_chatgpt', { question }); setOnlineTaskId(''); setApproval(next); setPetState('approval'); }
+    catch (error) { setError(errorMessage(error)); }
+  }, []);
+  // A hand-off keeps the question out of the address, and out of the browser's history.
+  const openChatGpt = useCallback(async (question: string) => {
+    await navigator.clipboard?.writeText(question).then(() => setNotice('Question copied.'), () => {});
+    if (desktop) await command('open_source', { url: CHATGPT_URL }).catch(error => setError(errorMessage(error)));
+    else window.open(CHATGPT_URL, '_blank', 'noreferrer');
   }, []);
   // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
@@ -415,10 +443,16 @@ export default function App() {
       await planOnline(prompt.trim(), false);
       return;
     }
+    const forChatGpt = chosenMode === 'auto' && !approvalId ? askChatGptQuestion(prompt) : null;
+    if (forChatGpt) {
+      if (data?.diagnostics.chatgptPlan === 'usable') await askChatGpt(forChatGpt);
+      else { setInput(''); await openChatGpt(forChatGpt); }
+      return;
+    }
     playbackOverride.current = null;
     const speechToken = speechQueue.current!.begin();
     const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
-    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', askAction = false, streamError = '', answeredAloud = false;
+    let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', goBrowser = false, askAction = false, streamError = '', answeredAloud = false;
     taskBusy.current = true;
     setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
     // A hello, a thank-you or a kind word shows on the cat's face before the reply comes.
@@ -445,6 +479,7 @@ export default function App() {
       setTurns(previous => mergeTurns(previous, [result]));
       // A failed turn already says so in the thread; only an error it doesn't show gets a toast.
       if (streamError && result.state !== 'error') setError(streamError);
+      goBrowser = result.handoff === 'browser';
       if (result.handoff === 'online') { goOnline = result.id; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       if (result.handoff === 'action' && result.action) { setActionError(''); setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       setTurns(previous => mergeTurns(previous, [result]));
@@ -467,11 +502,17 @@ export default function App() {
       taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle');
       // The model wants to look this up online: show the approval sheet for the same message.
       if (goOnline) void planOnline(prompt.trim(), false, goOnline);
+      // ChatGPT couldn't take it: the browser route needs its own approval.
+      if (goBrowser) void planOnline(prompt.trim(), true);
       if (askAction) setPetState('approval');
       // In a voice conversation, a spoken answer is followed by listening again.
       if (spoken) voiceHooks.current.afterAnswer(answeredAloud && !goOnline && !askAction);
     }
-  }, [input, mode, busy, planning, planOnline, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
+  }, [input, mode, busy, planning, planOnline, askChatGpt, openChatGpt, data?.diagnostics.chatgptPlan, recording, transcribing, refresh, data?.settings.speakResponses, data?.settings.speakVoiceReplies]);
+  runAllowed.current = async (allowed, taskId) => {
+    if (taskId) await continueSaved('continue_task_online', { taskId, approvalId: allowed.id });
+    else await submit(allowed.prompt, 'web', allowed.id);
+  };
   function cancelOnlineApproval() {
     if (approvalBusy.current) return;
     const taskId = onlineTaskId;
@@ -704,10 +745,9 @@ export default function App() {
     }, 200);
     return () => window.clearInterval(id);
   }, [recording]);
-  async function finishSetup(settings: Settings, keys: [KeyProvider, string][]) {
+  async function finishSetup(settings: Settings) {
     // An edit from before setup must not land on top of the choices just made.
     saver.current!.discard();
-    for (const [provider, key] of keys) await command('set_api_key', { provider, key });
     // A scheduled task may briefly hold the settings; try once more before giving up.
     const saved = await saveSettings(settings).catch(() => new Promise(resolve => setTimeout(resolve, 800)).then(() => saveSettings(settings)));
     await command('finish_onboarding');
@@ -822,6 +862,11 @@ export default function App() {
     finally { setAllowing(false); }
   }
   const need = needs && data ? shortcutNeeds(needs, data.settings.apps) : null;
+  async function allowApp(id: string) {
+    if (!data) return;
+    const base = saver.current!.pending() ?? data.settings;
+    if (!base.apps.includes(id)) await saver.current!.saveNow({ ...base, apps: [...base.apps, id] });
+  }
   const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => { setConfirmClear(false); setNeeds(null); }, [page]);
   useEffect(() => { if (needs) document.querySelector('.welcome-allow')?.scrollIntoView({ block: 'nearest' }); }, [needs]);
@@ -861,10 +906,11 @@ export default function App() {
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}{!glance.length && <span>{invitation(new Date())}</span>}</h1>
               {glance.length > 0 && <div className="glance">{glance.map(item => <button key={item.kind} onClick={() => void submit(item.kind === 'event' ? 'What’s on my calendar today?' : 'What are my reminders?')}><i>{item.kind === 'event' ? <CalendarDays /> : <Bell />}</i><span><strong>{item.title}</strong><small>{clockTime(item.time)}{item.place ? ` · ${item.place}` : ''}</small></span></button>)}</div>}
               <div className="welcome-chips">{suggestions(new Date(), usual, data?.settings.apps ?? []).map(item => <button key={item.label} onClick={() => item.prompt ? void submit(item.prompt) : item.shortcut ? shortcut(item.shortcut) : (setMode(item.mode!), inputRef.current?.focus())}>{item.label}</button>)}</div>
+              {data && <ConnectApps allowed={data.settings.apps} disabled={busy || pending} onAllow={allowApp} onConnected={() => void refresh().catch(e => setError(errorMessage(e)))} onPane={pane => void command('open_apple_settings', { pane }).catch(e => setError(errorMessage(e)))} onError={setError} />}
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
-                progress={progress} onFollowUp={text => void submit(text)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
+                progress={progress} onFollowUp={text => void submit(text, 'auto')} onOpenPane={pane => void command('open_apple_settings', { pane }).catch(error => setError(errorMessage(error)))} chatgptPlan={data?.diagnostics.chatgptPlan} onAskChatGpt={question => void askChatGpt(question)} onOpenChatGpt={question => void openChatGpt(question)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
             </>}
           </div>
           <div className="composer-area">
@@ -894,24 +940,25 @@ export default function App() {
             : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> Clear conversation history…</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>No conversations yet</h3></div>}
         </div>}
 
-        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'Key saved.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<YourData onNotice={setNotice} onError={setError} onErase={async () => {
+        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'Key saved.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<>{data.diagnostics.chatgptAlwaysAllow && <section className="settings-section"><Toggle label="Always allow internet questions to ChatGPT" checked onChange={() => void safeAction(async () => { await command('chatgpt_always_allow_off'); await refresh(); })} /></section>}<YourData onNotice={setNotice} onError={setError} onErase={async () => {
           // An edit not saved yet must not write the old settings back after the erase.
           const pending = saver.current!.pending();
           saver.current!.discard();
           try { await command('delete_all_data', { confirm: 'delete everything' }); }
           catch (error) { if (pending) saver.current!.edit(pending); throw error; }
-        }} onErased={async () => { forgetMood(); setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} />} />}
+        }} onErased={async () => { forgetMood(); setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} /></>} />}
 
         {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Nothing yet</h3></div>}</div>}
 
-        {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onAllow={async () => {
+        {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onOpenChatGpt={data?.diagnostics.chatgptPlan === 'usable' ? undefined : () => { const question = approval.prompt; cancelOnlineApproval(); void openChatGpt(question); }} onAllow={async always => {
           if (approvalBusy.current) return;
           approvalBusy.current = true; setApproving(true);
           try {
-            const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id });
+            const allowed = await command<WebApproval>('approve_web_approval', { id: approval.id, always: !!always });
             setApproval(null);
-            if (onlineTaskId) { const taskId = onlineTaskId; setOnlineTaskId(''); await continueSaved('continue_task_online', { taskId, approvalId: allowed.id }); }
-            else await submit(allowed.prompt, 'web', allowed.id);
+            const taskId = onlineTaskId || undefined;
+            setOnlineTaskId('');
+            await runAllowed.current(allowed, taskId);
           } catch (e) { setError(errorMessage(e)); setApproval(null); setPetState('idle'); }
           finally { approvalBusy.current = false; setApproving(false); }
         }} />}
@@ -943,7 +990,7 @@ export default function App() {
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
         <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>Pet {assistantName}</button>
-        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
+        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => { setMenu(false); void submit('How’s my Mac?', 'auto'); }}><Laptop size={13} /> Your Mac</button><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
       </div>
     </div>

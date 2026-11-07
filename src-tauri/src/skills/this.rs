@@ -2,7 +2,7 @@
 //! request about whatever was in front when Buntini opened. The selected text comes first,
 //! then the email open in Mail, the page in a browser or the files selected in Finder.
 //! Nothing changes on the Mac; the model writes the reply from what was read.
-use super::{browser, from_verb, without_politeness, Context, Outcome};
+use super::{browser, from_verb, one_of, without_politeness, Context, Outcome};
 use crate::{focus::Referent, privacy::Share};
 
 #[derive(Debug, PartialEq)]
@@ -35,7 +35,7 @@ fn target(rest: &str, follow_up: bool) -> Option<Command> {
         "what i've selected",
         "the highlighted text",
     ];
-    if named.contains(&rest) {
+    if one_of(rest, &named) {
         return Some(Command::Selection);
     }
     let vague = [
@@ -70,7 +70,7 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
     if let Some((_, rest)) = from_verb(text, VERBS) {
         return target(rest, follow_up);
     }
-    [
+    one_of(text, &[
         "what is this",
         "what's this",
         "what does this say",
@@ -79,8 +79,7 @@ pub fn recognise(text: &str, recent: &[String]) -> Option<Command> {
         "what's this about",
         "tldr",
         "tl dr",
-    ]
-    .contains(&text)
+    ])
     .then_some(Command::About)
 }
 

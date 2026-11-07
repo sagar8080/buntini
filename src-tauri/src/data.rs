@@ -242,7 +242,6 @@ where
     };
     let mut failures = Vec::new();
     state.approvals.lock().unwrap().clear();
-    state.pending_actions.lock().unwrap().clear();
     // Tools the user added stop before their settings and values are erased.
     crate::mcp::stop_servers(&state.store.lock().unwrap());
     if let Err(error) = state.voice.cancel().await {
@@ -261,6 +260,7 @@ where
     state
         .index_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::local_setup::erase(state);
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }
@@ -284,6 +284,9 @@ where
         }
     }
     if let Err(error) = state.voice.clear_cache() {
+        failures.push(error);
+    }
+    if let Err(error) = crate::controller::remove_made_images(&state.cache_dir) {
         failures.push(error);
     }
     state.models.reset().await;

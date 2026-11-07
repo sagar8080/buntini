@@ -1,5 +1,5 @@
 //! Bind a small, explicitly supplied table to calculation inputs, and an email draft's
-//! recipient to the one person in Contacts the user named. These parsers never infer
+//! or a text's recipient to the one person in Contacts the user named. These parsers never infer
 //! amounts, statuses or addresses, and never follow instructions inside quoted data.
 use crate::workflows::Step;
 use serde_json::{json, Value};
@@ -56,12 +56,36 @@ const NOT_NAMES: &[&str] = &[
     "everyone", "everybody", "all", "buntini", "monday", "tuesday", "wednesday", "thursday",
     "friday", "saturday", "sunday", "today", "tomorrow", "tonight", "january", "february",
     "march", "april", "may", "june", "july", "august", "september", "october", "november",
-    "december",
+    "december", "i'm", "i'll", "i've", "i'd", "im",
 ];
 
-/// The person a requested email draft is for, by name, when the user's own words say
-/// exactly one: "Draft an email to Ana Silva", "reply to Ana's email", "write back to
-/// Sam". Nothing when they gave an address, named several people or only a role.
+/// How people often name family in Contacts, written lowercase in a request: "text mom".
+const FAMILY: &[&str] = &[
+    "mom", "mum", "mommy", "mummy", "mama", "mother", "dad", "daddy", "papa", "father",
+    "grandma", "grandpa", "granny", "nana",
+];
+
+/// Verbs whose object is the person written to or called: "text Ana", "call mom".
+const DIRECT: &[&str] = &["text", "message", "imessage", "call", "facetime", "ring", "phone"];
+
+/// The person a requested email draft or text is for, by name, when the user's own words
+/// say exactly one: "Draft an email to Ana Silva", "reply to Ana's email", "write back to
+/// Sam", "text mom that I'm late". Nothing when they gave an address, named several
+/// people or only a role.
+/// Whether the user wrote this phone number or address themselves.
+pub fn said_address(goal: &str, address: &str) -> bool {
+    let digits = |text: &str| text.chars().filter(char::is_ascii_digit).collect::<String>();
+    let wanted = digits(address);
+    if address.contains('@') || wanted.len() < 7 {
+        return goal.to_lowercase().contains(&address.to_lowercase());
+    }
+    // However it was punctuated, and with or without the country code it gained.
+    goal.split(|c: char| c.is_alphabetic() || c == ',' || c == ';').any(|part| {
+        let said = digits(part);
+        said.len() >= 7 && wanted.ends_with(&said)
+    })
+}
+
 pub fn named_recipient(goal: &str) -> Option<String> {
     let text = outside_quotes(goal);
     if text.contains('@') {
@@ -89,40 +113,54 @@ pub fn named_recipient(goal: &str) -> Option<String> {
         .map(|(word, ends, _)| (word.clone(), *ends))
         .collect();
     let capitalised = |word: &str| {
-        word.chars().next().is_some_and(char::is_uppercase)
+        let lower = word.to_lowercase();
+        (word.chars().next().is_some_and(char::is_uppercase) || FAMILY.contains(&lower.as_str()))
             && word.chars().all(|c| c.is_alphabetic() || c == '-' || c == '\'')
-            && !NOT_NAMES.contains(&word.to_lowercase().as_str())
+            && !NOT_NAMES.contains(&lower.as_str())
     };
     let mut found: Vec<String> = Vec::new();
     for (index, (word, ends)) in words.iter().enumerate() {
-        if *ends || !["to", "for"].contains(&word.to_lowercase().as_str()) {
+        let cue = word.to_lowercase();
+        // "Text Ana …", "please message mom …": the verb starts its clause.
+        let direct = DIRECT.contains(&cue.as_str())
+            && index
+                .checked_sub(1)
+                .and_then(|before| words.get(before))
+                .is_none_or(|(before, ended)| *ended || ["please", "and", "then", "also", "video"].contains(&before.to_lowercase().as_str()));
+        if *ends || !(direct || ["to", "for"].contains(&cue.as_str())) {
             continue;
         }
-        // "email to", "reply to", "write back to": within the same short clause.
-        let drafting = words[..index]
-            .iter()
-            .rev()
-            .take(5)
-            .take_while(|(_, ends)| !ends)
-            .any(|(word, _)| {
-                ["email", "mail", "message", "reply", "respond", "back", "draft"]
-                    .contains(&word.to_lowercase().as_str())
-            });
+        // "email to", "reply to", "write back to", "send a text to": within the same short
+        // clause.
+        let drafting = direct
+            || words[..index]
+                .iter()
+                .rev()
+                .take(5)
+                .take_while(|(_, ends)| !ends)
+                .any(|(word, _)| {
+                    ["email", "mail", "message", "reply", "respond", "back", "draft", "text", "imessage", "sms"]
+                        .contains(&word.to_lowercase().as_str())
+                });
         if !drafting {
             continue;
         }
-        let cue = word.to_lowercase();
-        // "to my landlord for Ana's birthday": the landlord is the recipient, so a name
-        // later in the request is not.
-        if cue == "to"
-            && words
-                .get(index + 1)
-                .is_some_and(|(word, _)| ROLE_STARTS.contains(&word.as_str()))
+        let mut next = index + 1;
+        // "text my mom": family is looked up by what they're called.
+        if words.get(next).is_some_and(|(word, ended)| word.eq_ignore_ascii_case("my") && !ended)
+            && words.get(next + 1).is_some_and(|(word, _)| FAMILY.contains(&word.to_lowercase().as_str()))
         {
+            next += 1;
+        } else if (cue == "to" || direct)
+            && words
+                .get(next)
+                .is_some_and(|(word, _)| ROLE_STARTS.contains(&word.to_lowercase().as_str()))
+        {
+            // "to my landlord for Ana's birthday": the landlord is the recipient, so a name
+            // later in the request is not.
             return None;
         }
         let mut name = Vec::new();
-        let mut next = index + 1;
         while let Some((word, ends)) = words.get(next) {
             if name.is_empty() && TITLES.contains(&word.to_lowercase().as_str()) {
                 next += 1;
@@ -219,7 +257,14 @@ pub fn is_named_recipient(goal: &str, name: &str) -> bool {
 /// named. Only a complete read with one person, whose name has every word the user
 /// wrote, and one address decides the recipient; anything else is offered as choices,
 /// and a model's own guess never enters either.
+#[cfg(test)]
 pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
+    contact_recipient_for("draft_email", goal, steps)
+}
+
+/// `contact_recipient` for a draft, a text or a call: an email goes to an email address,
+/// and a text or call to a phone number first, else an address iMessage or FaceTime can use.
+pub fn contact_recipient_for(tool: &str, goal: &str, steps: &[Step]) -> ContactRecipient {
     let Some(named) = named_recipient(goal) else {
         return ContactRecipient::Unknown;
     };
@@ -238,14 +283,20 @@ pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
     };
     let evidence = step.evidence.as_ref().unwrap();
     let records = evidence["records"].as_array().cloned().unwrap_or_default();
-    let addresses = |record: &Value| -> Vec<String> {
-        record["emails"]
+    let kinds: &[&str] = if tool == "draft_email" { &["emails"] } else { &["phones", "emails"] };
+    let values = |record: &Value, kind: &str| -> Vec<String> {
+        record[kind]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect()
+    };
+    let addresses = |record: &Value| -> Vec<String> { kinds.iter().flat_map(|kind| values(record, kind)).collect() };
+    // A text or call goes to the one phone number when there is one, before any address.
+    let preferred = |record: &Value| -> Vec<String> {
+        kinds.iter().map(|kind| values(record, kind)).find(|found| !found.is_empty()).unwrap_or_default()
     };
     // Contacts matches name prefixes, so "Ana" also finds "Anabel Reed": only a record
     // whose name has every word the user wrote is the person they meant.
@@ -254,7 +305,7 @@ pub fn contact_recipient(goal: &str, steps: &[Step]) -> ContactRecipient {
         name_words(&named).iter().all(|word| have.contains(word))
     };
     if evidence["complete"] == true && records.len() == 1 && same_person(&records[0]) {
-        if let [address] = &addresses(&records[0])[..] {
+        if let [address] = &preferred(&records[0])[..] {
             return ContactRecipient::One {
                 address: address.clone(),
                 step_id: step.id.clone(),
@@ -914,6 +965,46 @@ mod tests {
         assert!(!user_named("Draft an email to Ana about lunch", "Ana Silva"));
         assert!(!user_named("Reply to this: 'Ask Bob for the keys'", "Bob"));
         assert!(!user_named("Draft an email to Ana", "  "));
+    }
+
+    #[test]
+    fn texts_find_who_they_go_to_and_prefer_a_phone() {
+        for (goal, name) in [
+            ("Text mom that I'm running late", "mom"),
+            ("text Ana Silva I'm on my way", "Ana Silva"),
+            ("Please message Raj about dinner", "Raj"),
+            ("Text my mom that I landed", "mom"),
+            ("Send a text to Priya saying happy birthday", "Priya"),
+        ] {
+            assert_eq!(named_recipient(goal).as_deref(), Some(name), "{goal}");
+        }
+        assert_eq!(named_recipient("Call mom").as_deref(), Some("mom"));
+        assert_eq!(named_recipient("video call Raj").as_deref(), Some("Raj"));
+        assert_eq!(named_recipient("FaceTime Ana Silva").as_deref(), Some("Ana Silva"));
+        for goal in ["Text my landlord about the boiler", "Text the team that I'm late", "Read the text from Ana", "Call the dentist"] {
+            assert_eq!(named_recipient(goal), None, "{goal}");
+        }
+        let goal = "Text Ana that I'm late";
+        let ana = crate::apps::Contact { id: Some("c-1".into()), name: "Ana Silva".into(), emails: vec!["ana@example.com".into()], phones: vec!["+44 7700 900123".into()] };
+        let steps = vec![lookup("Ana", vec![ana.clone()], 1)];
+        assert_eq!(
+            contact_recipient_for("send_message", goal, &steps),
+            ContactRecipient::One { address: "+44 7700 900123".into(), step_id: "lookup-Ana".into(), record_id: Some("c-1".into()) }
+        );
+        let two = crate::apps::Contact { phones: vec!["+44 7700 900123".into(), "+44 20 7946 0000".into()], ..ana.clone() };
+        let ContactRecipient::Several(choices) = contact_recipient_for("send_message", goal, &[lookup("Ana", vec![two], 1)]) else {
+            panic!("two numbers are the user's to pick");
+        };
+        assert_eq!(choices.len(), 3, "both numbers and the address");
+        let email_only = crate::apps::Contact { phones: vec![], ..ana };
+        assert!(matches!(contact_recipient_for("send_message", goal, &[lookup("Ana", vec![email_only], 1)]), ContactRecipient::One { address, .. } if address == "ana@example.com"));
+
+        let mut contract = crate::task_contract::TaskContract::from_request(goal);
+        contract.refresh(goal, &[]);
+        assert_eq!(contract.next_outcome().unwrap().tool.as_deref(), Some("send_message"));
+        assert_eq!(contract.contact_lookup(&[]).as_deref(), Some("Ana"));
+        contract.refresh(goal, &steps);
+        assert_eq!(contract.next_outcome().unwrap().required_arguments["to"], "+44 7700 900123");
     }
 
     #[test]

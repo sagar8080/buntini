@@ -114,25 +114,96 @@ pub fn credential_valid(provider: &str) -> Result<(), String> {
 const KEYCHAIN_SERVICE: &str = "app.buntini.companion";
 #[cfg(target_os = "macos")]
 const LEGACY_KEYCHAIN_SERVICE: &str = "app.nexon.companion";
+/// The only way Buntini touches the Keychain, so that macOS can never put a password dialog in
+/// front of anyone. A key this build can't read silently counts as not saved, and Settings
+/// asks for it again.
+#[cfg(target_os = "macos")]
+pub mod keychain {
+    use security_framework::os::macos::keychain::SecKeychain;
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
+    use std::sync::OnceLock;
+
+    /// errSecItemNotFound, and errSecInvalidOwnerEdit: macOS lets an update of the app read and
+    /// change a key that an earlier version saved, but not delete it.
+    const NOT_FOUND: i32 = -25300;
+    const NOT_OWNER: i32 = -25244;
+    /// What such a key is overwritten with, because an empty value leaves the old one in place.
+    const REMOVED: &[u8] = b"-";
+
+    /// Fails closed: if dialogs can't be turned off, the Keychain isn't touched at all.
+    pub(super) fn silent() -> bool {
+        static SILENT: OnceLock<bool> = OnceLock::new();
+        *SILENT.get_or_init(|| {
+            // The switch lasts until this lock is dropped, which should be never.
+            SecKeychain::disable_user_interaction().map(std::mem::forget).is_ok()
+        })
+    }
+
+    pub fn read(service: &str, account: &str) -> Option<Vec<u8>> {
+        if !silent() {
+            return None;
+        }
+        get_generic_password(service, account)
+            .ok()
+            .filter(|value| !value.is_empty() && value != REMOVED)
+    }
+
+    /// Checked by reading back: saving over a key from a differently signed build reports
+    /// success and changes nothing this build can read.
+    pub fn save(service: &str, account: &str, value: &[u8]) -> Result<(), ()> {
+        if !silent() {
+            return Err(());
+        }
+        set_generic_password(service, account, value).map_err(|_| ())?;
+        (read(service, account).as_deref() == Some(value)).then_some(()).ok_or(())
+    }
+
+    pub fn remove(service: &str, account: &str) -> Result<(), ()> {
+        if !silent() {
+            return Err(());
+        }
+        match delete_generic_password(service, account) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == NOT_FOUND => Ok(()),
+            Err(error) if error.code() == NOT_OWNER => {
+                set_generic_password(service, account, REMOVED).map_err(|_| ())?;
+                // Only true once the secret is really gone.
+                (get_generic_password(service, account).ok().as_deref() == Some(REMOVED))
+                    .then_some(())
+                    .ok_or(())
+            }
+            Err(_) => Err(()),
+        }
+    }
+}
 #[cfg(target_os = "macos")]
 pub fn credential(provider: &str) -> Result<String, String> {
-    use security_framework::passwords::*;
     credential_valid(provider)?;
-    get_generic_password(KEYCHAIN_SERVICE, provider)
-        .or_else(|_| {
+    let bytes = keychain::read(KEYCHAIN_SERVICE, provider)
+        .or_else(|| {
             // A key saved under the former Nexon name moves to the current entry once.
-            let bytes = get_generic_password(LEGACY_KEYCHAIN_SERVICE, provider)?;
-            if set_generic_password(KEYCHAIN_SERVICE, provider, &bytes).is_ok() {
-                let _ = delete_generic_password(LEGACY_KEYCHAIN_SERVICE, provider);
+            let bytes = keychain::read(LEGACY_KEYCHAIN_SERVICE, provider)?;
+            if keychain::save(KEYCHAIN_SERVICE, provider, &bytes).is_ok() {
+                let _ = keychain::remove(LEGACY_KEYCHAIN_SERVICE, provider);
             }
-            Ok(bytes)
+            Some(bytes)
         })
-        .map_err(|_: security_framework::base::Error| {
-            format!("Add your {provider} API key in Settings.")
-        })
-        .and_then(|bytes| {
-            String::from_utf8(bytes).map_err(|_| "Invalid credential encoding.".into())
-        })
+        .ok_or_else(|| format!("Add your {provider} API key in Settings."))?;
+    String::from_utf8(bytes).map_err(|_| "Invalid credential encoding.".into())
+}
+/// Whether there's a key this build can use.
+#[cfg(target_os = "macos")]
+pub fn credential_saved(provider: &str) -> bool {
+    credential_valid(provider).is_ok()
+        && [KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_SERVICE]
+            .iter()
+            .any(|service| keychain::read(service, provider).is_some())
+}
+#[cfg(not(target_os = "macos"))]
+pub fn credential_saved(_provider: &str) -> bool {
+    false
 }
 #[cfg(not(target_os = "macos"))]
 pub fn credential(_provider: &str) -> Result<String, String> {
@@ -157,12 +228,8 @@ pub fn set_credential(provider: &str, key: &str) -> Result<(), String> {
         let legacy = delete_credential(LEGACY_KEYCHAIN_SERVICE, provider);
         current.and(legacy)
     } else {
-        security_framework::passwords::set_generic_password(
-            KEYCHAIN_SERVICE,
-            provider,
-            key.trim().as_bytes(),
-        )
-        .map_err(|_| "macOS Keychain could not save the credential.".to_string())?;
+        keychain::save(KEYCHAIN_SERVICE, provider, key.trim().as_bytes())
+            .map_err(|_| "macOS Keychain could not save the credential.".to_string())?;
         // Remove an old credential only after its replacement has been saved.
         delete_credential(LEGACY_KEYCHAIN_SERVICE, provider)
     }
@@ -170,12 +237,9 @@ pub fn set_credential(provider: &str, key: &str) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn delete_credential(service: &str, provider: &str) -> Result<(), String> {
-    match security_framework::passwords::delete_generic_password(service, provider) {
-        Ok(()) => Ok(()),
-        // errSecItemNotFound, defined by Security.framework.
-        Err(error) if error.code() == -25300 => Ok(()),
-        Err(_) => Err(format!("macOS Keychain could not remove the {provider} credential. Unlock your Keychain and try again.")),
-    }
+    keychain::remove(service, provider).map_err(|_| {
+        format!("macOS Keychain could not remove the {provider} credential. Unlock your Keychain and try again.")
+    })
 }
 #[cfg(not(target_os = "macos"))]
 pub fn set_credential(_provider: &str, _key: &str) -> Result<(), String> {
@@ -389,5 +453,31 @@ mod tests {
         assert_eq!(retry_delay(Some("3")).unwrap().as_secs(), 3);
         assert!(retry_delay(Some("4")).is_none());
         assert!(retry_delay(Some("garbage")).is_none());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod keychain_tests {
+    use super::keychain;
+    use security_framework::os::macos::keychain::SecKeychain;
+
+    #[test]
+    fn the_keychain_can_never_show_a_dialog() {
+        assert!(keychain::silent());
+        assert_eq!(SecKeychain::user_interaction_allowed().ok(), Some(false));
+    }
+
+    /// Uses its own throwaway entry, never a saved key.
+    #[test]
+    #[ignore = "writes to this Mac's real Keychain"]
+    fn live_a_throwaway_key_saves_reads_and_goes() {
+        let (service, account) = ("app.buntini.keychain-test", "throwaway");
+        let _ = keychain::remove(service, account);
+        assert_eq!(keychain::read(service, account), None);
+        keychain::save(service, account, b"not-a-secret").unwrap();
+        assert_eq!(keychain::read(service, account).as_deref(), Some(&b"not-a-secret"[..]));
+        keychain::remove(service, account).unwrap();
+        assert_eq!(keychain::read(service, account), None);
+        keychain::remove(service, account).unwrap();
     }
 }

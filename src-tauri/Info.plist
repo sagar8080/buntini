@@ -8,5 +8,6 @@
   <key>NSRemindersFullAccessUsageDescription</key><string>Buntini lists your open reminders when you ask and in your morning brief, only after you allow Reminders in Settings → Apps.</string>
   <key>NSRemindersUsageDescription</key><string>Buntini lists your open reminders when you ask and in your morning brief, only after you allow Reminders in Settings → Apps.</string>
   <key>NSContactsUsageDescription</key><string>Buntini looks up the people you name, such as who to address a draft to, only after you allow Contacts in Settings → Apps.</string>
+  <key>NSPhotoLibraryUsageDescription</key><string>Buntini finds and shows the photos you ask for, only after you allow Photos in Settings → Apps. It never changes your library.</string>
   <key>LSUIElement</key><true/>
 </dict></plist>

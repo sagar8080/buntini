@@ -1302,3 +1302,132 @@ async fn several_emails_from_them_are_picked_in_the_sheet_not_by_the_model() {
     );
     state.models.shutdown().await;
 }
+
+/// The reply a real Mac gave to "whats on my mail": the model always says this if asked.
+const INVENTING_MODEL: &str = r#"import json,sys
+print(json.dumps({'type':'ready'}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    print(json.dumps(dict(id=req['id'],type='done',text='I cannot read your inbox directly. You have a few emails waiting. There is a new message from your boss about a project deadline.',finish_reason='stop')),flush=True)
+"#;
+
+fn fixture_inbox(args: &serde_json::Map<String, Value>) -> Value {
+    let inbox = [("2026-11-04 10:00", false, "Bob", "Invoice", "Your invoice is attached."), ("2026-11-04 09:00", false, "Ana", "Lease", "Can you sign by Friday")];
+    crate::apps::inbox_world(args.get("query").and_then(Value::as_str).unwrap_or(""), args.get("unread").and_then(Value::as_bool).unwrap_or(false), args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize, &inbox)
+}
+
+async fn inbox_journey(goal: &str, apps: &[&str]) -> (Result<(), String>, TaskRecord, Vec<(String, serde_json::Map<String, Value>)>) {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, mut settings, mut task, _) = fixture_task_state(dir.path(), goal, INVENTING_MODEL);
+    settings.apps = apps.iter().map(|app| app.to_string()).collect();
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+    let messages = vec![
+        json!({"role":"system","content":instructions(&state,&settings,true,"")}),
+        json!({"role":"user","content":goal}),
+    ];
+    let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
+    let reads = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = reads.clone();
+    let result = continue_workflow_using(&state, &mut task, &Channel::new(|_| Ok(())), Arc::new(AtomicBool::new(false)), &settings, &mut flow, move |tool, args| {
+        seen.lock().unwrap().push((tool.to_string(), args.clone()));
+        let found = fixture_inbox(&args);
+        async move { Ok(found) }
+    })
+    .await;
+    state.models.shutdown().await;
+    let reads = reads.lock().unwrap().clone();
+    (result, task, reads)
+}
+
+#[tokio::test]
+async fn an_inbox_question_reads_mail_and_says_only_what_it_found() {
+    for goal in ["whats on my mail", "What’s in my inbox?", "any new emails"] {
+        let (result, task, reads) = inbox_journey(goal, &["mail"]).await;
+        assert!(result.is_ok(), "{goal}: {result:?}");
+        assert_eq!(reads.iter().map(|(tool, _)| tool.as_str()).collect::<Vec<_>>(), ["read_mail"], "{goal}");
+        assert!(task.answer.contains("**Ana**: Lease"), "{goal}: {}", task.answer);
+        assert!(!task.answer.contains("boss"), "{goal}: {}", task.answer);
+    }
+    let (_, _, reads) = inbox_journey("any new emails", &["mail"]).await;
+    assert_eq!(reads[0].1["unread"], true);
+}
+
+#[tokio::test]
+async fn however_it_is_asked_a_model_that_skips_the_read_does_not_skip_it() {
+    // Plain inbox questions, and ones the model has to answer but can't answer unread.
+    for goal in ["hows my inbox", "got any mail", "Read me my emails", "tell me about my email", "how many emails do I have", "anything urgent in my mail", "is there anything from Ana in my inbox"] {
+        let (result, _, reads) = inbox_journey(goal, &["mail"]).await;
+        assert!(result.is_ok(), "{goal}: {result:?}");
+        assert!(!reads.is_empty() && reads.iter().all(|(tool, _)| tool == "read_mail"), "{goal}");
+    }
+}
+
+#[tokio::test]
+async fn what_a_model_writes_after_a_read_is_never_shown() {
+    for (goal, shows) in [("anything urgent in my mail", "**Ana**: Lease"), ("how many emails do I have", "**Ana**: Lease"), ("is there anything from Ana in my inbox", "**Ana**: Lease"), ("tell me what matters in my email", "**Bob**: Invoice")] {
+        let (result, task, reads) = inbox_journey(goal, &["mail"]).await;
+        assert!(result.is_ok(), "{goal}: {result:?}");
+        assert!(!reads.is_empty(), "{goal}");
+        assert!(!task.answer.contains("boss") && !task.answer.contains("waiting"), "{goal}: {}", task.answer);
+        assert!(task.answer.contains(shows), "{goal}: {}", task.answer);
+    }
+}
+
+/// A model that points at one record, or at one nobody read, and says what it read to the test.
+fn picking_model(reply: &str) -> String {
+    format!(
+        r#"import json,sys
+print(json.dumps({{'type':'ready'}}),flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    if req.get('record_pick'):
+        assert req['tools']==[] and req['record_ids']==['1','2']
+        assert 'Lease' in req['messages'][1]['content']
+        print(json.dumps(dict(id=req['id'],type='done',text={reply:?},finish_reason='stop')),flush=True)
+    else:
+        print(json.dumps(dict(id=req['id'],type='done',text='',finish_reason='stop')),flush=True)
+"#
+    )
+}
+
+async fn picked_journey(goal: &str, reply: &str) -> TaskRecord {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, mut settings, mut task, _) = fixture_task_state(dir.path(), goal, &picking_model(reply));
+    settings.apps = vec!["mail".into()];
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+    let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":goal})];
+    let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
+    continue_workflow_using(&state, &mut task, &Channel::new(|_| Ok(())), Arc::new(AtomicBool::new(false)), &settings, &mut flow, |_, args| { let found = fixture_inbox(&args); async move { Ok(found) } }).await.unwrap();
+    state.models.shutdown().await;
+    task
+}
+
+#[tokio::test]
+async fn the_model_only_points_at_records() {
+    let goal = "anything urgent in my mail";
+    let shown = picked_journey(goal, r#"{"ids":["2"]}"#).await.answer;
+    assert!(shown.contains("**Ana**: Lease") && shown.contains("Can you sign by Friday") && !shown.contains("Invoice"), "{shown}");
+    // None chosen: what was read is still there to see.
+    let shown = picked_journey(goal, r#"{"ids":[]}"#).await.answer;
+    assert!(shown.starts_with("I didn’t find one that fits.") && shown.contains("**Ana**: Lease") && shown.contains("**Bob**: Invoice"), "{shown}");
+    // A record nobody read, or words instead of a choice: everything read, and only that.
+    for reply in [r#"{"ids":["9"]}"#, "You have an email from your boss."] {
+        let shown = picked_journey(goal, reply).await.answer;
+        assert!(shown.contains("**Ana**: Lease") && shown.contains("**Bob**: Invoice") && !shown.contains("boss"), "{reply}: {shown}");
+    }
+}
+
+#[tokio::test]
+async fn an_inbox_nobody_may_read_is_not_made_up() {
+    let (result, task, reads) = inbox_journey("whats on my mail", &[]).await;
+    assert!(reads.is_empty());
+    let shown = result.err().unwrap_or(task.answer);
+    assert!(!shown.contains("boss") && !shown.contains("emails waiting"), "{shown}");
+    assert_eq!(shown, "Allow Mail in Settings → Apps so I can check your email.");
+    let (result, task, reads) = inbox_journey("More like these", &["mail"]).await;
+    assert!(reads.is_empty());
+    let shown = result.err().unwrap_or(task.answer);
+    assert!(shown.starts_with("I haven’t looked at your email"), "{shown}");
+}

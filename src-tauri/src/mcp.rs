@@ -166,6 +166,11 @@ fn shown_command(program: &str, args: &[String]) -> String {
         let at = rest[..end].rfind('@')?;
         Some(format!("{scheme}://{name}:{HIDDEN}{}", &rest[at..]))
     };
+    // "https://x/sse?token=abc", or "#token=abc": a secret after an address.
+    let hide_query = |arg: &str| -> Option<String> {
+        let at = arg.find(['?', '#']).filter(|at| arg[..*at].contains("://"))?;
+        arg[at + 1..].split(['&', '#', '?']).any(|pair| pair.split_once('=').is_some_and(|(name, _)| secret_name(name))).then(|| format!("{}?{HIDDEN}", &arg[..at]))
+    };
     let mut shown = vec![quote(program)];
     let mut hide_next = false;
     for arg in args {
@@ -173,13 +178,18 @@ fn shown_command(program: &str, args: &[String]) -> String {
             hide_next = false;
             HIDDEN.to_string()
         } else if let Some(url) = hide_userinfo(arg) {
-            url
-        } else if token_shaped(arg) {
+            hide_query(&url).unwrap_or(url)
+        } else if token_shaped(arg) || arg.to_lowercase().starts_with("bearer ") || arg.to_lowercase().starts_with("basic ") {
             HIDDEN.to_string()
         } else if let Some((name, _)) = arg.split_once('=').filter(|(name, _)| secret_name(name)) {
             format!("{name}={HIDDEN}")
+        } else if let Some(url) = hide_query(arg) {
+            url
+        } else if let Some((name, _)) = arg.split_once(':').filter(|(name, _)| secret_name(name) && !name.contains('/')) {
+            // "Authorization: Bearer abc123", the value of a --header.
+            format!("{name}: {HIDDEN}")
         } else {
-            hide_next = arg.starts_with('-') && secret_name(arg);
+            hide_next = arg.starts_with('-') && (secret_name(arg) || ["-h", "--header", "--headers"].contains(&arg.to_lowercase().as_str()));
             arg.clone()
         };
         shown.push(quote(&word));
@@ -199,8 +209,10 @@ fn quote(word: &str) -> String {
 // Storage
 
 /// Removes the Keychain values of servers that are being erased.
-pub fn forget_secrets(ids: &[String]) -> Result<(), String> {
-    ids.iter().try_for_each(|id| secrets::delete(id))
+/// Tries every one, so one that can't go doesn't leave the rest behind. Returns those that
+/// couldn't go, with why.
+pub fn forget_secrets(ids: &[String]) -> Vec<(String, String)> {
+    ids.iter().filter_map(|id| secrets::delete(id).err().map(|error| (id.clone(), error))).collect()
 }
 
 pub fn initialize(db: &Connection) -> Result<(), String> {
@@ -242,21 +254,16 @@ mod secrets {
 
     #[cfg(all(target_os = "macos", not(test)))]
     mod keychain {
-        use security_framework::passwords::*;
+        use crate::web::keychain;
         const SERVICE: &str = "app.buntini.companion.tools";
         pub fn save(id: &str, text: &str) -> Result<(), ()> {
-            set_generic_password(SERVICE, id, text.as_bytes()).map_err(|_| ())
+            keychain::save(SERVICE, id, text.as_bytes())
         }
         pub fn load(id: &str) -> Option<String> {
-            get_generic_password(SERVICE, id).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+            keychain::read(SERVICE, id).and_then(|bytes| String::from_utf8(bytes).ok())
         }
         pub fn delete(id: &str) -> Result<(), ()> {
-            match delete_generic_password(SERVICE, id) {
-                Ok(()) => Ok(()),
-                // errSecItemNotFound: already gone.
-                Err(error) if error.code() == -25300 => Ok(()),
-                Err(_) => Err(()),
-            }
+            keychain::remove(SERVICE, id)
         }
     }
     /// Tests (and other systems) keep the values in memory, never in the user's Keychain.
@@ -292,6 +299,14 @@ impl Store {
             rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
         };
         rows.iter().map(|data| self.read_mcp_server(data)).collect()
+    }
+    /// The saved tools for deciding whether a request names one, with no values from the
+    /// Keychain: reading those can make macOS ask, and every request gets here.
+    pub fn mcp_servers_without_values(&self) -> Result<Vec<McpServer>, String> {
+        let mut stmt = self.db.prepare("SELECT data FROM mcp_servers ORDER BY created_at, id").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let rows: Vec<String> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+        rows.iter().map(|data| serde_json::from_str(data).map_err(|e: serde_json::Error| e.to_string())).collect()
     }
     pub fn mcp_server(&self, id: &str) -> Result<Option<McpServer>, String> {
         let data: Option<String> = self
@@ -340,11 +355,13 @@ impl Store {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+    /// The values first: with the row gone, nothing could find them to try again.
     pub fn delete_mcp_server(&self, id: &str) -> Result<(), String> {
+        secrets::delete(id)?;
         self.db
             .execute("DELETE FROM mcp_servers WHERE id=?1", [id])
-            .map_err(|e| e.to_string())?;
-        secrets::delete(id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     /// For the export: how each server starts and which environment names it has,
     /// never their values.
@@ -1520,7 +1537,8 @@ fn sweep(current: Option<(&str, &str)>) {
     });
 }
 
-/// Starts the server afresh and reads its tools. Used when adding and reconnecting.
+/// Starts the server afresh and reads its tools.
+#[cfg(test)]
 pub async fn connect(server: &mut McpServer) -> Result<(), String> {
     connect_among(server, &[]).await
 }

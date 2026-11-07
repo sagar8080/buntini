@@ -1,13 +1,15 @@
-import { useState, type RefObject } from 'react';
-import { Check, Copy, ExternalLink, FileText, Laptop, LoaderCircle, Square, Volume2, VolumeX } from 'lucide-react';
+import { useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { Check, Copy, ExternalLink, FileText, LoaderCircle, Square, Volume2, VolumeX } from 'lucide-react';
 import Pet from './Pet';
 import { ResultCards } from './Online';
+import MacGlanceCard from './MacGlance';
 import { backendLabel } from './BrainSettings';
 import { lookFrom } from './petOptions';
 import { ProgressDetails } from './TaskProgress';
 import { taskRecovery, missingTaskFields } from './taskRecovery';
-import { parse, type Span } from './markdown';
+import { parse, withoutTracking, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
+import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
 import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
 
 type Props = {
@@ -17,10 +19,12 @@ type Props = {
   onOpen: (url: string) => void; onSpeak: (text: string) => void; onStopSpeaking: () => void;
   progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
   onFollowUp: (text: string) => void;
+  chatgptPlan?: ChatGptPlan; onAskChatGpt?: (question: string) => void; onOpenChatGpt?: (question: string) => void;
+  onOpenPane?: (pane: string) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
@@ -43,6 +47,8 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
     const wrote = !!savedProgress?.steps.some(step => step.approvedAt && step.state === 'succeeded');
     const confirmed = done && wrote ? receiptLines(item.answer) : null;
     const listed = done && !wrote && parse(item.answer).some(block => block.kind === 'list');
+    // Your own mail or calendar has no "more like this"; it's what's there.
+    const readOwnItems = !!item.touched?.some(kind => ['mail', 'calendar', 'reminders'].includes(kind));
     const missing = missingTaskFields(savedProgress);
     const continueWithDetails = () => {
       const updates: Record<string, TaskFieldUpdate> = {};
@@ -54,17 +60,23 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
       }
       onContinue(item, clarifications[item.id], Object.values(updates));
     };
+    const askedQuestion = askedChatGpt(item);
+    const latest = !isLive && item === turns[turns.length - 1];
+    const help = latest && item.id ? chatGptHelp(item, chatgptPlan, settings) : null;
+    // A card that says it all stands alone; a model's own reply about the Mac sits above it.
+    const cardOnly = !!item.glance && item.answer === item.glance.summary;
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
       {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>
-          {item.answer && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
+          {askedQuestion !== undefined && <div className="asked-chatgpt"><span>Asked ChatGPT</span>{askedQuestion}</div>}
+          {item.answer && !cardOnly && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
           {working && !item.answer && <div className="typing" role="status" aria-label={activity || 'Thinking'}><i /><i /><i /><span>{activity}</span></div>}
-          {item.system && <SystemCard snapshot={item.system} />}
+          {item.glance && <MacGlanceCard glance={item.glance} latest={latest} busy={busy} onQuit={app => onFollowUp(`Quit ${app}`)} onPane={pane => onOpenPane?.(pane)} />}
           {!!item.cards?.length && <ResultCards cards={item.cards} onOpen={onOpen} />}
           {item.files.length > 0 && <div className="file-results">{item.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
-          {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={source.url} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(source.url); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
+          {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={withoutTracking(source.url)} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(withoutTracking(source.url)); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
           {!!item.prices?.length && <div className="product-comparison"><div className="section-label">Published offers</div>{item.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? 'Published range' : 'Published offer'}</span></div>{offer.seller && <small>Seller: {offer.seller}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => onOpen(offer.url)}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}</div>}
           {!!item.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {item.research.length} pages</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
           {working && !!item.answer && !!activity && activity !== 'Thinking it over' && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity}</span></div>}
@@ -79,7 +91,8 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'That didn’t finish. Try again.'}</p>}
         </div>
       </div>
-      {listed && !busy && <div className="reply-chips"><button onClick={() => onFollowUp('More like these')}>More like this</button><button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
+      {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>More like this</button>}<button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
+      {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? 'Ask ChatGPT' : <><ExternalLink size={12} /> Open in ChatGPT</>}</button></div>}
       {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>
         <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? 'Stop' : 'Read aloud'}</button>
         <button className="text-button" onClick={() => { void navigator.clipboard?.writeText(item.answer).then(() => { setCopied(item.id); setTimeout(() => setCopied(current => current === item.id ? '' : current), 1500); }); }}>{copied === item.id ? <Check size={11} /> : <Copy size={11} />}{copied === item.id ? 'Copied' : 'Copy'}</button>
@@ -93,35 +106,54 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
   </div>;
 }
 
+function hostOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+}
+
 function Spans({ spans, onOpen }: { spans: Span[]; onOpen: (url: string) => void }) {
-  return <>{spans.map((span, index) => span.href ? <a key={index} href={span.href} onClick={event => { event.preventDefault(); onOpen(span.href!); }}>{span.text}</a>
-    : span.code ? <code key={index}>{span.text}</code> : span.bold ? <strong key={index}>{span.text}</strong> : span.italic ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
+  return <>{spans.map((span, index) => {
+    const open = (event: MouseEvent) => { event.preventDefault(); onOpen(span.href!); };
+    // Where a link goes comes from the address, never from words someone else wrote.
+    const host = span.href ? hostOf(span.href) : '';
+    if (span.cite) {
+      const site = host || span.text.replace(/^www\./, '');
+      return span.href ? <a key={index} className="reply-cite" href={span.href} title={span.href} onClick={open}>{site}</a> : <span key={index} className="reply-cite">{site}</span>;
+    }
+    let words: ReactNode = span.code ? <code>{span.text}</code> : span.text;
+    if (span.italic) words = <em>{words}</em>;
+    if (span.bold) words = <strong>{words}</strong>;
+    return span.href ? <span key={index}><a href={span.href} title={span.href} onClick={open}>{words}</a>{!span.text.toLowerCase().includes(host) && <span className="reply-cite">{host}</span>}</span> : <span key={index}>{words}</span>;
+  })}</>;
 }
 
 /** A reply with its light formatting shown: paragraphs, lists, headings and emphasis. */
 function Reply({ text, onOpen }: { text: string; onOpen: (url: string) => void }) {
   return <div className="answer-text">{parse(text).map((block, index) => {
-    if (block.kind === 'heading') return <p key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></p>;
+    if (block.kind === 'heading') return <h4 key={index} className="reply-heading"><Spans spans={block.spans} onOpen={onOpen} /></h4>;
+    if (block.kind === 'rule') return <hr key={index} />;
+    if (block.kind === 'code') return <pre key={index} tabIndex={0}><code>{block.text}</code></pre>;
+    if (block.kind === 'quote') return <blockquote key={index}>{block.lines.map((line, at) => <p key={at}><Spans spans={line} onOpen={onOpen} /></p>)}</blockquote>;
+    if (block.kind === 'table') return <div key={index} className="reply-table" tabIndex={0}><table>
+      <thead><tr>{block.header.map((cell, column) => <th key={column} scope="col" style={{ textAlign: block.align[column] }}><Spans spans={cell} onOpen={onOpen} /></th>)}</tr></thead>
+      <tbody>{block.rows.map((row, at) => <tr key={at}>{row.map((cell, column) => <td key={column} style={{ textAlign: block.align[column] }}><Spans spans={cell} onOpen={onOpen} /></td>)}</tr>)}</tbody>
+    </table></div>;
     if (block.kind === 'list') {
+      // Only when every item is one, so a stray plain line keeps its bullet.
+      const named = block.items.every((item, at) => block.depths[at] || (item[0]?.bold && item.length > 1));
       const items = block.items.map((item, at) => {
+        const inset = block.depths[at] ? { marginLeft: block.depths[at] * 16 } : undefined;
         // "**Tea and a book:** the one on your nightstand" reads as a name and a line.
         const [first, ...rest] = item;
-        if (first?.bold && rest.length) {
+        if (named && first?.bold && rest.length) {
           const tail = [{ ...rest[0], text: rest[0].text.replace(/^\s*[:\-–—]\s*/, '') }, ...rest.slice(1)];
-          return <li key={at} className="reply-row"><strong>{first.text.replace(/[:\s]+$/, '')}</strong><span><Spans spans={tail} onOpen={onOpen} /></span></li>;
+          return <li key={at} className="reply-row" style={inset}><Spans spans={[{ ...first, text: first.text.replace(/[:\s]+$/, '') }]} onOpen={onOpen} /><span><Spans spans={tail} onOpen={onOpen} /></span></li>;
         }
-        return <li key={at}><Spans spans={item} onOpen={onOpen} /></li>;
+        return <li key={at} style={inset}><Spans spans={item} onOpen={onOpen} /></li>;
       });
       return block.ordered ? <ol key={index} start={block.start}>{items}</ol> : <ul key={index}>{items}</ul>;
     }
     return <p key={index}>{block.lines.map((line, at) => <span key={at}>{at > 0 && <br />}<Spans spans={line} onOpen={onOpen} /></span>)}</p>;
   })}</div>;
-}
-
-export function SystemCard({ snapshot }: { snapshot: Record<string, unknown> }) {
-  const memoryUsed = Number(snapshot.memoryUsed || 0), memoryTotal = Number(snapshot.memoryTotal || 1);
-  const cpu = Number(snapshot.cpuPercent || 0), memoryPercent = memoryUsed / memoryTotal * 100;
-  return <div className="system-card"><div className="system-card-heading"><Laptop size={13} /><span>{String(snapshot.os || 'Your Mac')}</span></div><div className="system-metrics"><div><span>CPU usage</span><strong>{cpu.toFixed(1)}<small>%</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, cpu))}%` }} /></div></div><div><span>Memory in use</span><strong>{(memoryUsed / 1073741824).toFixed(1)}<small> / {(memoryTotal / 1073741824).toFixed(0)} GB</small></strong><div className="metric-track"><i style={{ width: `${Math.min(100, Math.max(0, memoryPercent))}%` }} /></div></div></div></div>;
 }
 
 /** Receipt lines ("Milk · done", "• Dentist · now Mon 2 Nov 09:00") as their item and

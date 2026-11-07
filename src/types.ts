@@ -19,6 +19,8 @@ export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
+  /** Buntini chooses the brain until the user picks one. */
+  brainAuto: boolean;
   assistantName: string;
   userName: string;
   personality: string;
@@ -75,7 +77,11 @@ export interface Source { title: string; url: string; snippet: string; retrieved
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }
 export interface PriceOffer { product: string; url: string; price: string; currency: string; availability?: string; seller?: string; isAggregate: boolean; highPrice?: string }
 export interface CardField { label: string; value: string }
-export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'listing' | 'flight'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string }
+export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'route' | 'listing' | 'flight' | 'photos' | 'shortcut'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string; map?: CardMap; photos?: CardPhoto[] }
+/** A photo from the user's library: its id in Photos and its thumbnail in the cache. */
+export interface CardPhoto { id: string; thumb: string; taken: string; video: boolean }
+/** A map of the results, drawn on the Mac, and the Maps view it opens. */
+export interface CardMap { id: string; url: string }
 export interface FileHit { name: string; path: string; size: number; modifiedAt: string; excerpt?: string }
 export interface TaskRecord {
   id: string;
@@ -86,9 +92,11 @@ export interface TaskRecord {
   sources: Source[];
   files: FileHit[];
   research?: ResearchContent[];
+  researchReport?: { attempts: { route: string; status: string; detail: string }[] };
   prices?: PriceOffer[];
   cards?: ResultCard[];
   system?: Record<string, unknown>;
+  glance?: MacGlance;
   backend?: string;
   touched?: string[];
   /** 'online' when the model asked to look something up; the app then asks for approval. */
@@ -112,6 +120,8 @@ export interface Diagnostics {
   cloudKeys?: string[];
   cloudSpendUsd?: number;
   chatgptAccount?: string | null;
+  chatgptPlan?: 'none' | 'usable' | 'refused';
+  chatgptAlwaysAllow?: boolean;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 /** Something done on its own at a set time; the morning brief is the built-in one. */
@@ -129,6 +139,7 @@ export interface ConversationList { items: ConversationSummary[]; nextCursor: st
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
+export type AppConnection = 'ready' | 'noAccount' | 'denied';
 export interface Memory { id: number; fact: string; createdAt: string }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
 export interface TaskOutcome { id: string; kind: string; description: string; tool?: string | null; acceptedTools: string[]; resources: string[]; dependencies: string[]; status: string; requiredArguments: Record<string, unknown>; requiredFields: string[]; completedBy: string[]; sourceRevision: number }
@@ -143,3 +154,24 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
 export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
+
+export type MemoryState = 'easy' | 'tight' | 'struggling';
+export type GlanceMetric = 'cpu' | 'memory' | 'energy';
+export interface MacBattery { percent: number; charging: boolean; minutesLeft?: number; healthPercent?: number; cycles?: number }
+export interface GlanceApp { name: string; cpuPercent: number; memoryBytes: number; energy?: number; quittable: boolean }
+export interface GlanceSample { at: number; cpu: number; pressure: number; battery?: number }
+export interface MacGlance {
+  focus: 'overview' | 'slow' | 'storage' | 'battery';
+  summary: string;
+  verdict: { kind: string; title: string; actions: { kind: 'quit' | 'settings'; target: string; label: string }[] };
+  storage: { totalBytes: number; freeBytes: number; parts: { key: string; label: string; bytes: number }[] };
+  memory: { state: MemoryState; totalBytes: number; swapBytes: number };
+  battery?: MacBattery;
+  cpuPercent: number;
+  hot: boolean;
+  history: GlanceSample[];
+  day?: GlanceSample[];
+  metric: GlanceMetric;
+  apps: GlanceApp[];
+  capturedAt: string;
+}

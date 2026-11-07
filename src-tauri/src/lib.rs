@@ -5,6 +5,7 @@ mod advisor;
 mod approvals;
 mod apps;
 mod ax;
+mod brain;
 mod brief;
 mod browser_workspace;
 mod browser_session;
@@ -18,8 +19,11 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod helper;
+mod glance;
 mod cloud;
 mod completion;
+mod cart;
 mod control_actions;
 mod controller;
 mod conversation;
@@ -32,6 +36,7 @@ mod goals;
 mod indexer;
 mod integrations;
 mod local;
+mod local_setup;
 mod login;
 mod mac_settings;
 mod mcp;
@@ -42,6 +47,7 @@ mod monitor_actions;
 mod notifications;
 mod nudges;
 mod overlay;
+mod personal_answer;
 mod pet;
 mod planning;
 mod pricing;
@@ -80,11 +86,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
-
-#[cfg(debug_assertions)]
-pub fn run_public_browser_smoke() {
-    browser_workspace::run_public_smoke(app_context());
-}
 
 #[cfg(debug_assertions)]
 pub fn run_public_desktop_browser_smoke() {
@@ -150,15 +151,13 @@ pub fn run() {
                 .on_notice(move |text| {
                     let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
                 });
-            // Learn whether Apple Intelligence can run here before the first chat.
-            let probe = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                probe
-                    .state::<controller::AppState>()
-                    .models
-                    .probe_apple()
-                    .await;
-            });
+            // Learn whether Apple Intelligence can run here before the first chat, and
+            // keep checking while it may still become usable.
+            tauri::async_runtime::spawn(controller::watch_apple(app.handle().clone()));
+            // A local model setup left unfinished carries on where it stopped.
+            tauri::async_runtime::spawn(local_setup::resume(app.handle().clone()));
+            // One point a minute for the Mac at a glance card's trend.
+            glance::start(app.handle().clone());
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
             browser_workspace::set_app(app.handle().clone());
@@ -277,10 +276,18 @@ pub fn run() {
             apps::check_app,
             apps::accessibility,
             advisor::mac_profile,
+            local_setup::local_setup_plan,
+            local_setup::local_setup_status,
+            local_setup::local_setup_start,
+            local_setup::local_setup_cancel,
+            local_setup::local_setup_remove,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
+            helper::chatgpt_always_allow_off,
+            glance::mac_glance_now,
+            approvals::plan_ask_chatgpt,
             brief::morning_brief,
             brief::day_glance,
             brief::usual_requests,
@@ -306,6 +313,12 @@ pub fn run() {
             pet::save_pet_memory,
             pet::pet_purr_tap,
             pet::pet_sound_allowed,
+            controller::open_apple_settings,
+            integrations::maps::map_picture,
+            skills::photos::photo_thumbnail,
+            skills::photos::show_photo,
+            apps::new_shortcut,
+            apps::connect_app,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

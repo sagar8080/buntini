@@ -40,6 +40,9 @@ pub struct Workflow {
     pub steps: Vec<Step>,
     pub updated_at: String,
     pub error: Option<String>,
+    /// Started with the user at the window. Older saved tasks don't say, so count as not.
+    #[serde(default)]
+    pub attended: bool,
 }
 
 pub fn backend_key(settings: &Settings) -> String {
@@ -75,6 +78,7 @@ impl Workflow {
             steps: vec![],
             updated_at: now(),
             error: None,
+            attended: !crate::controller::headless(),
         }
     }
 

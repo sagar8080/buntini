@@ -1,12 +1,12 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord } from './types';
+import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
   assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
-  modelBackend: 'apple', pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
+  modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
 };
@@ -17,8 +17,15 @@ export async function bootstrap(): Promise<Bootstrap> {
   const threads = previewThreads();
   return {
     settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
-    diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30 },
+    diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30, chatgptPlan: previewChatGptPlan(), chatgptAlwaysAllow: localStorage.getItem('buntini-preview-chatgpt-always') === '1' },
   };
+}
+function previewChatGptPlan() {
+  return localStorage.getItem('buntini-preview-chatgpt') === 'usable' ? 'usable' as const : 'none' as const;
+}
+function previewSheet(question: string, tool: string): WebApproval {
+  const chatgpt = tool !== 'web_search';
+  return { id: 'preview-sheet', prompt: question, provider: tool, expiresAt: '', approved: false, tool, arguments: { query: question }, service: chatgpt ? 'ChatGPT' : 'Google in your browser', summary: chatgpt ? 'Only this question is sent.' : 'Search Google in a dedicated tab.', sends: [{ label: chatgpt ? 'Question' : 'Query', value: question }], host: chatgpt ? 'api.openai.com' : 'google.com', usesKey: false };
 }
 function previewOnboarded() {
   try { return localStorage.getItem('buntini-preview-onboarded') === '1' || previewTasks().length > 0; } catch { return true; }
@@ -39,8 +46,8 @@ function previewProfile(model?: string | null) {
 }
 // Preview-only stand-in for the apps on a Mac.
 function previewApps() {
-  const can: Record<string, string[]> = { mail: ['Read and search your recent email', 'Draft replies for you to send'], calendar: ['See what’s on any day', 'Add events you approve'], reminders: ['See your open reminders', 'Add reminders you approve'], notes: ['Find your notes', 'Write notes you approve'], music: ['See what’s playing', 'Play, pause and skip', 'Play songs and playlists from your library'], spotify: ['See what’s playing', 'Play, pause and skip', 'Open a search in Spotify'], shortcuts: ['Run your shortcuts after you approve'], safari: ['List and find your open tabs', 'Switch to a tab', 'Read the page you’re on'], chrome: ['List and find your open tabs', 'Switch to a tab'], brave: ['List and find your open tabs', 'Switch to a tab'], edge: ['List and find your open tabs', 'Switch to a tab'], arc: ['List and find your open tabs', 'Switch to a tab'] };
-  const names: Record<string, string> = { mail: 'Mail', calendar: 'Calendar', reminders: 'Reminders', notes: 'Notes', music: 'Music', spotify: 'Spotify', shortcuts: 'Shortcuts', safari: 'Safari', chrome: 'Google Chrome', brave: 'Brave Browser', edge: 'Microsoft Edge', arc: 'Arc' };
+  const can: Record<string, string[]> = { mail: ['Read and search your recent email', 'Draft replies for you to send'], calendar: ['See what’s on any day', 'Add events you approve'], reminders: ['See your open reminders', 'Add reminders you approve'], notes: ['Find your notes', 'Write notes you approve'], music: ['See what’s playing', 'Play, pause and skip', 'Play songs and playlists from your library'], spotify: ['See what’s playing', 'Play, pause and skip', 'Open a search in Spotify'], tv: ['See what’s playing', 'Play, pause and skip', 'Play shows and films from your library'], shortcuts: ['Run your shortcuts after you approve'], facetime: ['Start calls you approve'], photos: ['Find and show photos'], messages: ['Send texts you approve'], safari: ['List and find your open tabs', 'Switch to a tab', 'Read the page you’re on'], chrome: ['List and find your open tabs', 'Switch to a tab'], brave: ['List and find your open tabs', 'Switch to a tab'], edge: ['List and find your open tabs', 'Switch to a tab'], arc: ['List and find your open tabs', 'Switch to a tab'] };
+  const names: Record<string, string> = { mail: 'Mail', calendar: 'Calendar', reminders: 'Reminders', notes: 'Notes', music: 'Music', spotify: 'Spotify', tv: 'TV', shortcuts: 'Shortcuts', facetime: 'FaceTime', photos: 'Photos', messages: 'Messages', safari: 'Safari', chrome: 'Google Chrome', brave: 'Brave Browser', edge: 'Microsoft Edge', arc: 'Arc' };
   return { apps: Object.keys(names).map(id => ({ id, name: names[id], can: can[id], note: id === 'safari' ? 'Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.' : null, installed: !['spotify', 'edge', 'arc'].includes(id), allowed: false })), others: ['Figma', 'Slack', 'Visual Studio Code', 'Xcode'] };
 }
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
@@ -76,6 +83,7 @@ function previewList(state: PreviewThreads, cursor?: string | null, limit = 30):
   const items = sorted.slice(start, start + limit);
   return { items, nextCursor: start + limit < sorted.length ? items.at(-1)!.id : null };
 }
+let previewLocal: 'idle' | 'downloading' = 'idle';
 export async function saveSettings(settings: Settings): Promise<Settings> {
   if (desktop) return invoke('save_settings', { settings });
   localStorage.setItem('buntini-preview-settings', JSON.stringify(settings));
@@ -115,18 +123,34 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'pet_memory' || name === 'save_pet_memory') return previewPetMemory(name, args) as T;
     // The preview can purr out loud; it has no trackpad taps.
     if (name === 'pet_sound_allowed') return true as T;
-    if (name === 'pet_purr_tap') return undefined as T;
+    if (name === 'pet_purr_tap' || name === 'open_apple_settings') return undefined as T;
+    // Maps are drawn by the Apple helper, which only the desktop app has.
+    if (name === 'map_picture' || name === 'photo_thumbnail') return '' as T;
+    if (name === 'show_photo' || name === 'new_shortcut') return undefined as T;
     if (name === 'finish_onboarding') { localStorage.setItem('buntini-preview-onboarded', '1'); return undefined as T; }
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
+    // The preview has no download to run: it shows setup partway through.
+    if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;
+    if (name === 'local_setup_status') return { phase: previewLocal, doneBytes: previewLocal === 'idle' ? 0 : 2440000000, totalBytes: 6100000000, message: '' } as T;
+    if (name === 'local_setup_start') { previewLocal = 'downloading'; return undefined as T; }
+    if (name === 'local_setup_cancel' || name === 'local_setup_remove') { previewLocal = 'idle'; return undefined as T; }
+    // The sheets can be looked at; nothing is sent.
+    if (name === 'plan_ask_chatgpt') return previewSheet(args?.question as string, 'ask_chatgpt') as T;
+    if (name === 'plan_online_request') return previewSheet(args?.prompt as string, previewChatGptPlan() === 'usable' && !args?.webOnly ? 'chatgpt_search' : 'web_search') as T;
+    // The card's live updates can be looked at with a reading set by hand.
+    if (name === 'mac_glance_now') return JSON.parse(localStorage.getItem('buntini-preview-glance-now') || 'null') as T;
+    if (name === 'chatgpt_always_allow_off') { localStorage.removeItem('buntini-preview-chatgpt-always'); return undefined as T; }
     if (name === 'app_list') return previewApps() as T;
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;
     if (name === 'stop_recording') return 'What’s on my calendar today?' as T;
     if (name === 'accessibility') return false as T;
     if (name === 'check_app') return 'macOS will ask you once, the first time Buntini uses it.' as T;
+    // What connecting finds can be set by hand, to look at each row.
+    if (name === 'connect_app') return (localStorage.getItem(`buntini-preview-connect-${args?.id}`) || 'ready') as T;
     throw new Error('Open the desktop app to use local tools. Run npm run desktop in the project.');
   }
   return invoke<T>(name, args);

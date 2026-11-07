@@ -16,6 +16,7 @@ impl Store {
             .map_err(|e| e.to_string())?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;
           CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS mac_history (at INTEGER PRIMARY KEY, cpu REAL NOT NULL, pressure INTEGER NOT NULL, battery INTEGER);
           CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY);
           CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, fact TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -570,6 +571,7 @@ impl Store {
             "monitorIntents": rows("SELECT json_object('id',id,'tool',tool,'arguments',json(args),'monitorId',monitor_id) FROM monitor_intents")?,
             "activityLog": self.audit_entries()?,
             "cat": crate::pet::export(self)?,
+            "macHistory": crate::glance::export(self)?,
         }))
     }
     /// "Delete everything": every table back to empty, as on a fresh install.
@@ -580,9 +582,9 @@ impl Store {
         tx
             .execute_batch(
                 "DELETE FROM control_intents; DELETE FROM monitor_intents; DELETE FROM timers; DELETE FROM monitor_runs; DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM saved_searches; DELETE FROM price_watches; DELETE FROM routines; DELETE FROM goals;
-                 DELETE FROM mcp_servers; DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
+                 DELETE FROM roots; DELETE FROM search_cache; DELETE FROM usage_monthly; DELETE FROM usage_daily;
                  DELETE FROM search_usage; DELETE FROM preferences; DELETE FROM audit; DELETE FROM memories;
-                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent;",
+                 DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent; DELETE FROM mac_history;",
             )
             .map_err(|e| e.to_string())?;
         self.bump_index();
@@ -593,8 +595,13 @@ impl Store {
         self.set_onboarded(false)?;
         // The morning brief comes back as on a fresh install: there, but off.
         crate::routines::initialize(self)?;
+        // Everything else is erased whatever happens here. A tool whose token can't be removed
+        // keeps its row, so another try can find it.
+        let kept = crate::mcp::forget_secrets(&tool_servers);
+        for id in tool_servers.iter().filter(|id| !kept.iter().any(|(failed, _)| failed == *id)) {
+            tx.execute("DELETE FROM mcp_servers WHERE id=?1", [id]).map_err(|e| e.to_string())?;
+        }
         tx.commit().map_err(|e| e.to_string())?;
-        crate::mcp::forget_secrets(&tool_servers)?;
         // DELETE alone leaves private text in free pages and older WAL frames.
         // Rebuild the emptied database and truncate the WAL before reporting
         // successful erasure. This is logical removal, not disk sanitization.
@@ -610,13 +617,15 @@ impl Store {
         if busy != 0 {
             return Err("Data was removed, but a database reader prevented final cleanup. Close and reopen Buntini, then delete everything again.".into());
         }
-        Ok(())
+        kept.into_iter().next().map_or(Ok(()), |(_, error)| Err(error))
     }
     pub fn clear_history(&self) -> Result<(), String> {
         let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
         tx.execute_batch("DELETE FROM workflows; DELETE FROM tasks; DELETE FROM conversation_turns; DELETE FROM chat_threads; DELETE FROM file_index; DELETE FROM preferences WHERE key IN ('active-conversation','conversation-start','mail-listing');
             UPDATE routines SET data=json_remove(data,'$.lastTaskId','$.lastError');
             DELETE FROM nudges;
+            DELETE FROM search_cache;
+            UPDATE audit SET detail='';
             DELETE FROM goals WHERE json_extract(data,'$.state') IN ('done','ended');
             UPDATE goals SET data=json_remove(data,'$.lastTaskId','$.note');").map_err(|e| e.to_string())?;
         // Heads-ups name events, reminders and emails, so they go with the history. What

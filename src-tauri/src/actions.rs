@@ -1,8 +1,9 @@
 //! Things Buntini can do on this Mac, each only after the user approves the exact
 //! details: add a reminder or calendar event, write a note, open a Mail draft (never
 //! sent) or a threaded reply to an email (never sent), run one of the user's Shortcuts,
-//! open an app or an https link, and change an item the user already has: mark a
-//! reminder done, move or rename an event, or add text to the end of a note.
+//! open an app or an https link, send a text through Messages, start a FaceTime call,
+//! and change an item the user already has: mark a reminder done, move or rename an event, or add text to the
+//! end of a note.
 //!
 //! The model proposes; Rust validates and normalises the arguments, the app shows them
 //! in an editable sheet, and only an approved, re-validated request runs. AppleScript
@@ -16,12 +17,14 @@ use std::{
 };
 use tokio::process::Command;
 
-pub const TOOLS: [&str; 12] = [
+pub const TOOLS: [&str; 14] = [
     "add_reminder",
     "add_calendar_event",
     "create_note",
     "draft_email",
     "reply_email",
+    "send_message",
+    "start_call",
     "run_shortcut",
     "open_app",
     "open_link",
@@ -273,6 +276,8 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "add_calendar_event" => &["title", "start", "minutes", "location"],
         "create_note" => &["title", "body"],
         "draft_email" => &["to", "subject", "body"],
+        "send_message" => &["to", "name", "text"],
+        "start_call" => &["to", "name", "how"],
         "reply_email" => &["message", "message_id", "to", "subject", "body", "answers"],
         "run_shortcut" | "open_app" => &["name"],
         "open_link" => &["url"],
@@ -324,6 +329,23 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
             put("to", to);
             put("subject", text(args, "subject", 200, true)?);
             put("body", text(args, "body", 4000, true)?);
+        }
+        "send_message" => {
+            // Who it goes to may still be blank for the user to fill in the sheet; it never
+            // sends without one.
+            put("to", text(args, "to", 254, false)?.map(|to| message_handle(&to)).transpose()?);
+            put("name", text(args, "name", 100, false)?);
+            put("text", text(args, "text", 2000, true)?);
+        }
+        "start_call" => {
+            // As with a text, the sheet asks when nobody is named; it never calls without one.
+            put("to", text(args, "to", 254, false)?.map(|to| call_handle(&to)).transpose()?);
+            put("name", text(args, "name", 100, false)?);
+            let how = text(args, "how", 10, false)?.unwrap_or_else(|| "audio".into()).to_lowercase();
+            if !["audio", "video"].contains(&how.as_str()) {
+                return Err("A call is audio or video.".into());
+            }
+            put("how", Some(how));
         }
         "reply_email" => {
             // Which email this answers, and its sender, come from Mail, Buntini's own list
@@ -421,6 +443,28 @@ fn reminder_due(text: &str) -> Option<String> {
 }
 
 /// One plain address ("ana@example.com"), not a list, a display name or a placeholder.
+/// A phone number (kept as its digits, with a leading +) or an email address that
+/// Messages can send to.
+fn message_handle(handle: &str) -> Result<String, String> {
+    if plain_address(handle) {
+        return Ok(handle.to_string());
+    }
+    let digits = handle.chars().filter(char::is_ascii_digit).count();
+    if !handle.chars().all(|c| c.is_ascii_digit() || " +-().".contains(c)) || !(6..=15).contains(&digits) || handle.rfind('+').is_some_and(|at| at > 0) {
+        return Err("A text goes to a phone number or an email address.".into());
+    }
+    Ok(handle.chars().filter(|c| c.is_ascii_digit() || *c == '+').collect())
+}
+
+/// `message_handle`, limited to what can sit in a call link unchanged.
+fn call_handle(handle: &str) -> Result<String, String> {
+    let handle = message_handle(handle).map_err(|_| "A call goes to a phone number or an email address.".to_string())?;
+    if !handle.chars().all(|c| c.is_ascii_alphanumeric() || "@.+_-".contains(c)) {
+        return Err("A call goes to a phone number or an email address.".into());
+    }
+    Ok(handle)
+}
+
 fn plain_address(address: &str) -> bool {
     address
         .split_once('@')
@@ -434,6 +478,9 @@ fn plain_address(address: &str) -> bool {
 pub fn fixed_fields(tool: &str) -> &'static [&'static str] {
     match tool {
         "reply_email" => &["message", "message_id", "to", "answers"],
+        crate::glance::QUIT_TOOL => &["app"],
+        crate::cart::TOOL => &["url", "item", "browser", "price"],
+        crate::mac_settings::TOOL => &["setting"],
         _ => &[],
     }
 }
@@ -517,6 +564,24 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
                 field("to", "To", "text"),
                 field("subject", "Subject", "text"),
                 field("body", "Message", "long"),
+            ],
+            String::new(),
+        ),
+        "send_message" => (
+            named("Text", "name", "Send a text"),
+            vec![
+                field("name", "Who", "hidden"),
+                field("to", "To", "text"),
+                field("text", "Message", "long"),
+            ],
+            String::new(),
+        ),
+        "start_call" => (
+            named("Call", "name", "Start a call"),
+            vec![
+                field("name", "Who", "hidden"),
+                field("to", "To", "text"),
+                field("how", "Audio or video", "text"),
             ],
             String::new(),
         ),
@@ -1597,8 +1662,31 @@ async fn dispatched_receipt(
     }
 }
 
+/// The link macOS hands to FaceTime (video) or its audio-call app.
+fn call_link(how: &str, handle: &str) -> String {
+    format!("{}://{handle}", if how == "video" { "facetime" } else { "facetime-audio" })
+}
+
+/// Sends one text with iMessage, or SMS through the user's iPhone when that is all there
+/// is, and answers the participant it went to. Both values arrive as arguments.
+const MESSAGE: &str = r#"on run argv
+    set theHandle to item 1 of argv
+    set theText to item 2 of argv
+    tell application "Messages"
+        try
+            set theService to 1st account whose service type = iMessage
+        on error
+            set theService to 1st account whose service type = SMS
+        end try
+        set theBuddy to participant theHandle of theService
+        send theText to theBuddy
+        return id of theBuddy
+    end tell
+end run"#;
+
 /// Execute exactly one approved intent. The caller journals its idempotency key
 /// before calling this, and must preserve Unknown receipts across restarts.
+#[cfg(any(test, debug_assertions))]
 pub async fn execute(tool: &str, args: &Map<String, Value>) -> ActionReceipt {
     execute_with(tool, args, Path::new("")).await
 }
@@ -1614,6 +1702,12 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
     }
     if tool == "reply_email" && !args.contains_key("message") {
         return ActionReceipt::failure(tool, ActionOutcome::Failed, "Pick which email to answer first.");
+    }
+    if tool == "send_message" && !args.contains_key("to") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Add who the text goes to first.");
+    }
+    if tool == "start_call" && !args.contains_key("to") {
+        return ActionReceipt::failure(tool, ActionOutcome::Failed, "Add who to call first.");
     }
     if let Some(argv) = helper_arguments(tool, &args) {
         if !helper.is_file() {
@@ -1699,6 +1793,44 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
             )
             .await
         }
+        "send_message" => {
+            let mut command = osascript_command("AppleScript", MESSAGE);
+            command.arg(get("to")).arg(get("text"));
+            let who = match get("name") {
+                name if name.is_empty() => get("to"),
+                name => name,
+            };
+            match command_output(command, 30).await {
+                Ok(participant) if !participant.trim().is_empty() => ActionReceipt {
+                    outcome: ActionOutcome::Succeeded,
+                    tool: tool.into(),
+                    object_id: Some(participant.trim().to_string()),
+                    destination: Some("Messages".into()),
+                    message: format!("Messages took your text for {who}."),
+                    evidence: json!({"verification":"messages_accepted", "to":get("to")}),
+                    error: None,
+                },
+                Ok(_) => ActionReceipt::failure(tool, ActionOutcome::Unknown, "Messages didn’t say whether it took the text. Check Messages before sending it again."),
+                Err(failure) => ActionReceipt::failure(
+                    tool,
+                    if failure.started { ActionOutcome::Unknown } else { ActionOutcome::Failed },
+                    if failure.message.contains("-1743") {
+                        "macOS hasn’t allowed Buntini to use Messages. Allow it in System Settings → Privacy & Security → Automation.".into()
+                    } else {
+                        failure.message
+                    },
+                ),
+            }
+        }
+        "start_call" => {
+            let who = match get("name") {
+                name if name.is_empty() => get("to"),
+                name => name,
+            };
+            let mut command = Command::new("/usr/bin/open");
+            command.arg(call_link(&get("how"), &get("to")));
+            dispatched_receipt(tool, command, 15, format!("macOS accepted the request to call {who}. Whether they answer is up to them."), json!({"verification":"launch_services_accepted", "to":get("to"), "how":get("how")})).await
+        }
         "open_link" => {
             let url = get("url");
             let mut command = Command::new("/usr/bin/open");
@@ -1709,20 +1841,64 @@ pub async fn execute_with(tool: &str, args: &Map<String, Value>, helper: &Path) 
     }
 }
 
-/// Compatibility for direct callers that only display text. Durable task runners
-/// should retain the complete receipt from execute instead.
-pub async fn run(tool: &str, args: &Map<String, Value>) -> Result<String, String> {
-    let receipt = execute(tool, args).await;
-    if receipt.outcome == ActionOutcome::Succeeded {
-        Ok(receipt.message)
-    } else {
-        Err(receipt.message)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_needs_words_and_goes_to_a_number_or_address() {
+        let text = validate("send_message", &json!({"to":"+44 (0)7700 900-123","name":"Ana","text":" I'm late "})).unwrap();
+        assert_eq!(text["to"], "+4407700900123");
+        assert_eq!(text["text"], "I'm late");
+        assert_eq!(validate("send_message", &json!({"to":"ana@example.com","text":"Hi"})).unwrap()["to"], "ana@example.com");
+        assert!(!validate("send_message", &json!({"text":"Hi"})).unwrap().contains_key("to"), "the sheet asks for it");
+        for bad in [json!({"to":"Ana","text":"Hi"}), json!({"to":"12","text":"Hi"}), json!({"to":"44+7700900123","text":"Hi"}), json!({"to":"+447700900123"}), json!({"to":"+447700900123","text":"Hi","service":"SMS"})] {
+            assert!(validate("send_message", &bad).is_err(), "{bad}");
+        }
+        let (title, fields, _) = describe("send_message", &text);
+        assert_eq!(title, "Text Ana");
+        assert_eq!(fields.iter().map(|field| (field.key.as_str(), field.kind)).collect::<Vec<_>>(), [("name", "hidden"), ("to", "text"), ("text", "long")]);
+        assert!(MESSAGE.contains("item 1 of argv") && !MESSAGE.contains("{"), "values arrive as arguments");
+    }
+
+    /// Sends one real text, only to the number or address in BUNTINI_TEST_TEXT_TO.
+    #[tokio::test]
+    #[ignore = "sends a real text; run with BUNTINI_TEST_TEXT_TO=<your own number> and --ignored live_send_message"]
+    async fn live_send_message() {
+        let to = std::env::var("BUNTINI_TEST_TEXT_TO").expect("BUNTINI_TEST_TEXT_TO");
+        let receipt = execute("send_message", json!({"to":to,"name":"you","text":"Buntini test: this text came from Buntini."}).as_object().unwrap()).await;
+        println!("{receipt:?}");
+        assert_eq!(receipt.outcome, ActionOutcome::Succeeded, "{}", receipt.message);
+    }
+
+    #[test]
+    fn a_call_goes_to_one_number_or_address_as_audio_or_video() {
+        let call = validate("start_call", &json!({"to":"+1 (415) 555-0100","name":"Ana"})).unwrap();
+        assert_eq!((call["to"].as_str(), call["how"].as_str()), (Some("+14155550100"), Some("audio")));
+        assert_eq!(call_link("audio", "+14155550100"), "facetime-audio://+14155550100");
+        let video = validate("start_call", &json!({"to":"ana@example.com","how":"Video"})).unwrap();
+        assert_eq!(call_link(video["how"].as_str().unwrap(), video["to"].as_str().unwrap()), "facetime://ana@example.com");
+        for bad in [json!({"to":"Ana"}), json!({"to":"a/b@example.com"}), json!({"to":"a?x=1@example.com"}), json!({"to":"+14155550100","how":"carrier pigeon"}), json!({"to":"+14155550100","text":"Hi"})] {
+            assert!(validate("start_call", &bad).is_err(), "{bad}");
+        }
+        let (title, fields, _) = describe("start_call", &call);
+        assert_eq!(title, "Call Ana");
+        assert_eq!(fields.iter().map(|field| (field.key.as_str(), field.kind)).collect::<Vec<_>>(), [("name", "hidden"), ("to", "text"), ("how", "text")]);
+    }
+
+    #[tokio::test]
+    async fn a_call_with_nobody_to_call_never_runs() {
+        let receipt = execute("start_call", json!({"how":"video"}).as_object().unwrap()).await;
+        assert_eq!(receipt.outcome, ActionOutcome::Failed);
+        assert!(receipt.message.contains("who to call"));
+    }
+
+    #[tokio::test]
+    async fn a_text_with_nobody_to_send_to_never_runs() {
+        let receipt = execute("send_message", json!({"text":"Hi"}).as_object().unwrap()).await;
+        assert_eq!(receipt.outcome, ActionOutcome::Failed);
+        assert!(receipt.message.contains("who the text goes to"));
+    }
 
     #[test]
     fn proposals_are_checked_and_normalised() {

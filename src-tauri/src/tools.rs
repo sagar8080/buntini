@@ -13,6 +13,7 @@ pub const RESOURCES: &[&str] = &[
     "automation",
     "browser",
     "calendar",
+    "calls",
     "contacts",
     "currency",
     "files",
@@ -20,6 +21,7 @@ pub const RESOURCES: &[&str] = &[
     "knowledge",
     "mail",
     "memory",
+    "messages",
     "music",
     "notes",
     "places",
@@ -38,15 +40,6 @@ pub enum ToolOperation {
     Write,
     Mixed,
 }
-impl ToolOperation {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Mixed => "mixed",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,16 +48,6 @@ pub enum RetryPolicy {
     ReadRequiresNewApproval,
     ReconcileBeforeRetry,
     ByOperation,
-}
-impl RetryPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::RetryReadAfterFailure => "retry_read_after_failure",
-            Self::ReadRequiresNewApproval => "read_requires_new_approval",
-            Self::ReconcileBeforeRetry => "reconcile_before_retry",
-            Self::ByOperation => "by_operation",
-        }
-    }
 }
 
 /// Identifiers of existing execution/verification boundaries, not model claims.
@@ -85,25 +68,6 @@ pub enum SuccessVerifier {
     ControlReceipt,
     MonitorReceipt,
     BrowserSnapshotReceipt,
-}
-impl SuccessVerifier {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CalculationResult => "calculation_result",
-            Self::StructuredMathResult => "structured_math_result",
-            Self::ScopedFileResults => "scoped_file_results",
-            Self::ScopedMemoryResults => "scoped_memory_results",
-            Self::SystemSnapshot => "system_snapshot",
-            Self::OnlineTaskResult => "online_task_result",
-            Self::IntegrationResponse => "integration_response",
-            Self::AppReadResult => "app_read_result",
-            Self::VerifiedAppReceipt => "verified_app_receipt",
-            Self::DispatchReceipt => "dispatch_receipt",
-            Self::ControlReceipt => "control_receipt",
-            Self::MonitorReceipt => "monitor_receipt",
-            Self::BrowserSnapshotReceipt => "browser_snapshot_receipt",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,9 +93,6 @@ pub struct ToolContract {
     pub examples: Vec<ToolExample>,
 }
 impl ToolContract {
-    pub fn has_resource(&self, resource: &str) -> bool {
-        self.resources.iter().any(|item| item == resource)
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -517,7 +478,6 @@ mod tests {
             assert!(crate::apps::validate("find_contact", &example.arguments).is_ok());
         }
         // Looking someone up never offers a write or a recipient on its own.
-        assert!(!contract.has_resource("mail"));
     }
 
     #[test]
@@ -570,8 +530,6 @@ mod tests {
             contract("read_calendar").unwrap().operation,
             ToolOperation::Read
         );
-        assert!(contract("read_calendar").unwrap().has_resource("calendar"));
-        assert!(!contract("read_calendar").unwrap().has_resource("mail"));
         assert_eq!(
             contract("control_music").unwrap().operation,
             ToolOperation::Mixed
@@ -600,11 +558,6 @@ mod tests {
                 contract(name).unwrap().success_verifier,
                 SuccessVerifier::VerifiedAppReceipt
             );
-        }
-        for tool in all().values() {
-            assert!(!tool.contract.operation.as_str().is_empty());
-            assert!(!tool.contract.retry_policy.as_str().is_empty());
-            assert!(!tool.contract.success_verifier.as_str().is_empty());
         }
     }
 }

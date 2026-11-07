@@ -5,7 +5,8 @@
 // `error` always followed by `done`. The model only *proposes* a tool; the Rust
 // controller validates and runs it. Built for macOS 13 with Foundation Models and
 // Speech weak-linked, so older systems answer `pong{available:false}`. It also reads
-// Calendar, Reminders and Contacts, and the text of documents in shared folders.
+// Calendar, Reminders and Contacts, the text of documents in shared folders, photos in
+// the Photos library, and places and travel times from Apple Maps.
 import AppKit
 import AVFoundation
 import Compression
@@ -13,11 +14,24 @@ import Contacts
 import CoreFoundation
 import EventKit
 import Foundation
+import MapKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
 import PDFKit
+import Photos
 import Speech
+
+/// Only what someone just asked for may put a macOS permission prompt on screen. Background
+/// reads get "not authorized" until they've answered.
+let macOSMayBeAsked = ProcessInfo.processInfo.environment["BUNTINI_MAY_ASK"] == "1"
+
+/// Already granted in full, so asking again can't show anything. Write-only would prompt to upgrade.
+func hasFullAccess(_ type: EKEntityType) -> Bool {
+    let status = EKEventStore.authorizationStatus(for: type)
+    if #available(macOS 14.0, *) { return status == .fullAccess }
+    return status == .authorized
+}
 
 let output = FileHandle.standardOutput
 let writeLock = NSLock()
@@ -58,6 +72,28 @@ func researchSourceIDs(_ request: [String: Any]) throws -> [String]? {
         throw Failure(code: "invalid_request", message: "Research summaries require distinct verified source numbers and no executable tools.")
     }
     return ids
+}
+
+/// The numbers of the records a personal answer may be built from. Enabled only by the
+/// controller, with no tools: all the model can do here is point at records it was given.
+func recordPickIDs(_ request: [String: Any]) throws -> [String]? {
+    guard request["record_pick"] as? Bool == true else { return nil }
+    guard let ids = request["record_ids"] as? [String], !ids.isEmpty, ids.count <= 64,
+          Set(ids).count == ids.count,
+          ids.allSatisfy({ value in Int(value).map { $0 > 0 && String($0) == value } ?? (!value.isEmpty && value.allSatisfy { $0.isLowercase && $0.isLetter }) }),
+          (request["tools"] as? [Any] ?? []).isEmpty else {
+        throw Failure(code: "invalid_request", message: "Picking records needs distinct record numbers and no executable tools.")
+    }
+    return ids
+}
+
+func validatedRecordPick(_ json: String, ids: [String]) throws -> String {
+    func invalid() -> Failure { Failure(code: "invalid_record_pick", message: "Apple Intelligence returned a record that wasn't read.") }
+    guard let value = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+          let picked = value["ids"] as? [String], Set(picked).isSubset(of: Set(ids)) else { throw invalid() }
+    let encoded = try JSONSerialization.data(withJSONObject: ["ids": picked], options: [.sortedKeys])
+    guard let result = String(data: encoded, encoding: .utf8) else { throw invalid() }
+    return result
 }
 
 /// The controller supplies this distinction after actually reading the source.
@@ -500,7 +536,11 @@ func fail(_ id: String, _ failure: Failure) {
 func availability() -> (available: Bool, reason: String) {
     #if canImport(FoundationModels)
     if #available(macOS 26.0, *) {
-        switch SystemLanguageModel.default.availability {
+        let model = SystemLanguageModel.default
+        // Apple Intelligence can't be turned on while the Mac's language is one it doesn't
+        // speak yet (Hindi, say): that, not the switch, is what to tell the user.
+        if case .unavailable = model.availability, !model.supportsLocale(Locale.current) { return (false, "languageNotSupported") }
+        switch model.availability {
         case .available: return (true, "available")
         case .unavailable(.deviceNotEligible): return (false, "deviceNotEligible")
         case .unavailable(.appleIntelligenceNotEnabled): return (false, "appleIntelligenceNotEnabled")
@@ -680,6 +720,14 @@ func researchSchema(sourceIDs: [String], evidenceKind: String = "pages") throws 
 }
 
 @available(macOS 26.0, *)
+func recordPickSchema(ids: [String], most: Int?) throws -> GenerationSchema {
+    let record = DynamicGenerationSchema(name: "ChoiceNumber", description: "One of the numbers given", anyOf: ids)
+    return try GenerationSchema(root: DynamicGenerationSchema(name: "Choice", description: "The numbers that answer the question", properties: [
+        .init(name: "ids", description: most == 1 ? "The one number that answers the question" : "The numbers that answer the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: record, minimumElements: most == 1 ? 1 : 0, maximumElements: most ?? ids.count)),
+    ]), dependencies: [])
+}
+
+@available(macOS 26.0, *)
 func text(_ value: String) -> Transcript.Segment {
     .text(Transcript.TextSegment(content: value))
 }
@@ -761,6 +809,14 @@ func generate(_ id: String, _ request: [String: Any]) async {
     do {
         let transform = try contentTransform(request)
         let nextStep = request["next_step"] as? [String: Any]
+        if let recordIDs = try recordPickIDs(request) {
+            let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
+            emit(["id": id, "type": "model_call", "stage": "pick"])
+            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int), options: GenerationOptions(temperature: 0))
+            try requireCompleteGeneration(result.rawContent.isComplete)
+            emit(["id": id, "type": "done", "text": try validatedRecordPick(result.content.jsonString, ids: recordIDs), "finish_reason": "stop"])
+            return
+        }
         if let sourceIDs = try researchSourceIDs(request) {
             let evidenceKind = try researchEvidenceKind(request)
             let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
@@ -978,10 +1034,12 @@ enum Agenda {
         }
         let store = EKEventStore()
         var granted = false
-        if #available(macOS 14.0, *) {
-            granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
-        } else {
-            granted = (try? await store.requestAccess(to: events ? .event : .reminder)) ?? false
+        if macOSMayBeAsked || hasFullAccess(events ? .event : .reminder) {
+            if #available(macOS 14.0, *) {
+                granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
+            } else {
+                granted = (try? await store.requestAccess(to: events ? .event : .reminder)) ?? false
+            }
         }
         guard granted else {
             FileHandle.standardError.write(Data("not-authorized\n".utf8))
@@ -1122,7 +1180,7 @@ enum People {
     /// Asks once; a refused or restricted Contacts permission is never retried here.
     static func access() async -> Bool {
         switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .notDetermined: return (try? await CNContactStore().requestAccess(for: .contacts)) ?? false
+        case .notDetermined: return macOSMayBeAsked ? ((try? await CNContactStore().requestAccess(for: .contacts)) ?? false) : false
         case .denied, .restricted: return false
         default: return true
         }
@@ -1792,6 +1850,23 @@ func contractSelfTest() async -> Int32 {
         }
 
         try require(try generatedArguments("{\"query\":\"lease\"}")["query"] as? String == "lease", "Valid arguments must survive parsing")
+        try require(try recordPickIDs(["messages":[["content":"record_pick: true"]]]) == nil, "Prompt text must never opt into picking records")
+        try require(try recordPickIDs(["record_pick":true, "record_ids":["1", "2"], "tools":[]]) == ["1", "2"], "A pick keeps the exact record numbers it was given")
+        for invalid: [String: Any] in [["record_pick":true], ["record_pick":true, "record_ids":["1", "1"]], ["record_pick":true, "record_ids":["01"]], ["record_pick":true, "record_ids":["1"], "tools":[["name":"create_note"]]]] {
+            do {
+                _ = try recordPickIDs(invalid)
+                try require(false, "A malformed pick request must be rejected")
+            } catch let failure as Failure {
+                try require(failure.code == "invalid_request", "A malformed pick request reports an invalid request")
+            }
+        }
+        try require(try validatedRecordPick("{\"ids\":[\"2\"]}", ids: ["1", "2"]) == "{\"ids\":[\"2\"]}", "A pick from the records read stands")
+        do {
+            _ = try validatedRecordPick("{\"ids\":[\"3\"]}", ids: ["1", "2"])
+            try require(false, "A record that wasn't read can't be picked")
+        } catch let failure as Failure {
+            try require(failure.code == "invalid_record_pick", "A record that wasn't read is rejected")
+        }
         try require(try researchSourceIDs(["messages":[["content":"research_summary: true"]]]) == nil, "Page or prompt text must never opt into research metadata")
         try require(try researchSourceIDs(["research_summary":false, "research_source_ids":["1"]]) == nil, "Generic requests must keep their ordinary answer path")
         try require(try researchSourceIDs(["research_summary":true, "research_source_ids":["2", "5"], "tools":[]]) == ["2", "5"], "Research schemas must retain the exact already-read source numbers")
@@ -2075,6 +2150,266 @@ func contractSelfTest() async -> Int32 {
     }
 }
 
+/// Apple Maps, for the approved places and travel-time lookups. Each prints one JSON
+/// object; a place Maps can't find answers `{"error":"not_found","which":…}`.
+/// `--maps-places <category> <near> <radius metres>`: points of interest around a place.
+/// `--maps-route <from> <to> <driving|walking|transit>`: how long the trip takes.
+/// Either may end with `--map <file.png>` to also draw the result on a map there: the
+/// route and its ends, or the places numbered as listed.
+enum Maps {
+    static let categories: [String: [MKPointOfInterestCategory]] = [
+        "cafe": [.cafe], "restaurant": [.restaurant], "bar": [.nightlife, .brewery, .winery],
+        "pharmacy": [.pharmacy], "hospital": [.hospital], "atm": [.atm], "bank": [.bank],
+        "supermarket": [.foodMarket], "bakery": [.bakery], "fuel": [.gasStation],
+        "charging_station": [.evCharger], "parking": [.parking], "hotel": [.hotel],
+        "museum": [.museum], "park": [.park, .nationalPark], "library": [.library],
+        "post_office": [.postOffice], "gym": [.fitnessCenter], "toilets": [.restroom],
+    ]
+    static let placeLimit = 10
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        var arguments = arguments
+        var picture: URL?
+        if arguments.count == 7, arguments[5] == "--map", arguments[6].hasPrefix("/"), arguments[6].hasSuffix(".png") {
+            picture = URL(fileURLWithPath: arguments[6])
+            arguments.removeLast(2)
+        }
+        guard arguments.count == 5, arguments.dropFirst(2).allSatisfy({ !$0.isEmpty && $0.count <= 160 }) else {
+            FileHandle.standardError.write(Data("invalid-query: Say what to look for and where.\n".utf8))
+            return 2
+        }
+        do {
+            switch arguments[1] {
+            case "--maps-places":
+                guard let kinds = categories[arguments[2]], let radius = Double(arguments[4]), (100...5000).contains(radius) else { break }
+                emit(try await places(kinds, near: arguments[3], radius: radius, picture: picture))
+                return 0
+            case "--maps-route":
+                guard ["driving", "walking", "transit"].contains(arguments[4]) else { break }
+                emit(try await route(from: arguments[2], to: arguments[3], mode: arguments[4], picture: picture))
+                return 0
+            default: break
+            }
+            FileHandle.standardError.write(Data("invalid-query: That isn’t a Maps lookup Buntini knows.\n".utf8))
+            return 2
+        } catch {
+            FileHandle.standardError.write(Data("lookup-failed: Apple Maps didn’t answer. Check the internet connection.\n".utf8))
+            return 4
+        }
+    }
+
+    /// The best match for a place the user named, or nil when Maps knows none.
+    static func find(_ text: String) async throws -> MKMapItem? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = text
+        request.resultTypes = [.address, .pointOfInterest]
+        do { return try await MKLocalSearch(request: request).start().mapItems.first }
+        catch let error as MKError where error.code == .placemarkNotFound { return nil }
+    }
+
+    static func describe(_ item: MKMapItem) -> [String: Any] {
+        let coordinate = item.placemark.coordinate
+        return ["name": item.name ?? "", "address": item.placemark.title ?? "",
+                "latitude": coordinate.latitude, "longitude": coordinate.longitude]
+    }
+
+    static func places(_ kinds: [MKPointOfInterestCategory], near: String, radius: Double, picture: URL?) async throws -> [String: Any] {
+        guard let center = try await find(near) else { return ["error": "not_found", "which": "near"] }
+        let request = MKLocalPointsOfInterestRequest(center: center.placemark.coordinate, radius: radius)
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: kinds)
+        let found: [MKMapItem]
+        do { found = try await MKLocalSearch(request: request).start().mapItems }
+        catch let error as MKError where error.code == .placemarkNotFound { found = [] }
+        let origin = CLLocation(latitude: center.placemark.coordinate.latitude, longitude: center.placemark.coordinate.longitude)
+        let rows = found.map { item -> [String: Any] in
+            var row = describe(item)
+            row["phone"] = item.phoneNumber ?? ""
+            row["url"] = item.url?.absoluteString ?? ""
+            row["distance_m"] = (item.placemark.location?.distance(from: origin) ?? 0).rounded()
+            return row
+        }.filter { ($0["distance_m"] as? Double ?? 0) <= radius }
+         .sorted { ($0["distance_m"] as? Double ?? 0) < ($1["distance_m"] as? Double ?? 0) }
+        let shown = Array(rows.prefix(placeLimit))
+        var result: [String: Any] = ["center": describe(center), "places": shown, "total": rows.count]
+        if let picture, !shown.isEmpty {
+            let pins = shown.compactMap { row -> CLLocationCoordinate2D? in
+                guard let latitude = row["latitude"] as? Double, let longitude = row["longitude"] as? Double else { return nil }
+                return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            }
+            result["map"] = await draw(pins: pins.enumerated().map { (String($0.offset + 1), $0.element) }, line: nil, to: picture)
+        }
+        return result
+    }
+
+    static func route(from: String, to: String, mode: String, picture: URL?) async throws -> [String: Any] {
+        guard let start = try await find(from) else { return ["error": "not_found", "which": "from"] }
+        guard let end = try await find(to) else { return ["error": "not_found", "which": "to"] }
+        let request = MKDirections.Request()
+        request.source = start
+        request.destination = end
+        request.transportType = mode == "walking" ? .walking : mode == "transit" ? .transit : .automobile
+        var result: [String: Any] = ["from": describe(start), "to": describe(end), "mode": mode]
+        var line: MKPolyline?
+        do {
+            // Maps gives transit only as a travel time, not a full route.
+            if mode == "transit" {
+                let eta = try await MKDirections(request: request).calculateETA()
+                result["seconds"] = eta.expectedTravelTime.rounded()
+                result["distance_m"] = eta.distance.rounded()
+            } else {
+                guard let best = try await MKDirections(request: request).calculate().routes.first else { return result.merging(["error": "no_route"]) { $1 } }
+                result["seconds"] = best.expectedTravelTime.rounded()
+                result["distance_m"] = best.distance.rounded()
+                result["via"] = best.name
+                line = best.polyline
+            }
+        } catch let error as MKError where error.code == .directionsNotFound {
+            result["error"] = "no_route"
+        }
+        if let picture, result["error"] == nil {
+            result["map"] = await draw(pins: [("A", start.placemark.coordinate), ("B", end.placemark.coordinate)], line: line, to: picture)
+        }
+        return result
+    }
+
+    /// Draws a map around the pins (and the route line, when there is one), in the Mac's
+    /// light or dark look, and saves it as a PNG. Whether it was saved.
+    static func draw(pins: [(String, CLLocationCoordinate2D)], line: MKPolyline?, to file: URL) async -> Bool {
+        let size = CGSize(width: 560, height: 300)
+        var area = line?.boundingMapRect ?? .null
+        for (_, coordinate) in pins {
+            let point = MKMapPoint(coordinate)
+            area = area.union(MKMapRect(x: point.x, y: point.y, width: 0, height: 0))
+        }
+        // Room around the edges for the pins, at least a few streets' worth, in the picture's shape.
+        let least = 1500 * MKMapPointsPerMeterAtLatitude(pins.first?.1.latitude ?? 0)
+        var width = max(area.size.width * 1.3, least), height = max(area.size.height * 1.4, least)
+        if width / height < size.width / size.height { width = height * size.width / size.height } else { height = width * size.height / size.width }
+        let options = MKMapSnapshotter.Options()
+        options.mapRect = MKMapRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height)
+        options.size = size
+        let dark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        options.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        guard let shot = try? await MKMapSnapshotter(options: options).start() else { return false }
+        let scale: CGFloat = 2
+        guard let canvas = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: canvas) else { return false }
+        canvas.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: scale, y: scale)
+        shot.image.draw(in: CGRect(origin: .zero, size: size))
+        if let line, line.pointCount > 1 {
+            let path = NSBezierPath()
+            let points = line.points()
+            for index in 0..<line.pointCount {
+                // On the Mac a snapshot's points already count up from the bottom, as AppKit draws.
+                let at = shot.point(for: points[index].coordinate)
+                if index == 0 { path.move(to: at) } else { path.line(to: at) }
+            }
+            path.lineWidth = 7
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            NSColor.white.withAlphaComponent(0.85).setStroke()
+            path.stroke()
+            path.lineWidth = 4.5
+            NSColor.systemBlue.setStroke()
+            path.stroke()
+        }
+        // Drawn last to first, so the nearest place sits on top.
+        for (label, coordinate) in pins.reversed() {
+            let center = shot.point(for: coordinate)
+            let dot = NSBezierPath(ovalIn: CGRect(x: center.x - 11, y: center.y - 11, width: 22, height: 22))
+            NSColor.white.setFill()
+            dot.fill()
+            let inner = NSBezierPath(ovalIn: CGRect(x: center.x - 9, y: center.y - 9, width: 18, height: 18))
+            NSColor.systemRed.setFill()
+            inner.fill()
+            let text = NSAttributedString(string: label, attributes: [.font: NSFont.boldSystemFont(ofSize: 11), .foregroundColor: NSColor.white])
+            let bounds = text.size()
+            text.draw(at: CGPoint(x: center.x - bounds.width / 2, y: center.y - bounds.height / 2))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = canvas.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: file, options: .atomic)) != nil
+    }
+}
+
+/// `--find-photos <json>`: the newest photos matching `from`/`to` (local "YYYY-MM-DD",
+/// `to` exclusive), an `album` name, `favorites` and a `kind` (photo, video, screenshot or
+/// selfie), with small JPEG thumbnails saved in `thumbs` (a folder). Read-only; prints one
+/// JSON object, or `{"error":"denied"}` when Photos isn't allowed, or `{"error":"no_album"}`.
+enum Library {
+    static let limit = 12
+
+    static func run(_ arguments: [String]) async -> Int32 {
+        guard arguments.count == 3, arguments[1] == "--find-photos", arguments[2].utf8.count <= 4096,
+              let query = (try? JSONSerialization.jsonObject(with: Data(arguments[2].utf8))) as? [String: Any],
+              let thumbs = query["thumbs"] as? String, thumbs.hasPrefix("/") else {
+            FileHandle.standardError.write(Data("invalid-query: Say which photos to find.\n".utf8))
+            return 2
+        }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            emit(["error": "denied"])
+            return 0
+        }
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        var conditions: [NSPredicate] = []
+        let day = DateFormatter()
+        day.calendar = Calendar(identifier: .gregorian)
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        if let from = (query["from"] as? String).flatMap(day.date(from:)) { conditions.append(NSPredicate(format: "creationDate >= %@", from as NSDate)) }
+        if let to = (query["to"] as? String).flatMap(day.date(from:)) { conditions.append(NSPredicate(format: "creationDate < %@", to as NSDate)) }
+        if query["favorites"] as? Bool == true { conditions.append(NSPredicate(format: "favorite == YES")) }
+        var collection: PHAssetCollection?
+        switch query["kind"] as? String {
+        case "video": conditions.append(NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue))
+        case "screenshot": conditions.append(NSPredicate(format: "(mediaSubtypes & %d) != 0", PHAssetMediaSubtype.photoScreenshot.rawValue))
+        case "selfie": collection = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumSelfPortraits, options: nil).firstObject
+        case "photo": conditions.append(NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue))
+        default: break
+        }
+        if let album = (query["album"] as? String)?.trimmingCharacters(in: .whitespaces), !album.isEmpty {
+            var named: PHAssetCollection?
+            PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil).enumerateObjects { item, _, stop in
+                if item.localizedTitle?.compare(album, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame { named = item; stop.pointee = true }
+            }
+            guard let named else { emit(["error": "no_album"]); return 0 }
+            collection = named
+        }
+        options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: conditions)
+        let found = collection.map { PHAsset.fetchAssets(in: $0, options: options) } ?? PHAsset.fetchAssets(with: options)
+        let stamp = ISO8601DateFormatter()
+        stamp.timeZone = .current
+        var rows: [[String: Any]] = []
+        let request = PHImageRequestOptions()
+        request.isSynchronous = true
+        request.deliveryMode = .highQualityFormat
+        request.resizeMode = .fast
+        // Only what is already on this Mac: an iCloud original is never downloaded for this.
+        request.isNetworkAccessAllowed = false
+        found.enumerateObjects { asset, index, stop in
+            guard index < limit else { stop.pointee = true; return }
+            var thumb = ""
+            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 320, height: 320), contentMode: .aspectFill, options: request) { image, _ in
+                guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                      let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75]) else { return }
+                let name = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".jpg"
+                if (try? jpeg.write(to: URL(fileURLWithPath: thumbs).appendingPathComponent(name), options: .atomic)) != nil { thumb = name }
+            }
+            rows.append(["id": asset.localIdentifier, "taken": asset.creationDate.map { stamp.string(from: $0) } ?? "",
+                         "video": asset.mediaType == .video, "favorite": asset.isFavorite, "thumb": thumb])
+        }
+        emit(["total": found.count, "photos": rows])
+        return 0
+    }
+}
+
 @main
 struct Helper {
     static func main() async {
@@ -2085,6 +2420,12 @@ struct Helper {
         }
         if CommandLine.arguments.count > 1, ["--find-contact", "--contacts-access"].contains(CommandLine.arguments[1]) {
             exit(await People.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--find-photos" {
+            exit(await Library.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, ["--maps-places", "--maps-route"].contains(CommandLine.arguments[1]) {
+            exit(await Maps.run(CommandLine.arguments))
         }
         if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--extract-document" {
             exit(Documents.run(CommandLine.arguments))

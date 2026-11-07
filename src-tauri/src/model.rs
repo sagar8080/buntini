@@ -60,6 +60,20 @@ pub fn backend(settings: &Settings) -> Backend {
 }
 
 /// A local MLX model is usable when its folder holds a `config.json`.
+/// Whether the local model answers when ChatGPT can't. Only when the brain was left to
+/// Buntini, and never for a reply ChatGPT refused on its merits.
+fn local_stands_in(settings: &Settings, message: &str) -> bool {
+    settings.brain_auto
+        && settings.cloud_provider == "chatgpt"
+        && local_ready(settings)
+        && crate::chatgpt::unavailable(message)
+}
+
+/// Whether the local model these settings point at can start.
+pub fn local_ready(settings: &Settings) -> bool {
+    !settings.python_path.trim().is_empty() && mlx_model_present(&settings.model_path)
+}
+
 pub fn mlx_model_present(path: &str) -> bool {
     !path.is_empty() && Path::new(path).join("config.json").is_file()
 }
@@ -101,6 +115,11 @@ impl ModelHub {
     pub fn ready(&self, settings: &Settings) -> Result<(), String> {
         match backend(settings) {
             Backend::Mlx => {
+                if !local_ready(settings) {
+                    if let Some(line) = crate::local_setup::progress_line() {
+                        return Err(line);
+                    }
+                }
                 if settings.python_path.trim().is_empty() {
                     return Err("Choose the Python environment that has MLX installed in Settings → Brain to chat with a local model.".into());
                 }
@@ -118,14 +137,11 @@ impl ModelHub {
             Backend::Cloud => {
                 let provider = cloud::provider(&settings.cloud_provider)
                     .ok_or("Choose a cloud model in Settings → Brain.")?;
+                // Whether a sign-in may use the plan is checked when it's next used.
                 if provider.id == "chatgpt" {
-                    return match crate::chatgpt::load() {
-                        Some(session) if session.plan_allowed() => Ok(()),
-                        Some(_) => Err("Your ChatGPT sign-in doesn’t allow Buntini to use your plan. Sign in again and allow plan usage.".into()),
-                        None => Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()),
-                    };
+                    return if crate::chatgpt::saved() { Ok(()) } else { Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()) };
                 }
-                if crate::web::credential(provider.id).is_err() {
+                if !crate::web::credential_saved(provider.id) {
                     return Err(format!(
                         "Add your {} API key in Settings → Brain to use the cloud model.",
                         provider.name
@@ -207,7 +223,8 @@ impl ModelHub {
         }
         Ok(Launch {
             program: PathBuf::from(&settings.python_path),
-            args: vec!["-u".into(), self.mlx_script.to_string_lossy().into_owned()],
+            // -I: no user site-packages, environment or working folder on the import path.
+            args: vec!["-I".into(), "-u".into(), self.mlx_script.to_string_lossy().into_owned()],
             env: vec![("PYTHONUNBUFFERED", "1".into()), ("HF_HUB_OFFLINE", "1".into()), ("TRANSFORMERS_OFFLINE", "1".into())],
             key: format!("{}\u{0}{}", settings.python_path, settings.model_path),
             start_error: "Cannot start Python. Select your existing MLX virtual environment’s Python executable in Settings → Brain.".into(),
@@ -237,6 +254,11 @@ impl ModelHub {
         self.apple_state.lock().unwrap().clone()
     }
 
+    /// Replaces the helper's reason with the one to show (a download called stuck).
+    pub fn set_apple_status(&self, available: bool, reason: String) {
+        *self.apple_state.lock().unwrap() = Some((available, reason));
+    }
+
     /// Asks the helper whether Apple Intelligence can run here and remembers the answer,
     /// so the synchronous bootstrap and readiness checks can report it.
     pub async fn probe_apple(&self) -> (bool, String) {
@@ -259,7 +281,9 @@ impl ModelHub {
                         pong["reason"].as_str().unwrap_or("unavailable").to_string(),
                     )
                 }
-                Err(_) => (false, "unsupported".to_string()),
+                // Before macOS 26 there's no Apple Intelligence for it to reach.
+                Err(_) if sysinfo::System::os_version().unwrap_or_default().split('.').next().and_then(|major| major.parse::<u32>().ok()).is_some_and(|major| major < 26) => (false, "unsupported".to_string()),
+                Err(_) => (false, "helperFailed".to_string()),
             },
         };
         *self.apple_state.lock().unwrap() = Some(status.clone());
@@ -314,7 +338,7 @@ impl ModelHub {
         settings: &Settings,
         mut payload: Value,
         cancel: Arc<AtomicBool>,
-        on_token: F,
+        mut on_token: F,
     ) -> Result<Turn, String>
     where
         F: FnMut(String) + Send,
@@ -337,10 +361,45 @@ impl ModelHub {
                     .await
             }
             Backend::Cloud => {
-                self.cloud_generate(settings, payload, cancel, on_token)
-                    .await
+                // Nothing has been shown yet when ChatGPT turns a request away, so a local
+                // model can still answer that one, seeing no more than ChatGPT was given.
+                let mut said = false;
+                let first = self
+                    .cloud_generate(settings, payload.clone(), cancel.clone(), |token| {
+                        said = true;
+                        on_token(token);
+                    })
+                    .await;
+                match first {
+                    Err(message) if !said && local_stands_in(settings, &message) => {
+                        if let Some(notify) = self.notice.get() {
+                            notify("ChatGPT isn’t available right now, so this came from your Mac.".into());
+                        }
+                        payload["model_path"] = settings.model_path.clone().into();
+                        self.mlx
+                            .request(&self.mlx_launch(settings)?, payload, cancel, on_token)
+                            .await
+                    }
+                    other => other,
+                }
             }
         }
+    }
+
+    /// One question to ChatGPT beside whichever brain is in use. Unlike the main brain's
+    /// requests, nothing else answers it if ChatGPT can't: the user approved ChatGPT.
+    pub async fn ask_chatgpt<F>(
+        &self,
+        settings: &Settings,
+        payload: Value,
+        cancel: Arc<AtomicBool>,
+        on_token: F,
+    ) -> Result<Turn, String>
+    where
+        F: FnMut(String) + Send,
+    {
+        let settings = crate::brain::with(settings, crate::brain::Brain::ChatGpt);
+        self.cloud_generate(&settings, payload, cancel, on_token).await
     }
 
     /// One cloud call: reserve the estimated cost, stream, then settle with real usage.
@@ -361,6 +420,14 @@ impl ModelHub {
         // A ChatGPT plan isn't billed per token, so there's nothing to reserve.
         if provider.id == "chatgpt" {
             let token = crate::chatgpt::access_token().await?;
+            if let Some(store) = self.ledger.get() {
+                let unnoted = crate::chatgpt::account_unnoted(&store.lock().unwrap());
+                if unnoted {
+                    if let Some(session) = crate::chatgpt::load() {
+                        let _ = crate::chatgpt::note(&store.lock().unwrap(), &session);
+                    }
+                }
+            }
             let model = match settings.cloud_model.trim() {
                 "" => crate::chatgpt::models()
                     .await?
@@ -374,6 +441,12 @@ impl ModelHub {
             {
                 Ok((turn, _)) => Ok(turn),
                 Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => {
+                    // This account can't use its plan here: the rule moves on from ChatGPT.
+                    if message == crate::chatgpt::PLAN_NOT_ELIGIBLE {
+                        if let Some(store) = self.ledger.get() {
+                            let _ = store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "1");
+                        }
+                    }
                     Err(message)
                 }
             };
@@ -443,15 +516,38 @@ impl ModelHub {
     }
 }
 
+/// How long Apple's model may stay "not ready" before Buntini stops calling it a download.
+pub const STUCK_AFTER_MINUTES: i64 = 15;
+
+/// The reason to show for Apple's `reason` now, and when the model was first seen not
+/// ready (kept across launches, None once it isn't). A model still not ready after
+/// STUCK_AFTER_MINUTES is "modelStuck": on a Mac whose System Settings shows only Siri,
+/// macOS never finishes it, and the user needs to know what to check.
+pub fn waiting(reason: &str, since: Option<chrono::DateTime<chrono::Utc>>, now: chrono::DateTime<chrono::Utc>) -> (String, Option<chrono::DateTime<chrono::Utc>>) {
+    if reason != "modelNotReady" {
+        return (reason.into(), None);
+    }
+    let since = since.filter(|at| *at <= now).unwrap_or(now);
+    let shown = if now - since >= chrono::Duration::minutes(STUCK_AFTER_MINUTES) { "modelStuck" } else { "modelNotReady" };
+    (shown.into(), Some(since))
+}
+
+/// Whether Apple Intelligence may still become usable here, so it's worth checking again.
+pub fn apple_may_change(reason: &str) -> bool {
+    !["available", "deviceNotEligible", "unsupported", "missing"].contains(&reason)
+}
+
 /// What to tell the user when Apple Intelligence can't run.
 pub fn apple_advice(reason: &str) -> String {
     match reason {
-        "deviceNotEligible" => "This Mac doesn’t support Apple Intelligence. Choose a local or cloud model in Settings → Brain.",
+        "deviceNotEligible" => "This Mac doesn’t support Apple Intelligence. Sign in with ChatGPT or choose another brain in Settings → Brain.",
         "appleIntelligenceNotEnabled" => "Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri, then try again.",
-        "modelNotReady" => "Apple Intelligence is still downloading its model. Try again in a few minutes.",
-        "unsupported" => "Apple Intelligence needs macOS 26 on an Apple silicon Mac. Choose a local or cloud model in Settings → Brain.",
+        "modelNotReady" => "Apple Intelligence is still downloading its model. Try again in a few minutes, or sign in with ChatGPT in Settings → Brain meanwhile.",
+        "modelStuck" => "Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, sign in with ChatGPT or choose another brain in Settings → Brain.",
+        "languageNotSupported" => "Apple Intelligence doesn’t speak this Mac’s language yet. In System Settings → General → Language & Region, put a supported language such as English (India) first, then turn on Apple Intelligence.",
+        "unsupported" => "Apple Intelligence needs macOS 26 on an Apple silicon Mac. Sign in with ChatGPT or choose another brain in Settings → Brain.",
         "missing" => "The Apple Intelligence helper is missing from this installation. Reinstall Buntini or choose another brain in Settings.",
-        _ => "Apple Intelligence isn’t available right now. Choose a local or cloud model in Settings → Brain.",
+        _ => "Apple Intelligence isn’t available right now. Sign in with ChatGPT or choose another brain in Settings → Brain.",
     }
     .into()
 }
@@ -468,6 +564,27 @@ mod tests {
             whisper_model: String::new(),
             ..Settings::default()
         }
+    }
+
+    #[test]
+    fn a_local_model_stands_in_only_for_an_unavailable_chatgpt_when_left_to_buntini() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), "{}").unwrap();
+        let ready = Settings {
+            brain_auto: true,
+            cloud_provider: "chatgpt".into(),
+            python_path: "/python".into(),
+            model_path: dir.path().to_string_lossy().into(),
+            ..settings("cloud")
+        };
+        let limit = crate::chatgpt::plan_error("subscription_sharing_usage_limit_exceeded", "").unwrap();
+        for message in [limit.as_str(), crate::chatgpt::PLAN_NOT_ELIGIBLE, "Couldn’t reach ChatGPT. Check your internet connection.", "The connection to ChatGPT failed."] {
+            assert!(local_stands_in(&ready, message), "{message}");
+        }
+        assert!(!local_stands_in(&ready, "ChatGPT declined to answer."), "not for a refusal");
+        assert!(!local_stands_in(&Settings { brain_auto: false, ..ready.clone() }, &limit), "a brain the user picked stays");
+        assert!(!local_stands_in(&Settings { cloud_provider: "openai".into(), ..ready.clone() }, &limit));
+        assert!(!local_stands_in(&Settings { model_path: String::new(), ..ready }, &limit), "nothing to stand in");
     }
 
     #[tokio::test]
@@ -523,6 +640,20 @@ mod tests {
             hub.budget(&settings("apple")).history_tokens
                 < hub.budget(&settings("mlx")).history_tokens
         );
+    }
+
+    #[test]
+    fn a_download_that_never_finishes_is_called_stuck_after_a_while() {
+        let at = |minutes: i64| chrono::DateTime::parse_from_rfc3339("2026-11-03T12:00:00Z").unwrap().to_utc() + chrono::Duration::minutes(minutes);
+        assert_eq!(waiting("modelNotReady", None, at(0)), ("modelNotReady".into(), Some(at(0))));
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(14)).0, "modelNotReady");
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(15)), ("modelStuck".into(), Some(at(0))));
+        assert_eq!(waiting("modelNotReady", Some(at(0)), at(60 * 24)).0, "modelStuck", "remembered across launches");
+        assert_eq!(waiting("available", Some(at(0)), at(30)), ("available".into(), None), "ready: the wait is over");
+        assert_eq!(waiting("modelNotReady", Some(at(90)), at(0)).1, Some(at(0)), "a clock set back starts the wait again");
+        assert!(apple_may_change("modelNotReady") && apple_may_change("appleIntelligenceNotEnabled") && apple_may_change("modelStuck"));
+        assert!(!apple_may_change("available") && !apple_may_change("deviceNotEligible") && !apple_may_change("unsupported"));
+        assert!(apple_advice("modelStuck").contains("only Siri"));
     }
 
     #[test]

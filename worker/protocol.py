@@ -282,6 +282,59 @@ def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, An
     return validate_tool_call({"name": name, "arguments": arguments}, allowed)
 
 
+# Text that could pose as a turn of the conversation: <| whatever follows, a word closed by
+# |>, and the bracket-style markers some models use. A bare |> is ordinary code.
+TEMPLATE_MARKERS = r"<\||<[^<>\s]{0,40}\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
+
+
+def _disarmed(marker: str) -> str:
+    if marker.startswith("<"):
+        return "\u2039" + marker[1:]
+    if marker.endswith(">"):
+        return marker[:-1] + "\u203a"
+    return marker[0] + "\u200b" + marker[1:]
+
+
+def template_cleaner(tokenizer: Any):
+    """Text from outside can't become a turn: only the template adds real markers. Markers
+    are disarmed in place, never deleted, because deleting one can join the text around it
+    into another. Values are cleaned; names and keys are Buntini's own."""
+    named = {token for token in (getattr(tokenizer, "all_special_tokens", None) or []) if isinstance(token, str) and token}
+    added = getattr(tokenizer, "get_added_vocab", None)
+    if callable(added):
+        try:
+            # Some models list ordinary HTML such as <b> as added tokens; those aren't turns.
+            named.update(token for token in added() if token.startswith("<") and token.endswith(">") and ("|" in token or "turn" in token))
+        except Exception:
+            pass
+    pattern = re.compile("|".join([*(re.escape(token) for token in sorted(named, key=len, reverse=True)), TEMPLATE_MARKERS]))
+    # Tokens with no brackets, like [INST], go first: another marker's match could hide them.
+    bare = [token for token in sorted(named, key=len, reverse=True) if not token.startswith("<")]
+    bare_pattern = re.compile("|".join(re.escape(token) for token in bare)) if bare else None
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, str):
+            text = bare_pattern.sub(lambda found: _disarmed(found.group(0)), value) if bare_pattern else value
+            return pattern.sub(lambda found: _disarmed(found.group(0)), text)
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
+        return value
+
+    return clean
+
+
+def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> list[dict[str, Any]]:
+    """Every message is covered, since the system message and tool calls carry values bound
+    from emails and pages."""
+    clean = template_cleaner(tokenizer)
+    return [
+        {**message, **{key: clean(message[key]) for key in ("content", "tool_calls") if key in message}}
+        for message in messages
+    ]
+
+
 def adapt_messages(messages: list[dict[str, Any]], tools: list[dict[str, Any]], native_tools: bool) -> list[dict[str, Any]]:
     """Fit the conversation to the model's chat template.
 

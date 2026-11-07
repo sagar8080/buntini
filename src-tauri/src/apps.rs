@@ -30,14 +30,18 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 14] = [
+pub const APPS: [App; 18] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
     App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
+    App { id: "messages", name: "Messages", can: &["Send texts"], tools: &["send_message"], share: None, note: None },
+    App { id: "facetime", name: "FaceTime", can: &["Start calls"], tools: &["start_call"], share: None, note: None },
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    App { id: "photos", name: "Photos", can: &["Find and show photos"], tools: &[], share: Some(Share::Photos), note: None },
     App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
     App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
     App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
@@ -48,6 +52,27 @@ pub const APPS: [App; 14] = [
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
+
+/// Apps whose playback `control_music` reads and changes.
+pub const PLAYERS: [&str; 3] = ["music", "spotify", "tv"];
+
+/// A player's name, and the script that reads and changes it.
+fn player_script(app: &str) -> (&'static str, &'static str) {
+    match app {
+        "spotify" => ("Spotify", SPOTIFY),
+        "tv" => ("TV", TV),
+        _ => ("Music", MUSIC),
+    }
+}
+
+/// "from Severance, Season 1, Episode 2" for a show; nothing for a film.
+fn from_show(show: &str, episode: &str) -> String {
+    match (show.trim(), episode.trim()) {
+        ("", _) => String::new(),
+        (show, "") => format!(" from {show}"),
+        (show, episode) => format!(" from {show}, {episode}"),
+    }
+}
 
 /// App read/control schemas. The workflow controller requires durable approval
 /// for playback mutations and tab switching; now_playing remains a read.
@@ -89,9 +114,10 @@ pub fn for_call(tool: &str, args: &Map<String, Value>) -> Option<&'static App> {
     }
 }
 
-/// Which music app a playback call means. Saying "Spotify" or "Apple Music" decides it;
-/// otherwise the model's choice if it made one; otherwise the allowed app that's open,
-/// preferring Spotify. Small models often leave the app out or pick the wrong one.
+/// Which player a playback call means. Saying "Spotify", "Apple Music" or the TV, a
+/// show, an episode or a film decides it; otherwise the model's choice if it made one;
+/// otherwise the allowed app that's open, preferring Spotify, then TV when it alone is
+/// open. Small models often leave the app out or pick the wrong one.
 pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'static str {
     let said = prompt.to_lowercase();
     if said.contains("spotify") {
@@ -101,8 +127,14 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
         return "music";
     }
     let usable = |id: &str| app(id).is_some_and(|app| allowed(settings, id) && installed(app));
+    let words: Vec<&str> = said.split(|c: char| !c.is_alphanumeric()).collect();
+    let watching = ["tv", "show", "episode", "episodes", "movie", "film", "series", "watching"];
+    if usable("tv") && words.iter().any(|word| watching.contains(word)) {
+        return "tv";
+    }
     match chosen {
         Some("spotify") if usable("spotify") => return "spotify",
+        Some("tv") if usable("tv") => return "tv",
         Some("music") if usable("music") && !usable("spotify") => return "music",
         _ => {}
     }
@@ -112,6 +144,9 @@ pub fn player(settings: &Settings, prompt: &str, chosen: Option<&str>) -> &'stat
             .status()
             .is_ok_and(|status| status.success())
     };
+    if usable("tv") && running("TV") && !running("Music") && !running("Spotify") {
+        return "tv";
+    }
     match (usable("spotify"), usable("music")) {
         (true, true) if running("Music") && !running("Spotify") => "music",
         (false, true) => "music",
@@ -193,7 +228,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     let args = args.as_object().ok_or("Arguments must be an object.")?;
     let allowed: &[&str] = match tool {
         "read_mail" => &["query", "unread", "limit"],
-        "read_calendar" => &["day"],
+        "read_calendar" => &["day", "until"],
         "read_reminders" => &[],
         "find_notes" => &["query"],
         "find_contact" => &["name"],
@@ -239,6 +274,13 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
                 return Err("Pick a day within a year of today.".into());
             }
             out.insert("day".into(), day.format("%Y-%m-%d").to_string().into());
+            if let Some(until) = text(args, "until", 10)? {
+                let until = chrono::NaiveDate::parse_from_str(&until, "%Y-%m-%d").map_err(|_| "Use a day like 2026-10-23.")?;
+                if until < day || (until - today).num_days() > 366 {
+                    return Err("Pick days within a year of today.".into());
+                }
+                out.insert("until".into(), until.format("%Y-%m-%d").to_string().into());
+            }
         }
         "find_notes" => {
             out.insert(
@@ -264,8 +306,8 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
         "control_music" => {
             let selected = text(args, "app", 10)?;
             let app = selected.as_deref().unwrap_or("music");
-            if !["music", "spotify"].contains(&app) {
-                return Err("Music controls work with Music or Spotify.".into());
+            if !PLAYERS.contains(&app) {
+                return Err("Playback works with Music, Spotify or TV.".into());
             }
             let action = args
                 .get("action")
@@ -452,6 +494,63 @@ const MUSIC: &str = r#"on run argv
       if found is {} then return "notfound"
       play item 1 of found
       return "track" & tab & my clean(name of item 1 of found) & tab & my clean(artist of item 1 of found)
+    end if
+  end tell
+  return "ok"
+end run
+"#;
+// argv: action, query. Shows answer their name, the show and "Season 1, Episode 2" where
+// Music answers a track, its artist and album; playing by name searches the TV library.
+const TV: &str = r#"on run argv
+  set act to item 1 of argv
+  set q to item 2 of argv
+  if (act is "now_playing" or act is "read_evidence") and application "TV" is not running then return "closed"
+  tell application "TV"
+    if act is "now_playing" or act is "read_evidence" then
+      if player state is stopped then return "stopped"
+      set trackId to ""
+      set showName to ""
+      set episodeName to ""
+      if act is "read_evidence" then
+        try
+          set trackId to persistent ID of current track
+        end try
+      end if
+      try
+        set showName to show of current track
+        set seasonNumber to season number of current track
+        set episodeNumber to episode number of current track
+        if seasonNumber > 0 and episodeNumber > 0 then set episodeName to "Season " & seasonNumber & ", Episode " & episodeNumber
+      end try
+      -- Something streaming may not be a track TV can describe; its stream title is.
+      set trackName to ""
+      try
+        set trackName to name of current track
+      on error
+        try
+          set trackName to current stream title
+        end try
+      end try
+      set result to (player state as text) & tab & my clean(trackName) & tab & my clean(showName) & tab & my clean(episodeName)
+      if act is "read_evidence" then return result & tab & my clean(trackId) & tab & "__buntini_end__"
+      return result
+    else if act is "pause" then
+      pause
+    else if act is "next" then
+      next track
+    else if act is "previous" then
+      previous track
+    else if q is "" then
+      play
+    else
+      set found to (search library playlist 1 for q)
+      if found is {} then return "notfound"
+      play item 1 of found
+      set showName to ""
+      try
+        set showName to show of item 1 of found
+      end try
+      return "track" & tab & my clean(name of item 1 of found) & tab & my clean(showName)
     end if
   end tell
   return "ok"
@@ -785,6 +884,11 @@ const NOT_RUNNING_SENTINEL: &str = "__buntini_not_running__";
 pub const NOT_RUNNING: &str = "isn’t open, so I left it closed.";
 
 /// Whether a read failed only because its app was closed and was left that way.
+/// A background read that stopped short of an app without trying: closed, or not allowed yet.
+pub fn left_alone(error: &str) -> bool {
+    is_not_running(error) || error.ends_with(NOT_ALLOWED_YET)
+}
+
 pub fn is_not_running(error: &str) -> bool {
     error.ends_with(NOT_RUNNING)
 }
@@ -805,6 +909,100 @@ fn guarded(source: &'static str, app: &str, launch: Launch) -> std::borrow::Cow<
 }
 
 /// Runs a script that `guarded` may stop early, as an `Err` naming the closed app.
+const NOT_ALLOWED_YET: &str = "hasn’t been allowed to answer Buntini yet.";
+
+/// Whether macOS already lets Buntini script an app, asked without showing anything.
+mod automation {
+    /// macOS's own answer: allowed, not allowed, or it would have to ask.
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub enum Consent {
+        Allowed,
+        WouldAsk,
+        Denied,
+        NotRunning,
+    }
+
+    pub(super) fn consent_from(status: i32) -> Consent {
+        match status {
+            0 => Consent::Allowed,
+            -1744 => Consent::WouldAsk,
+            -1743 => Consent::Denied,
+            -600 => Consent::NotRunning,
+            // Anything unexpected might mean a prompt, so it counts as one.
+            _ => Consent::WouldAsk,
+        }
+    }
+
+    fn bundle(app: &str) -> Option<&'static str> {
+        match app {
+            "Mail" => Some("com.apple.mail"),
+            "Notes" => Some("com.apple.Notes"),
+            "Calendar" => Some("com.apple.iCal"),
+            "Reminders" => Some("com.apple.reminders"),
+            "Contacts" => Some("com.apple.AddressBook"),
+            "Music" => Some("com.apple.Music"),
+            "TV" => Some("com.apple.TV"),
+            "Spotify" => Some("com.spotify.client"),
+            "Google Chrome" | "Chrome" => Some("com.google.Chrome"),
+            "Brave Browser" | "Brave" => Some("com.brave.Browser"),
+            "Microsoft Edge" | "Edge" => Some("com.microsoft.edgemac"),
+            "Arc" => Some("company.thebrowser.Browser"),
+            "Safari" => Some("com.apple.Safari"),
+            _ => None,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn consent(bundle: &str) -> Consent {
+        use std::ffi::c_void;
+        // Carbon's own layout: two-byte packing, so the handle sits right after the type.
+        #[repr(C, packed(2))]
+        struct AEDesc {
+            descriptor_type: u32,
+            data_handle: *mut c_void,
+        }
+        #[link(name = "CoreServices", kind = "framework")]
+        extern "C" {
+            fn AECreateDesc(kind: u32, data: *const c_void, size: isize, result: *mut AEDesc) -> i16;
+            fn AEDisposeDesc(desc: *mut AEDesc) -> i16;
+            fn AEDeterminePermissionToAutomateTarget(target: *const AEDesc, class: u32, id: u32, ask: u8) -> i32;
+        }
+        const BUNDLE_ID: u32 = u32::from_be_bytes(*b"bund");
+        const ANY: u32 = u32::from_be_bytes(*b"****");
+        let mut target = AEDesc { descriptor_type: 0, data_handle: std::ptr::null_mut() };
+        unsafe {
+            if AECreateDesc(BUNDLE_ID, bundle.as_ptr().cast(), bundle.len() as isize, &mut target) != 0 {
+                return Consent::WouldAsk;
+            }
+            let status = AEDeterminePermissionToAutomateTarget(&target, ANY, ANY, 0);
+            AEDisposeDesc(&mut target);
+            consent_from(status)
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn consent(_: &str) -> Consent {
+        Consent::NotRunning
+    }
+
+    /// True when scripting this app can't raise a prompt. A closed app is the script's own
+    /// guard to handle. An app it can't name might prompt, so it doesn't pass.
+    pub fn may_ask_silently(app: &str) -> bool {
+        bundle(app).is_some_and(|bundle| matches!(consent(bundle), Consent::Allowed | Consent::NotRunning))
+    }
+}
+
+/// Stops a read nobody is here for that macOS would have to ask about. Its answer can be
+/// slow, and that mustn't hold up the app.
+async fn no_prompt_unasked(app: &str) -> Result<(), String> {
+    let name = app.to_string();
+    let asked = tokio::task::spawn_blocking(move || automation::may_ask_silently(&name));
+    match tokio::time::timeout(std::time::Duration::from_secs(5), asked).await {
+        Ok(Ok(true)) => Ok(()),
+        _ => Err(format!("{app} {NOT_ALLOWED_YET}")),
+    }
+}
+
 async fn osascript_if(
     source: &'static str,
     app: &str,
@@ -812,6 +1010,11 @@ async fn osascript_if(
     argv: &[String],
     seconds: u64,
 ) -> Result<String, String> {
+    // A read nobody asked for never puts "Buntini wants to control Mail" on screen. The
+    // first request that needs it asks instead.
+    if matches!(launch, Launch::IfRunning) {
+        no_prompt_unasked(app).await?;
+    }
     let output = osascript(&guarded(source, app, launch), argv, seconds).await?;
     if output.trim() == NOT_RUNNING_SENTINEL {
         return Err(format!("{app} {NOT_RUNNING}"));
@@ -920,6 +1123,24 @@ async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Age
     parse_helper_rows(&helper_output(helper, args).await?)
 }
 
+tokio::task_local! {
+    /// Set for what a person just asked for. Anything else that reads Calendar, Reminders or
+    /// Contacts never raises macOS's prompt: it gets "not authorized" until they've answered.
+    static MAY_ASK: ();
+}
+
+/// Runs what someone is here for and asked for, which may ask macOS for access.
+pub async fn asked_for<T>(work: impl std::future::Future<Output = T>) -> T {
+    MAY_ASK.scope((), work).await
+}
+
+/// Tells the helper whether it may ask macOS for access.
+fn set_asking(command: &mut Command) {
+    if MAY_ASK.try_with(|_| ()).is_ok() && !crate::controller::headless() {
+        command.env("BUNTINI_MAY_ASK", "1");
+    }
+}
+
 async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
     if !helper.is_file() {
         return Err(
@@ -928,6 +1149,7 @@ async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
         );
     }
     let mut command = Command::new(helper);
+    set_asking(&mut command);
     command.args(args);
     // The first use waits for the macOS permission prompt, so allow time to answer it.
     let output = crate::actions::output(command, 90).await.map_err(|error| {
@@ -1155,6 +1377,7 @@ pub async fn find_contact(helper_path: &Path, name: &str) -> Result<Value, Strin
         return Err(CONTACTS_HELPER.into());
     }
     let mut command = Command::new(helper_path);
+    set_asking(&mut command);
     command.args(["--find-contact", name]);
     // The first use waits for the macOS permission prompt, so allow time to answer it.
     let output = crate::actions::output(command, 90).await?;
@@ -1306,6 +1529,7 @@ async fn contacts_access(helper_path: &Path) -> Result<String, String> {
         return Err(CONTACTS_HELPER.into());
     }
     let mut command = Command::new(helper_path);
+    set_asking(&mut command);
     command.arg("--contacts-access");
     let output = crate::actions::output(command, 90).await?;
     match serde_json::from_str::<Value>(output.trim())
@@ -1424,6 +1648,15 @@ pub fn calendar_evidence(day: &str, events: &Agenda<Event>) -> Value {
     result
 }
 
+/// Several days at once, for a question that names none ("when's my dentist appointment").
+/// The soonest events, at most as many as a day's read holds.
+pub fn calendar_range_evidence(from: &str, until: &str, mut events: Agenda<Event>) -> Value {
+    events.items.truncate(40);
+    let mut result = calendar_evidence(from, &events);
+    result["scope"]["until"] = json!(until);
+    result
+}
+
 pub fn reminder_evidence(reminders: &Agenda<Reminder>) -> Value {
     let records = reminders.items.iter().enumerate().map(|(index, reminder)| {
         let date_only = reminder.due_date_only.or_else(|| (!reminder.due.is_empty()).then_some(reminder.due.len() == 10));
@@ -1462,6 +1695,9 @@ pub async fn run_evidence(
                 .get("day")
                 .and_then(Value::as_str)
                 .ok_or("A calendar read needs a date.")?;
+            if let Some(until) = args.get("until").and_then(Value::as_str) {
+                return Ok(calendar_range_evidence(day, until, events_between(helper_path, day, until).await?));
+            }
             Ok(calendar_evidence(day, &events(helper_path, day).await?))
         }
         "read_reminders" => Ok(reminder_evidence(&reminders(helper_path).await?)),
@@ -1483,20 +1719,19 @@ pub async fn run_evidence(
             } else {
                 get("app")
             };
-            let output = osascript(
-                if selected == "spotify" {
-                    SPOTIFY
-                } else {
-                    MUSIC
-                },
-                &["read_evidence".into(), String::new()],
-                20,
-            )
-            .await?;
+            if crate::controller::headless() {
+                no_prompt_unasked(player_script(selected).0).await?;
+            }
+            let output = osascript(player_script(selected).1, &["read_evidence".into(), String::new()], 20).await?;
             music_evidence(selected, &output)
         }
         "browser_tabs" => browser_tabs_evidence(&browsers_for(settings, args), get("query")).await,
-        "read_page" => page_evidence(&osascript(SAFARI_PAGE, &[], 20).await?),
+        "read_page" => {
+            if crate::controller::headless() {
+                no_prompt_unasked("Safari").await?;
+            }
+            page_evidence(&osascript(SAFARI_PAGE, &[], 20).await?)
+        }
         // Mutating controls retain their action receipt flow. They are not reads.
         _ => run(tool, args, helper_path, settings).await.map(|text| {
             evidence(
@@ -1619,6 +1854,7 @@ pub fn validate_evidence(
             if chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_err()
                 || value["day"] != day
                 || scope["day"] != day
+                || scope.get("until") != args.get("until")
                 || value["events"] != value["records"]
                 || scope["calendars"] != "all_accessible"
                 || scope["limit"] != 40
@@ -1702,7 +1938,7 @@ pub fn validate_evidence(
         }
         "music" => {
             let state = value["state"].as_str().ok_or_else(invalid)?;
-            if !["music", "spotify"].contains(&app)
+            if !PLAYERS.contains(&app)
                 || scope["action"] != "now_playing"
                 || !["playing", "paused", "closed", "stopped"].contains(&state)
                 || count != u64::from(["playing", "paused"].contains(&state))
@@ -1962,6 +2198,14 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Lau
     )
     .await?;
     let found = counted_rows(&output, 6, "Mail")?;
+    // With no account there's no inbox, which isn't the same as an empty one.
+    if found.total == 0 {
+        if let Ok(counted) = osascript_if(COUNT_MAIL_ACCOUNTS, "Mail", launch, &[], 40).await {
+            if matches!(mail_connection(Ok(counted)), Ok(Connection::NoAccount)) {
+                return Err("Mail has no account on this Mac yet. Add one in System Settings → Internet Accounts.".into());
+            }
+        }
+    }
     let selected = select_mail_rows(&found, unread, limit)?;
     let ids: Vec<String> = selected
         .iter()
@@ -2185,7 +2429,7 @@ async fn find_notes(query: &str) -> Result<String, String> {
 }
 
 fn music_evidence(app: &str, output: &str) -> Result<Value, String> {
-    let name = if app == "spotify" { "Spotify" } else { "Music" };
+    let name = player_script(app).0;
     let parts: Vec<_> = output.trim_end_matches(['\r', '\n']).split('\t').collect();
     let (state, records, display) = match parts.as_slice() {
         ["closed"] => (
@@ -2197,17 +2441,15 @@ fn music_evidence(app: &str, output: &str) -> Result<Value, String> {
         [state @ ("playing" | "paused"), track, artist, album, id, "__buntini_end__"] => {
             let record = json!({"id":nonempty(id), "reference":source_reference(app, nonempty(id), 0),
                 "title":track, "artist":artist, "album":album, "state":state});
+            let doing = if *state == "paused" { "paused on" } else { "playing" };
             (
                 *state,
                 vec![record],
-                format!(
-                    "{name} is {}: “{track}” by {artist}, from {album}.",
-                    if *state == "paused" {
-                        "paused on"
-                    } else {
-                        "playing"
-                    }
-                ),
+                if app == "tv" {
+                    format!("{name} is {doing}: “{track}”{}.", from_show(artist, album))
+                } else {
+                    format!("{name} is {doing}: “{track}” by {artist}, from {album}.")
+                },
             )
         }
         _ => {
@@ -2234,7 +2476,7 @@ pub(crate) async fn control_music(
     query: &str,
     retry: bool,
 ) -> Result<String, String> {
-    let name = if app == "spotify" { "Spotify" } else { "Music" };
+    let (name, script) = player_script(app);
     let words = query.to_string();
     // On a retry, the song playing now is the wrong one.
     let avoid = if retry && app == "spotify" {
@@ -2258,12 +2500,7 @@ pub(crate) async fn control_music(
     } else {
         query.to_string()
     };
-    let result = osascript(
-        if app == "spotify" { SPOTIFY } else { MUSIC },
-        &[action.into(), query.clone()],
-        20,
-    )
-    .await?;
+    let result = osascript(script, &[action.into(), query.clone()], 20).await?;
     if result.trim() == "search" {
         return Ok(
             match crate::skills::music::press_play(&words, avoid).await {
@@ -2296,6 +2533,14 @@ pub(crate) async fn control_music(
     Ok(match (action, parts.as_slice()) {
         (_, ["closed"]) => format!("{name} isn’t open, so nothing is playing."),
         (_, ["stopped"]) => format!("Nothing is playing in {name}."),
+        ("now_playing", [state, track, show, episode]) if app == "tv" => format!(
+            "{name} is {}: “{track}”{}.",
+            if *state == "paused" { "paused on" } else { "playing" },
+            from_show(show, episode)
+        ),
+        (_, ["track", title, show]) if app == "tv" => format!("Playing “{title}”{} in {name}.", from_show(show, "")),
+        ("next", _) if app == "tv" => format!("Skipped to the next episode in {name}."),
+        ("previous", _) if app == "tv" => format!("Went back in {name}."),
         ("now_playing", [state, track, artist, album]) => format!(
             "{name} is {}: “{track}” by {artist}, from {album}.",
             if *state == "paused" {
@@ -2417,10 +2662,13 @@ fn tab_records(app: &App, output: &str) -> Result<(Vec<Value>, CountedRows), Str
 async fn browser_tabs_evidence(browsers: &[&App], query: &str) -> Result<Value, String> {
     let mut results = Vec::new();
     for app in browsers {
-        results.push((
-            *app,
-            osascript(&tab_scripts(app).0, &[query.into()], 20).await,
-        ));
+        // With nobody here, a browser macOS would have to ask about counts as unread.
+        let read = if crate::controller::headless() { no_prompt_unasked(app.name).await } else { Ok(()) };
+        let tabs = match read {
+            Ok(()) => osascript(&tab_scripts(app).0, &[query.into()], 20).await,
+            Err(error) => Err(error),
+        };
+        results.push((*app, tabs));
     }
     tabs_evidence(browsers, query, results)
 }
@@ -2485,7 +2733,7 @@ fn tabs_evidence(
                     } else {
                         ""
                     },
-                    tab["title"].as_str().unwrap_or(""),
+                    crate::personal_answer::no_links(tab["title"].as_str().unwrap_or("")),
                     tab["url"].as_str().unwrap_or("")
                 )
             })
@@ -2577,9 +2825,14 @@ fn parse_page(output: &str) -> Result<Option<PageSnapshot>, String> {
 /// The compatibility view retains the larger 8,000-character snapshot used by
 /// the browser skill. The model-facing read below advertises its smaller bound.
 pub(crate) async fn safari_page() -> Result<Option<(String, String, String)>, String> {
-    Ok(parse_page(&osascript(SAFARI_PAGE, &[], 20).await?)?
-        .map(|page| (page.title, page.url, page.text)))
+    Ok(parse_page(&osascript(SAFARI_PAGE, &[], 20).await?)?.map(|page| {
+        let cut = page.original_length > 8000;
+        (page.title, page.url, if cut { format!("{}{PAGE_CUT}", page.text) } else { page.text })
+    }))
 }
+
+/// Ends the text of a page that was longer than what was read.
+pub(crate) const PAGE_CUT: &str = "\n\n[The rest of this page wasn't read.]";
 
 /// The email selected in Mail, for "this". Mail must be allowed in Settings → Apps.
 #[derive(Debug, Clone, PartialEq)]
@@ -2732,7 +2985,7 @@ pub(crate) async fn recent_mail(
         match mail_openings(batch, launch).await {
             Ok(found) => openings.extend(found),
             // Mail was quit part-way through; reading on would open it again.
-            Err(error) if is_not_running(&error) => return Err(error),
+            Err(error) if left_alone(&error) => return Err(error),
             Err(error) => {
                 missed.extend(batch.iter().cloned());
                 failed = Some(error);
@@ -2904,6 +3157,14 @@ pub(crate) fn app_names() -> Vec<String> {
     names
 }
 
+/// Opens Shortcuts on a new shortcut, from a reply that found none that fits.
+#[tauri::command]
+pub async fn new_shortcut() -> Result<(), String> {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("shortcuts://create-shortcut");
+    crate::actions::output(command, 15).await.map(|_| ())
+}
+
 /// The apps Buntini can work with and whether each is allowed, plus the rest it can open.
 #[tauri::command]
 pub fn app_list(state: tauri::State<'_, crate::controller::AppState>) -> Result<AppList, String> {
@@ -2943,6 +3204,13 @@ pub async fn check_app(
     id: String,
     state: tauri::State<'_, crate::controller::AppState>,
 ) -> Result<String, String> {
+    asked_for(check_app_asked(id, state)).await
+}
+
+async fn check_app_asked(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<String, String> {
     let helper_path = state.models.apple_helper().to_path_buf();
     match id.as_str() {
         "calendar" => events(
@@ -2975,9 +3243,108 @@ pub async fn check_app(
     }
 }
 
+/// A real read's evidence, for tests: two of the eight emails an inbox holds.
+#[cfg(test)]
+pub(crate) fn sample_inbox(unread: bool) -> Value {
+    let output = "2026-11-04 10:00\tm2\tfalse\tBob\tInvoice\t102\n2026-11-04 09:00\tm1\tfalse\tAna\tLease\t101\n__buntini_summary__\t8\t2\ttrue";
+    mail_evidence("", unread, 8, counted_rows(output, 6, "Mail").unwrap(), Some("101\tCan you sign by Friday\t22")).unwrap()
+}
+
+/// An inbox as `read_mail` would find it, searched and filtered the way Mail does:
+/// (received, read, sender, subject, opening) rows, newest first.
+#[cfg(test)]
+pub(crate) fn inbox_world(query: &str, unread: bool, limit: usize, inbox: &[(&str, bool, &str, &str, &str)]) -> Value {
+    let wanted = query.to_lowercase();
+    let found: Vec<(usize, &(&str, bool, &str, &str, &str))> = inbox
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| !unread || !row.1)
+        .filter(|(_, row)| wanted.is_empty() || row.2.to_lowercase().contains(&wanted) || row.3.to_lowercase().contains(&wanted))
+        .collect();
+    let mut output: Vec<String> = found.iter().map(|(at, row)| format!("{}\tm{at}\t{}\t{}\t{}\t{at}", row.0, row.1, row.2, row.3)).collect();
+    output.push(format!("__buntini_summary__\t{0}\t{0}\ttrue", found.len()));
+    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", row.4, row.4.len())).collect();
+    mail_evidence(query, unread, limit, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some(&openings.join("\n"))).unwrap()
+}
+
+/// Where an app stands once the user has asked to connect it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Connection {
+    Ready,
+    /// Mail is allowed but has no account to read.
+    NoAccount,
+    /// macOS said no; only System Settings can change that.
+    Denied,
+}
+
+const COUNT_MAIL_ACCOUNTS: &str = "on run argv\n  tell application \"Mail\" to return count of accounts\nend run\n";
+
+fn mail_connection(counted: Result<String, String>) -> Result<Connection, String> {
+    match counted {
+        Ok(count) => match count.trim().parse::<u32>() {
+            Ok(0) => Ok(Connection::NoAccount),
+            Ok(_) => Ok(Connection::Ready),
+            Err(_) => Err("Mail didn’t say which accounts it has. Try again.".into()),
+        },
+        // errAEEventNotPermitted: the Automation switch for Mail is off.
+        Err(error) if error.contains("-1743") || error.contains("Not authorized") => Ok(Connection::Denied),
+        Err(error) => Err(error),
+    }
+}
+
+fn calendar_connection(read: Result<(), String>) -> Result<Connection, String> {
+    match read {
+        Ok(()) => Ok(Connection::Ready),
+        Err(error) if error.starts_with("macOS hasn’t allowed") => Ok(Connection::Denied),
+        Err(error) => Err(error),
+    }
+}
+
+/// Connects Mail or Calendar now, so macOS asks while the user is looking at the card
+/// rather than in the middle of a later request. Connecting Mail may open it.
+#[tauri::command]
+pub async fn connect_app(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<Connection, String> {
+    asked_for(connect_app_asked(id, state)).await
+}
+
+async fn connect_app_asked(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<Connection, String> {
+    match id.as_str() {
+        // Long enough to answer the macOS prompt.
+        "mail" => mail_connection(osascript(COUNT_MAIL_ACCOUNTS, &[], 90).await),
+        "calendar" => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            calendar_connection(events(state.models.apple_helper(), &today).await.map(|_| ()))
+        }
+        _ => Err("That app can’t be connected here.".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connecting_mail_tells_no_account_and_refusal_apart_from_a_failure() {
+        assert_eq!(mail_connection(Ok("2\n".into())), Ok(Connection::Ready));
+        assert_eq!(mail_connection(Ok("0".into())), Ok(Connection::NoAccount));
+        assert!(mail_connection(Ok("many".into())).is_err(), "never guessed");
+        assert_eq!(mail_connection(Err("execution error: Not authorized to send Apple events to Mail. (-1743)".into())), Ok(Connection::Denied));
+        assert_eq!(mail_connection(Err("That took too long".into())), Err("That took too long".into()));
+    }
+
+    #[test]
+    fn connecting_calendar_tells_refusal_apart_from_a_failure() {
+        assert_eq!(calendar_connection(Ok(())), Ok(Connection::Ready));
+        assert_eq!(calendar_connection(Err("macOS hasn’t allowed Buntini to read that. Allow it in System Settings.".into())), Ok(Connection::Denied));
+        assert_eq!(calendar_connection(Err("Calendar didn’t answer in time.".into())), Err("Calendar didn’t answer in time.".into()));
+    }
 
     #[test]
     fn unreplied_mail_rows_are_typed_and_sorted_newest_first() {
@@ -3415,6 +3782,12 @@ mod tests {
         );
         assert!(validate("find_notes", &json!({})).is_err());
         assert!(validate("control_music", &json!({"app":"vlc","action":"play"})).is_err());
+        assert_eq!(validate("control_music", &json!({"app":"tv","action":"pause"})).unwrap()["app"], "tv");
+        assert_eq!(from_show("Severance", "Season 1, Episode 2"), " from Severance, Season 1, Episode 2");
+        assert_eq!(from_show("", ""), "", "a film is just its name");
+        let watching = music_evidence("tv", "playing\tGood News About Hell\tSeverance\tSeason 1, Episode 1\tABC\t__buntini_end__").unwrap();
+        assert_eq!(watching["text"], "TV is playing: “Good News About Hell” from Severance, Season 1, Episode 1.");
+        assert_eq!(music_evidence("tv", "closed").unwrap()["text"], "TV isn’t open, so nothing is playing.");
         assert!(validate("control_music", &json!({"action":"shuffle"})).is_err());
         let play = validate(
             "control_music",
@@ -3791,6 +4164,26 @@ mod tests {
         }
         assert!(is_not_running(&format!("Mail {NOT_RUNNING}")));
         assert!(!is_not_running("Mail returned incomplete data. Please try again."));
+    }
+
+    #[test]
+    fn macoss_answer_about_scripting_an_app_is_read_right() {
+        use automation::{consent_from, Consent};
+        assert_eq!(consent_from(0), Consent::Allowed);
+        assert_eq!(consent_from(-1744), Consent::WouldAsk);
+        assert_eq!(consent_from(-1743), Consent::Denied);
+        assert_eq!(consent_from(-600), Consent::NotRunning);
+        assert_eq!(consent_from(-50), Consent::WouldAsk, "an unexpected answer never lets a read go ahead");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn asking_macos_about_scripting_shows_nothing_and_returns() {
+        // Whatever the answer on this Mac, it comes back at once with no dialog.
+        let started = std::time::Instant::now();
+        let _ = automation::consent("com.apple.mail");
+        let _ = automation::consent("com.apple.Notes");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]

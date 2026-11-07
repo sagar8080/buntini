@@ -63,6 +63,15 @@ echo "Checking release preflight rejection paths..."
 "$BUNTINI_CHECK_PYTHON" -m unittest discover -s scripts/tests -v
 echo "Checking native audio with synthetic input (microphone stays closed)..."
 bash "$BUNTINI_CHECK_ROOT/native/test.sh"
+echo "Checking the release build has no warnings, so unused code can't build up..."
+BUNTINI_CHECK_RELEASE=$(cargo check --release --lib --locked --offline --target-dir "$BUNTINI_CHECK_ROOT/src-tauri/target" --manifest-path "$BUNTINI_CHECK_ROOT/src-tauri/Cargo.toml" 2>&1) || { printf '%s\n' "$BUNTINI_CHECK_RELEASE"; exit 1; }
+if printf '%s\n' "$BUNTINI_CHECK_RELEASE" | grep -q '^warning: `buntini`'; then
+  printf '%s\n' "$BUNTINI_CHECK_RELEASE"
+  echo "The release build has warnings. Remove the unused code rather than silencing them." >&2
+  exit 1
+fi
+echo "Checking the opt-in debug examples still build..."
+cargo check --examples --locked --offline --target-dir "$BUNTINI_CHECK_ROOT/src-tauri/target" --manifest-path "$BUNTINI_CHECK_ROOT/src-tauri/Cargo.toml"
 echo "Checking Rust controller with locked, cached dependencies..."
 cargo test --locked --offline --target-dir "$BUNTINI_CHECK_ROOT/src-tauri/target" --manifest-path "$BUNTINI_CHECK_ROOT/src-tauri/Cargo.toml"
 echo "Validating scenario coverage (device evidence is scored separately per brain)..."

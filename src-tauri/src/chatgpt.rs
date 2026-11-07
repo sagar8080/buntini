@@ -64,6 +64,35 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Whether this Mac has a sign-in that Buntini can use.
+pub fn saved() -> bool {
+    crate::web::credential_saved(KEYCHAIN_ID)
+}
+
+/// Not secrets: who is signed in and whether they allowed plan use, noted at sign-in so that
+/// opening Buntini doesn't have to decode the session. A sign-in from before these were noted
+/// shows a plain name until it's next used, and finds out about its plan then.
+const ACCOUNT: &str = "chatgpt-account";
+const NO_PLAN: &str = "chatgpt-no-plan-scope";
+
+pub fn note(store: &crate::store::Store, session: &Session) -> Result<(), String> {
+    store.set_preference(ACCOUNT, &session.email)?;
+    store.set_preference(NO_PLAN, if session.plan_allowed() { "" } else { "1" })
+}
+
+pub fn account(store: &crate::store::Store) -> Option<String> {
+    saved().then(|| store.preference(ACCOUNT).ok().flatten().filter(|email| !email.is_empty()).unwrap_or_else(|| "your ChatGPT account".into()))
+}
+
+pub fn plan_noted(store: &crate::store::Store) -> bool {
+    store.preference(NO_PLAN).ok().flatten().is_none_or(|value| value.is_empty())
+}
+
+/// Whether a sign-in from before these were noted still has to be.
+pub fn account_unnoted(store: &crate::store::Store) -> bool {
+    store.preference(ACCOUNT).ok().flatten().is_none()
+}
+
 pub fn load() -> Option<Session> {
     crate::web::credential(KEYCHAIN_ID)
         .ok()
@@ -588,13 +617,25 @@ pub async fn models() -> Result<Vec<ModelInfo>, String> {
     Ok(list)
 }
 
+/// This account can't use its plan in other apps.
+pub const PLAN_NOT_ELIGIBLE: &str = "This ChatGPT account can’t use its plan in other apps.";
+
+/// Whether this message says ChatGPT can't answer at the moment, rather than won't.
+pub fn unavailable(message: &str) -> bool {
+    message == PLAN_NOT_ELIGIBLE
+        || message.contains("reached the limit for using your ChatGPT plan")
+        || message == "ChatGPT is busy right now. Try again in a moment."
+        || message.starts_with("Couldn’t reach ChatGPT")
+        || message.starts_with("The connection to ChatGPT failed")
+}
+
 /// Plain-language advice for ChatGPT plan errors (HTTP responses or failed streams).
 pub fn plan_error(code: &str, param: &str) -> Option<String> {
     Some(match code {
         "subscription_sharing_usage_limit_exceeded" => "You’ve reached the limit for using your ChatGPT plan in apps like Buntini. Check ChatGPT → Settings → Usage.".into(),
         "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable" => "ChatGPT is busy right now. Try again in a moment.".into(),
         "subscription_sharing_invalid_user" => "ChatGPT didn’t accept this sign-in. If you disconnected Buntini in ChatGPT, sign in again in Settings → Brain.".into(),
-        "subscription_sharing_user_not_eligible" => "Your ChatGPT workspace doesn’t allow its plan to be used in other apps.".into(),
+        "subscription_sharing_user_not_eligible" => PLAN_NOT_ELIGIBLE.into(),
         "subscription_sharing_unsupported_capability" => format!("ChatGPT doesn’t support {} here. Choose another model in Settings → Brain.", if param.is_empty() { "that request" } else { param }),
         _ => return None,
     })
@@ -613,6 +654,7 @@ fn host_id(store: &crate::store::Store) -> Result<String, String> {
 #[tauri::command]
 pub async fn chatgpt_sign_in(
     state: tauri::State<'_, crate::controller::AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let (host, saved) = {
         let store = state.store.lock().unwrap();
@@ -624,7 +666,11 @@ pub async fn chatgpt_sign_in(
         .lock()
         .unwrap()
         .set_preference("chatgpt-client-id", &session.client_id)?;
+    note(&state.store.lock().unwrap(), &session)?;
     state.audit("chatgpt.signed_in", "Signed in with ChatGPT");
+    state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_in(&state.store.lock().unwrap())?;
+    crate::brain::settle_after_sign_in(&app).await;
     if !session.plan_allowed() {
         return Err("You’re signed in, but Buntini wasn’t allowed to use your ChatGPT plan. Sign in again and allow plan usage.".into());
     }
@@ -641,8 +687,12 @@ pub fn chatgpt_cancel_sign_in() {
 #[tauri::command]
 pub async fn chatgpt_sign_out(
     state: tauri::State<'_, crate::controller::AppState>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
     let confirmed = sign_out().await?;
+    state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_out(&state.store.lock().unwrap())?;
+    crate::brain::settle_and_tell(&app).await;
     state.audit(
         "chatgpt.signed_out",
         if confirmed {

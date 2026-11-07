@@ -335,6 +335,12 @@ pub(crate) fn unjoined(clause: &str, original: &str) -> String {
     clause.into()
 }
 
+/// Writes that always wait for a sheet, so words in them never run a direct command.
+pub(crate) const NOT_A_DIRECT_COMMAND: [&str; 14] = [
+    "add_reminder", "add_calendar_event", "create_note", "draft_email", "reply_email", "send_message", "start_call",
+    "update_calendar_event", "reschedule_reminder", "complete_reminder", "append_to_note", "set_timer", "create_saved_search", "create_price_watch",
+];
+
 pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
     // "Follow up with Ana until she replies" asks for a goal now; each follow-up is a
     // check-in's own task.
@@ -371,6 +377,9 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
             };
             let has = |targets: &[&str]| tokens.iter().any(|token| targets.contains(token));
             let tool = match verb {
+                "add" | "put" | "throw" if has(&["cart", "basket"]) || tokens.windows(2).any(|pair| pair[0] == "my" && pair[1] == "bag") => Some(crate::cart::TOOL),
+                // Before the Mac-setting words below: "set a reminder to turn on dark mode".
+                "set" | "add" | "create" | "make" if tokens.iter().take(3).any(|token| *token == "reminder") => Some("add_reminder"),
                 "remember" => Some("remember"),
                 // Changing an item the user already has: its id comes from a read.
                 "mark" if has(&["done", "complete", "completed", "finished"]) => {
@@ -418,6 +427,29 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                     if has(&["price", "prices"]) =>
                 {
                     Some("create_price_watch")
+                }
+                // A text to one person through Messages; never email, WhatsApp or the like.
+                "text" | "imessage" | "message"
+                    if tokens.len() > 1 && !has(&["email", "mail", "whatsapp", "slack", "telegram", "signal"]) =>
+                {
+                    Some("send_message")
+                }
+                "send"
+                    if has(&["text", "texts", "imessage", "sms"])
+                        && !has(&["email", "mail", "whatsapp", "slack", "telegram", "signal"]) =>
+                {
+                    Some("send_message")
+                }
+                // A call to one person through FaceTime; never another service, or "call me".
+                "call" | "facetime" | "ring" | "phone"
+                    if tokens.len() > 1
+                        && !["me", "us", "it", "this", "that", "the", "a", "an", "back", "up", "off", "number", "numbers"].contains(&tokens[1])
+                        && !has(&["whatsapp", "zoom", "teams", "slack", "meet", "skype", "api", "function", "method"]) =>
+                {
+                    Some("start_call")
+                }
+                "video" if tokens.get(1) == Some(&"call") && tokens.len() > 2 && !has(&["whatsapp", "zoom", "teams", "slack", "meet", "skype"]) => {
+                    Some("start_call")
                 }
                 "remind" if tokens.get(1) == Some(&"me") => Some("add_reminder"),
                 "add" | "create" | "set" | "make" if has(&["reminder", "reminders"]) => {
@@ -467,9 +499,15 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
                 {
                     Some("run_shortcut")
                 }
+                // Answering an invite through Buntini isn't possible; "Accept Saturday" in a
+                // draft's instructions isn't this.
+                "accept" | "decline" if has(&["invite", "invitation", "invites", "invitations", "meeting", "event"]) => {
+                    unsupported = true;
+                    None
+                }
                 "send" | "email" | "text" | "post" | "publish" | "book" | "reserve" | "buy"
                 | "purchase" | "order" | "pay" | "delete" | "cancel" | "move" | "update"
-                | "change" => {
+                | "change" | "forward" | "archive" | "unsubscribe" | "rsvp" | "trash" => {
                     unsupported = true;
                     None
                 }
@@ -531,81 +569,6 @@ pub(crate) fn requested_actions(prompt: &str) -> (Vec<&'static str>, bool) {
         }
     }
     (expected, unsupported)
-}
-
-/// Untrusted source text may suggest actions, but only the saved user goal may
-/// authorize proposing one. Ambiguous goals can be clarified through Resume.
-pub fn validate_proposal(goal: &str, tool: &str, steps: &[Step]) -> Result<(), String> {
-    if steps
-        .iter()
-        .any(|step| matches!(step.state.as_str(), "failed" | "unknown" | "running"))
-    {
-        return Err("An earlier step is unresolved. Buntini cannot propose another action until its result is known.".into());
-    }
-    if !action_remaining(goal, tool, steps) {
-        return Err(format!("Buntini proposed {tool}, but could not establish that your request asks for it. No action ran. Add an explicit instruction in the task’s additional details to continue."));
-    }
-    if next_action(goal, steps) != Some(tool) {
-        return Err("An earlier requested action is still unfinished. Buntini must complete the task in the requested order before proposing this action.".into());
-    }
-    require_reads(goal, steps)?;
-    Ok(())
-}
-
-/// A completed obligation removes its write tool from subsequent planning turns.
-/// This uses only the user's saved goal and controller-owned step states. Source
-/// text and model narration cannot add an obligation or restore a consumed one.
-pub fn action_remaining(goal: &str, tool: &str, steps: &[Step]) -> bool {
-    let requested = requested_actions(goal)
-        .0
-        .iter()
-        .filter(|name| **name == tool)
-        .count();
-    let finished = steps
-        .iter()
-        .filter(|step| step.effect && step.tool == tool && step.state == "succeeded")
-        .count();
-    requested > finished
-}
-
-fn next_action(goal: &str, steps: &[Step]) -> Option<&'static str> {
-    let mut completed = steps
-        .iter()
-        .filter(|step| step.effect && step.state == "succeeded")
-        .map(|step| step.tool.as_str())
-        .collect::<Vec<_>>();
-    for expected in requested_actions(goal).0 {
-        if let Some(index) = completed.iter().position(|tool| *tool == expected) {
-            completed.remove(index);
-        } else {
-            return Some(expected);
-        }
-    }
-    None
-}
-
-/// Offer only writes justified by this task, before inference. The dispatch-time
-/// validation above remains mandatory, including for providers ignoring schemas.
-pub fn planning_tools(
-    goal: &str,
-    steps: &[Step],
-    definitions: &serde_json::Value,
-) -> serde_json::Value {
-    let unresolved = steps
-        .iter()
-        .any(|step| matches!(step.state.as_str(), "failed" | "unknown" | "running"));
-    let tools = definitions.as_array().into_iter().flatten().filter_map(|definition| {
-        let name = definition["name"].as_str()?;
-        let write = TOOLS.contains(&name) || crate::monitor_actions::TOOLS.contains(&name) || crate::control_actions::TOOLS.contains(&name);
-        let allowed = !unresolved && next_action(goal, steps) == Some(name) && require_reads(goal, steps).is_ok();
-        if name == "control_music" && !allowed {
-            let mut read_only = definition.clone();
-            read_only["parameters"]["properties"]["action"]["enum"] = serde_json::json!(["now_playing"]);
-            read_only["description"] = serde_json::json!("Read what is currently playing. Playback changes are unavailable for this task.");
-            Some(read_only)
-        } else if write && !allowed { None } else { Some(definition.clone()) }
-    }).collect::<Vec<_>>();
-    serde_json::Value::Array(tools)
 }
 
 fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
@@ -702,7 +665,19 @@ pub(crate) fn claims_own_write(text: &str) -> bool {
         "emailed",
         "set",
         "enabled",
+        "forwarded",
+        "archived",
+        "unsubscribed",
+        "accepted",
+        "declined",
+        "replied",
+        "trashed",
+        "blocked",
+        "marked",
     ];
+    if tokens.first().is_some_and(|first| *first == "done") && tokens.len() <= 4 {
+        return true;
+    }
     for (index, token) in tokens.iter().enumerate() {
         if !["i", "i've", "we", "we've"].contains(token) {
             continue;
@@ -954,6 +929,134 @@ fn clock_times(text: &str) -> Vec<String> {
 }
 
 /// Sentences and lines of an answer, each with its own punctuation.
+/// Every number in a text, ignoring commas and a whole number's ".00", so "$1,299.00" and
+/// "1299" are the same number.
+pub(crate) fn numbers(text: &str) -> std::collections::HashSet<String> {
+    number_spans(text).into_iter().map(|span| span.number).collect()
+}
+
+struct NumberSpan {
+    number: String,
+    before: Option<char>,
+    after: Option<char>,
+    word_before: String,
+    word_after: String,
+    symbol_beside: bool,
+}
+
+fn number_spans(text: &str) -> Vec<NumberSpan> {
+    let chars: Vec<char> = text.chars().collect();
+    let word_at = |mut at: usize, forward: bool| -> String {
+        let mut word = Vec::new();
+        loop {
+            match chars.get(at) {
+                Some(c) if c.is_alphabetic() => word.push(c.to_ascii_lowercase()),
+                _ => break,
+            }
+            if forward {
+                at += 1;
+            } else if at == 0 {
+                break;
+            } else {
+                at -= 1;
+            }
+        }
+        if !forward {
+            word.reverse();
+        }
+        word.into_iter().collect()
+    };
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].is_ascii_digit() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len() && (chars[at].is_ascii_digit() || (matches!(chars[at], ',' | '.') && chars.get(at + 1).is_some_and(char::is_ascii_digit))) {
+            at += 1;
+        }
+        let raw: String = chars[start..at].iter().filter(|c| **c != ',').collect();
+        let number = raw.strip_suffix(".00").map(str::to_string).unwrap_or(raw);
+        let spaced_symbol = |index: Option<usize>| index.and_then(|index| chars.get(index)).is_some_and(|c| "$€£¥₹".contains(*c));
+        let symbol_beside = (chars.get(at) == Some(&' ') && spaced_symbol(Some(at + 1))) || (start >= 2 && chars[start - 1] == ' ' && spaced_symbol(Some(start - 2)));
+        let skip_space = |index: usize| if chars.get(index) == Some(&' ') { index + 1 } else { index };
+        let before_index = if start >= 2 && chars[start - 1] == ' ' { start - 2 } else { start.saturating_sub(1) };
+        found.push(NumberSpan {
+            number,
+            before: start.checked_sub(1).map(|index| chars[index]),
+            after: chars.get(at).copied(),
+            word_before: if start == 0 { String::new() } else { word_at(before_index, false) },
+            word_after: word_at(skip_space(at), true),
+            symbol_beside,
+        });
+    }
+    found
+}
+
+/// The numbers an answer states as facts: amounts and percentages of any size, and others
+/// long enough to be a code, a phone number or a count. Part of a name ("WH-1000XM5"), a
+/// citation marker or a year isn't one.
+pub(crate) fn stated_figures(text: &str) -> Vec<String> {
+    const SYMBOLS: &str = "$€£¥₹";
+    const AFTER: [&str; 15] = ["usd", "eur", "gbp", "inr", "cad", "aud", "dollars", "dollar", "euros", "euro", "pounds", "bucks", "quid", "rupees", "million"];
+    const BEFORE: [&str; 6] = ["usd", "eur", "gbp", "inr", "cad", "rs"];
+    number_spans(text)
+        .into_iter()
+        .filter(|span| {
+            let money = span.before.is_some_and(|c| SYMBOLS.contains(c))
+                || span.after.is_some_and(|c| SYMBOLS.contains(c) || c == '%')
+                || span.symbol_beside
+                || AFTER.contains(&span.word_after.as_str())
+                || BEFORE.contains(&span.word_before.as_str());
+            let in_a_name = !money && (span.before.is_some_and(char::is_alphabetic) || span.after.is_some_and(char::is_alphabetic));
+            let marker = span.before == Some('[') && span.after == Some(']');
+            let digits = span.number.chars().filter(char::is_ascii_digit).count();
+            let year = digits == 4 && (span.number.starts_with("19") || span.number.starts_with("20"));
+            !in_a_name && !marker && (money || (digits >= 3 && !year))
+        })
+        .map(|span| span.number)
+        .collect()
+}
+
+/// Sentences from a model's answer about the user's notes, contacts, files or memory that
+/// state a number or address nothing it read holds. Those are where a made-up amount or
+/// phone number does harm, and no record-written answer covers them.
+fn without_unread_details(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let reads: Vec<&Step> = steps
+        .iter()
+        .filter(|step| {
+            let live_results = step.tool == "look_up_online"
+                // A conversion's answer is worked out from its rate, so isn't on the card.
+                && step.evidence.as_ref().is_some_and(|evidence| evidence["cards"].as_array().is_some_and(|cards| !cards.is_empty() && !cards.iter().any(|card| card["kind"] == "rate")));
+            step.state == "succeeded" && (live_results || ["find_notes", "find_contact", "search_files", "search_memory"].contains(&step.tool.as_str()))
+        })
+        .collect();
+    if reads.is_empty() {
+        return answer.to_string();
+    }
+    let held = reads.iter().filter_map(|step| step.evidence.as_ref()).map(serde_json::Value::to_string).chain([prompt.to_string()]).collect::<Vec<_>>().join("\n");
+    let held_numbers = numbers(&held);
+    let lower = held.to_lowercase();
+    let made_up = |sentence: &str| {
+        stated_figures(sentence).iter().any(|figure| !held_numbers.contains(figure))
+            || sentence.split_whitespace().any(|word| {
+                let word = word.trim_matches(|c: char| !c.is_alphanumeric());
+                word.contains('@') && !lower.contains(&word.to_lowercase())
+            })
+    };
+    if !sentences(answer).into_iter().any(|sentence| made_up(sentence)) {
+        return answer.to_string();
+    }
+    let kept: String = sentences(answer).into_iter().filter(|sentence| !made_up(sentence)).collect::<String>().trim().to_string();
+    if kept.chars().any(char::is_alphabetic) {
+        kept
+    } else {
+        "I couldn’t find that in what I read.".into()
+    }
+}
+
 pub(crate) fn sentences(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     for line in text.split_inclusive('\n') {
@@ -971,6 +1074,118 @@ pub(crate) fn sentences(text: &str) -> Vec<&str> {
     parts.into_iter().filter(|part| !part.trim().is_empty()).collect()
 }
 
+/// A question about the topic in general, or text the user supplied: an answer can say
+/// "you have" or "there are" without it being about their own apps.
+fn may_speak_generally(prompt: &str) -> bool {
+    let asked = prompt.to_lowercase().replace('’', "'");
+    let words: Vec<&str> = asked.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).collect();
+    ["how", "why", "explain", "define", "should"].contains(words.first().unwrap_or(&""))
+        || asked.starts_with("what is a ")
+        || asked.starts_with("what is an ")
+        || asked.starts_with("what does ")
+        || asked.chars().count() > 200
+        || asked.contains(':')
+        || words.iter().any(|word| {
+            ["this", "screen", "selected", "selection", "draft", "write", "compose", "rewrite", "translate", "example", "sample", "template", "story", "pretend", "imagine"].contains(word)
+        })
+}
+
+/// A sentence that states what's on the user's calendar or reminders with no clock time:
+/// "You have a dentist visit tomorrow." Nothing this turn read anything, so it can't know.
+fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
+    const NOUNS: [&str; 10] = ["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments", "reminder", "reminders"];
+    const DAYS: [&str; 11] = ["today", "tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend"];
+    let text = sentence.to_lowercase().replace('’', "'");
+    let asked = prompt.to_lowercase().replace('’', "'");
+    let in_text = |set: &[&str]| text.split(|c: char| !c.is_alphanumeric()).any(|word| set.contains(&word));
+    let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once ", "want me", "would you", "i can "].iter().any(|hedge| text.contains(hedge));
+    if hedged {
+        return false;
+    }
+    // "You're free" says as much about a calendar as "you have a meeting".
+    if ["you're free", "you are free", "you're clear", "you are clear", "is clear", "are clear", "wide open", "you're not busy", "you are not busy", "nothing on ", "no meetings", "no events", "nothing scheduled", "you have nothing", "you've got nothing"].iter().any(|claim| text.contains(claim)) {
+        return true;
+    }
+    // "Your dentist is tomorrow at 15:00" with nothing read this turn may be stale or made up.
+    let says_you_have = ["you have ", "you've got ", "you got "].iter().any(|claim| text.contains(claim));
+    let there_is = ["there's ", "there is ", "there are ", "coming up", "on your calendar", "on your schedule", "is due", "are due"].iter().any(|claim| text.contains(claim));
+    // A day the user brought up themselves ("I have a dentist visit tomorrow") can be repeated.
+    let day_is_new = DAYS.iter().any(|day| text.split(|c: char| !c.is_alphanumeric()).any(|word| word == *day) && !asked.contains(day));
+    (in_text(&NOUNS) && (says_you_have || there_is)) || (says_you_have && day_is_new)
+}
+
+/// When an answer built on a Mail read names something the read doesn't hold, the read
+/// itself, in place of the answer. The model only saw that read, so a sender or subject
+/// outside it is made up, and so is a count above what it found. The read can't lie;
+/// the sentence around a made-up name can't be trusted, so it isn't repaired.
+fn mail_read_instead(prompt: &str, answer: &str, steps: &[Step]) -> Option<String> {
+    const NOT_NAMES: &[&str] = &[
+        "your", "the", "a", "an", "my", "any", "anything", "these", "those", "this", "that", "it", "them", "each", "all", "some", "one", "more", "what", "which", "how", "who", "whom", "him",
+        "her", "you", "me", "us", "there", "here", "their", "his", "its", "our", "today", "yesterday", "now", "last", "past", "recent", "earlier", "someone", "people", "emails",
+        "email", "mail", "inbox", "day", "days", "week", "weeks", "month", "months", "several", "many",
+    ];
+    const SMALL: [&str; 13] = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    if steps.iter().any(|step| step.effect) {
+        return None;
+    }
+    let read = steps.iter().rev().find(|step| step.tool == "read_mail" && step.state == "succeeded")?.evidence.as_ref()?;
+    let shown = read["text"].as_str().map(str::trim).filter(|text| !text.is_empty())?;
+    let mut known = prompt.to_lowercase();
+    for evidence in steps.iter().filter(|step| step.state == "succeeded").filter_map(|step| step.evidence.as_ref()) {
+        known += " ";
+        known += &evidence["text"].as_str().unwrap_or_default().to_lowercase();
+        for record in evidence["records"].as_array().into_iter().flatten() {
+            for field in ["sender", "subject", "excerpt"] {
+                known += " ";
+                known += &record[field].as_str().unwrap_or_default().to_lowercase();
+            }
+        }
+    }
+    let lower = answer.to_lowercase().replace('’', "'");
+    let words: Vec<&str> = lower.split_whitespace().map(|word| word.trim_matches(|c: char| !c.is_alphanumeric())).filter(|word| !word.is_empty()).collect();
+    let backed = |word: &str| {
+        let stem: String = word.chars().take(4).collect();
+        known.contains(&stem)
+    };
+    let names_outside = words.iter().enumerate().filter(|(_, word)| ["from", "about"].contains(word)).any(|(at, _)| {
+        words[at + 1..].iter().take(3).find(|word| !NOT_NAMES.contains(word) && !SMALL.contains(word)).is_some_and(|name| {
+            name.chars().count() >= 3 && !name.chars().all(|c| c.is_ascii_digit()) && !backed(name)
+        })
+    });
+    let found = read["total"].as_u64().unwrap_or(0).max(read["count"].as_u64().unwrap_or(0));
+    let too_many = words.windows(3).any(|window| {
+        let mail = |word: &str| ["email", "emails", "message", "messages"].contains(&word);
+        let counted = mail(window[1]) || (["new", "unread"].contains(&window[1]) && mail(window[2]));
+        let number = window[0].parse::<u64>().ok().or_else(|| SMALL.iter().position(|small| *small == window[0]).map(|at| at as u64));
+        counted && number.is_some_and(|number| number > found)
+    });
+    (names_outside || too_many).then(|| shown.to_string())
+}
+
+/// Whether an answer says what's in the user's inbox when nothing this turn read anything.
+/// On a real Mac the on-device model answered "whats on my mail" with a made-up message
+/// from the user's boss, with no clock time for the check below to catch. The whole answer
+/// goes, since the sentences around such a claim are made up too. Text the user supplied,
+/// and questions about email in general, can say these things.
+fn invents_inbox(prompt: &str, answer: &str, steps: &[Step]) -> bool {
+    if steps.iter().any(|step| step.state == "succeeded" && !step.effect) || may_speak_generally(prompt) {
+        return false;
+    }
+    sentences(answer).into_iter().any(|sentence| {
+        let text = sentence.to_lowercase().replace('’', "'");
+        let about_mail = text
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| ["email", "emails", "mail", "inbox", "message", "messages"].contains(&word));
+        let states = ["you have ", "you've got ", "you got ", "there's ", "there is ", "there are ", "your inbox has", "your inbox is", "your inbox contains", "waiting", "new message from", "new email from", "email from your", "message from your"]
+            .iter()
+            .any(|claim| text.contains(claim));
+        let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once "]
+            .iter()
+            .any(|hedge| text.contains(hedge));
+        about_mail && states && !hedged
+    })
+}
+
 /// An answer that states what is in the user's calendar, reminders or email at a given
 /// time, when nothing this turn read that app, keeps only what it can stand behind. The
 /// sentences with those claims go; what is left (a greeting, a reply to what was asked)
@@ -978,17 +1193,40 @@ pub(crate) fn sentences(text: &str) -> Vec<&str> {
 /// and otherwise just answers the person. Times the user wrote themselves don't count,
 /// nor times a file or note read this turn states ("the repair appointment is 14:20").
 pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> String {
+    let answer = &without_unread_details(prompt, answer, steps);
+    if invents_inbox(prompt, answer, steps) {
+        return "I haven’t looked at your email, so I won’t guess. Ask me “what’s in my inbox?” and I’ll check.".into();
+    }
+    if let Some(read) = mail_read_instead(prompt, answer, steps) {
+        return read;
+    }
+    // An answer from the web is about the web, unless the request was about the user or
+    // something of theirs was read too.
+    let about_the_user = prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| ["my", "i", "me", "mine", "our", "we", "us"].contains(&word));
+    let looked_online = steps.iter().any(|step| step.state == "succeeded" && step.tool == "look_up_online");
+    let read_theirs = steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online");
+    if looked_online && !about_the_user && !read_theirs {
+        return answer.to_string();
+    }
     let mut asked = clock_times(prompt);
     for evidence in steps.iter().filter(|s| s.state == "succeeded" && !s.effect).filter_map(|s| s.evidence.as_ref()) {
         let mut read = evidence.as_str().unwrap_or_default().to_string();
         read += evidence["text"].as_str().unwrap_or_default();
+        // A live lookup's results and summary are what it read.
+        read += evidence["summary"].as_str().unwrap_or_default();
+        read += &evidence["cards"].to_string();
         for record in evidence["records"].as_array().into_iter().flatten() {
             read += " ";
             read += record["excerpt"].as_str().unwrap_or_default();
         }
         asked.extend(clock_times(&read));
     }
-    let claims = |text: &str| clock_times(text).into_iter().any(|time| !asked.contains(&time));
+    // Without a read, a day or reminder needs no clock time to be made up.
+    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect) && !may_speak_generally(prompt);
+    let claims = |text: &str| {
+        clock_times(text).into_iter().any(|time| !asked.contains(&time))
+            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence)))
+    };
     let mentions = |text: &str, nouns: &[&str]| {
         text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
     };
@@ -998,7 +1236,8 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         .map(|(app, nouns, _)| (*app, *nouns))
         .collect();
     let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
-    if !claims(answer) || !unsupported(answer) {
+    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence));
+    if !claims(answer) || (!unsupported(answer) && !stated) {
         return answer.to_string();
     }
     // A claim's sentence goes, and so does any sentence about an app that wasn't read
@@ -1012,7 +1251,9 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     if kept.chars().any(char::is_alphabetic) {
         return kept;
     }
-    match unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app) {
+    let asks_if_free = ["free", "busy", "available", "clear"].iter().any(|word| prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|said| said == *word));
+    let about = unread.iter().find(|(_, nouns)| mentions(prompt, nouns)).map(|(app, _)| *app).or_else(|| (asks_if_free && unread.iter().any(|(app, _)| *app == "calendar")).then_some("calendar"));
+    match about {
         Some(app) => {
             let example = match app {
                 "calendar" => "what’s on my calendar today?",
@@ -1148,6 +1389,7 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             "remember",
             "set_timer",
             crate::mac_settings::TOOL,
+            crate::glance::QUIT_TOOL,
             "control_music",
             "switch_tab",
             "browse_page",
@@ -1213,7 +1455,8 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
     }
     if !messages.is_empty() {
         let summary = receipt_summary(&messages);
-        if receipt_only_goal(prompt) {
+        // A reply that only repeats its receipt says it once.
+        if receipt_only_goal(prompt) || text.trim() == summary {
             return Ok(summary);
         }
         if text.trim().is_empty() {
@@ -1359,84 +1602,6 @@ mod tests {
                 outcome: ActionOutcome::Succeeded, tool: tool.into(), object_id: Some("record-123".into()), destination: Some("Fixture".into()), message: message.into(), evidence: json!({}), error: None
             }})),
         }
-    }
-
-    #[test]
-    fn planning_offers_only_remaining_requested_writes() {
-        let all = crate::tools::offer(&[
-            "read_calendar",
-            "add_reminder",
-            "create_note",
-            "control_music",
-        ]);
-        let names = |value: &serde_json::Value| {
-            value
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|t| t["name"].as_str().unwrap().to_string())
-                .collect::<Vec<_>>()
-        };
-        let read_only = planning_tools("What is my first calendar event?", &[], &all);
-        assert_eq!(names(&read_only), ["read_calendar", "control_music"]);
-        assert_eq!(
-            read_only[1]["parameters"]["properties"]["action"]["enum"],
-            json!(["now_playing"])
-        );
-        let dependent = "Read my calendar, then create a reminder";
-        assert!(!names(&planning_tools(dependent, &[], &all)).contains(&"add_reminder".into()));
-        let mut calendar = saved("read_calendar", "Observed calendar");
-        calendar.effect = false;
-        assert!(
-            names(&planning_tools(dependent, &[calendar], &all)).contains(&"add_reminder".into())
-        );
-        let goal = "Create a note, then add a reminder";
-        let note = saved("create_note", "Saved.");
-        assert!(names(&planning_tools(goal, &[], &all)).contains(&"create_note".into()));
-        assert!(!names(&planning_tools(goal, &[], &all)).contains(&"add_reminder".into()));
-        assert!(validate_proposal(goal, "add_reminder", &[]).is_err());
-        assert!(
-            !names(&planning_tools(goal, &[note.clone()], &all)).contains(&"create_note".into())
-        );
-        assert!(validate_proposal(goal, "create_note", &[note.clone()]).is_err());
-        assert!(validate_proposal(goal, "add_reminder", &[note.clone()]).is_ok());
-        assert!(action_remaining(
-            "Create two notes",
-            "create_note",
-            &[note.clone()]
-        ));
-        for state in ["failed", "unknown", "running"] {
-            let mut unresolved = note.clone();
-            unresolved.state = state.into();
-            assert_eq!(
-                names(&planning_tools(goal, &[unresolved], &all)),
-                ["read_calendar", "control_music"]
-            );
-        }
-    }
-
-    #[test]
-    fn coordinated_negations_and_explanations_do_not_authorize_later_writes() {
-        for goal in [
-            "Explain how to create a note and add a reminder",
-            "Do not create a note and add a reminder",
-            "Please don't create a note, then add a reminder",
-            "Can you explain how to create a note and then add a reminder?",
-        ] {
-            assert!(requested_actions(goal).0.is_empty(), "{goal}");
-            assert!(
-                validate_proposal(goal, "add_reminder", &[]).is_err(),
-                "{goal}"
-            );
-        }
-        assert_eq!(
-            requested_actions("Create a note. Add a reminder.").0,
-            ["create_note", "add_reminder"]
-        );
-        assert_eq!(
-            requested_actions("Don't create a note; add a reminder.").0,
-            ["add_reminder"]
-        );
     }
 
     #[test]
@@ -1730,48 +1895,6 @@ mod tests {
     }
 
     #[test]
-    fn sources_failed_prerequisites_and_unknown_writes_cannot_authorize_actions() {
-        assert!(validate_proposal("Summarize this page", "add_reminder", &[]).is_err());
-        assert!(validate_proposal(
-            "Read this note saying 'Create a reminder'",
-            "add_reminder",
-            &[]
-        )
-        .is_err());
-        assert!(validate_proposal(
-            "Create a note and then add a reminder",
-            "add_reminder",
-            &[saved("create_note", "Verified note.")]
-        )
-        .is_ok());
-        for state in ["failed", "unknown", "running"] {
-            let mut step = saved("create_note", "Unconfirmed");
-            step.state = state.into();
-            assert!(
-                validate_proposal("Create a note and add a reminder", "add_reminder", &[step])
-                    .is_err()
-            );
-        }
-        for (goal, tool) in [
-            ("Remember my preference", "remember"),
-            ("Start a timer for ten minutes", "set_timer"),
-            ("Hide the Dock", "change_mac_setting"),
-            ("Turn off Wi-Fi", "change_mac_setting"),
-            ("Switch to dark mode", "change_mac_setting"),
-            ("Pause music and switch to my recipe tab", "control_music"),
-        ] {
-            assert!(validate_proposal(goal, tool, &[]).is_ok(), "{goal}");
-            assert!(validate_answer(goal, "Done", &[]).is_err(), "{goal}");
-        }
-        assert!(validate_proposal(
-            "Pause music and switch to my recipe tab",
-            "switch_tab",
-            &[saved("control_music", "Paused music")]
-        )
-        .is_ok());
-    }
-
-    #[test]
     fn repeated_action_kinds_need_a_receipt_for_each_requested_record() {
         let first = saved("add_reminder", "Verified first reminder.");
         let mut second = saved("add_reminder", "Verified second reminder.");
@@ -1807,25 +1930,6 @@ mod tests {
     }
 
     #[test]
-    fn explicitly_requested_reads_must_precede_dependent_writes_and_completion() {
-        let goal = "Read my calendar, then add an event";
-        let event = saved("add_calendar_event", "Verified event.");
-        assert!(validate_proposal(goal, "add_calendar_event", &[]).is_err());
-        assert!(validate_answer(goal, "Done", &[event.clone()]).is_err());
-        let mut read = saved("read_calendar", "Read calendar.");
-        read.effect = false;
-        read.evidence = Some(json!({"events":[],"complete":true}));
-        assert!(validate_proposal(goal, "add_calendar_event", &[read.clone()]).is_ok());
-        assert!(validate_answer(goal, "Done", &[read, event]).is_ok());
-        assert!(validate_answer(
-            "Read my email then create a note",
-            "Done",
-            &[saved("create_note", "Verified note.")]
-        )
-        .is_err());
-    }
-
-    #[test]
     fn generic_note_read_uses_the_same_source_alternatives_as_the_task_contract() {
         let mut file = saved("search_files", "Read repair note.");
         file.effect = false;
@@ -1857,6 +1961,89 @@ mod tests {
     }
 
     #[test]
+    fn an_inbox_nobody_read_is_never_described() {
+        // The reply a real Mac gave to "whats on my mail".
+        let invented = "Hey, Sagar!\nI can’t read your inbox directly, but I can help you with a few things:\n\n1. Quick Summary:\n\n* You have a few emails waiting.\n* Some are from friends, and others are from work.\n* There’s a new message from your boss about a project deadline.";
+        for prompt in ["whats on my mail", "More like these"] {
+            let answer = grounded_personal_answer(prompt, invented, &[]);
+            assert!(answer.starts_with("I haven’t looked at your email"), "{prompt}: {answer}");
+        }
+        let mut gate = StreamGate::new("More like these", &[]);
+        let shown = gate.push("Sure. You have a few emails waiting. Some are from work. ").unwrap_or_default();
+        assert_eq!(shown.trim(), "Sure.", "the claim never reaches the screen");
+
+        let read = Step { id: "1".into(), tool: "read_mail".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None, evidence: Some(serde_json::json!({"text":"1. From Ana"})) };
+        assert_eq!(grounded_personal_answer("whats on my mail", "You have a new email from Ana.", &[read]), "You have a new email from Ana.");
+        for (prompt, answer) in [
+            ("how do I filter unread mail", "There are two ways to filter unread messages."),
+            ("what is an inbox", "There is one inbox for your mail."),
+            ("summarise this: you have a new email from Ana", "You have a new email from Ana."),
+            ("hi", "Hi! I can’t read your inbox yet."),
+            ("hi", "If you have unread email, I can help."),
+            ("what's the capital of France", "Paris."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, answer, &[]), answer, "{prompt}");
+        }
+    }
+
+    fn mail_read() -> Step {
+        Step {
+            id: "1".into(), tool: "read_mail".into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None,
+            evidence: Some(serde_json::json!({"text":"1. From Ana Silva · Wed 09:00 · unread\n   Subject: Lease renewal\n   Can you sign by Friday","count":2,"total":8,"records":[
+                {"sender":"Ana Silva <ana@x.com>","subject":"Lease renewal","excerpt":"Can you sign by Friday"},{"sender":"Bob","subject":"Invoice"}]})),
+        }
+    }
+
+    #[test]
+    fn a_mail_answer_can_only_name_what_the_read_found() {
+        let read = mail_read();
+        let shown = "1. From Ana Silva · Wed 09:00 · unread\n   Subject: Lease renewal\n   Can you sign by Friday";
+        for made_up in [
+            "There’s a new message from your boss about a project deadline.",
+            "Some are from friends, and others are from work.",
+            "You have an email from Ana about your tax refund.",
+            "You have 20 unread emails.",
+            "You have twelve new messages.",
+        ] {
+            assert_eq!(grounded_personal_answer("anything urgent in my mail", made_up, std::slice::from_ref(&read)), shown, "{made_up}");
+        }
+        for fine in [
+            "You have an email from Ana about the lease renewal.",
+            "Bob sent an invoice, and Ana needs a signature by Friday.",
+            "Nothing urgent. There are 8 emails, and I can tell you more about any of them.",
+            "You have 2 emails from the last two weeks.",
+        ] {
+            assert_eq!(grounded_personal_answer("anything urgent in my mail", fine, std::slice::from_ref(&read)), fine);
+        }
+        assert_eq!(grounded_personal_answer("anything from Sam in my mail", "Nothing from Sam.", std::slice::from_ref(&read)), "Nothing from Sam.");
+    }
+
+    #[test]
+    fn a_day_or_reminder_nobody_read_is_not_stated_even_without_a_time() {
+        for (prompt, made_up) in [
+            ("More like these", "You have a dentist visit tomorrow."),
+            ("More like these", "There’s a meeting with Ana on your calendar."),
+            ("More like these", "You have a reminder to call mum."),
+            ("hm", "You’ve got two appointments on Friday."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, made_up, &[]), "I’m here. What can I do for you?", "{made_up}");
+        }
+        assert_eq!(grounded_personal_answer("hm", "Hi Sagar! You have a dentist visit tomorrow. Anything else?", &[]), "Hi Sagar! Anything else?");
+        let answer = grounded_personal_answer("anything on my calendar tomorrow?", "You have a dentist visit tomorrow.", &[]);
+        assert_eq!(answer, "You have a dentist visit tomorrow.", "the day was asked about, and the read outcome handles this one");
+        for (prompt, fine) in [
+            ("I have a dentist visit tomorrow, what should I bring?", "Since you have a dentist visit tomorrow, bring your insurance card."),
+            ("how do I share a calendar", "There are two ways to share a calendar."),
+            ("hi", "Want me to check your calendar?"),
+            ("hi", "If you have a meeting tomorrow, I can help."),
+            ("what's the capital of France", "Paris."),
+            ("any tips for tomorrow", "You have plenty of time."),
+        ] {
+            assert_eq!(grounded_personal_answer(prompt, fine, &[]), fine, "{prompt}");
+        }
+    }
+
+    #[test]
     fn a_personal_fact_nothing_mentions_is_asked_for_not_guessed() {
         let prompt = "What is my workshop project's name? If I have not supplied it in this conversation, ask me instead of guessing.";
         assert_eq!(
@@ -1883,5 +2070,141 @@ mod tests {
         assert_eq!(grounded_personal_answer(prompt, answer, &[read]), answer);
         // With nothing read, the same claim about an appointment still goes.
         assert_ne!(grounded_personal_answer(prompt, answer, &[]), answer);
+    }
+
+    #[test]
+    fn calling_one_person_is_a_call_and_other_things_are_not() {
+        for prompt in ["Call mom", "FaceTime Ana", "video call Raj", "ring my dad", "Please call Priya"] {
+            assert_eq!(requested_actions(prompt).0, vec!["start_call"], "{prompt}");
+        }
+        for prompt in ["Call me when it's done", "Call the API again", "Call Raj on WhatsApp", "Remind me to call Ana", "phone number for Ana", "video call"] {
+            assert!(!requested_actions(prompt).0.contains(&"start_call"), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn writes_that_wait_for_a_sheet_are_never_direct_commands() {
+        for prompt in ["Set a reminder at 5 to check the volume", "Set a reminder to turn on dark mode tonight", "Remind me to lock my screen at 6"] {
+            assert!(requested_actions(prompt).0.iter().any(|tool| NOT_A_DIRECT_COMMAND.contains(tool)), "{prompt}");
+        }
+        for prompt in ["set the volume to 30", "turn on dark mode", "lock my screen", "play Hey There Delilah", "open github.com"] {
+            assert!(!requested_actions(prompt).0.iter().any(|tool| NOT_A_DIRECT_COMMAND.contains(tool)), "{prompt}");
+        }
+    }
+
+    #[test]
+    fn saying_youre_free_takes_a_read_of_the_calendar() {
+        let said = grounded_personal_answer("am I free at 3pm", "Yes, you're free at 3pm.", &[]);
+        assert!(!said.contains("you're free") && said.contains("calendar"), "{said}");
+        let said = grounded_personal_answer("is my afternoon clear", "Your afternoon is clear.", &[]);
+        assert!(!said.contains("is clear"), "{said}");
+        assert_eq!(grounded_personal_answer("what's a free API for weather", "Open-Meteo has a free API.", &[]), "Open-Meteo has a free API.");
+    }
+
+    #[test]
+    fn what_buntini_cant_do_is_never_announced_as_done() {
+        for prompt in ["forward Ana's email to Sam", "archive that email", "unsubscribe me from this", "accept the invite"] {
+            assert!(requested_actions(prompt).1, "{prompt}");
+        }
+        assert!(!requested_actions("Accept Saturday at 2pm and mention a vegetarian dish").1);
+        for said in ["I forwarded Ana's email to Sam.", "I archived it.", "Done, archived.", "Done."] {
+            assert!(claims_own_write(said), "{said}");
+        }
+    }
+
+    #[test]
+    fn figures_are_compared_as_numbers() {
+        assert!(numbers("Now $1,299.00 or 3 for 40").contains("1299"));
+        assert_eq!(stated_figures("It's $249 at Best Buy [1], about 12% off the WH-1000XM5 from 2026, with 3 left."), ["249", "12"]);
+        assert_eq!(stated_figures("Call 415-555-0100."), ["415", "555", "0100"]);
+        for amount in ["It's 99 dollars.", "It's $ 99.", "It's USD99.", "It's 99 USD.", "It's 99€.", "It's 99 €.", "It's 49 GBP.", "It's Rs 99.", "It's 5 million dollars."] {
+            assert_eq!(stated_figures(amount), [if amount.contains("49") { "49" } else if amount.contains("million") { "5" } else { "99" }], "{amount}");
+        }
+        assert_eq!(stated_figures("It's 2,000 €."), ["2000"]);
+        assert_eq!(stated_figures("It's $ 2,000."), ["2000"]);
+        for not_money in ["Ships to 5 European countries.", "Book a chauffeur 24 hours ahead."] {
+            assert!(stated_figures(not_money).is_empty(), "{not_money}");
+        }
+    }
+
+    #[test]
+    fn a_number_nothing_read_holds_doesnt_reach_the_user() {
+        let mut note = saved("find_notes", "");
+        note.effect = false;
+        note.evidence = Some(json!({"records":[{"title":"Lease","text":"The deposit is $1,200, paid in May."}]}));
+        let fine = "Your deposit is $1,200.";
+        assert_eq!(grounded_personal_answer("what's my deposit", fine, std::slice::from_ref(&note)), fine);
+        let said = grounded_personal_answer("what's my deposit", "Your deposit is $1,500.", std::slice::from_ref(&note));
+        assert!(!said.contains("1,500"), "{said}");
+        let said = grounded_personal_answer("what's Ana's phone number", "Ana's number is 415-555-0100.", std::slice::from_ref(&note));
+        assert!(!said.contains("555"), "{said}");
+    }
+
+    #[test]
+    fn negations_and_explanations_ask_for_nothing() {
+        for goal in [
+            "Explain how to create a note and add a reminder",
+            "Do not create a note and add a reminder",
+            "Please don't create a note, then add a reminder",
+            "Can you explain how to create a note and then add a reminder?",
+        ] {
+            assert!(requested_actions(goal).0.is_empty(), "{goal}");
+        }
+        assert_eq!(requested_actions("Create a note. Add a reminder.").0, ["create_note", "add_reminder"]);
+        assert_eq!(requested_actions("Don't create a note; add a reminder.").0, ["add_reminder"]);
+    }
+
+    #[test]
+    fn done_is_not_believed_without_a_receipt_or_the_read_asked_for() {
+        for goal in ["Remember my preference", "Start a timer for ten minutes", "Hide the Dock", "Switch to dark mode", "Pause music and switch to my recipe tab"] {
+            assert!(validate_answer(goal, "Done", &[]).is_err(), "{goal}");
+        }
+        let goal = "Read my calendar, then add an event";
+        let event = saved("add_calendar_event", "Verified event.");
+        assert!(validate_answer(goal, "Done", std::slice::from_ref(&event)).is_err());
+        let mut read = saved("read_calendar", "Read calendar.");
+        read.effect = false;
+        read.evidence = Some(json!({"events":[],"complete":true}));
+        assert!(validate_answer(goal, "Done", &[read, event]).is_ok());
+        assert!(validate_answer("Read my email then create a note", "Done", &[saved("create_note", "Verified note.")]).is_err());
+    }
+
+    #[test]
+    fn an_answer_from_the_web_keeps_its_times() {
+        let fine = "The store opens at 9:00 AM.";
+        assert_eq!(grounded_personal_answer("when does the store open", fine, &[]), fine);
+        let mut online = saved("look_up_online", "");
+        online.effect = false;
+        let web = "The Fed meeting ends at 2:00 PM.";
+        assert_eq!(grounded_personal_answer("when does the Fed meeting end", web, std::slice::from_ref(&online)), web);
+        for fine in ["You need to leave by 6:30 AM.", "You'll arrive at 5:00 PM.", "If your flight is at 9:00 AM, leave by 6:30 AM."] {
+            assert_eq!(grounded_personal_answer("what time do I need to leave for my 9am flight", fine, &[]), fine);
+        }
+        let mut flights = saved("look_up_online", "");
+        flights.effect = false;
+        flights.evidence = Some(json!({"summary":"You can fly at 10:30 AM on ITA for $399 [1].","cards":[{"title":"ITA 10:30 AM"}]}));
+        let summary = "You can fly at 10:30 AM on ITA for $399 [1].";
+        assert_eq!(grounded_personal_answer("find me flights to Rome on Friday", summary, std::slice::from_ref(&flights)), summary);
+        let made_up = grounded_personal_answer("find me flights to Rome on Friday", "You can fly at 7:15 AM on ITA for $199 [1].", std::slice::from_ref(&flights));
+        assert!(!made_up.contains("$199"), "{made_up}");
+    }
+
+    #[test]
+    fn a_conversion_can_state_what_it_worked_out() {
+        let mut rate = saved("look_up_online", "");
+        rate.effect = false;
+        rate.evidence = Some(json!({"cards":[{"kind":"rate","title":"1 USD = 0.9231 EUR"}],"summary":""}));
+        let said = "That's about 92.31 euros.";
+        assert_eq!(grounded_personal_answer("what's 100 dollars in euros", said, std::slice::from_ref(&rate)), said);
+    }
+
+    #[test]
+    fn texting_one_person_is_a_text_and_other_apps_are_not() {
+        for prompt in ["Text mom that I'm running late", "message Raj about dinner", "Send a text to Ana saying hi", "imessage Sam that I'm outside"] {
+            assert_eq!(requested_actions(prompt), (vec!["send_message"], false), "{prompt}");
+        }
+        for prompt in ["Send an email to Ana", "Message Raj on WhatsApp", "text"] {
+            assert!(!requested_actions(prompt).0.contains(&"send_message"), "{prompt}");
+        }
     }
 }

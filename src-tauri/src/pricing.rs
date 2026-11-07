@@ -1,5 +1,5 @@
-//! Extract prices only from published Schema.org JSON-LD, never arbitrary page
-//! numbers, rendered text, inferred discounts, or model output.
+//! Extract prices from published Schema.org JSON-LD and, for a page that publishes none,
+//! from what its rendered page plainly shows. Never inferred discounts or model output.
 
 use crate::research::{label, validate_public_url, MAX_HTML_BYTES};
 use scraper::{Html, Selector};
@@ -488,7 +488,7 @@ pub fn extract_offers(html: &str, page_url: &str) -> Result<Vec<PriceOffer>, Str
         }
     }
     if extractor.offers.is_empty() {
-        return Err("No supported Schema.org JSON-LD product price was published on this page. Buntini does not infer prices from page text or run JavaScript.".into());
+        return Err("This shop doesn’t publish its price in a form I can read reliably, so I won’t guess it.".into());
     }
     Ok(extractor.offers)
 }
@@ -613,5 +613,232 @@ mod tests {
         );
         let page = html(serde_json::json!({"@context":"https://schema.org","@type":"Offer","price":"10","priceCurrency":"USD"})).repeat(MAX_SCRIPTS + 1);
         assert!(extract_offers(&page, "https://shop.example.com").is_err());
+    }
+}
+
+/// What a shop page showed once its scripts had run, read by a fixed script.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RenderedPage {
+    pub ready: bool,
+    pub url: String,
+    pub title: String,
+    pub heading: String,
+    pub heading_top: Option<f64>,
+    pub json_ld: Vec<String>,
+    pub meta_amount: Option<String>,
+    pub meta_currency: Option<String>,
+    pub candidates: Vec<PriceOnPage>,
+    pub buy: bool,
+    pub sold_out: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct PriceOnPage {
+    pub text: String,
+    pub size: f64,
+    pub top: f64,
+    /// Crossed out, as a former price is.
+    pub struck: bool,
+    /// In navigation, recommendations, financing or the like.
+    pub noise: bool,
+    /// Its own markup calls it a price.
+    pub hint: bool,
+    /// The short text right around it.
+    pub near: String,
+}
+
+impl RenderedPage {
+    /// Enough to tell whether the page has stopped changing.
+    pub fn signature(&self) -> String {
+        let prices: Vec<&str> = self.candidates.iter().map(|price| price.text.as_str()).collect();
+        format!("{}|{}|{:?}|{}", self.json_ld.len(), self.meta_amount.as_deref().unwrap_or_default(), prices, self.heading)
+    }
+}
+
+/// "$3,199.95", "1.299,00 €", "CA$40", "USD 19" as an amount and whether `currency` fits it.
+fn visible_price(text: &str, currency: &str) -> Option<String> {
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit() || matches!(c, '.' | ',')).collect();
+    let mark: String = text.chars().filter(|c| !c.is_ascii_digit() && !matches!(c, '.' | ',') && !c.is_whitespace()).collect();
+    let fits = match mark.as_str() {
+        "$" => ["USD", "CAD", "AUD", "NZD", "SGD", "HKD", "MXN"].contains(&currency),
+        "US$" => currency == "USD",
+        "CA$" | "C$" => currency == "CAD",
+        "A$" | "AU$" => currency == "AUD",
+        "€" => currency == "EUR",
+        "£" => currency == "GBP",
+        "¥" => ["JPY", "CNY"].contains(&currency),
+        "₹" => currency == "INR",
+        code => code == currency,
+    };
+    if !fits {
+        return None;
+    }
+    // The last separator is a decimal point only with one or two digits after it.
+    let plain = match digits.rfind(['.', ',']) {
+        Some(at) if digits.len() - at - 1 <= 2 => format!("{}.{}", digits[..at].replace(['.', ','], ""), &digits[at + 1..]),
+        _ => digits.replace(['.', ','], ""),
+    };
+    canonical_decimal(&plain).filter(|amount| amount != "0")
+}
+
+/// The price a rendered page is selling at, or why it can't be told. A published record comes
+/// first; failing that the most prominent price on the page, if that's one clear amount. This
+/// can never say a price the page doesn't show, and when it can't tell it doesn't choose.
+pub fn offer_from_rendered(page: &RenderedPage, currency: &str) -> Result<PriceOffer, String> {
+    let product = label(if page.heading.is_empty() { &page.title } else { &page.heading }, 180);
+    // A "sold out" and an "add to cart" together may be about other products on the page.
+    let availability = match (page.buy, page.sold_out) {
+        (true, false) => Some("InStock".to_string()),
+        (false, true) => Some("OutOfStock".to_string()),
+        _ => None,
+    };
+    let offer = |price: String, availability: Option<String>| PriceOffer { product: product.clone(), url: page.url.clone(), price, currency: currency.to_string(), availability, seller: None, is_aggregate: false, high_price: None };
+    if !page.json_ld.is_empty() {
+        let html: String = page.json_ld.iter().map(|text| format!("<script type=\"application/ld+json\">{}</script>", text.replace("</", "<\\/"))).collect();
+        if let Ok(found) = extract_offers(&html, &page.url).and_then(|offers| crate::watches::exact_offer(&offers, currency)) {
+            return Ok(found);
+        }
+    }
+    if let Some(amount) = page.meta_amount.as_deref().and_then(|amount| canonical_decimal(&amount.replace(',', ""))) {
+        if page.meta_currency.as_deref().is_some_and(|meta| meta.eq_ignore_ascii_case(currency)) && amount != "0" {
+            return Ok(offer(amount, availability));
+        }
+    }
+    const NOT_THE_PRICE: [&str; 17] = ["save", "off", "was", "list", "reg", "msrp", "mo", "month", "monthly", "shipping", "delivery", "rebate", "coupon", "credit", "trade", "deposit", "per"];
+    let eligible: Vec<(&PriceOnPage, String)> = page
+        .candidates
+        .iter()
+        .filter(|price| !price.struck && !price.noise && price.top < 2200.0)
+        .filter(|price| {
+            let near = price.near.to_lowercase();
+            !near.split(|c: char| !c.is_alphabetic()).any(|word| NOT_THE_PRICE.contains(&word))
+        })
+        .filter_map(|price| visible_price(&price.text, currency).map(|amount| (price, amount)))
+        .collect();
+    let Some(largest) = eligible.iter().map(|(price, _)| price.size).reduce(f64::max) else {
+        return Err("This shop didn’t show a price I could read. It may need a sign-in or be keeping automated readers out.".into());
+    };
+    let top: Vec<&(&PriceOnPage, String)> = eligible.iter().filter(|(price, _)| price.size >= largest * 0.92).collect();
+    let marked: Vec<&&(&PriceOnPage, String)> = top.iter().filter(|(price, _)| price.hint).collect();
+    let mut amounts: Vec<&String> = if marked.is_empty() { top.iter().map(|(_, amount)| amount).collect() } else { marked.iter().map(|(_, amount)| amount).collect() };
+    amounts.sort();
+    amounts.dedup();
+    match amounts[..] {
+        [one] => Ok(offer(one.clone(), availability)),
+        _ => Err("This page shows several prices and I can’t tell which is yours. Choose a page for just the one you want.".into()),
+    }
+}
+
+#[cfg(test)]
+mod rendered_tests {
+    use super::*;
+
+    fn price(text: &str, size: f64) -> PriceOnPage {
+        PriceOnPage { text: text.into(), size, top: 400.0, ..Default::default() }
+    }
+    fn page(candidates: Vec<PriceOnPage>) -> RenderedPage {
+        RenderedPage { ready: true, url: "https://shop.example.com/p/1".into(), heading: "Billy bookcase".into(), buy: true, candidates, ..Default::default() }
+    }
+
+    #[test]
+    fn a_page_that_says_both_doesnt_say_whether_its_in_stock() {
+        let mut both = page(vec![price("$129.00", 32.0)]);
+        both.sold_out = true;
+        assert_eq!(offer_from_rendered(&both, "USD").unwrap().availability, None);
+        let mut foreign = page(vec![]);
+        foreign.meta_amount = Some("219".into());
+        assert!(offer_from_rendered(&foreign, "USD").is_err(), "a price with no currency isn't dollars");
+    }
+
+    #[test]
+    fn the_most_prominent_price_is_the_price() {
+        let shown = offer_from_rendered(&page(vec![price("$19.99", 14.0), price("$129.00", 32.0), price("$5.00", 12.0)]), "USD").unwrap();
+        assert_eq!((shown.price.as_str(), shown.product.as_str(), shown.availability.as_deref()), ("129", "Billy bookcase", Some("InStock")));
+    }
+
+    #[test]
+    fn former_prices_and_other_peoples_prices_are_not_the_price() {
+        let mut was = price("$199.00", 40.0);
+        was.struck = true;
+        let mut other = price("$49.00", 40.0);
+        other.noise = true;
+        let mut monthly = price("$22.00", 40.0);
+        monthly.near = "$22.00 per month".into();
+        let mut saving = price("$30.00", 40.0);
+        saving.near = "Save $30.00".into();
+        let mut far = price("$9.00", 40.0);
+        far.top = 5000.0;
+        let shown = offer_from_rendered(&page(vec![was, other, monthly, saving, far, price("$169.00", 20.0)]), "USD").unwrap();
+        assert_eq!(shown.price, "169");
+    }
+
+    #[test]
+    fn it_never_chooses_between_equally_prominent_prices() {
+        assert!(offer_from_rendered(&page(vec![price("$10.00", 20.0), price("$20.00", 20.0)]), "USD").unwrap_err().contains("several prices"));
+        let mut marked = price("$20.00", 20.0);
+        marked.hint = true;
+        assert_eq!(offer_from_rendered(&page(vec![price("$10.00", 20.0), marked]), "USD").unwrap().price, "20");
+        assert_eq!(offer_from_rendered(&page(vec![price("$10.00", 20.0), price("$10.00", 21.0)]), "USD").unwrap().price, "10");
+        assert!(offer_from_rendered(&page(vec![]), "USD").unwrap_err().contains("didn’t show a price"));
+    }
+
+    #[test]
+    fn a_price_has_to_be_in_the_watched_currency() {
+        assert!(offer_from_rendered(&page(vec![price("£10.00", 20.0)]), "USD").is_err());
+        assert_eq!(visible_price("$3,199.95", "USD").as_deref(), Some("3199.95"));
+        assert_eq!(visible_price("1.299,00 €", "EUR").as_deref(), Some("1299"));
+        assert_eq!(visible_price("1,299", "USD"), None);
+        assert_eq!(visible_price("USD 1,299", "USD").as_deref(), Some("1299"));
+        assert_eq!(visible_price("CA$40", "CAD").as_deref(), Some("40"));
+        assert_eq!(visible_price("CA$40", "USD"), None);
+        assert_eq!(visible_price("$0.00", "USD"), None);
+    }
+
+    #[test]
+    fn a_published_record_comes_before_what_is_shown() {
+        let mut record = page(vec![price("$1.00", 50.0)]);
+        record.json_ld = vec![r#"{"@context":"https://schema.org","@type":"Product","name":"Z 8","offers":{"@type":"Offer","price":"3199.95","priceCurrency":"USD","availability":"https://schema.org/InStock"}}"#.into()];
+        assert_eq!(offer_from_rendered(&record, "USD").unwrap().price, "3199.95");
+        let mut meta = page(vec![price("$1.00", 50.0)]);
+        meta.meta_amount = Some("24.50".into());
+        meta.meta_currency = Some("USD".into());
+        assert_eq!(offer_from_rendered(&meta, "USD").unwrap().price, "24.5");
+        meta.meta_currency = Some("GBP".into());
+        assert_eq!(offer_from_rendered(&meta, "USD").unwrap().price, "1");
+    }
+
+    #[test]
+    fn sold_out_shows_as_sold_out() {
+        let mut gone = page(vec![price("$10.00", 20.0)]);
+        gone.buy = false;
+        gone.sold_out = true;
+        assert_eq!(offer_from_rendered(&gone, "USD").unwrap().availability.as_deref(), Some("OutOfStock"));
+    }
+}
+
+#[cfg(test)]
+mod live_pages {
+    use super::*;
+    /// Real shop pages through the fetch and reader a price watch uses. Reads public pages.
+    #[tokio::test]
+    #[ignore = "fetches real shop pages; run with --ignored live_price_pages"]
+    async fn live_price_pages() {
+        let urls = std::env::var("BUNTINI_PRICE_URLS").unwrap();
+        for url in urls.split_whitespace() {
+            let started = std::time::Instant::now();
+            match crate::research::fetch_watched_html(url).await {
+                Err(error) => eprintln!("PAGE {url} | fetch failed | {error}"),
+                Ok(page) => {
+                    let found = extract_offers(&page.html, url);
+                    let parsed = started.elapsed();
+                    match found {
+                        Ok(offers) => eprintln!("PAGE {url} | watch sees: {:?} | {} bytes | {:?} | {} offers | {:?}", crate::watches::exact_offer(&offers, "USD").map(|offer| (offer.price, offer.availability)), page.html.len(), parsed, offers.len(), offers.iter().take(2).map(|o| (o.product.clone(), o.price.clone(), o.currency.clone(), o.availability.clone())).collect::<Vec<_>>()),
+                        Err(error) => eprintln!("PAGE {url} | {} bytes | read failed | {error}", page.html.len()),
+                    }
+                }
+            }
+        }
     }
 }

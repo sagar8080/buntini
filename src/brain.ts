@@ -6,12 +6,26 @@ export function appleStatus(reason?: string): { ready: boolean; label: string; a
     case 'available': return { ready: true, label: 'Ready on this Mac' };
     case 'appleIntelligenceNotEnabled': return { ready: false, label: 'Turned off', advice: 'Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri.' };
     case 'modelNotReady': return { ready: false, label: 'Downloading' };
+    case 'modelStuck': return { ready: false, label: 'Not getting ready', advice: 'Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, choose a local or cloud model.' };
+    case 'languageNotSupported': return { ready: false, label: 'Language not supported', advice: 'Apple Intelligence doesn’t speak this Mac’s language yet. In System Settings → General → Language & Region, put a supported language such as English (India) first, then turn on Apple Intelligence.' };
     case 'deviceNotEligible': return { ready: false, label: 'Not supported', advice: 'This Mac doesn’t support Apple Intelligence.' };
     case 'unsupported': return { ready: false, label: 'Needs macOS 26', advice: 'Apple Intelligence needs macOS 26 on an Apple silicon Mac.' };
     case 'missing': return { ready: false, label: 'Missing', advice: 'The Apple Intelligence helper is missing from this installation.' };
     case 'checking': case undefined: return { ready: false, label: 'Checking…' };
     default: return { ready: false, label: 'Unavailable', advice: 'Apple Intelligence isn’t available right now.' };
   }
+}
+
+/** The System Settings pane that can fix Apple Intelligence here, if any. */
+export function appleSettingsPane(reason?: string): 'siri' | 'language' | null {
+  if (reason === 'languageNotSupported') return 'language';
+  return reason === 'appleIntelligenceNotEnabled' || reason === 'modelStuck' ? 'siri' : null;
+}
+
+/** Whether to offer ChatGPT in Apple Intelligence's place: once Buntini knows it can't
+    answer here yet. */
+export function offersChatGPT(reason?: string): boolean {
+  return reason !== undefined && reason !== 'checking' && !appleStatus(reason).ready;
 }
 
 // Mirrors src-tauri/src/cloud.rs PROVIDERS (suggested models and list prices, October 2026).

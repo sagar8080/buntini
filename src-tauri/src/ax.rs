@@ -26,6 +26,7 @@ pub fn trusted(ask: bool) -> bool {
     unsafe { AXIsProcessTrustedWithOptions(Some(options.as_opaque())) }
 }
 
+#[derive(Clone)]
 pub struct Element(CFRetained<AXUIElement>);
 
 impl Element {
@@ -36,14 +37,19 @@ impl Element {
         unsafe {
             element.0.set_messaging_timeout(2.0);
         }
+        element.ask_for_tree();
+        element
+    }
+
+    /// Chromium ignores this while it is still starting, so a caller waiting on a browser
+    /// that was closed asks again.
+    pub fn ask_for_tree(&self) {
         for name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
             unsafe {
-                element
-                    .0
+                self.0
                     .set_attribute_value(&CFString::from_str(name), CFBoolean::new(true));
             }
         }
-        element
     }
 
     fn value(&self, name: &str) -> Option<CFRetained<CFType>> {
@@ -89,6 +95,11 @@ impl Element {
             .downcast::<AXUIElement>()
             .ok()
             .map(Element)
+    }
+
+    /// A yes-or-no attribute such as AXEnabled.
+    pub fn flag(&self, name: &str) -> Option<bool> {
+        self.value(name)?.downcast::<CFBoolean>().ok().map(|value| value.value())
     }
 
     pub fn press(&self) -> bool {
@@ -158,7 +169,7 @@ impl Element {
         (elements, count as usize > take)
     }
 
-    fn url(&self, attribute: &str) -> Option<String> {
+    pub fn url(&self, attribute: &str) -> Option<String> {
         let value = self.value(attribute)?;
         if let Ok(text) = value.clone().downcast::<CFString>() {
             return Some(text.to_string());
@@ -321,8 +332,11 @@ pub fn page_text(pid: i32, cap: usize) -> Option<String> {
         }
     }
     let title = area.text("AXTitle");
-    (!text.trim().is_empty())
-        .then(|| format!("{title}\n{}", text.chars().take(cap).collect::<String>()))
+    let cut = text.len() > cap;
+    (!text.trim().is_empty()).then(|| {
+        let shown: String = text.chars().take(cap).collect();
+        format!("{title}\n{shown}{}", if cut { crate::apps::PAGE_CUT } else { "" })
+    })
 }
 
 const RESEARCH_NODE_CAP: usize = 12_000;
