@@ -79,7 +79,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m pip install 'pip-audit==2.10.1'
-      - run: python3 -m pip_audit -r worker/requirements.txt -r worker/requirements-vad.txt
+      - run: python3 -m pip_audit -r worker/requirements.txt -r worker/requirements-vad.txt -r worker/requirements-voice.txt
+      # What one-click local setup really installs.
+      - run: python3 -m pip_audit -r worker/requirements-local.lock --require-hashes --disable-pip
 
   build:
     name: Development bundle

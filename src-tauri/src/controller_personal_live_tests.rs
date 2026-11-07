@@ -47,7 +47,7 @@ const QUESTIONS: &[Question] = &[
     // Calendar.
     q("what's on my calendar today", DAY, &["Design review"], &["Dentist"]),
     q("whats on my schedule tomorrow", DAY, &["Dentist"], &["Design review"]),
-    q("what do I have on Saturday", DAY, &["Climbing"], &["Dentist"]),
+    q("what do I have on Saturday", DAY, &["Climbing"], &[]),
     q("whats on my calendar", DAY, &["Design review"], &[]),
     q("am I free tomorrow at 3pm", DAY, &["Dentist"], &[]),
     q("am I free tomorrow at 9am", DAY, &["Nothing on your calendar at 09:00"], &[]),
@@ -291,7 +291,12 @@ fn world_day(day: chrono::NaiveDate, today: chrono::NaiveDate) -> Agenda<Event> 
     let items = if day == today {
         vec![event(&stamp, "23:00", "23:30", "Design review", "Room 4")]
     } else if day == today + Duration::days(1) {
-        vec![event(&stamp, "11:00", "11:30", "1:1 with Priya", ""), event(&stamp, "15:00", "15:45", "Dentist", "Harley Street")]
+        let mut tomorrow = vec![event(&stamp, "11:00", "11:30", "1:1 with Priya", ""), event(&stamp, "15:00", "15:45", "Dentist", "Harley Street")];
+        // Saturday's climbing happens whichever day this runs on.
+        if day.weekday() == chrono::Weekday::Sat {
+            tomorrow.insert(0, event(&stamp, "08:00", "10:00", "Climbing with Sam", "The Arch"));
+        }
+        tomorrow
     } else if day.weekday() == chrono::Weekday::Sat {
         vec![event(&stamp, "10:00", "12:00", "Climbing with Sam", "The Arch")]
     } else {
@@ -323,10 +328,24 @@ async fn live_personal_answers() {
     let inbox = world_inbox(&day, &before);
     let mut passed = 0;
     let mut asked = 0;
-    for question in QUESTIONS {
+    // `BUNTINI_PERSONAL_FILE`: questions from a file, scored as they come.
+    let from_file: Vec<Question> = std::env::var("BUNTINI_PERSONAL_FILE").ok().map(|file| {
+        let leak = |text: &str| -> &'static str { Box::leak(text.to_string().into_boxed_str()) };
+        let list = |value: &Value| -> &'static [&'static str] {
+            let items: Vec<&'static str> = value.as_array().into_iter().flatten().filter_map(Value::as_str).map(leak).collect();
+            Box::leak(items.into_boxed_slice())
+        };
+        let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        rows.iter().map(|row| q(leak(row["asked"].as_str().unwrap()), list(&row["reads"]), list(&row["says"]), list(&row["never"]))).collect()
+    }).unwrap_or_default();
+    let tomorrow = (today + Duration::days(1)).format("%A").to_string();
+    for question in if from_file.is_empty() { QUESTIONS } else { from_file.as_slice() } {
         if only.as_deref().is_some_and(|only| !only.split('|').any(|one| question.asked == one)) {
             continue;
         }
+        // These were written for the day before a Friday: tomorrow is the day with the dentist.
+        let asked_text = if from_file.is_empty() && question.says.contains(&"Dentist") { question.asked.replace("Friday", &tomorrow) } else { question.asked.to_string() };
+        let asked_text = asked_text.as_str();
         asked += 1;
         let dir = tempfile::tempdir().unwrap();
         let state = live_state(dir.path());
@@ -334,13 +353,13 @@ async fn live_personal_answers() {
         settings.apps = vec!["mail".into(), "calendar".into(), "reminders".into()];
         state.store.lock().unwrap().save_settings(&settings).unwrap();
         let mut task: TaskRecord = serde_json::from_value(json!({
-            "id":uuid::Uuid::new_v4().to_string(), "prompt":question.asked, "answer":"",
+            "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
             "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":"apple"
         }))
         .unwrap();
         state.store.lock().unwrap().save_task(&task).unwrap();
         let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
-        let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":question.asked})];
+        let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":asked_text})];
         let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
         let rows: Vec<(&str, bool, &str, &str, &str)> = inbox.iter().map(|row| (row.0.as_str(), row.1, row.2, row.3, row.4)).collect();
         let result = tokio::time::timeout(
@@ -375,7 +394,7 @@ async fn live_personal_answers() {
         };
         let read: Vec<&str> = flow.steps.iter().filter(|step| step.state == "succeeded" && !step.effect).map(|step| step.tool.as_str()).collect();
         let needed = question.reads.iter().all(|tool| read.contains(tool)) && (!question.reads.is_empty() || read.is_empty());
-        let records = crate::personal_answer::reads(question.asked, &flow.steps).is_some();
+        let records = crate::personal_answer::reads(asked_text, &flow.steps).is_some();
         let shown = error.clone().unwrap_or_else(|| task.answer.clone());
         // Reading it as a person would: a reply escapes what could become Markdown.
         let lower = shown.replace('\\', "").to_lowercase();
@@ -384,13 +403,13 @@ async fn live_personal_answers() {
         let ok = error.is_none() && needed && says && clean && (question.reads.is_empty() || records);
         passed += usize::from(ok);
         let row = json!({
-            "question": question.asked, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
+            "question": asked_text, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
             "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state})).collect::<Vec<_>>(),
             "modelCalls": state.models.apple.model_calls(), "error": error, "answer": shown,
         });
         writeln!(out, "{row}").unwrap();
         out.flush().unwrap();
-        eprintln!("PERSONAL {} {} (read {read:?})", if ok { "pass" } else { "FAIL" }, question.asked);
+        eprintln!("PERSONAL {} {} (read {read:?})", if ok { "pass" } else { "FAIL" }, asked_text);
         state.models.shutdown().await;
     }
     eprintln!("PERSONAL {passed} of {asked} passed");
