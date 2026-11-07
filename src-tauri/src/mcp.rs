@@ -166,10 +166,10 @@ fn shown_command(program: &str, args: &[String]) -> String {
         let at = rest[..end].rfind('@')?;
         Some(format!("{scheme}://{name}:{HIDDEN}{}", &rest[at..]))
     };
-    // "https://x/sse?token=abc": a secret in an address's query.
+    // "https://x/sse?token=abc", or "#token=abc": a secret after an address.
     let hide_query = |arg: &str| -> Option<String> {
-        let (address, query) = arg.split_once('?').filter(|(address, _)| address.contains("://"))?;
-        query.split('&').any(|pair| pair.split_once('=').is_some_and(|(name, _)| secret_name(name))).then(|| format!("{address}?{HIDDEN}"))
+        let at = arg.find(['?', '#']).filter(|at| arg[..*at].contains("://"))?;
+        arg[at + 1..].split(['&', '#', '?']).any(|pair| pair.split_once('=').is_some_and(|(name, _)| secret_name(name))).then(|| format!("{}?{HIDDEN}", &arg[..at]))
     };
     let mut shown = vec![quote(program)];
     let mut hide_next = false;
@@ -178,7 +178,7 @@ fn shown_command(program: &str, args: &[String]) -> String {
             hide_next = false;
             HIDDEN.to_string()
         } else if let Some(url) = hide_userinfo(arg) {
-            url
+            hide_query(&url).unwrap_or(url)
         } else if token_shaped(arg) || arg.to_lowercase().starts_with("bearer ") || arg.to_lowercase().starts_with("basic ") {
             HIDDEN.to_string()
         } else if let Some((name, _)) = arg.split_once('=').filter(|(name, _)| secret_name(name)) {

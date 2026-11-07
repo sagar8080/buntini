@@ -282,17 +282,28 @@ def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, An
     return validate_tool_call({"name": name, "arguments": arguments}, allowed)
 
 
-# Turn markers a page or an email could write to pose as a real turn of the conversation.
-TEMPLATE_MARKERS = r"<\|[^|<>\s]{1,40}\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
-MARKER_PASSES = 8
+# Text that could pose as a turn of the conversation: any <| or |>, whatever follows, and
+# the bracket-style markers some models use.
+TEMPLATE_MARKERS = r"<\||\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
+
+
+def _disarmed(marker: str) -> str:
+    disarmed = marker.replace("<|", "\u2039|").replace("|>", "|\u203a")
+    if disarmed != marker:
+        return disarmed
+    if marker.startswith("<"):
+        return "\u2039" + marker[1:]
+    if marker.endswith(">"):
+        return marker[:-1] + "\u203a"
+    return marker[0] + "\u200b" + marker[1:]
 
 
 def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> list[dict[str, Any]]:
     """Text from outside can't become a turn: only the template adds real markers. Every
-    message is cleaned, since the system message carries values bound from emails and pages.
-    Removing an inner marker can join the text around it into a new one, so this repeats,
-    and input built to outlast the passes loses every marker's brackets instead."""
-    named = set(getattr(tokenizer, "all_special_tokens", None) or [])
+    message is covered, since the system message and tool calls carry values bound from
+    emails and pages. Markers are disarmed in place, never deleted, because deleting one
+    can join the text around it into another. One pass is enough."""
+    named = {token for token in (getattr(tokenizer, "all_special_tokens", None) or []) if isinstance(token, str) and token}
     added = getattr(tokenizer, "get_added_vocab", None)
     if callable(added):
         try:
@@ -300,18 +311,19 @@ def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> 
             named.update(token for token in added() if token.startswith("<") and token.endswith(">") and ("|" in token or "turn" in token))
         except Exception:
             pass
-    pattern = re.compile("|".join([TEMPLATE_MARKERS, *(re.escape(token) for token in sorted(named, key=len, reverse=True) if token)]))
+    pattern = re.compile("|".join([*(re.escape(token) for token in sorted(named, key=len, reverse=True)), TEMPLATE_MARKERS]))
 
-    def clean(text: str) -> str:
-        for _ in range(MARKER_PASSES):
-            cleaned = pattern.sub("", text)
-            if cleaned == text:
-                return text
-            text = cleaned
-        return pattern.sub("", text).replace("<|", "").replace("|>", "")
+    def clean(value: Any) -> Any:
+        if isinstance(value, str):
+            return pattern.sub(lambda found: _disarmed(found.group(0)), value)
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
+        return value
 
     return [
-        {**message, "content": clean(message["content"])} if isinstance(message.get("content"), str) else message
+        {**message, **{key: clean(message[key]) for key in ("content", "tool_calls") if key in message}}
         for message in messages
     ]
 

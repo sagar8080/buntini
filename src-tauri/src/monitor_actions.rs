@@ -22,6 +22,28 @@ fn text(args: &Map<String, Value>, key: &str, max: usize) -> Result<String, Stri
     }
     Ok(value.into())
 }
+/// The words to search for, not the sentence asking: a model can hand back "search for
+/// Nikon Z8 deals every hour" whole, and that's what the provider would then look up.
+fn search_words(asked: &str) -> String {
+    let mut query = asked.trim().trim_end_matches(['.', '!', '?']).trim();
+    let lower = query.to_lowercase();
+    for lead in ["keep checking for ", "keep checking ", "keep searching for ", "keep searching ", "search the web for ", "search for ", "look up ", "check for ", "search ", "find "] {
+        if lower.starts_with(lead) {
+            query = &query[lead.len()..];
+            break;
+        }
+    }
+    let lower = query.to_lowercase();
+    for tail in [" every hour", " every day", " every week", " every morning", " every night", " hourly", " daily", " weekly", " regularly"] {
+        if lower.ends_with(tail) {
+            query = &query[..query.len() - tail.len()];
+            break;
+        }
+    }
+    let query = query.trim();
+    if query.is_empty() || query.eq_ignore_ascii_case("for") { asked.trim().to_string() } else { query.to_string() }
+}
+
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     if tool == crate::routines::TOOL {
         return crate::routines::validate(args);
@@ -52,7 +74,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     let mut out = Map::new();
     out.insert("interval_minutes".into(), json!(interval));
     if tool == "create_saved_search" {
-        let query = text(args, "query", 2000)?;
+        let query = search_words(&text(args, "query", 2000)?);
         crate::scheduler::validate(&query, interval as u32)?;
         out.insert("query".into(), json!(query));
     } else {
@@ -401,6 +423,15 @@ mod tests {
         );
         assert!(store.price_watches().unwrap().is_empty());
     }
+    #[test]
+    fn a_saved_search_keeps_the_words_to_search_for() {
+        assert_eq!(search_words("search for Nikon Z8 camera deals every hour"), "Nikon Z8 camera deals");
+        assert_eq!(search_words("Search for Apple AirPods Pro 2 at Walmart every hour."), "Apple AirPods Pro 2 at Walmart");
+        assert_eq!(search_words("mechanical keyboards under $120"), "mechanical keyboards under $120");
+        assert_eq!(search_words("cargo bikes hourly"), "cargo bikes");
+        assert_eq!(search_words("search for"), "search for");
+    }
+
     #[test]
     fn export_and_erase_cover_approved_intents_timers_and_monitor_history() {
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();

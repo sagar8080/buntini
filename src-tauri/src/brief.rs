@@ -154,7 +154,7 @@ pub fn compose(
     match &day.mail {
         Some(triage) => lines.extend(crate::triage::brief_line(triage)),
         None if day.mail_skipped => lines.push("Mail isn’t open, so I skipped your inbox.".into()),
-        None if day.mail_allowed => lines.push("I couldn’t check your email. Check Mail is open and allowed under System Settings → Privacy & Security → Automation.".into()),
+        None if day.mail_allowed => lines.push("I couldn’t check your email this time. Ask me “what’s in my inbox?” and I’ll try again. Check Mail is open and allowed under System Settings → Privacy & Security → Automation.".into()),
         None => {}
     }
     if battery_low {
@@ -209,7 +209,11 @@ pub async fn morning_brief(
         }
     };
     let day = tokio::select! {
-        day = crate::brief::gather(state.models.apple_helper(), &settings, launch) => day,
+        day = async {
+            let reading = crate::brief::gather(state.models.apple_helper(), &settings, launch);
+            // "My day" was asked for. The automatic brief wasn't, so it never raises a prompt.
+            if automatic.unwrap_or(false) { reading.await } else { crate::apps::asked_for(reading).await }
+        } => day,
         () = stopped => return Err("Morning brief cancelled.".into()),
     };
     if cancel.load(Ordering::Relaxed) {

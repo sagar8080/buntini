@@ -959,10 +959,16 @@ fn number_spans(text: &str) -> Vec<(String, Option<char>, Option<char>)> {
 /// long enough to be a code, a phone number or a count. Part of a name ("WH-1000XM5"), a
 /// citation marker or a year isn't one.
 pub(crate) fn stated_figures(text: &str) -> Vec<String> {
-    number_spans(text)
+    // "99 dollars", "$ 99" and "USD199" are amounts too.
+    let lower = text.to_lowercase();
+    let mut plain = lower.replace("$ ", "$").replace("usd", "$").replace("eur ", "€").replace("gbp ", "£");
+    for word in ["dollars", "dollar", "bucks", "euros", "euro", "pounds", "quid", "rupees"] {
+        plain = plain.split(&format!(" {word}")).collect::<Vec<_>>().join("%");
+    }
+    number_spans(&plain)
         .into_iter()
         .filter(|(number, before, after)| {
-            let money = before.is_some_and(|c| "$€£¥₹".contains(c)) || *after == Some('%');
+            let money = before.is_some_and(|c| "$€£¥₹".contains(c)) || matches!(after, Some('%'));
             let in_a_name = !money && (before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic));
             let marker = *before == Some('[') && *after == Some(']');
             let digits = number.chars().filter(char::is_ascii_digit).count();
@@ -1051,6 +1057,17 @@ fn states_day_or_reminder(prompt: &str, sentence: &str, known_times: &[String]) 
     let text = sentence.to_lowercase().replace('’', "'");
     let asked = prompt.to_lowercase().replace('’', "'");
     let in_text = |set: &[&str]| text.split(|c: char| !c.is_alphanumeric()).any(|word| set.contains(&word));
+    // "Your dentist is tomorrow at 15:00": the user's own day, with nothing read this turn,
+    // is stale or made up. Questions and offers don't claim anything; "you'll arrive at 5pm"
+    // is arithmetic, and "leave by 6:30" answers "when should I leave".
+    let said: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
+    let offers = ["?", "want me", "would you", "i can "].iter().any(|phrase| text.contains(phrase));
+    let new_time = clock_times(&text).iter().any(|time| !known_times.contains(time));
+    let new_day = DAYS.iter().any(|day| said.contains(day) && !asked.contains(day));
+    let advice = asked.split(|c: char| !c.is_alphanumeric()).any(|word| word == "should") || ["should", "could", "might", "try", "recommend", "suggest", "aim"].iter().any(|word| said.contains(word));
+    if !offers && !advice && said.contains(&"your") && (new_time || new_day) {
+        return true;
+    }
     let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once ", "want me", "would you", "i can "].iter().any(|hedge| text.contains(hedge));
     if hedged {
         return false;
@@ -1060,13 +1077,6 @@ fn states_day_or_reminder(prompt: &str, sentence: &str, known_times: &[String]) 
         return true;
     }
     // "Your dentist is tomorrow at 15:00" with nothing read this turn may be stale or made up.
-    let new_time = clock_times(&text).iter().any(|time| !known_times.contains(time));
-    let said: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
-    // "Leave by 6:30" answers "when should I leave"; it doesn't claim to know their day.
-    let advice = asked.split(|c: char| !c.is_alphanumeric()).any(|word| word == "should") || ["should", "could", "might", "try", "recommend", "suggest", "aim"].iter().any(|word| said.contains(word));
-    if new_time && !advice && said.iter().any(|word| ["your", "you"].contains(word)) {
-        return true;
-    }
     let says_you_have = ["you have ", "you've got ", "you got "].iter().any(|claim| text.contains(claim));
     let there_is = ["there's ", "there is ", "there are ", "coming up", "on your calendar", "on your schedule", "is due", "are due"].iter().any(|claim| text.contains(claim));
     // A day the user brought up themselves ("I have a dentist visit tomorrow") can be repeated.
@@ -1165,7 +1175,8 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     let about_the_user = prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| ["my", "i", "me", "mine", "our", "we", "us"].contains(&word));
     let looked_online = steps.iter().any(|step| step.state == "succeeded" && step.tool == "look_up_online");
     let read_theirs = steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online");
-    if looked_online && !about_the_user && !read_theirs {
+    let says_yours = answer.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| word == "your");
+    if looked_online && !about_the_user && !read_theirs && !says_yours {
         return answer.to_string();
     }
     let mut asked = clock_times(prompt);
@@ -2077,6 +2088,9 @@ mod tests {
         assert!(numbers("Now $1,299.00 or 3 for 40").contains("1299"));
         assert_eq!(stated_figures("It's $249 at Best Buy [1], about 12% off the WH-1000XM5 from 2026, with 3 left."), ["249", "12"]);
         assert_eq!(stated_figures("Call 415-555-0100."), ["415", "555", "0100"]);
+        for amount in ["It's 99 dollars.", "It's $ 99.", "It's USD99."] {
+            assert_eq!(stated_figures(amount), ["99"], "{amount}");
+        }
     }
 
     #[test]
@@ -2135,6 +2149,16 @@ mod tests {
         // The web doesn't excuse a claim about the user's own day.
         let said = grounded_personal_answer("when's my dentist", "Your dentist is tomorrow at 15:00.", std::slice::from_ref(&online));
         assert!(!said.contains("15:00"), "{said}");
+        for made_up in ["Your dentist is tomorrow.", "Your meeting is on Friday.", "Your dentist is at 15:00 if I recall."] {
+            let said = grounded_personal_answer("when's the dentist", made_up, &[]);
+            assert_ne!(said, made_up);
+        }
+        for fine in ["You need to leave by 6:30 AM.", "You'll arrive at 5:00 PM."] {
+            assert_eq!(grounded_personal_answer("what time do I need to leave for my 9am flight", fine, &[]), fine);
+        }
+        // An answer from the web doesn't excuse a claim about the user's own day.
+        let said = grounded_personal_answer("when's the dentist", "Your appointment is at 3pm.", std::slice::from_ref(&online));
+        assert!(!said.contains("3pm"), "{said}");
         let advice = "You should try to sleep by 11pm.";
         assert_eq!(grounded_personal_answer("when should I sleep", advice, &[]), advice);
         let leave = "Leave by 6:30 AM so you have time.";

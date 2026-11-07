@@ -22,6 +22,10 @@ import PDFKit
 import Photos
 import Speech
 
+/// Only what someone just asked for may put a macOS permission prompt on screen. Background
+/// reads get "not authorized" until they've answered.
+let macOSMayBeAsked = ProcessInfo.processInfo.environment["BUNTINI_MAY_ASK"] == "1"
+
 let output = FileHandle.standardOutput
 let writeLock = NSLock()
 
@@ -1023,10 +1027,12 @@ enum Agenda {
         }
         let store = EKEventStore()
         var granted = false
-        if #available(macOS 14.0, *) {
-            granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
-        } else {
-            granted = (try? await store.requestAccess(to: events ? .event : .reminder)) ?? false
+        if macOSMayBeAsked || EKEventStore.authorizationStatus(for: events ? .event : .reminder) != .notDetermined {
+            if #available(macOS 14.0, *) {
+                granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
+            } else {
+                granted = (try? await store.requestAccess(to: events ? .event : .reminder)) ?? false
+            }
         }
         guard granted else {
             FileHandle.standardError.write(Data("not-authorized\n".utf8))
@@ -1167,7 +1173,7 @@ enum People {
     /// Asks once; a refused or restricted Contacts permission is never retried here.
     static func access() async -> Bool {
         switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .notDetermined: return (try? await CNContactStore().requestAccess(for: .contacts)) ?? false
+        case .notDetermined: return macOSMayBeAsked ? ((try? await CNContactStore().requestAccess(for: .contacts)) ?? false) : false
         case .denied, .restricted: return false
         default: return true
         }

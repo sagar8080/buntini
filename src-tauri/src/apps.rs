@@ -943,6 +943,10 @@ mod automation {
             "Music" => Some("com.apple.Music"),
             "TV" => Some("com.apple.TV"),
             "Spotify" => Some("com.spotify.client"),
+            "Google Chrome" | "Chrome" => Some("com.google.Chrome"),
+            "Brave Browser" | "Brave" => Some("com.brave.Browser"),
+            "Microsoft Edge" | "Edge" => Some("com.microsoft.edgemac"),
+            "Arc" => Some("company.thebrowser.Browser"),
             "Safari" => Some("com.apple.Safari"),
             _ => None,
         }
@@ -982,9 +986,9 @@ mod automation {
     }
 
     /// True when scripting this app can't raise a prompt. A closed app is the script's own
-    /// guard to handle, and an app with no known bundle keeps today's behaviour.
+    /// guard to handle. An app it can't name might prompt, so it doesn't pass.
     pub fn may_ask_silently(app: &str) -> bool {
-        bundle(app).is_none_or(|bundle| matches!(consent(bundle), Consent::Allowed | Consent::NotRunning))
+        bundle(app).is_some_and(|bundle| matches!(consent(bundle), Consent::Allowed | Consent::NotRunning))
     }
 }
 
@@ -1119,6 +1123,24 @@ async fn helper<T: DeserializeOwned>(helper: &Path, args: &[&str]) -> Result<Age
     parse_helper_rows(&helper_output(helper, args).await?)
 }
 
+tokio::task_local! {
+    /// Set for what a person just asked for. Anything else that reads Calendar, Reminders or
+    /// Contacts never raises macOS's prompt: it gets "not authorized" until they've answered.
+    static MAY_ASK: ();
+}
+
+/// Runs what someone is here for and asked for, which may ask macOS for access.
+pub async fn asked_for<T>(work: impl std::future::Future<Output = T>) -> T {
+    MAY_ASK.scope((), work).await
+}
+
+/// Tells the helper whether it may ask macOS for access.
+fn set_asking(command: &mut Command) {
+    if MAY_ASK.try_with(|_| ()).is_ok() && !crate::controller::headless() {
+        command.env("BUNTINI_MAY_ASK", "1");
+    }
+}
+
 async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
     if !helper.is_file() {
         return Err(
@@ -1127,6 +1149,7 @@ async fn helper_output(helper: &Path, args: &[&str]) -> Result<String, String> {
         );
     }
     let mut command = Command::new(helper);
+    set_asking(&mut command);
     command.args(args);
     // The first use waits for the macOS permission prompt, so allow time to answer it.
     let output = crate::actions::output(command, 90).await.map_err(|error| {
@@ -1505,6 +1528,7 @@ async fn contacts_access(helper_path: &Path) -> Result<String, String> {
         return Err(CONTACTS_HELPER.into());
     }
     let mut command = Command::new(helper_path);
+    set_asking(&mut command);
     command.arg("--contacts-access");
     let output = crate::actions::output(command, 90).await?;
     match serde_json::from_str::<Value>(output.trim())
@@ -2637,10 +2661,13 @@ fn tab_records(app: &App, output: &str) -> Result<(Vec<Value>, CountedRows), Str
 async fn browser_tabs_evidence(browsers: &[&App], query: &str) -> Result<Value, String> {
     let mut results = Vec::new();
     for app in browsers {
-        results.push((
-            *app,
-            osascript(&tab_scripts(app).0, &[query.into()], 20).await,
-        ));
+        // With nobody here, a browser macOS would have to ask about counts as unread.
+        let read = if crate::controller::headless() { no_prompt_unasked(app.name).await } else { Ok(()) };
+        let tabs = match read {
+            Ok(()) => osascript(&tab_scripts(app).0, &[query.into()], 20).await,
+            Err(error) => Err(error),
+        };
+        results.push((*app, tabs));
     }
     tabs_evidence(browsers, query, results)
 }
@@ -3176,6 +3203,13 @@ pub async fn check_app(
     id: String,
     state: tauri::State<'_, crate::controller::AppState>,
 ) -> Result<String, String> {
+    asked_for(check_app_asked(id, state)).await
+}
+
+async fn check_app_asked(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<String, String> {
     let helper_path = state.models.apple_helper().to_path_buf();
     match id.as_str() {
         "calendar" => events(
@@ -3270,6 +3304,13 @@ fn calendar_connection(read: Result<(), String>) -> Result<Connection, String> {
 /// rather than in the middle of a later request. Connecting Mail may open it.
 #[tauri::command]
 pub async fn connect_app(
+    id: String,
+    state: tauri::State<'_, crate::controller::AppState>,
+) -> Result<Connection, String> {
+    asked_for(connect_app_asked(id, state)).await
+}
+
+async fn connect_app_asked(
     id: String,
     state: tauri::State<'_, crate::controller::AppState>,
 ) -> Result<Connection, String> {
