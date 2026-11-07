@@ -3487,6 +3487,10 @@ where
                 }
             }
         }
+        // Told "general" about the user's own things, a small model makes up the answer.
+        if locality == privacy::Locality::OnDevice && sources.is_empty() && crate::personal_answer::about_own_things(&flow.contract.current_request, &flow.contract) {
+            sources = crate::personal_answer::every_source();
+        }
         // It's in the app, not in what Buntini remembers. With the app off, memory still is.
         let remembers = flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.accepted_tools.iter().all(|tool| tool == "search_memory"));
         if remembers {
@@ -3509,6 +3513,11 @@ where
             if let Some(message) = crate::personal_answer::unavailable(&tools, &offered, |app| crate::apps::allowed(settings, app)) {
                 return Err(message.into());
             }
+        }
+        // Nothing it could read, so nothing true to say. A model would answer anyway.
+        let wanted_own = locality == privacy::Locality::OnDevice && crate::personal_answer::about_own_things(&goal, &flow.contract);
+        if wanted_own && flow.contract.own_sources.iter().flatten().count() > 0 && flow.contract.own_sources.iter().flatten().all(|source| guessed_off.contains(source)) {
+            return Err("I can’t check that yet. Allow Mail, Calendar or Reminders in Settings → Apps and ask again.".into());
         }
         if let Some(sources) = flow.contract.own_sources.as_mut() {
             sources.retain(|source| !guessed_off.contains(source));
@@ -3577,7 +3586,7 @@ where
                     None => {
                         let moment = now.format("%A %Y-%m-%d %H:%M").to_string();
                         match crate::personal_answer::pick_request(&flow.contract.current_request, &reads, &moment, budget) {
-                            None => crate::personal_answer::everything(&reads),
+                            None => crate::personal_answer::none_picked(&reads),
                             Some(request) => {
                                 phase(channel, &task.id, "thinking");
                                 let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
@@ -3586,7 +3595,7 @@ where
                                 }
                                 match turn.ok().and_then(|turn| crate::personal_answer::parse_pick(&turn.text, &reads)) {
                                     Some(picks) => crate::personal_answer::picked(&reads, &picks),
-                                    None => crate::personal_answer::everything(&reads),
+                                    None => crate::personal_answer::none_picked(&reads),
                                 }
                             }
                         }

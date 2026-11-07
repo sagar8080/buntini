@@ -120,12 +120,34 @@ fn dates(text: &str) -> Vec<String> {
         .map(str::to_owned)
         .collect()
 }
+/// How people type: "tmrw", "wht", "havent". Only for reading what a question asks, never
+/// for what gets written or sent.
+pub(crate) fn spelled(text: &str) -> String {
+    const USUAL: [(&str, &str); 30] = [
+        ("yesterdays", "yesterday"), ("todays", "today"), ("tomorrows", "tomorrow"),
+        ("tmrw", "tomorrow"), ("tmr", "tomorrow"), ("tomorow", "tomorrow"), ("tommorow", "tomorrow"), ("tommorrow", "tomorrow"), ("2morrow", "tomorrow"), ("2day", "today"),
+        ("tonite", "tonight"), ("wht", "what"), ("wat", "what"), ("whos", "who's"), ("hows", "how's"), ("wheres", "where's"), ("whens", "when's"), ("havent", "haven't"),
+        ("dont", "don't"), ("didnt", "didn't"), ("doesnt", "doesn't"), ("cant", "can't"), ("isnt", "isn't"), ("cal", "calendar"), ("emial", "email"), ("calender", "calendar"),
+        ("reminer", "reminder"), ("remiders", "reminders"), ("mtg", "meeting"), ("appt", "appointment"),
+    ];
+    text.split(' ')
+        .map(|word| {
+            let bare = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            match USUAL.iter().find(|(typed, _)| *typed == bare) {
+                Some((_, meant)) => word.to_lowercase().replacen(&bare, meant, 1),
+                None => word.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The days a clause names, for calendar reads. Rust resolves them from the task's date, so
 /// a model never has to work out which date "Friday" is.
 pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> {
     use chrono::Datelike;
     const WEEKDAYS: [&str; 7] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-    let text = text.to_lowercase();
+    let text = spelled(text).to_lowercase();
     let words = tokens(&text);
     let mut result = Vec::new();
     let mut add = |day: chrono::NaiveDate| {
@@ -188,7 +210,11 @@ pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> 
             }
         }
     }
-    for word in &words {
+    for (at, word) in words.iter().enumerate() {
+        if *word == "tomorrow" && at > 1 && words[at - 1] == "after" && words[at - 2] == "day" {
+            add(base + chrono::Duration::days(2));
+            continue;
+        }
         let day = chrono::NaiveDate::parse_from_str(word, "%Y-%m-%d")
             .ok()
             .or_else(|| match *word {

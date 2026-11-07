@@ -52,11 +52,13 @@ fn general_question(goal: &str) -> bool {
     // "Is email secure" is about email. Saying whose makes it the user's: "my", "any", "got",
     // or a day or a sender to look for.
     const TOPICS: [&str; 13] = ["email", "emails", "mail", "inbox", "calendar", "calendars", "meeting", "meetings", "reminder", "reminders", "appointment", "appointments", "schedule"];
-    const WHOSE: [&str; 21] = ["there", "the", "my", "i", "me", "mine", "any", "anything", "new", "unread", "got", "from", "today", "tomorrow", "tonight", "yesterday", "week", "weekend", "next", "someone", "anyone"];
+    const WHOSE: [&str; 22] = ["which", "there", "the", "my", "i", "me", "mine", "any", "anything", "new", "unread", "got", "from", "today", "tomorrow", "tonight", "yesterday", "week", "weekend", "next", "someone", "anyone"];
     let topic_only = words.iter().any(|word| TOPICS.contains(word)) && !words.iter().any(|word| WHOSE.contains(word));
     // "I just got back from the gym" tells rather than asks.
+    let a_book = opening(&["who", "wrote"]) && !words.iter().any(|word| ["me", "to", "back", "email", "mail", "about"].contains(word));
+    let a_topic = opening(&["tell", "me", "about"]) && !words.iter().any(|word| ["my", "our", "that", "the"].contains(word));
     let telling = !lower.contains('?') && ["i", "i'm", "im", "i've", "ive", "thanks", "thank", "sorry", "ok", "okay"].contains(words.first().unwrap_or(&""));
-    sum || definition || how_to || about_apps || topic_only || telling
+    sum || definition || how_to || about_apps || topic_only || telling || a_book || a_topic
 }
 
 /// A clause's own app, when its words settle it.
@@ -72,11 +74,59 @@ fn settled_source(clause: &str) -> Option<&'static str> {
     }
 }
 
+/// The apps a word in a question points at, for sending it there: "did I set a reminder to
+/// water the plants", "how's my day, calendar wise". It says where to look, not that the
+/// question wants all of it. "Mail" alone is too often the post, so it counts beside another app.
+fn named_sources(clause: &str) -> Vec<&'static str> {
+    let text = crate::skills::words(clause).replace('\'', "");
+    let words: Vec<&str> = text.split(' ').filter(|word| !word.is_empty()).collect();
+    let has = |set: &[&str]| words.iter().any(|word| set.contains(word));
+    let mut named = Vec::new();
+    if has(&["reminder", "reminders", "todo", "todos"]) {
+        named.push("read_reminders");
+    }
+    if has(&["calendar", "schedule", "agenda"]) {
+        named.push("read_calendar");
+    }
+    if has(&["unread", "inbox"]) || (has(&["email", "emails"]) && has(&["my", "any", "which", "who", "i", "the"])) || (has(&["mail"]) && !named.is_empty()) {
+        named.push("read_mail");
+    }
+    named
+}
+
+/// A question about the user's own things, by its shape: "how long is my streak", "where do
+/// I go for my 1:1". On-device, a model told these are general makes up the answer, so when
+/// it says so the apps are read anyway, and a miss says it wasn't found.
+pub fn about_own_things(goal: &str, contract: &TaskContract) -> bool {
+    let goal = &crate::task_contract::spelled(goal);
+    let lower = goal.to_lowercase().replace('’', "'");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
+    // What Buntini is told to remember isn't in these apps, and nor is this Mac itself.
+    let remembered = ["name", "favourite", "favorite", "birthday", "allergic", "allergy", "prefer", "age", "address", "mac", "mac's", "macbook", "computer", "laptop", "battery", "disk", "storage"];
+    let elsewhere = contract.outcomes.iter().any(|outcome| outcome.kind == "read");
+    let mine = words.iter().any(|word| ["my", "mine", "our"].contains(word)) || [["do", "i"], ["did", "i"], ["am", "i"], ["have", "i"], ["i", "had"], ["where", "do"]].iter().any(|pair| words.windows(2).any(|run| run == pair));
+    let question = ["what", "what's", "whats", "when", "when's", "where", "where's", "who", "who's", "how", "how's", "is", "are", "am", "do", "did", "does", "have", "has", "any", "i"].contains(words.first().unwrap_or(&""));
+    only_asks(goal) && !general_question(goal) && !elsewhere && mine && question && !words.iter().any(|word| remembered.contains(word))
+}
+
+/// When no record was picked: across several apps, that it wasn't found. Within one app the
+/// whole read is short enough to show, and it can't be wrong.
+pub fn none_picked(reads: &[&Step]) -> String {
+    let kinds = SOURCES.iter().filter(|tool| reads.iter().any(|step| step.tool == **tool)).count();
+    if kinds > 1 { picked(reads, &[]) } else { everything(reads) }
+}
+
+/// All the apps a question about the user's own things could be in.
+pub fn every_source() -> Vec<String> {
+    SOURCES.iter().map(|source| source.to_string()).collect()
+}
+
 /// What a local model is asked first: for each part of the message whose words don't settle
 /// it, which of the user's own apps it needs, with "none" as a real choice (an empty one
 /// was never made on a real Mac). The model can only name an app, and a wrong one only costs
 /// a read on this Mac. Returns the apps already settled and the questions to put.
 pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContract) -> (Vec<String>, Vec<Value>) {
+    let goal = &crate::task_contract::spelled(goal);
     // "Did Sam ask about lunch" could be in Mail as easily as in memory, so it's still asked.
     let elsewhere = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && !outcome.accepted_tools.iter().any(|tool| SOURCES.contains(&tool.as_str()) || tool == "search_memory"));
     let pasted = goal.chars().count() > 240 || goal.contains(':') || goal.contains('\n') || goal.contains('"') || goal.contains('“');
@@ -99,9 +149,14 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
             settled.push("read_mail".to_string());
             continue;
         }
+        let named = named_sources(clause);
+        if !named.is_empty() {
+            settled.extend(named.into_iter().map(str::to_string));
+            continue;
+        }
         requests.push(json!({
             "messages": [
-                {"role":"system","content":"Decide what the user's message needs.\nmail: something in emails they received, or whether someone wrote or replied to them.\ncalendar: their own events, meetings, appointments, plans or free time.\nreminders: their own tasks, to-dos and what's due.\ngeneral: everything else, including greetings, chit-chat, facts about the world, advice, cooking, jokes, weather, time zones, how things work. Most messages are general.\n\nExamples:\ndid Marco reply yet -> mail\nany word from the bank -> mail\nhas my order shipped -> mail\nwhat time is my haircut -> calendar\nam I busy Sunday morning -> calendar\nanything on Monday -> calendar\ndo I have something at 2 on Friday -> calendar\nwho am I seeing on Friday -> calendar\nwhat's on my list for today -> reminders\nwhat needs doing this week -> reminders\ndo I need to buy anything -> reminders\nis there anything I have to pay -> reminders\nwhat's the weather tomorrow -> general\nhi there -> general\nhello buntini -> general\nhow do calendars sync -> general\nwhat is a spam filter -> general\nrecommend a mail app -> general\nsony headphones deals -> general\ncheap flights to Rome -> general\niphone reviews -> general\nwhat is the capital of France -> general\nhow many weeks are in a year -> general\nwhat should I make for dinner -> general\nwhat's the difference between to and cc -> general\nwhat time is it in Paris -> general\nwhat's my favourite colour -> general\ntell me a funny story about meetings -> general\n\nReply only with JSON in this form: {\"ids\":[\"general\"]}"},
+                {"role":"system","content":"Decide what the user's message needs.\nmail: something in emails they received, or whether someone wrote or replied to them.\ncalendar: their own events, meetings, appointments, plans or free time.\nreminders: their own tasks, to-dos and what's due.\ngeneral: everything else, including greetings, chit-chat, facts about the world, advice, cooking, jokes, weather, time zones, how things work. Most messages are general.\n\nExamples:\ndid Marco reply yet -> mail\nany word from the bank -> mail\nhas my order shipped -> mail\nwhat time is my haircut -> calendar\nam I busy Sunday morning -> calendar\nanything on Monday -> calendar\ndo I have something at 2 on Friday -> calendar\nwho am I seeing on Friday -> calendar\nwhere do i go for my eye test -> calendar\nwho am i seeing tmrw -> calendar\nhows my day looking -> calendar\nis the rent thing due today -> reminders\ndo i gotta call the vet -> reminders\nwho do i need to call -> reminders\ndo i need to pick anything up -> reminders\nwhat do i need to grab -> reminders\nwhat's on my list for today -> reminders\nwhat needs doing this week -> reminders\ndo I need to buy anything -> reminders\nis there anything I have to pay -> reminders\nwhat's the weather tomorrow -> general\nwhat do plumbers do -> general\nwhat day is Easter this year -> general\nhi there -> general\nhello buntini -> general\nhow do calendars sync -> general\nwhat is a spam filter -> general\nrecommend a mail app -> general\nsony headphones deals -> general\ncheap flights to Rome -> general\niphone reviews -> general\nwhat is the capital of France -> general\nhow many weeks are in a year -> general\nwhat should I make for dinner -> general\nwhat's the difference between to and cc -> general\nwhat time is it in Paris -> general\nwhat's my favourite colour -> general\ntell me a funny story about meetings -> general\n\nReply only with JSON in this form: {\"ids\":[\"general\"]}"},
                 {"role":"user","content":format!("{earlier}Their message: {clause}")},
             ],
             "tools": [],
@@ -117,6 +172,7 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
 /// Whether only the model's guess sent this request to `tool`: the words didn't name that app
 /// and nothing else requires it. A guess that can't be read isn't the user's problem.
 pub fn only_a_guess(goal: &str, contract: &TaskContract, tool: &str) -> bool {
+    let goal = &crate::task_contract::spelled(goal);
     let required = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.accepted_tools.iter().any(|name| name == tool));
     let settled = goal.split(" and ").flat_map(|part| part.split(',')).any(|clause| {
         settled_source(clause) == Some(tool) || (tool == "read_mail" && (recipes::asks_about_mail_thing(clause) || recipes::asks_if_someone_wrote(clause)))
@@ -139,16 +195,17 @@ pub fn parse_source(reply: &str) -> Option<Option<String>> {
     }
 }
 
+const COMMON: &[&str] = &[
+    "about", "after", "all", "and", "any", "anyone", "anything", "appointment", "appointments", "are", "available", "back", "been", "before", "busy", "buntini", "but", "calendar", "can", "check", "could", "did", "does", "due",
+    "email", "emailed", "emails", "event", "events", "ever", "first", "for", "free", "one", "called", "named", "titled", "actually", "wise", "gotta", "pressing", "opened", "hasn't", "haven't", "havent", "friday", "from", "get", "got", "had", "has", "have", "hey", "how", "inbox", "forget", "looking", "much", "read", "something", "still", "just", "last", "latest", "left", "meet", "happening", "coming", "seeing", "done", "newest", "list", "look", "mail", "mailed", "many", "meeting",
+    "meetings", "message", "messages", "monday", "need", "new", "next", "not", "now", "please", "plans", "recent", "overdue", "plate", "remind", "reminder", "reminders", "reply", "replied", "said", "saturday", "say", "says", "schedule", "send", "sent",
+    "show", "someone", "stuff", "sunday", "task", "tasks", "tell", "that", "the", "thing", "things", "to-do", "to-dos", "todos", "there", "this", "thursday", "today", "todo", "tomorrow", "tonight", "tuesday", "unread", "urgent", "important", "interesting", "matters", "matter", "attention", "worry", "critical", "priority", "needs", "was", "wednesday", "week", "weekend", "were", "what", "whats", "when", "where",
+    "which", "who", "whom", "why", "will", "with", "write", "wrote", "yesterday", "yet", "you", "your",
+];
+
 /// Words of a question worth searching the inbox for, when the newest emails didn't cover
 /// it: the names in it, or failing that its most particular words.
 fn search_words(goal: &str) -> Vec<String> {
-    const COMMON: &[&str] = &[
-        "about", "after", "all", "and", "any", "anyone", "anything", "appointment", "appointments", "are", "available", "back", "been", "before", "busy", "buntini", "but", "calendar", "can", "check", "could", "did", "does", "due",
-        "email", "emailed", "emails", "event", "events", "ever", "first", "for", "free", "friday", "from", "get", "got", "had", "has", "have", "hey", "how", "inbox", "forget", "looking", "much", "read", "something", "still", "just", "last", "latest", "left", "meet", "happening", "coming", "seeing", "done", "newest", "list", "look", "mail", "mailed", "many", "meeting",
-        "meetings", "message", "messages", "monday", "need", "new", "next", "not", "now", "please", "plans", "recent", "overdue", "plate", "remind", "reminder", "reminders", "reply", "replied", "said", "saturday", "say", "says", "schedule", "send", "sent",
-        "show", "someone", "stuff", "sunday", "task", "tasks", "tell", "that", "the", "thing", "things", "to-do", "to-dos", "todos", "there", "this", "thursday", "today", "todo", "tomorrow", "tonight", "tuesday", "unread", "urgent", "important", "interesting", "matters", "matter", "attention", "worry", "critical", "priority", "needs", "was", "wednesday", "week", "weekend", "were", "what", "whats", "when", "where",
-        "which", "who", "whom", "why", "will", "with", "write", "wrote", "yesterday", "yet", "you", "your",
-    ];
     let words: Vec<String> = crate::completion::unquoted(goal)
         .split_whitespace()
         .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric()).trim_end_matches("'s").to_string())
@@ -186,7 +243,7 @@ fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDat
         }
         "read_mail" => {
             let asked = crate::skills::words(goal);
-            let unread = asked.split(' ').any(|word| word == "new" || word == "unread") || asked.contains("haven't read") || asked.contains("not read");
+            let unread = asked.split(' ').any(|word| word == "new" || word == "unread") || asked.contains("haven't read") || asked.contains("not read") || asked.contains("haven't opened") || asked.contains("not opened") || asked.contains("haven't seen");
             let newest = json!({"limit":8,"unread":unread});
             let words = if recipes::asks_about_inbox(goal) { vec![] } else { search_words(goal) };
             if words.is_empty() {
@@ -195,7 +252,8 @@ fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDat
             // Mail's own search first: it looks back months, and what it finds has the word.
             // It only looks at senders and subjects, so with nothing found the newest emails'
             // openings are looked through too.
-            let mut plan: Vec<Value> = words.into_iter().map(|word| json!({"limit":8,"unread":unread,"query":word})).collect();
+            // Mail matches inside words, so "priyas" and "receipts" look for less and miss nothing.
+            let mut plan: Vec<Value> = words.into_iter().map(|word| json!({"limit":8,"unread":unread,"query":if word.ends_with('s') && !word.ends_with("ss") && word.chars().count() > 3 { &word[..word.len() - 1] } else { word.as_str() }})).collect();
             let searched = plan.iter().all(|read| steps.iter().any(|step| step.tool == "read_mail" && step.arguments.get("query") == read.get("query")));
             let found = steps.iter().any(|step| step.tool == "read_mail" && step.evidence.as_ref().is_some_and(|evidence| evidence["count"].as_u64().unwrap_or(0) > 0));
             if searched && !found {
@@ -215,16 +273,10 @@ fn names_an_app(goal: &str) -> bool {
 /// The records holding one of the question's words: a sender, subject, title or place, and
 /// for an email the opening too.
 fn holding_words(goal: &str, records: &[(String, &Value, &Step)]) -> Vec<String> {
-    let words: Vec<String> = search_words(goal).iter().map(|word| word.to_lowercase()).collect();
-    records
-        .iter()
-        .filter(|(_, record, _)| {
-            let text = ["title", "location", "subject", "sender", "list", "excerpt"].iter().map(|field| record[*field].as_str().unwrap_or_default().to_lowercase()).collect::<Vec<_>>().join(" ");
-            let found: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
-            words.iter().any(|word| found.contains(&word.as_str()))
-        })
-        .map(|(number, ..)| number.clone())
-        .collect()
+    let words = question_words(goal);
+    let hits: Vec<usize> = records.iter().map(|(_, record, _)| word_hits(&words, record, true)).collect();
+    let best = hits.iter().copied().max().unwrap_or(0);
+    records.iter().zip(&hits).filter(|(_, hit)| best > 0 && **hit == best).map(|((number, ..), _)| number.clone()).collect()
 }
 
 fn has_the_words(goal: &str, steps: &[Step]) -> bool {
@@ -232,8 +284,42 @@ fn has_the_words(goal: &str, steps: &[Step]) -> bool {
     !holding_words(goal, &numbered(&reads)).is_empty()
 }
 
+/// Every word that says what a question is about, lowercase. `search_words` keeps the two
+/// worth searching for; this also leaves out what people say around a question.
+fn question_words(goal: &str) -> Vec<String> {
+    const AROUND: &[&str] = &["again", "dumb", "lately", "lol", "okay", "pls", "really", "remember", "soon", "sorry", "start", "starts", "time", "wait", "want", "wants", "whoever"];
+    let lower = crate::completion::unquoted(goal).to_lowercase().replace('’', "'");
+    let mut words = Vec::new();
+    for word in lower.split_whitespace().map(|word| word.trim_matches(|c: char| !c.is_alphanumeric()).trim_end_matches("'s")) {
+        let usable = word.chars().count() >= 3 && !word.chars().any(|c| c.is_ascii_digit() || c == '\'') && !COMMON.contains(&word) && !AROUND.contains(&word);
+        if usable && !words.iter().any(|seen| seen == word) {
+            words.push(word.to_string());
+        }
+    }
+    words
+}
+
+/// How many of the words a record has. `loose` also takes plurals, for once a question is
+/// known to be about this app. A sender's name counts with an "s" either way ("priyas").
+fn word_hits(words: &[String], record: &Value, loose: bool) -> usize {
+    let field = |name: &str| record[name].as_str().unwrap_or_default().to_lowercase();
+    let text = ["title", "location", "subject", "sender", "list", "excerpt"].iter().map(|name| field(name)).collect::<Vec<_>>().join(" ");
+    let found: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
+    let sender = field("sender");
+    let names: Vec<&str> = sender.split(|c: char| !c.is_alphanumeric()).collect();
+    words
+        .iter()
+        .filter(|word| {
+            let single = word.strip_suffix('s').unwrap_or(word);
+            let doing = word.strip_suffix("ing").unwrap_or(word);
+            found.contains(&word.as_str()) || found.contains(&doing) || names.contains(&single) || (loose && (found.contains(&single) || found.contains(&format!("{word}s").as_str())))
+        })
+        .count()
+}
+
 /// The next read this question needs, when it's only a question about the user's own apps.
 pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chrono::NaiveDate) -> Option<(&'static str, Value)> {
+    let goal = &crate::task_contract::spelled(goal);
     if !only_asks(goal) || steps.iter().any(|step| step.state != "succeeded" || !SOURCES.contains(&step.tool.as_str())) {
         return None;
     }
@@ -471,17 +557,18 @@ fn clock_label(minutes: u32) -> String {
 
 /// The answer when the question's own words settle it, with no model at all.
 pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) -> Option<String> {
+    let goal = &crate::task_contract::spelled(goal);
     let records = numbered(reads);
     let searches = reads.iter().filter(|step| step.tool == "read_mail" && step.evidence.as_ref().is_some_and(|evidence| !evidence["scope"]["query"].as_str().unwrap_or_default().is_empty())).count();
     if searches > 1 && searches == reads.len() && !records.is_empty() {
         let all: Vec<String> = records.iter().map(|(number, ..)| number.clone()).collect();
         return Some(picked(reads, &all));
     }
-    if wants_everything(goal, reads) {
-        return Some(everything(reads));
-    }
     let asked: Vec<String> = crate::skills::words(goal).split(' ').map(|word| word.replace('\'', "")).collect();
     let says = |word: &str| asked.iter().any(|one| one == word);
+    if wants_everything(goal, reads) || says("everything") {
+        return Some(everything(reads));
+    }
     let calendar_only = reads.iter().all(|step| step.tool == "read_calendar");
     // "Am I free tomorrow at 3pm?" Times decide this, not a model.
     if calendar_only && (says("free") || says("busy") || says("available")) {
@@ -528,6 +615,10 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
     // "What's due today?": the due dates decide it, and overdue is due too.
     if reads.iter().all(|step| step.tool == "read_reminders") {
         let days = crate::task_contract::calendar_days(goal, now.date());
+        let named = holding_words(goal, &records);
+        if !named.is_empty() {
+            return Some(picked(reads, &named));
+        }
         if !days.is_empty() {
             let today = now.date().format("%Y-%m-%d").to_string();
             let due: Vec<String> = records
@@ -570,6 +661,11 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
     if !matching.is_empty() {
         return Some(picked(reads, &matching));
     }
+    // Every app was tried and none has the words. A model would still choose something.
+    let apps = SOURCES.iter().filter(|tool| reads.iter().any(|step| step.tool == **tool)).count();
+    if apps > 1 && !words.is_empty() && !names_an_app(goal) && crate::task_contract::calendar_days(goal, now.date()).is_empty() {
+        return Some(picked(reads, &[]));
+    }
     let mail_only = reads.iter().all(|step| step.tool == "read_mail");
     if mail_only {
         // Who wrote on a day: the dates decide it.
@@ -577,9 +673,11 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
         // Email has already arrived, so "Monday" is the last one, not the next.
         let days: Vec<String> = crate::task_contract::calendar_days(goal, today)
             .into_iter()
-            .map(|day| match chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
-                Ok(date) if date > today => (date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string(),
-                _ => day,
+            .filter_map(|day| match chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
+                // "Tomorrow" is about something else: no email has come from then.
+                Ok(date) if date > today && says("tomorrow") => None,
+                Ok(date) if date > today => Some((date - chrono::Duration::days(7)).format("%Y-%m-%d").to_string()),
+                _ => Some(day),
             })
             .collect();
         if !days.is_empty() {
@@ -601,6 +699,10 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
             }
             return Some(picked(reads, &on_day));
         }
+        // "What's unread": all of it, not what a model picks from it.
+        if words.is_empty() && reads.iter().any(|step| step.arguments["unread"] == true) {
+            return Some(everything(reads));
+        }
         if says("last") || says("latest") || says("newest") || says("recent") {
             return records.first().map(|(number, ..)| picked(reads, std::slice::from_ref(number)));
         }
@@ -612,15 +714,12 @@ pub fn direct_answer(goal: &str, reads: &[&Step], now: chrono::NaiveDateTime) ->
         }
         return None;
     }
-    let kinds = SOURCES.iter().filter(|tool| reads.iter().any(|step| step.tool == **tool)).count();
-    if kinds > 1 && !words.is_empty() {
-        return Some("I didn’t find that in your email, calendar or reminders.".into());
-    }
-    if reads.iter().all(|step| step.tool != "read_mail") {
-        // Dates and words decide these. A named day is about that day. Words with no match:
-        // say so. Nothing to narrow by: the question is about all of it.
-        let named_day = !crate::task_contract::calendar_days(goal, now.date()).is_empty();
-        return Some(if words.is_empty() || named_day { everything(reads) } else { picked(reads, &[]) });
+    // Words with no match don't mean it isn't there ("what's most pressing"), so the model
+    // gets to point at a record first. A named day is about that day, and with nothing to
+    // narrow by the question is about all of it.
+    let named_day = !crate::task_contract::calendar_days(goal, now.date()).is_empty();
+    if reads.iter().all(|step| step.tool != "read_mail") && (words.is_empty() || named_day) {
+        return Some(everything(reads));
     }
     None
 }
@@ -894,21 +993,27 @@ pub fn picked(reads: &[&Step], picks: &[String]) -> String {
     if chosen.is_empty() {
         // The model missing an email can't hide it: Mail's few are shown. The others can run
         // to weeks of events that have nothing to do with the question.
+        let kinds = SOURCES.iter().filter(|tool| reads.iter().any(|step| step.tool == **tool)).count();
         return if reads.iter().all(|step| step.tool == "read_mail") {
             format!("I didn’t find one that fits. This is what I read:\n\n{}", everything(reads))
+        } else if kinds > 1 {
+            match partly_read(reads) {
+                Some(partly) => format!("I didn’t find that in your email, calendar or reminders. {partly}"),
+                None => "I didn’t find that in your email, calendar or reminders.".into(),
+            }
         } else if partly_read(reads).is_some() {
             // Not all of it was read, so "not there" isn't known. What was read says so.
             everything(reads)
-        } else if false {
-            format!("I didn’t find one that fits. This is what I read:\n\n{}", everything(reads))
         } else if reads.iter().all(|step| step.tool == "read_reminders") {
-            "I didn’t find that in your reminders.".into()
+            // What's there is right beside it, since the question may have meant one of them.
+            format!("I didn’t find that in your reminders. This is what you have:\n\n{}", everything(reads))
         } else {
             let until = reads.iter().find_map(|step| step.evidence.as_ref().and_then(|evidence| evidence["scope"]["until"].as_str()));
-            match until {
+            let line = match until {
                 Some(until) => format!("I didn’t find that on your calendar up to {}.", day_label(until)),
                 None => "I didn’t find that on your calendar.".into(),
-            }
+            };
+            format!("{line} This is what’s on it:\n\n{}", everything(reads))
         };
     }
     let days = reads.iter().filter(|step| step.tool == "read_calendar").count();
@@ -1432,6 +1537,65 @@ mod tests {
         let found = searched(&[["2026-11-05 07:00", "m", "Landlord <l@example.com>", "Door", "1"]]);
         assert_eq!(source_missing(goal, std::slice::from_ref(&found)), None);
         assert_eq!(source_read(goal, std::slice::from_ref(&found)), None);
+    }
+
+    #[test]
+    fn the_way_people_type_is_read_as_what_they_mean() {
+        let base = chrono::NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        assert_eq!(crate::task_contract::calendar_days("who am i meeting with tomorow", base), ["2026-11-06"]);
+        assert_eq!(crate::task_contract::calendar_days("free at 11 tmrw?", base), ["2026-11-06"]);
+        assert_eq!(crate::task_contract::spelled("wht does sam want"), "what does sam want");
+    }
+
+    #[test]
+    fn a_question_about_my_things_isnt_left_to_guess() {
+        let asked = |goal: &str| about_own_things(goal, &TaskContract::from_request(goal));
+        for goal in ["how long is my duolingo streak", "where do i need to go for my 1:1 with priya", "what time's my 1:1 w priya", "do i gotta call my mom today", "what's my wifi password"] {
+            assert!(asked(goal), "{goal}");
+        }
+        for goal in ["what's my favourite colour", "what's my name", "what is a spam filter", "who wrote pride and prejudice", "how do I make pasta", "i just got back from the gym", "what's the capital of France"] {
+            assert!(!asked(goal), "{goal}");
+        }
+    }
+
+    #[test]
+    fn a_word_naming_the_app_settles_it() {
+        assert_eq!(named_sources("did i set a reminder to water the plants"), ["read_reminders"]);
+        assert!(named_sources("is my mac due for a clean install").is_empty());
+        assert_eq!(named_sources("hows my day look, calendar wise"), ["read_calendar"]);
+        assert_eq!(named_sources("which emails havent i opened yet"), ["read_mail"]);
+        assert!(named_sources("what's the capital of France").is_empty());
+        assert_eq!(named_sources("mail calendar reminders all of it"), ["read_reminders", "read_calendar", "read_mail"]);
+        assert!(named_sources("my dog hates the mail carrier").is_empty());
+    }
+
+    #[test]
+    fn words_in_no_app_are_not_found_without_asking_a_model() {
+        let day = calendar("2026-11-05", vec![event("Design review", "2026-11-05 15:00", "2026-11-05 15:30", "")]);
+        let list = reminders(vec![reminder("Buy milk", "")]);
+        let said = direct_answer("who is my boss", &[&day, &list], morning()).unwrap();
+        assert!(said.contains("didn’t find") && !said.contains("Design review"), "{said}");
+    }
+
+    #[test]
+    fn days_are_read_as_they_are_typed() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        assert_eq!(crate::task_contract::calendar_days("whats the day after tomorrow look like", today), ["2026-11-07"]);
+        assert_eq!(crate::task_contract::calendar_days("summarize yesterdays emails", today), ["2026-11-04"]);
+    }
+
+    #[test]
+    fn asking_for_everything_gets_everything() {
+        let list = reminders(vec![reminder("Buy milk", ""), reminder("Call mum", "")]);
+        let said = direct_answer("show me everything in reminders", &[&list], morning()).unwrap();
+        assert!(said.contains("milk") && said.contains("mum"), "{said}");
+    }
+
+    #[test]
+    fn not_found_shows_whats_there() {
+        let day = calendar("2026-11-05", vec![event("Dentist", "2026-11-05 15:00", "2026-11-05 15:30", "")]);
+        let said = picked(&[&day], &[]);
+        assert!(said.contains("didn’t find") && said.contains("Dentist"), "{said}");
     }
 
     #[test]
