@@ -3439,6 +3439,18 @@ fn worked_answer(flow: &Workflow) -> Option<String> {
 
 /// The app-read boundary is injectable so complete planning/approval journeys can
 /// run against controlled observations without reading personal accounts.
+/// Whether the question's words are in the user's own mail, calendar or reminders, by the local
+/// index and only those it may use. The model called it general, and it may not be.
+fn index_holds(state: &AppState, settings: &Settings, goal: &str) -> bool {
+    let query = crate::personal_answer::index_query(goal);
+    if query.is_empty() {
+        return false;
+    }
+    let store = state.store.lock().unwrap();
+    crate::memory_index::search_visible(&store.db, &query, None, 1, |hit| ["mail", "calendar", "reminders"].contains(&hit.source.as_str()) && crate::apps::allowed(settings, &hit.source))
+        .is_ok_and(|hits| !hits.is_empty())
+}
+
 async fn continue_workflow_using<F, Fut>(
     state: &AppState,
     task: &mut TaskRecord,
@@ -3489,6 +3501,9 @@ where
         flow.refresh_contract();
         let earlier = flow.messages.iter().rev().filter(|message| message["role"] == "user").nth(1).and_then(|message| message["content"].as_str());
         let (mut sources, asked) = crate::personal_answer::source_requests(&flow.contract.current_request, earlier, &flow.contract);
+        let chose_mine = crate::personal_answer::chose_my_things(&flow.contract.current_request);
+        let asked = if chose_mine { sources = crate::personal_answer::every_source(); Vec::new() } else { asked };
+        let sorted = !asked.is_empty();
         if state.models.small(settings) {
             for request in asked {
                 phase(channel, &task.id, "thinking");
@@ -3504,7 +3519,21 @@ where
             }
         }
         // Told "general" about the user's own things, a small model makes up the answer.
-        if state.models.small(settings) && sources.is_empty() && crate::personal_answer::about_own_things(&flow.contract.current_request, &flow.contract) {
+        let goal_now = flow.contract.current_request.clone();
+        let own_shape = crate::personal_answer::about_own_things(&goal_now, &flow.contract);
+        if small && sources.is_empty() && !crate::personal_answer::chose_already(&goal_now) && (own_shape || (sorted && index_holds(state, settings, &goal_now))) {
+            // Nothing it can read: the answer is what would change that, further down.
+            if offered.iter().any(|tool| crate::personal_answer::every_source().contains(tool)) {
+                let (question, choices) = crate::personal_answer::ask_which(&goal_now);
+                task.answer = question;
+                task.choices = choices;
+                flow.contract.mark_answer_complete();
+                flow.state = "completed".into();
+                task.state = "completed".into();
+                state.store.lock().unwrap().checkpoint(flow, task)?;
+                emit(channel, "delta", &task.id, Some(task.answer.clone()));
+                return Ok(());
+            }
             sources = crate::personal_answer::every_source();
         }
         // It's in the app, not in what Buntini remembers. With the app off, memory still is.
@@ -3598,26 +3627,13 @@ where
             .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
         if small && own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
-                let budget = state.models.budget(settings).max_tokens;
                 let now = chrono::Local::now().naive_local();
                 let answer = match crate::personal_answer::direct_answer(&flow.contract.current_request, &reads, now) {
                     Some(answer) => answer,
                     None => {
-                        let moment = now.format("%A %Y-%m-%d %H:%M").to_string();
-                        match crate::personal_answer::pick_request(&flow.contract.current_request, &reads, &moment, budget) {
-                            None => crate::personal_answer::none_picked(&reads),
-                            Some(request) => {
-                                phase(channel, &task.id, "thinking");
-                                let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
-                                if cancel.load(Ordering::Relaxed) {
-                                    return Err("Task cancelled.".into());
-                                }
-                                match turn.ok().and_then(|turn| crate::personal_answer::parse_pick(&turn.text, &reads)) {
-                                    Some(picks) => crate::personal_answer::picked(&reads, &picks),
-                                    None => crate::personal_answer::none_picked(&reads),
-                                }
-                            }
-                        }
+                        let goal = flow.contract.current_request.clone();
+                        let read: Vec<crate::workflows::Step> = reads.iter().map(|step| (*step).clone()).collect();
+                        tokio::task::spawn_blocking(move || crate::personal_answer::closest(&goal, &read.iter().collect::<Vec<_>>())).await.map_err(|e| e.to_string())?
                     }
                 };
                 task.answer = answer;
@@ -4274,6 +4290,7 @@ pub async fn run_task(
         touched: vec![],
         handoff: None,
         action: None,
+        choices: vec![],
     };
     // A brain that became usable while nothing was running takes over from this task on.
     crate::brain::settle_and_tell(&app).await;
@@ -5165,6 +5182,7 @@ for line in sys.stdin:
             touched: vec![],
             handoff: None,
             action: None,
+            choices: vec![],
         };
         assert_eq!(
             skill_history(&[previous.clone()], None, "current"),
@@ -5255,6 +5273,7 @@ for line in sys.stdin:
             touched: vec![],
             handoff: None,
             action: None,
+            choices: vec![],
         };
         let channel = Channel::new(|_| Ok(()));
         execute(
@@ -5325,6 +5344,7 @@ for line in sys.stdin:
             touched: vec![],
             handoff: None,
             action: None,
+            choices: vec![],
         };
         state.store.lock().unwrap().save_task(&task).unwrap();
         execute(
@@ -5405,6 +5425,7 @@ for line in sys.stdin:
             touched: vec![],
             handoff: None,
             action: None,
+            choices: vec![],
         };
         state.store.lock().unwrap().save_task(&task).unwrap();
         let events = Arc::new(Mutex::new(Vec::<Value>::new()));

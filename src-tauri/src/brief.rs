@@ -244,6 +244,7 @@ pub async fn morning_brief(
             .collect(),
         handoff: None,
         action: None,
+        choices: vec![],
     };
     let store = state.store.lock().unwrap();
     store.save_task(&task)?;

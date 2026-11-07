@@ -159,7 +159,9 @@ pub(crate) fn calendar_days(text: &str, base: chrono::NaiveDate) -> Vec<String> 
     let span = |start: i64, days: i64| (0..days).map(move |ahead| base + chrono::Duration::days(start + ahead));
     let from_monday = i64::from(base.weekday().num_days_from_monday());
     let pair = |first: &str, second: &str| words.windows(2).any(|pair| pair[0] == first && pair[1] == second);
-    if pair("next", "week") {
+    if words.windows(3).any(|run| run == ["week", "after", "next"]) {
+        span(14 - from_monday, 7).for_each(&mut add);
+    } else if pair("next", "week") {
         span(7 - from_monday, 7).for_each(&mut add);
     } else if pair("this", "week") || pair("my", "week") {
         span(0, 7 - from_monday).for_each(&mut add);

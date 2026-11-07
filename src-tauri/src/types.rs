@@ -412,6 +412,16 @@ pub struct TaskRecord {
     /// With handoff "action": the proposal the approval sheet shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<serde_json::Value>,
+    /// Answers the user can pick when Buntini asked them something. Each sends its prompt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Choice {
+    pub label: String,
+    pub prompt: String,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

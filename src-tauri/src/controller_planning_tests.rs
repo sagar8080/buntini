@@ -1405,16 +1405,10 @@ async fn picked_journey(goal: &str, reply: &str) -> TaskRecord {
 }
 
 #[tokio::test]
-async fn the_model_only_points_at_records() {
-    let goal = "anything urgent in my mail";
-    let shown = picked_journey(goal, r#"{"ids":["2"]}"#).await.answer;
-    assert!(shown.contains("**Ana**: Lease") && shown.contains("Can you sign by Friday") && !shown.contains("Invoice"), "{shown}");
-    // None chosen: what was read is still there to see.
-    let shown = picked_journey(goal, r#"{"ids":[]}"#).await.answer;
-    assert!(shown.starts_with("I didn’t find one that fits.") && shown.contains("**Ana**: Lease") && shown.contains("**Bob**: Invoice"), "{shown}");
-    // A record nobody read, or words instead of a choice: everything read, and only that.
-    for reply in [r#"{"ids":["9"]}"#, "You have an email from your boss."] {
-        let shown = picked_journey(goal, reply).await.answer;
+async fn a_small_model_never_chooses_the_record_shown() {
+    // Whatever it would say, what's shown comes from the read, and all of it is there to see.
+    for reply in [r#"{"ids":["2"]}"#, r#"{"ids":[]}"#, r#"{"ids":["9"]}"#, "You have an email from your boss."] {
+        let shown = picked_journey("anything urgent in my mail", reply).await.answer;
         assert!(shown.contains("**Ana**: Lease") && shown.contains("**Bob**: Invoice") && !shown.contains("boss"), "{reply}: {shown}");
     }
 }

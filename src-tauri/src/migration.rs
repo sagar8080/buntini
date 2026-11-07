@@ -106,6 +106,7 @@ mod tests {
                 touched: vec![],
                 handoff: None,
                 action: None,
+                choices: vec![],
             })
             .unwrap();
         let mut settings = serde_json::to_value(Settings::default()).unwrap();

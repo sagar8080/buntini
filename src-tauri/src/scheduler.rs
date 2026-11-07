@@ -187,6 +187,7 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         touched: vec![],
         handoff: None,
         action: None,
+        choices: vec![],
     };
     let cancel = Arc::new(AtomicBool::new(false));
     let active_key = format!("saved-search-{id}");

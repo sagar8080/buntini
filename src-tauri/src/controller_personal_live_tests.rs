@@ -320,6 +320,20 @@ fn world_reminders(today: chrono::NaiveDate) -> Agenda<Reminder> {
 /// `BUNTINI_PERSONAL_BRAIN=chatgpt`: the same made-up records through a ChatGPT plan. It signs
 /// in once in the browser, and the session lasts only as long as this run. Run both tests with
 /// `--test-threads=1` and they share one sign-in.
+/// What a Mac that has been indexing would hold: these same made-up records.
+fn seed_index(state: &AppState, inbox: &[(String, bool, &'static str, &'static str, &'static str)], today: chrono::NaiveDate) {
+    use crate::{memory_index as index, privacy::Share};
+    let record = |source: &'static str, id: String, title: String, text: String, share: Share| index::Record { source, source_id: id, scope: String::new(), shares: vec![share], title, text, observed_at: today.to_string() };
+    let store = state.store.lock().unwrap();
+    let mail: Vec<index::Record> = inbox.iter().enumerate().map(|(at, row)| record("mail", format!("m{at}"), format!("{} {}", row.2, row.3), row.4.to_string(), Share::Mail)).collect();
+    index::replace_source(&store.db, "mail", &mail).unwrap();
+    let events = [("Design review", "Room 4"), ("1:1 with Priya", ""), ("Dentist", "Harley Street"), ("Climbing with Sam", "The Arch")];
+    let calendar: Vec<index::Record> = events.iter().enumerate().map(|(at, (title, place))| record("calendar", format!("c{at}"), title.to_string(), place.to_string(), Share::Calendar)).collect();
+    index::replace_source(&store.db, "calendar", &calendar).unwrap();
+    let reminders: Vec<index::Record> = ["Renew car insurance", "Call mum", "Buy milk"].iter().enumerate().map(|(at, title)| record("reminders", format!("r{at}"), title.to_string(), "Home".to_string(), Share::Calendar)).collect();
+    index::replace_source(&store.db, "reminders", &reminders).unwrap();
+}
+
 async fn on_chatgpt() -> bool {
     if !std::env::var("BUNTINI_PERSONAL_BRAIN").is_ok_and(|brain| brain == "chatgpt") {
         return false;
@@ -366,6 +380,7 @@ async fn live_personal_answers() {
     // `BUNTINI_PERSONAL_BRAIN=chatgpt`: the same made-up records through a ChatGPT plan. It
     // signs in once in the browser, and the session lasts only as long as this run.
     let on_chatgpt = on_chatgpt().await;
+    crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
     let tomorrow = (today + Duration::days(1)).format("%A").to_string();
     for question in if from_file.is_empty() { QUESTIONS } else { from_file.as_slice() } {
         if only.as_deref().is_some_and(|only| !only.split('|').any(|one| question.asked == one)) {
@@ -383,6 +398,7 @@ async fn live_personal_answers() {
             use_chatgpt(&mut settings);
         }
         state.store.lock().unwrap().save_settings(&settings).unwrap();
+        seed_index(&state, &inbox, today);
         let mut task: TaskRecord = serde_json::from_value(json!({
             "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
             "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt { "cloud" } else { "apple" }
@@ -436,7 +452,7 @@ async fn live_personal_answers() {
         let row = json!({
             "question": asked_text, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
             "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state})).collect::<Vec<_>>(),
-            "modelCalls": state.models.apple.model_calls(), "error": error, "answer": shown,
+            "modelCalls": state.models.apple.model_calls(), "error": error, "answer": shown, "choices": task.choices,
         });
         writeln!(out, "{row}").unwrap();
         out.flush().unwrap();

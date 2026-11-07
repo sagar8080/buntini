@@ -91,6 +91,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'That didn’t finish. Try again.'}</p>}
         </div>
       </div>
+      {latest && !busy && !!item.choices?.length && <div className="reply-chips">{item.choices.map(choice => <button key={choice.label} onClick={() => onFollowUp(choice.prompt)}>{choice.label}</button>)}</div>}
       {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>More like this</button>}<button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
       {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? 'Ask ChatGPT' : <><ExternalLink size={12} /> Open in ChatGPT</>}</button></div>}
       {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>

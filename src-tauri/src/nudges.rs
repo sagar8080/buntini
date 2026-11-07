@@ -806,6 +806,7 @@ pub fn open(store: &Store, id: &str, now: DateTime<Local>) -> Result<Opened, Str
         touched,
         handoff: None,
         action: None,
+        choices: vec![],
     };
     nudge.task_id = Some(task.id.clone());
     let transaction = store.db.unchecked_transaction().map_err(|e| e.to_string())?;

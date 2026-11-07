@@ -97,6 +97,8 @@ export interface TaskRecord {
   researchReport?: { attempts: { route: string; status: string; detail: string }[] };
   prices?: PriceOffer[];
   cards?: ResultCard[];
+  /** Answers to pick when Buntini asked something. Each sends its prompt. */
+  choices?: { label: string; prompt: string }[];
   system?: Record<string, unknown>;
   glance?: MacGlance;
   backend?: string;

@@ -113,6 +113,7 @@ mod tests {
             touched: touched.iter().map(|id| id.to_string()).collect(),
             handoff: None,
             action: None,
+            choices: vec![],
         }
     }
 
