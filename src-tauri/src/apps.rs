@@ -1377,6 +1377,7 @@ pub async fn find_contact(helper_path: &Path, name: &str) -> Result<Value, Strin
         return Err(CONTACTS_HELPER.into());
     }
     let mut command = Command::new(helper_path);
+    set_asking(&mut command);
     command.args(["--find-contact", name]);
     // The first use waits for the macOS permission prompt, so allow time to answer it.
     let output = crate::actions::output(command, 90).await?;

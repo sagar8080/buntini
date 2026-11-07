@@ -26,6 +26,13 @@ import Speech
 /// reads get "not authorized" until they've answered.
 let macOSMayBeAsked = ProcessInfo.processInfo.environment["BUNTINI_MAY_ASK"] == "1"
 
+/// Already granted in full, so asking again can't show anything. Write-only would prompt to upgrade.
+func hasFullAccess(_ type: EKEntityType) -> Bool {
+    let status = EKEventStore.authorizationStatus(for: type)
+    if #available(macOS 14.0, *) { return status == .fullAccess }
+    return status == .authorized
+}
+
 let output = FileHandle.standardOutput
 let writeLock = NSLock()
 
@@ -1027,7 +1034,7 @@ enum Agenda {
         }
         let store = EKEventStore()
         var granted = false
-        if macOSMayBeAsked || EKEventStore.authorizationStatus(for: events ? .event : .reminder) != .notDetermined {
+        if macOSMayBeAsked || hasFullAccess(events ? .event : .reminder) {
             if #available(macOS 14.0, *) {
                 granted = (try? await (events ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
             } else {

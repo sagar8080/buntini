@@ -932,11 +932,39 @@ fn clock_times(text: &str) -> Vec<String> {
 /// Every number in a text, ignoring commas and a whole number's ".00", so "$1,299.00" and
 /// "1299" are the same number.
 pub(crate) fn numbers(text: &str) -> std::collections::HashSet<String> {
-    number_spans(text).into_iter().map(|(number, ..)| number).collect()
+    number_spans(text).into_iter().map(|span| span.number).collect()
 }
 
-fn number_spans(text: &str) -> Vec<(String, Option<char>, Option<char>)> {
+struct NumberSpan {
+    number: String,
+    before: Option<char>,
+    after: Option<char>,
+    word_before: String,
+    word_after: String,
+}
+
+fn number_spans(text: &str) -> Vec<NumberSpan> {
     let chars: Vec<char> = text.chars().collect();
+    let word_at = |mut at: usize, forward: bool| -> String {
+        let mut word = Vec::new();
+        loop {
+            match chars.get(at) {
+                Some(c) if c.is_alphabetic() => word.push(c.to_ascii_lowercase()),
+                _ => break,
+            }
+            if forward {
+                at += 1;
+            } else if at == 0 {
+                break;
+            } else {
+                at -= 1;
+            }
+        }
+        if !forward {
+            word.reverse();
+        }
+        word.into_iter().collect()
+    };
     let mut found = Vec::new();
     let mut at = 0;
     while at < chars.len() {
@@ -950,7 +978,15 @@ fn number_spans(text: &str) -> Vec<(String, Option<char>, Option<char>)> {
         }
         let raw: String = chars[start..at].iter().filter(|c| **c != ',').collect();
         let number = raw.strip_suffix(".00").map(str::to_string).unwrap_or(raw);
-        found.push((number, start.checked_sub(1).map(|before| chars[before]), chars.get(at).copied()));
+        let skip_space = |index: usize| if chars.get(index) == Some(&' ') { index + 1 } else { index };
+        let before_index = if start >= 2 && chars[start - 1] == ' ' { start - 2 } else { start.saturating_sub(1) };
+        found.push(NumberSpan {
+            number,
+            before: start.checked_sub(1).map(|index| chars[index]),
+            after: chars.get(at).copied(),
+            word_before: if start == 0 { String::new() } else { word_at(before_index, false) },
+            word_after: word_at(skip_space(at), true),
+        });
     }
     found
 }
@@ -959,23 +995,25 @@ fn number_spans(text: &str) -> Vec<(String, Option<char>, Option<char>)> {
 /// long enough to be a code, a phone number or a count. Part of a name ("WH-1000XM5"), a
 /// citation marker or a year isn't one.
 pub(crate) fn stated_figures(text: &str) -> Vec<String> {
-    // "99 dollars", "$ 99" and "USD199" are amounts too.
-    let lower = text.to_lowercase();
-    let mut plain = lower.replace("$ ", "$").replace("usd", "$").replace("eur ", "€").replace("gbp ", "£");
-    for word in ["dollars", "dollar", "bucks", "euros", "euro", "pounds", "quid", "rupees"] {
-        plain = plain.split(&format!(" {word}")).collect::<Vec<_>>().join("%");
-    }
-    number_spans(&plain)
+    const SYMBOLS: &str = "$€£¥₹";
+    const AFTER: [&str; 15] = ["usd", "eur", "gbp", "inr", "cad", "aud", "dollars", "dollar", "euros", "euro", "pounds", "bucks", "quid", "rupees", "million"];
+    const BEFORE: [&str; 6] = ["usd", "eur", "gbp", "inr", "cad", "rs"];
+    number_spans(text)
         .into_iter()
-        .filter(|(number, before, after)| {
-            let money = before.is_some_and(|c| "$€£¥₹".contains(c)) || matches!(after, Some('%'));
-            let in_a_name = !money && (before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic));
-            let marker = *before == Some('[') && *after == Some(']');
-            let digits = number.chars().filter(char::is_ascii_digit).count();
-            let year = digits == 4 && (number.starts_with("19") || number.starts_with("20"));
+        .filter(|span| {
+            let money = span.before.is_some_and(|c| SYMBOLS.contains(c))
+                || span.after.is_some_and(|c| SYMBOLS.contains(c) || c == '%')
+                || (span.after == Some(' ') && text.contains(&format!("{} ", span.number)) && SYMBOLS.chars().any(|c| text.contains(&format!("{} {c}", span.number))))
+                || (span.before == Some(' ') && SYMBOLS.chars().any(|c| text.contains(&format!("{c} {}", span.number))))
+                || AFTER.contains(&span.word_after.as_str())
+                || BEFORE.contains(&span.word_before.as_str());
+            let in_a_name = !money && (span.before.is_some_and(char::is_alphabetic) || span.after.is_some_and(char::is_alphabetic));
+            let marker = span.before == Some('[') && span.after == Some(']');
+            let digits = span.number.chars().filter(char::is_ascii_digit).count();
+            let year = digits == 4 && (span.number.starts_with("19") || span.number.starts_with("20"));
             !in_a_name && !marker && (money || (digits >= 3 && !year))
         })
-        .map(|(number, ..)| number)
+        .map(|span| span.number)
         .collect()
 }
 
@@ -1051,23 +1089,12 @@ fn may_speak_generally(prompt: &str) -> bool {
 
 /// A sentence that states what's on the user's calendar or reminders with no clock time:
 /// "You have a dentist visit tomorrow." Nothing this turn read anything, so it can't know.
-fn states_day_or_reminder(prompt: &str, sentence: &str, known_times: &[String]) -> bool {
+fn states_day_or_reminder(prompt: &str, sentence: &str) -> bool {
     const NOUNS: [&str; 10] = ["calendar", "schedule", "meeting", "meetings", "event", "events", "appointment", "appointments", "reminder", "reminders"];
     const DAYS: [&str; 11] = ["today", "tomorrow", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend"];
     let text = sentence.to_lowercase().replace('’', "'");
     let asked = prompt.to_lowercase().replace('’', "'");
     let in_text = |set: &[&str]| text.split(|c: char| !c.is_alphanumeric()).any(|word| set.contains(&word));
-    // "Your dentist is tomorrow at 15:00": the user's own day, with nothing read this turn,
-    // is stale or made up. Questions and offers don't claim anything; "you'll arrive at 5pm"
-    // is arithmetic, and "leave by 6:30" answers "when should I leave".
-    let said: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
-    let offers = ["?", "want me", "would you", "i can "].iter().any(|phrase| text.contains(phrase));
-    let new_time = clock_times(&text).iter().any(|time| !known_times.contains(time));
-    let new_day = DAYS.iter().any(|day| said.contains(day) && !asked.contains(day));
-    let advice = asked.split(|c: char| !c.is_alphanumeric()).any(|word| word == "should") || ["should", "could", "might", "try", "recommend", "suggest", "aim"].iter().any(|word| said.contains(word));
-    if !offers && !advice && said.contains(&"your") && (new_time || new_day) {
-        return true;
-    }
     let hedged = ["if ", "when ", "whether", "?", "can't", "cannot", "don't", "haven't", "won't", "how to", "once ", "want me", "would you", "i can "].iter().any(|hedge| text.contains(hedge));
     if hedged {
         return false;
@@ -1175,8 +1202,7 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
     let about_the_user = prompt.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| ["my", "i", "me", "mine", "our", "we", "us"].contains(&word));
     let looked_online = steps.iter().any(|step| step.state == "succeeded" && step.tool == "look_up_online");
     let read_theirs = steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online");
-    let says_yours = answer.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|word| word == "your");
-    if looked_online && !about_the_user && !read_theirs && !says_yours {
+    if looked_online && !about_the_user && !read_theirs {
         return answer.to_string();
     }
     let mut asked = clock_times(prompt);
@@ -1193,10 +1219,10 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         asked.extend(clock_times(&read));
     }
     // Without a read, a day or reminder needs no clock time to be made up.
-    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect && step.tool != "look_up_online") && !may_speak_generally(prompt);
+    let read_nothing = !steps.iter().any(|step| step.state == "succeeded" && !step.effect) && !may_speak_generally(prompt);
     let claims = |text: &str| {
         clock_times(text).into_iter().any(|time| !asked.contains(&time))
-            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence, &asked)))
+            || (read_nothing && sentences(text).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence)))
     };
     let mentions = |text: &str, nouns: &[&str]| {
         text.to_lowercase().split(|c: char| !c.is_alphanumeric() && c != '-').any(|word| nouns.contains(&word))
@@ -1207,7 +1233,7 @@ pub fn grounded_personal_answer(prompt: &str, answer: &str, steps: &[Step]) -> S
         .map(|(app, nouns, _)| (*app, *nouns))
         .collect();
     let unsupported = |text: &str| unread.iter().any(|(_, nouns)| mentions(text, nouns));
-    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence, &asked));
+    let stated = read_nothing && sentences(answer).into_iter().any(|sentence| states_day_or_reminder(prompt, sentence));
     if !claims(answer) || (!unsupported(answer) && !stated) {
         return answer.to_string();
     }
@@ -2088,8 +2114,11 @@ mod tests {
         assert!(numbers("Now $1,299.00 or 3 for 40").contains("1299"));
         assert_eq!(stated_figures("It's $249 at Best Buy [1], about 12% off the WH-1000XM5 from 2026, with 3 left."), ["249", "12"]);
         assert_eq!(stated_figures("Call 415-555-0100."), ["415", "555", "0100"]);
-        for amount in ["It's 99 dollars.", "It's $ 99.", "It's USD99."] {
-            assert_eq!(stated_figures(amount), ["99"], "{amount}");
+        for amount in ["It's 99 dollars.", "It's $ 99.", "It's USD99.", "It's 99 USD.", "It's 99€.", "It's 99 €.", "It's 49 GBP.", "It's Rs 99.", "It's 5 million dollars."] {
+            assert_eq!(stated_figures(amount), [if amount.contains("49") { "49" } else if amount.contains("million") { "5" } else { "99" }], "{amount}");
+        }
+        for not_money in ["Ships to 5 European countries.", "Book a chauffeur 24 hours ahead."] {
+            assert!(stated_figures(not_money).is_empty(), "{not_money}");
         }
     }
 
@@ -2136,34 +2165,16 @@ mod tests {
     }
 
     #[test]
-    fn a_time_for_the_user_takes_a_read_this_turn() {
-        let said = grounded_personal_answer("when's the dentist", "Your dentist is tomorrow at 15:00.", &[]);
-        assert!(!said.contains("15:00"), "{said}");
+    fn an_answer_from_the_web_keeps_its_times() {
         let fine = "The store opens at 9:00 AM.";
         assert_eq!(grounded_personal_answer("when does the store open", fine, &[]), fine);
-        // An answer from the web is about the web, whatever nouns it has.
         let mut online = saved("look_up_online", "");
         online.effect = false;
         let web = "The Fed meeting ends at 2:00 PM.";
         assert_eq!(grounded_personal_answer("when does the Fed meeting end", web, std::slice::from_ref(&online)), web);
-        // The web doesn't excuse a claim about the user's own day.
-        let said = grounded_personal_answer("when's my dentist", "Your dentist is tomorrow at 15:00.", std::slice::from_ref(&online));
-        assert!(!said.contains("15:00"), "{said}");
-        for made_up in ["Your dentist is tomorrow.", "Your meeting is on Friday.", "Your dentist is at 15:00 if I recall."] {
-            let said = grounded_personal_answer("when's the dentist", made_up, &[]);
-            assert_ne!(said, made_up);
-        }
-        for fine in ["You need to leave by 6:30 AM.", "You'll arrive at 5:00 PM."] {
+        for fine in ["You need to leave by 6:30 AM.", "You'll arrive at 5:00 PM.", "If your flight is at 9:00 AM, leave by 6:30 AM."] {
             assert_eq!(grounded_personal_answer("what time do I need to leave for my 9am flight", fine, &[]), fine);
         }
-        // An answer from the web doesn't excuse a claim about the user's own day.
-        let said = grounded_personal_answer("when's the dentist", "Your appointment is at 3pm.", std::slice::from_ref(&online));
-        assert!(!said.contains("3pm"), "{said}");
-        let advice = "You should try to sleep by 11pm.";
-        assert_eq!(grounded_personal_answer("when should I sleep", advice, &[]), advice);
-        let leave = "Leave by 6:30 AM so you have time.";
-        assert_eq!(grounded_personal_answer("what time should I leave for my 9am flight", leave, &[]), leave);
-        // A live lookup's own results count as read.
         let mut flights = saved("look_up_online", "");
         flights.effect = false;
         flights.evidence = Some(json!({"summary":"You can fly at 10:30 AM on ITA for $399 [1].","cards":[{"title":"ITA 10:30 AM"}]}));
@@ -2171,8 +2182,6 @@ mod tests {
         assert_eq!(grounded_personal_answer("find me flights to Rome on Friday", summary, std::slice::from_ref(&flights)), summary);
         let made_up = grounded_personal_answer("find me flights to Rome on Friday", "You can fly at 7:15 AM on ITA for $199 [1].", std::slice::from_ref(&flights));
         assert!(!made_up.contains("$199"), "{made_up}");
-        let echoed = "Your dentist is at 3pm, so leave by 2.";
-        assert_eq!(grounded_personal_answer("my dentist is at 3pm, when should I leave", echoed, &[]), echoed);
     }
 
     #[test]

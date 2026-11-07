@@ -23,25 +23,21 @@ fn text(args: &Map<String, Value>, key: &str, max: usize) -> Result<String, Stri
     Ok(value.into())
 }
 /// The words to search for, not the sentence asking: a model can hand back "search for
-/// Nikon Z8 deals every hour" whole, and that's what the provider would then look up.
-fn search_words(asked: &str) -> String {
-    let mut query = asked.trim().trim_end_matches(['.', '!', '?']).trim();
-    let lower = query.to_lowercase();
-    for lead in ["keep checking for ", "keep checking ", "keep searching for ", "keep searching ", "search the web for ", "search for ", "look up ", "check for ", "search ", "find "] {
-        if lower.starts_with(lead) {
-            query = &query[lead.len()..];
-            break;
-        }
+/// Nikon Z8 deals every hour" whole. Runs once, on what the model proposed, so what the sheet
+/// shows is what's saved. Only the whole sentence counts: "Entertainment Weekly" and
+/// "search engine news" are real searches.
+pub fn search_words(asked: &str) -> String {
+    let trimmed = asked.trim().trim_end_matches(['.', '!', '?']).trim();
+    let lower = trimmed.to_lowercase();
+    const TAILS: [&str; 8] = [" every hour", " every day", " every week", " every morning", " every night", " hourly", " daily", " weekly"];
+    const LEADS: [&str; 8] = ["keep checking for ", "keep searching for ", "search the web for ", "search for ", "look up ", "check for ", "search ", "find "];
+    let (Some(lead), Some(tail)) = (LEADS.iter().find(|lead| lower.starts_with(**lead)), TAILS.iter().find(|tail| lower.ends_with(**tail))) else {
+        return asked.trim().to_string();
+    };
+    if lead.len() + tail.len() >= trimmed.len() {
+        return asked.trim().to_string();
     }
-    let lower = query.to_lowercase();
-    for tail in [" every hour", " every day", " every week", " every morning", " every night", " hourly", " daily", " weekly", " regularly"] {
-        if lower.ends_with(tail) {
-            query = &query[..query.len() - tail.len()];
-            break;
-        }
-    }
-    let query = query.trim();
-    if query.is_empty() || query.eq_ignore_ascii_case("for") { asked.trim().to_string() } else { query.to_string() }
+    trimmed[lead.len()..trimmed.len() - tail.len()].trim().to_string()
 }
 
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
@@ -74,7 +70,7 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> 
     let mut out = Map::new();
     out.insert("interval_minutes".into(), json!(interval));
     if tool == "create_saved_search" {
-        let query = search_words(&text(args, "query", 2000)?);
+        let query = text(args, "query", 2000)?;
         crate::scheduler::validate(&query, interval as u32)?;
         out.insert("query".into(), json!(query));
     } else {
@@ -427,9 +423,12 @@ mod tests {
     fn a_saved_search_keeps_the_words_to_search_for() {
         assert_eq!(search_words("search for Nikon Z8 camera deals every hour"), "Nikon Z8 camera deals");
         assert_eq!(search_words("Search for Apple AirPods Pro 2 at Walmart every hour."), "Apple AirPods Pro 2 at Walmart");
-        assert_eq!(search_words("mechanical keyboards under $120"), "mechanical keyboards under $120");
-        assert_eq!(search_words("cargo bikes hourly"), "cargo bikes");
-        assert_eq!(search_words("search for"), "search for");
+        assert_eq!(search_words("search for Find My iPhone alternatives every day"), "Find My iPhone alternatives");
+        for real in ["mechanical keyboards under $120", "Entertainment Weekly", "The Daily", "search engine optimization news", "find apartments", "cargo bikes hourly", "search for every hour"] {
+            assert_eq!(search_words(real), real, "{real}");
+        }
+        // Once only: the saved words go through the check again unchanged.
+        assert_eq!(search_words(&search_words("search for look up tables every week")), "look up tables");
     }
 
     #[test]

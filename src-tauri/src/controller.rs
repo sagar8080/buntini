@@ -1525,14 +1525,14 @@ pub async fn continue_task_online(
             .await
         }
         Ok(()) => {
-            continue_workflow(
+            crate::apps::asked_for(continue_workflow(
                 &state,
                 &mut task,
                 &on_event,
                 cancel.clone(),
                 &settings,
                 &mut flow,
-            )
+            ))
             .await
         }
         Err(error) => Err(error),
@@ -2059,8 +2059,12 @@ async fn glance_task(state: &AppState, task: &mut TaskRecord, focus: crate::glan
 /// Whether every price and number a summary states is on the result cards. A conversion is
 /// the one lookup whose answer is worked out from them.
 fn figures_on_cards(tool: &str, summary: &str, cards: &str, asked: &str) -> bool {
-    let shown = crate::completion::numbers(&format!("{cards}\n{asked}"));
-    tool == "currency" || crate::completion::stated_figures(summary).iter().all(|figure| shown.contains(figure))
+    let shown = crate::completion::numbers(cards);
+    let limits = crate::completion::numbers(asked);
+    let lower = summary.to_lowercase();
+    // "Options under $300" repeats the user's limit; "it's $300" would be a price.
+    let states_a_limit = ["under ", "below ", "over ", "above ", "budget", "up to ", "less than ", "more than "].iter().any(|word| lower.contains(word));
+    tool == "currency" || crate::completion::stated_figures(summary).iter().all(|figure| shown.contains(figure) || (states_a_limit && limits.contains(figure)))
 }
 /// Reads the product, then asks. Nothing goes in a cart until the sheet is approved.
 async fn propose_cart(state: &AppState, task: &mut TaskRecord, mode: &str, settings: &Settings, request: serde_json::Map<String, Value>, cancel: Arc<AtomicBool>) -> Result<(), String> {
@@ -3553,7 +3557,15 @@ where
             return Err(nothing);
         }
         let own_read = crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today)
-            .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
+            .or_else(|| {
+                // A guessed source this brain or these settings can't read is simply not used.
+                crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps).filter(|(tool, _)| {
+                    !crate::personal_answer::source_is_a_guess(&flow.contract.current_request)
+                        || (crate::apps::for_call(tool, &serde_json::Map::new()).is_some_and(|app| {
+                            crate::apps::allowed(settings, app.id) && app.share.is_none_or(|share| privacy::allows(state.models.locality(settings), settings, share))
+                        }) && !flow.steps.iter().any(|step| step.tool == *tool && step.state != "succeeded"))
+                })
+            });
         if own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
                 let budget = state.models.budget(settings).max_tokens;
@@ -3880,7 +3892,8 @@ where
         // asked for: if Contacts can't be read, the draft goes ahead without an address.
         let optional_read = (name == "find_contact"
             && flow.contract.contact_lookup(&flow.steps).as_deref() == args["name"].as_str())
-            || (rust_read && crate::personal_answer::only_a_guess(&flow.contract.current_request, &flow.contract, &name));
+            || (rust_read && crate::personal_answer::only_a_guess(&flow.contract.current_request, &flow.contract, &name))
+            || (rust_read && crate::personal_answer::source_is_a_guess(&flow.contract.current_request));
         if crate::apps::READ_TOOLS.contains(&name.as_str()) {
             args = Value::Object(crate::apps::validate(&name, &args)?);
             if name == "control_music" {
@@ -3928,6 +3941,11 @@ where
                 return Err("Send me the link, or tell me the shop and the item, and I'll add it.".into());
             }
             args = Value::Object(validate_action(&name, &args)?);
+            if name == "create_saved_search" {
+                if let Some(query) = args["query"].as_str().map(crate::monitor_actions::search_words) {
+                    args["query"] = query.into();
+                }
+            }
             // A checklist made from a note keeps only what the request or the note says.
             if name == "create_note"
                 && !flow.contract.next_outcome().is_some_and(|o| o.required_arguments.get("body").is_some())
@@ -5752,6 +5770,7 @@ for line in sys.stdin:
         assert!(figures_on_cards("ebay_search", "It's $249 [1].", cards, "headphones"));
         assert!(!figures_on_cards("ebay_search", "It's $199 [1].", cards, "headphones"));
         assert!(figures_on_cards("ebay_search", "Options under $300 [1].", cards, "headphones under $300"));
+        assert!(!figures_on_cards("ebay_search", "It's $300 [1].", cards, "headphones under $300"));
         assert!(figures_on_cards("currency", "That's 92.31 euros [1].", cards, "100 dollars in euros"));
     }
 

@@ -282,15 +282,12 @@ def parse_gemma_call(payload: str, allowed: set[str]) -> tuple[str, dict[str, An
     return validate_tool_call({"name": name, "arguments": arguments}, allowed)
 
 
-# Text that could pose as a turn of the conversation: any <| or |>, whatever follows, and
-# the bracket-style markers some models use.
-TEMPLATE_MARKERS = r"<\||\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
+# Text that could pose as a turn of the conversation: <| whatever follows, a word closed by
+# |>, and the bracket-style markers some models use. A bare |> is ordinary code.
+TEMPLATE_MARKERS = r"<\||<[^<>\s]{0,40}\|>|</?(?:start_of_turn|end_of_turn|tool_call|tool_response)>"
 
 
 def _disarmed(marker: str) -> str:
-    disarmed = marker.replace("<|", "\u2039|").replace("|>", "|\u203a")
-    if disarmed != marker:
-        return disarmed
     if marker.startswith("<"):
         return "\u2039" + marker[1:]
     if marker.endswith(">"):
@@ -298,11 +295,10 @@ def _disarmed(marker: str) -> str:
     return marker[0] + "\u200b" + marker[1:]
 
 
-def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> list[dict[str, Any]]:
-    """Text from outside can't become a turn: only the template adds real markers. Every
-    message is covered, since the system message and tool calls carry values bound from
-    emails and pages. Markers are disarmed in place, never deleted, because deleting one
-    can join the text around it into another. One pass is enough."""
+def template_cleaner(tokenizer: Any):
+    """Text from outside can't become a turn: only the template adds real markers. Markers
+    are disarmed in place, never deleted, because deleting one can join the text around it
+    into another. Values are cleaned; names and keys are Buntini's own."""
     named = {token for token in (getattr(tokenizer, "all_special_tokens", None) or []) if isinstance(token, str) and token}
     added = getattr(tokenizer, "get_added_vocab", None)
     if callable(added):
@@ -322,6 +318,13 @@ def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> 
             return {key: clean(item) for key, item in value.items()}
         return value
 
+    return clean
+
+
+def without_template_markers(messages: list[dict[str, Any]], tokenizer: Any) -> list[dict[str, Any]]:
+    """Every message is covered, since the system message and tool calls carry values bound
+    from emails and pages."""
+    clean = template_cleaner(tokenizer)
     return [
         {**message, **{key: clean(message[key]) for key in ("content", "tool_calls") if key in message}}
         for message in messages
