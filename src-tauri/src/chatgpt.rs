@@ -66,8 +66,16 @@ pub fn now() -> i64 {
 
 /// Whether this Mac has a sign-in that Buntini can use.
 pub fn saved() -> bool {
+    #[cfg(test)]
+    if let Some(session) = TEST_SESSION.lock().unwrap().as_ref() {
+        return session.is_some();
+    }
     crate::web::credential_saved(KEYCHAIN_ID)
 }
+
+/// A live test signs in for one run and keeps it here, away from the app's own Keychain entry.
+#[cfg(test)]
+pub(crate) static TEST_SESSION: std::sync::Mutex<Option<Option<Session>>> = std::sync::Mutex::new(None);
 
 /// Not secrets: who is signed in and whether they allowed plan use, noted at sign-in so that
 /// opening Buntini doesn't have to decode the session. A sign-in from before these were noted
@@ -94,17 +102,31 @@ pub fn account_unnoted(store: &crate::store::Store) -> bool {
 }
 
 pub fn load() -> Option<Session> {
+    #[cfg(test)]
+    if let Some(session) = TEST_SESSION.lock().unwrap().as_ref() {
+        return session.clone();
+    }
     crate::web::credential(KEYCHAIN_ID)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
 }
 fn save(session: &Session) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(saved) = TEST_SESSION.lock().unwrap().as_mut() {
+        *saved = Some(session.clone());
+        return Ok(());
+    }
     crate::web::set_credential(
         KEYCHAIN_ID,
         &serde_json::to_string(session).map_err(|e| e.to_string())?,
     )
 }
 fn forget() -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(saved) = TEST_SESSION.lock().unwrap().as_mut() {
+        *saved = None;
+        return Ok(());
+    }
     crate::web::set_credential(KEYCHAIN_ID, "")
 }
 

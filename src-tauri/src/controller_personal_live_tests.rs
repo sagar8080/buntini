@@ -338,6 +338,16 @@ async fn live_personal_answers() {
         let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
         rows.iter().map(|row| q(leak(row["asked"].as_str().unwrap()), list(&row["reads"]), list(&row["says"]), list(&row["never"]))).collect()
     }).unwrap_or_default();
+    // `BUNTINI_PERSONAL_BRAIN=chatgpt`: the same made-up records through a ChatGPT plan. It
+    // signs in once in the browser, and the session lasts only as long as this run.
+    let on_chatgpt = std::env::var("BUNTINI_PERSONAL_BRAIN").is_ok_and(|brain| brain == "chatgpt");
+    if on_chatgpt {
+        *crate::chatgpt::TEST_SESSION.lock().unwrap() = Some(None);
+        eprintln!("PERSONAL finish signing in to ChatGPT in the browser");
+        crate::chatgpt::sign_in(&uuid::Uuid::new_v4().to_string(), None).await.expect("sign in");
+        let models = crate::chatgpt::models().await.expect("models");
+        eprintln!("PERSONAL on ChatGPT model {}", models.first().map_or("none", |model| model.slug.as_str()));
+    }
     let tomorrow = (today + Duration::days(1)).format("%A").to_string();
     for question in if from_file.is_empty() { QUESTIONS } else { from_file.as_slice() } {
         if only.as_deref().is_some_and(|only| !only.split('|').any(|one| question.asked == one)) {
@@ -351,10 +361,17 @@ async fn live_personal_answers() {
         let state = live_state(dir.path());
         let mut settings = state.store.lock().unwrap().settings().unwrap();
         settings.apps = vec!["mail".into(), "calendar".into(), "reminders".into()];
+        if on_chatgpt {
+            settings.model_backend = "cloud".into();
+            settings.cloud_provider = "chatgpt".into();
+            settings.cloud_model = String::new();
+            // Only the made-up records below exist here, so all of them may go.
+            settings.external_shares = crate::privacy::Share::ALL.iter().map(|share| share.id().to_string()).collect();
+        }
         state.store.lock().unwrap().save_settings(&settings).unwrap();
         let mut task: TaskRecord = serde_json::from_value(json!({
             "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
-            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":"apple"
+            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt { "cloud" } else { "apple" }
         }))
         .unwrap();
         state.store.lock().unwrap().save_task(&task).unwrap();
