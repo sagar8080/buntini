@@ -399,12 +399,166 @@ pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
         .filter(|_| steps.iter().all(|s| s.state != "succeeded" || s.effect))
         .or_else(|| rule_choice(goal, steps, today))
         .or_else(|| assignments(goal, steps))
+        .or_else(|| conversion(goal))
+        .or_else(|| countdown(goal, today))
+}
+
+/// A unit, its kind and how many of the kind's base unit it is. Cups, pints, quarts and
+/// gallons are US measures, and say so.
+fn unit(word: &str) -> Option<(&'static str, f64, &'static str)> {
+    let word = word.trim_end_matches('.');
+    Some(match word {
+        "mm" | "millimetre" | "millimetres" | "millimeter" | "millimeters" => ("length", 0.001, "mm"),
+        "cm" | "centimetre" | "centimetres" | "centimeter" | "centimeters" => ("length", 0.01, "cm"),
+        "m" | "metre" | "metres" | "meter" | "meters" => ("length", 1.0, "metres"),
+        "km" | "kms" | "kilometre" | "kilometres" | "kilometer" | "kilometers" => ("length", 1000.0, "km"),
+        "in" | "inch" | "inches" => ("length", 0.0254, "inches"),
+        "ft" | "foot" | "feet" => ("length", 0.3048, "feet"),
+        "yd" | "yard" | "yards" => ("length", 0.9144, "yards"),
+        "mi" | "mile" | "miles" => ("length", 1609.344, "miles"),
+        "mg" | "milligram" | "milligrams" => ("mass", 0.001, "mg"),
+        "g" | "gram" | "grams" | "gramme" | "grammes" => ("mass", 1.0, "grams"),
+        "kg" | "kgs" | "kilo" | "kilos" | "kilogram" | "kilograms" => ("mass", 1000.0, "kg"),
+        "oz" | "ounce" | "ounces" => ("mass", 28.349523125, "ounces"),
+        "lb" | "lbs" | "pound" | "pounds" => ("mass", 453.59237, "pounds"),
+        "stone" | "stones" | "st" => ("mass", 6350.29318, "stone"),
+        "ml" | "millilitre" | "millilitres" | "milliliter" | "milliliters" => ("volume", 1.0, "ml"),
+        "l" | "litre" | "litres" | "liter" | "liters" => ("volume", 1000.0, "litres"),
+        "tsp" | "teaspoon" | "teaspoons" => ("volume", 4.92892159375, "teaspoons"),
+        "tbsp" | "tablespoon" | "tablespoons" => ("volume", 14.78676478125, "tablespoons"),
+        "cup" | "cups" => ("volume", 236.5882365, "US cups"),
+        "pint" | "pints" => ("volume", 473.176473, "US pints"),
+        "quart" | "quarts" => ("volume", 946.352946, "US quarts"),
+        "gallon" | "gallons" => ("volume", 3785.411784, "US gallons"),
+        "c" | "celsius" | "centigrade" => ("temperature", 0.0, "°C"),
+        "f" | "fahrenheit" => ("temperature", 1.0, "°F"),
+        "k" | "kelvin" => ("temperature", 2.0, "K"),
+        _ => return None,
+    })
+}
+
+fn amount(word: &str) -> Option<f64> {
+    match word {
+        "a" | "an" | "one" => Some(1.0),
+        "half" => Some(0.5),
+        _ => word.replace(',', "").parse::<f64>().ok().filter(|value| value.is_finite() && value.abs() < 1e12),
+    }
+}
+
+fn shown(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    let text = format!("{rounded:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// "how many ounces in 2 pounds", "convert 5 miles to km", "72 fahrenheit in celsius".
+/// Pounds that become dollars are money, not weight, and aren't answered here.
+fn conversion(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['?', '!'], " ").replace("°", " ").replace("degrees", " ").replace("fl oz", "floz");
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    // From and to: "N from in|to to", or "how many to in|are in N from".
+    let (value, from, to) = if let Some(at) = words.iter().position(|word| *word == "many") {
+        let to = unit(words.get(at + 1)?)?;
+        let mut rest = &words[at + 2..];
+        while rest.first().is_some_and(|word| ["are", "is", "in", "per", "there"].contains(word)) {
+            rest = &rest[1..];
+        }
+        let value = amount(rest.first()?)?;
+        (value, unit(rest.get(1)?)?, to)
+    } else {
+        let at = words.iter().position(|word| amount(word).is_some_and(|_| !["a", "an", "one", "half"].contains(word)))?;
+        let value = amount(words[at])?;
+        let from = unit(words.get(at + 1)?)?;
+        let link = words.get(at + 2)?;
+        if !["in", "to", "into", "as"].contains(link) {
+            return None;
+        }
+        (value, from, unit(words.get(at + 3)?)?)
+    };
+    if from.0 != to.0 || from.2 == to.2 {
+        return None;
+    }
+    let result = if from.0 == "temperature" {
+        let celsius = match from.1 as u8 { 0 => value, 1 => (value - 32.0) * 5.0 / 9.0, _ => value - 273.15 };
+        match to.1 as u8 { 0 => celsius, 1 => celsius * 9.0 / 5.0 + 32.0, _ => celsius + 273.15 }
+    } else {
+        value * from.1 / to.1
+    };
+    // "1 litre", "1 foot": one of a unit is singular.
+    let named = |count: f64, name: &str| -> String {
+        if shown(count) != "1" {
+            return name.to_string();
+        }
+        match name {
+            "inches" => "inch".into(),
+            "feet" => "foot".into(),
+            _ => name.strip_suffix('s').unwrap_or(name).to_string(),
+        }
+    };
+    let (from_name, to_name) = (named(value, from.2), named(result, to.2));
+    let joiner = if from.0 == "temperature" { "" } else { " " };
+    Some(format!("{}{joiner}{from_name} is {}{joiner}{to_name}.", shown(value), shown(result)))
+}
+
+/// "how many days until christmas", "how long till friday": counted from today.
+fn countdown(goal: &str, today: NaiveDate) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['?', '!', '’'], " ").replace('\'', " ");
+    let rest = ["days until ", "days till ", "days til ", "days to ", "days before ", "long until ", "long till ", "long til "]
+        .iter()
+        .find_map(|cue| lower.split_once(cue).map(|(_, rest)| rest.trim().to_string()))?;
+    let rest = rest.trim_start_matches("it's ").trim_start_matches("its ").trim_start_matches("it is ");
+    let year = today.year();
+    let fixed = |month: u32, day: u32| {
+        NaiveDate::from_ymd_opt(year, month, day).filter(|date| *date >= today).or_else(|| NaiveDate::from_ymd_opt(year + 1, month, day))
+    };
+    let (name, date) = if rest.starts_with("christmas eve") {
+        ("Christmas Eve".to_string(), fixed(12, 24)?)
+    } else if rest.starts_with("christmas") || rest.starts_with("xmas") {
+        ("Christmas".to_string(), fixed(12, 25)?)
+    } else if rest.starts_with("new year s eve") || rest.starts_with("new years eve") {
+        ("New Year’s Eve".to_string(), fixed(12, 31)?)
+    } else if rest.starts_with("new year") {
+        ("New Year’s Day".to_string(), NaiveDate::from_ymd_opt(year + 1, 1, 1)?)
+    } else if rest.starts_with("halloween") {
+        ("Halloween".to_string(), fixed(10, 31)?)
+    } else if rest.starts_with("valentine") {
+        ("Valentine’s Day".to_string(), fixed(2, 14)?)
+    } else if rest.starts_with("my ") {
+        return None;
+    } else {
+        let when = crate::request_fields::when(rest, today);
+        (String::new(), when.date?)
+    };
+    let days = (date - today).num_days();
+    let day = date.format("%A %-d %B").to_string();
+    Some(match (days, name.is_empty()) {
+        (0, true) => format!("That’s today, {day}."),
+        (0, false) => format!("{name} is today."),
+        (1, true) => format!("1 day, until {day}."),
+        (1, false) => format!("1 day until {name}, {day}."),
+        (_, true) => format!("{days} days, until {day}."),
+        (_, false) => format!("{days} days until {name}, {day}."),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn units_and_days_are_worked_out() {
+        assert_eq!(conversion("how many ounces in 2 pounds").as_deref(), Some("2 pounds is 32 ounces."));
+        assert_eq!(conversion("convert 5 miles to km").as_deref(), Some("5 miles is 8.05 km."));
+        assert_eq!(conversion("what's 72 fahrenheit in celsius").as_deref(), Some("72°F is 22.22°C."));
+        assert_eq!(conversion("how many cups in a litre").as_deref(), Some("1 litre is 4.23 US cups."));
+        assert_eq!(conversion("convert 250 pounds to dollars"), None);
+        assert_eq!(conversion("how many people live in london"), None);
+        let saturday = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
+        assert_eq!(countdown("how many days until christmas", saturday).as_deref(), Some("48 days until Christmas, Friday 25 December."));
+        assert_eq!(countdown("how long until friday?", saturday).as_deref(), Some("6 days, until Friday 13 November."));
+        assert_eq!(countdown("how many days until my birthday", saturday), None);
+    }
 
     fn note(body: &str) -> Vec<Step> {
         vec![Step {

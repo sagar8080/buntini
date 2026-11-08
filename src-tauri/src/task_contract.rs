@@ -704,6 +704,66 @@ impl TaskContract {
         contract.bootstrap(goal);
         contract
     }
+    /// One requested write: a change to an existing item first reads where it lives, and
+    /// what the request names (a due time, a length) is required of its proposal.
+    fn push_write(&mut self, tool: &str, clause: &str, goal: &str, reference_date: chrono::NaiveDate) {
+        let mut required: Vec<String> = crate::tools::definition(tool)
+            .and_then(|d| d["parameters"]["required"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        // A change to an existing item first reads where that item lives. Its
+        // id is bound from that read or picked in the sheet, never required of
+        // a proposal (`edit_targets::check` enforces where it came from).
+        if let Some((read, arguments)) =
+            crate::edit_targets::source(tool, clause, reference_date)
+        {
+            required.retain(|field| field != "id");
+            if !self.outcomes.iter().any(|o| {
+                o.kind == "read"
+                    && o.accepted_tools.iter().any(|t| t == read)
+                    && o.required_arguments == arguments
+            }) {
+                self.push_outcome(
+                    "read",
+                    &format!("{EDIT_READ}{clause}"),
+                    vec![read.into()],
+                    arguments,
+                    vec![],
+                );
+            }
+        }
+        if tool == "add_reminder"
+            && (tokens(clause).iter().any(|w| {
+                [
+                    "due", "before", "after", "tomorrow", "today", "tonight", "at",
+                ]
+                .contains(w)
+            }) || !dates(clause).is_empty())
+            && !required.contains(&"due".into())
+        {
+            required.push("due".into());
+        }
+        if tool == "add_calendar_event"
+            && completion::unquoted(goal).split(|c:char|!c.is_alphanumeric()).any(|word|["duration","lasting","minutes","minute"].contains(&word))
+            && !required.contains(&"minutes".into())
+        {
+            required.push("minutes".into());
+        }
+        self.push_outcome(
+            "write",
+            clause,
+            if tool == "open_link" {
+                vec![tool.into(), "browse_page".into()]
+            } else {
+                vec![tool.into()]
+            },
+            json!({}),
+            required,
+        );
+    }
+
     fn push_outcome(
         &mut self,
         kind: &str,
@@ -927,61 +987,7 @@ impl TaskContract {
                 }
             }
             for tool in writes {
-                let mut required: Vec<String> = crate::tools::definition(tool)
-                    .and_then(|d| d["parameters"]["required"].as_array().cloned())
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|v| v.as_str().map(str::to_owned))
-                    .collect();
-                // A change to an existing item first reads where that item lives. Its
-                // id is bound from that read or picked in the sheet, never required of
-                // a proposal (`edit_targets::check` enforces where it came from).
-                if let Some((read, arguments)) =
-                    crate::edit_targets::source(tool, &clause, reference_date)
-                {
-                    required.retain(|field| field != "id");
-                    if !self.outcomes.iter().any(|o| {
-                        o.kind == "read"
-                            && o.accepted_tools.iter().any(|t| t == read)
-                            && o.required_arguments == arguments
-                    }) {
-                        self.push_outcome(
-                            "read",
-                            &format!("{EDIT_READ}{clause}"),
-                            vec![read.into()],
-                            arguments,
-                            vec![],
-                        );
-                    }
-                }
-                if tool == "add_reminder"
-                    && (tokens(&clause).iter().any(|w| {
-                        [
-                            "due", "before", "after", "tomorrow", "today", "tonight", "at",
-                        ]
-                        .contains(w)
-                    }) || !dates(&clause).is_empty())
-                    && !required.contains(&"due".into())
-                {
-                    required.push("due".into());
-                }
-                if tool == "add_calendar_event"
-                    && completion::unquoted(goal).split(|c:char|!c.is_alphanumeric()).any(|word|["duration","lasting","minutes","minute"].contains(&word))
-                    && !required.contains(&"minutes".into())
-                {
-                    required.push("minutes".into());
-                }
-                self.push_outcome(
-                    "write",
-                    &clause,
-                    if tool == "open_link" {
-                        vec![tool.into(), "browse_page".into()]
-                    } else {
-                        vec![tool.into()]
-                    },
-                    json!({}),
-                    required,
-                );
+                self.push_write(tool, &clause, goal, reference_date);
             }
             if !reads.is_empty() {
                 let arguments = if reads[0] == "read_calendar" {
@@ -1007,6 +1013,31 @@ impl TaskContract {
                 }
             } else if completion::requested_actions(&clause).0.is_empty() && !unsupported {
                 unparsed = true;
+            }
+        }
+        // Nothing to do by the word rules, and not a question: what it asks for by meaning,
+        // in place of what its words looked like ("add eggs to my reminders" isn't a read).
+        if !self.outcomes.iter().any(|outcome| outcome.kind == "write" || outcome.kind == "unsupported")
+            || self.outcomes.iter().all(|outcome| outcome.kind == "unsupported")
+        {
+            match crate::intent::read(goal) {
+                Some(crate::intent::Intent::Action(tool)) => {
+                    self.outcomes.clear();
+                    self.push_write(tool, goal, goal, reference_date);
+                    unparsed = false;
+                }
+                Some(crate::intent::Intent::Unsupported) if self.outcomes.is_empty() || !self.outcomes.iter().any(|o| o.kind == "read") => {
+                    self.outcomes.clear();
+                    self.push_outcome("unsupported", goal, vec![], json!({}), vec![]);
+                    unparsed = false;
+                }
+                Some(crate::intent::Intent::LookUp) if !self.outcomes.iter().any(|o| o.kind == "read") => {
+                    self.outcomes.clear();
+                    self.push_outcome("read", goal, vec!["look_up_online".into()], json!({"query":goal.trim()}), vec!["query".into()]);
+                    self.outcomes.last_mut().unwrap().resources = vec!["web".into()];
+                    unparsed = false;
+                }
+                _ => {}
             }
         }
         // An answer is distinct from successful writes. The conservative bootstrap
@@ -1177,6 +1208,30 @@ impl TaskContract {
                         }
                     }
                 }
+            }
+        }
+        // An everyday request ("remind me to call the plumber monday morning"): what its
+        // own words say, for anything the literal forms above didn't set.
+        let writes: Vec<usize> = self.outcomes.iter().enumerate().filter(|(_, o)| o.kind == "write").map(|(index, _)| index).collect();
+        // Exact, quoted or source-derived requests keep to the literal forms above.
+        let lower = goal.to_lowercase();
+        let everyday = !goal.contains("Additional details:")
+            && !self.outcomes.iter().any(|o| o.kind == "read")
+            && !['"', '“', '‘'].iter().any(|quote| goal.contains(*quote))
+            && ![" titled ", " exactly ", " with body ", " due 20", "before", "after", " explain", " then "].iter().any(|form| lower.contains(form))
+            && goal.split(['.', '?', '!', ';', '\n']).filter(|sentence| !sentence.trim().is_empty()).count() == 1;
+        if let ([index], true) = (&writes[..], everyday) {
+            let tool = self.outcomes[*index].tool.clone().unwrap_or_default();
+            for (field, value) in crate::request_fields::fields(&tool, goal, reference_date) {
+                let outcome = &mut self.outcomes[*index];
+                if outcome.required_arguments.get(&field).is_some() {
+                    continue;
+                }
+                outcome.required_arguments[&field] = value.clone();
+                if field == "minutes" && !outcome.required_fields.contains(&field) {
+                    outcome.required_fields.push(field.clone());
+                }
+                self.constraints.push(Constraint { outcome_id: Some(outcome.id.clone()), field, value, source: "user_literal".into(), revision: self.revision, record: None });
             }
         }
         if unparsed {
@@ -2266,6 +2321,9 @@ impl TaskContract {
             .iter()
             .find(|o| !large && o.kind != "answer" && o.status != "complete")
         {
+            if outcome.kind == "unsupported" && self.outcomes.iter().all(|o| o.kind != "write" || o.status == "complete") {
+                return Err("I can’t do that yet.".into());
+            }
             return Err(format!("I didn’t get this done yet: {}. I couldn’t check it, so I’m not calling it finished.",outcome.description));
         }
         if self.outcomes.iter().any(|o| o.kind == "answer") && text.trim().is_empty() {
@@ -2512,9 +2570,14 @@ mod tests {
         assert!(contract
             .validate_proposal("add_reminder", &json!({"title":"Something else","due":"2026-10-30 09:00"}), &[])
             .is_err());
+        // "Tomorrow at 9" is the request's own, so it's bound too; another day isn't it.
+        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d 09:00").to_string();
+        assert!(contract
+            .validate_proposal("add_reminder", &json!({"title":title,"due":tomorrow}), &[])
+            .is_ok());
         assert!(contract
             .validate_proposal("add_reminder", &json!({"title":title,"due":"2026-10-30 09:00"}), &[])
-            .is_ok());
+            .is_err());
     }
     fn shortcut_read(id: &str, query: &str, names: &[&str]) -> Step {
         let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
@@ -3550,7 +3613,10 @@ mod tests {
         assert_eq!(due("Remind me to call Ana at 09:30 on May 21, 2031."), Some(json!("2031-05-21 09:30")));
         // A lead in days isn't read here, and no year means no binding: the time stays open.
         assert_eq!(due("My exam is at 09:00 on May 21, 2031. Remind me two days before."), None);
-        assert_eq!(due("Remind me at 09:30 on May 21 to call Ana."), None);
+        // With no year, it's the next May 21.
+        use chrono::Datelike;
+        let next = (0..2).find_map(|ahead| chrono::NaiveDate::from_ymd_opt(chrono::Local::now().year() + ahead, 5, 21).filter(|day| *day >= chrono::Local::now().date_naive())).unwrap();
+        assert_eq!(due("Remind me at 09:30 on May 21 to call Ana."), Some(json!(format!("{} 09:30", next.format("%Y-%m-%d")))));
     }
 
     #[test]
@@ -3570,7 +3636,8 @@ mod tests {
     fn a_receipt_survives_the_check_for_what_a_model_made_up() {
         let goal = "remind me to book a dentist appointment tomorrow at 9";
         let mut contract = TaskContract::from_request(goal);
-        let mut done = step("r", "add_reminder", json!({"title":"Book a dentist appointment","due":"2026-11-07 09:00"}), true);
+        let tomorrow = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).format("%Y-%m-%d 09:00").to_string();
+        let mut done = step("r", "add_reminder", json!({"title":"Book a dentist appointment","due":tomorrow}), true);
         done.evidence = Some(json!({"receipt":{"outcome":"succeeded","tool":"add_reminder","objectId":"x","destination":"Reminders","message":"Book a dentist appointment · Sat 7 Nov 09:00","evidence":{},"error":null}}));
         contract.refresh(goal, std::slice::from_ref(&done));
         let said = contract.validate_answer("", std::slice::from_ref(&done)).unwrap();

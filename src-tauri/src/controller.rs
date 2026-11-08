@@ -137,6 +137,11 @@ impl AppState {
             bundled
         };
         crate::embedding::set_model_dir(resource("models/bge-small-en-v1.5"));
+        // Unit tests keep to word rules whatever else they set up; live tests turn it on.
+        if !cfg!(test) {
+            crate::intent::enable();
+            std::thread::spawn(crate::intent::warm);
+        }
         // Native helpers are bundled as sidecars in Contents/MacOS so Tauri
         // signs each executable before signing and notarizing the outer app.
         // Release builds must never fall back to a writable source checkout.
@@ -3384,6 +3389,10 @@ fn bound_task_fields(flow: &Workflow) -> Result<Option<crate::planning::BoundAct
     let Some(tool) = outcome.tool.as_deref().and_then(tools::name) else {
         return Ok(None);
     };
+    // Who a text or a draft goes to comes from Contacts first.
+    if flow.contract.contact_lookup(&flow.steps).is_some() {
+        return Ok(None);
+    }
     let arguments = Value::Object(validate_action(tool, &outcome.required_arguments)?);
     Ok(Some(crate::planning::BoundAction {
         tool,

@@ -282,7 +282,7 @@ fn world_inbox(today: &str, yesterday: &str) -> [(String, bool, &'static str, &'
 }
 
 fn event(day: &str, start: &str, end: &str, title: &str, location: &str) -> Event {
-    serde_json::from_value(json!({"start":format!("{day} {start}"),"end":format!("{day} {end}"),"allDay":false,"title":title,"location":location,"calendar":"Work"})).unwrap()
+    serde_json::from_value(json!({"id":format!("event-{day}-{start}"),"calendarId":"work","start":format!("{day} {start}"),"end":format!("{day} {end}"),"allDay":false,"title":title,"location":location,"calendar":"Work"})).unwrap()
 }
 
 fn world_day(day: chrono::NaiveDate, today: chrono::NaiveDate) -> Agenda<Event> {
@@ -306,8 +306,20 @@ fn world_day(day: chrono::NaiveDate, today: chrono::NaiveDate) -> Agenda<Event> 
     Agenda { items, total }
 }
 
+fn world_contacts(asked: &str) -> Agenda<crate::apps::Contact> {
+    let people = [("Priya Shah", "priya@northwind.example", "+15550100001"), ("Sam Lee", "sam@example.com", "+15550100002"), ("Ana Ruiz", "ana@example.com", "+15550100003"), ("Mum", "mum@example.com", "+15550100004")];
+    let wanted = asked.to_lowercase();
+    let items: Vec<crate::apps::Contact> = people
+        .iter()
+        .filter(|person| person.0.to_lowercase().split_whitespace().any(|word| wanted.split_whitespace().any(|one| one == word)))
+        .map(|person| crate::apps::Contact { id: Some(format!("contact-{}", person.0.replace(' ', "-"))), name: person.0.into(), emails: vec![person.1.into()], phones: vec![person.2.into()] })
+        .collect();
+    let total = items.len();
+    Agenda { items, total }
+}
+
 fn world_reminders(today: chrono::NaiveDate) -> Agenda<Reminder> {
-    let reminder = |title: &str, due: String| -> Reminder { serde_json::from_value(json!({"title":title,"due":due,"list":"Home"})).unwrap() };
+    let reminder = |title: &str, due: String| -> Reminder { serde_json::from_value(json!({"id":format!("reminder-{}", title.replace(' ', "-")),"calendarId":"home","title":title,"due":due,"list":"Home"})).unwrap() };
     let items = vec![
         reminder("Renew car insurance", today.format("%Y-%m-%d").to_string()),
         reminder("Call mum", (today + Duration::days(1)).format("%Y-%m-%d").to_string()),
@@ -381,6 +393,7 @@ async fn live_personal_answers() {
     // signs in once in the browser, and the session lasts only as long as this run.
     let on_chatgpt = on_chatgpt().await;
     crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+    crate::intent::enable();
     let tomorrow = (today + Duration::days(1)).format("%A").to_string();
     for question in if from_file.is_empty() { QUESTIONS } else { from_file.as_slice() } {
         if only.as_deref().is_some_and(|only| !only.split('|').any(|one| question.asked == one)) {
@@ -393,7 +406,10 @@ async fn live_personal_answers() {
         let dir = tempfile::tempdir().unwrap();
         let state = live_state(dir.path());
         let mut settings = state.store.lock().unwrap().settings().unwrap();
-        settings.apps = vec!["mail".into(), "calendar".into(), "reminders".into()];
+        settings.apps = match std::env::var("BUNTINI_PERSONAL_APPS") {
+            Ok(apps) => apps.split(',').map(str::to_string).collect(),
+            Err(_) => vec!["mail".into(), "calendar".into(), "reminders".into()],
+        };
         if on_chatgpt {
             use_chatgpt(&mut settings);
         }
@@ -428,6 +444,10 @@ async fn live_personal_answers() {
                         }
                     }
                     "read_reminders" => Ok(reminder_evidence(&world_reminders(today))),
+                    "find_contact" => {
+                        let asked = args.get("name").and_then(Value::as_str).unwrap_or_default();
+                        Ok(crate::apps::contact_evidence(asked, &world_contacts(asked)))
+                    }
                     other => Err(format!("{other} isn't in this world")),
                 };
                 async move { found }
@@ -453,6 +473,9 @@ async fn live_personal_answers() {
             "question": asked_text, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
             "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state})).collect::<Vec<_>>(),
             "modelCalls": state.models.apple.model_calls(), "error": error, "answer": shown, "choices": task.choices,
+            "outcomes": flow.contract.outcomes.iter().map(|o| json!({"kind":o.kind,"tool":o.tool,"status":o.status,"accepted":o.accepted_tools,"required":o.required_arguments})).collect::<Vec<_>>(),
+            "ownSources": flow.contract.own_sources, "offered": flow.offered,
+            "modelSaid": flow.messages.iter().rev().find(|message| message["role"] == "assistant").map(|message| message["content"].clone()),
         });
         writeln!(out, "{row}").unwrap();
         out.flush().unwrap();
@@ -597,3 +620,4 @@ async fn live_real_apps() {
     }
     state.models.shutdown().await;
 }
+

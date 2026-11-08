@@ -196,6 +196,10 @@ pub fn every_source() -> Vec<String> {
 /// was never made on a real Mac). The model can only name an app, and a wrong one only costs
 /// a read on this Mac. Returns the apps already settled and the questions to put.
 pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContract) -> (Vec<String>, Vec<Value>) {
+    // A request to do something isn't answered from records ("timer 25 min").
+    if contract.outcomes.iter().any(|outcome| outcome.kind == "write" || outcome.kind == "unsupported") {
+        return (vec![], vec![]);
+    }
     let goal = &crate::task_contract::spelled(goal);
     // "Did Sam ask about lunch" could be in Mail as easily as in memory, so it's still asked.
     let elsewhere = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && !outcome.accepted_tools.iter().any(|tool| SOURCES.contains(&tool.as_str()) || tool == "search_memory"));

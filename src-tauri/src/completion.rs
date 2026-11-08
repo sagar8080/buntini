@@ -695,6 +695,30 @@ pub(crate) fn claims_own_write(text: &str) -> bool {
             return true;
         }
     }
+    // A change told as a result, without anyone doing it: "Brightness set to 50%", "Wi-Fi
+    // turned off", "the timer has been started". "Can be set to" explains; it isn't one.
+    const CHANGED: &[&str] = &[
+        "turned", "switched", "lowered", "raised", "muted", "unmuted", "paused", "skipped", "started",
+        "stopped", "quit", "closed", "dimmed", "adjusted", "increased", "decreased", "reduced", "resumed",
+    ];
+    const EXPLAINING: &[&str] = &["can", "could", "should", "would", "will", "may", "might", "must", "be", "to", "you", "please", "not", "never", "how"];
+    for clause in text.split(['.', '!', '\n', ';']) {
+        let clause_words = words(clause.trim());
+        let changed = |word: &&str| writes.contains(word) || CHANGED.contains(word);
+        for (index, word) in clause_words.iter().enumerate().take(4).skip(1) {
+            if changed(word)
+                && clause_words.get(index + 1).is_some_and(|next| ["to", "on", "off", "up", "down", "for", "at"].contains(next))
+                && !clause_words[..index].iter().any(|before| EXPLAINING.contains(before))
+            {
+                return true;
+            }
+        }
+        for pair in clause_words.windows(3) {
+            if [["has", "been"], ["have", "been"], ["is", "now"], ["are", "now"]].iter().any(|lead| pair[..2] == lead[..]) && changed(&pair[2]) {
+                return true;
+            }
+        }
+    }
     // Direct result announcements often omit the assistant's pronoun. Limit
     // these patterns to sentence/phrase starts so how-to explanations still work.
     for clause in text.split(['.', '!', '\n', ';', ',']) {
@@ -1508,6 +1532,11 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
             // cannot be mistaken for an assistant execution announcement.
             return Ok(format!("Text for review:\n\n{}",text.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")));
         }
+        // "Summarise this: the meeting has been moved": the answer retells the user's text.
+        let supplied = prompt.split_once(": ").is_some_and(|(head, body)| head.split_whitespace().count() <= 6 && body.split_whitespace().count() >= 4);
+        if supplied && actions.is_empty() && !unsupported {
+            return Ok(text.to_string());
+        }
         return Err("The response claimed an action without a verified receipt. Buntini has not confirmed that it was done.".into());
     }
     Ok(text.to_string())
@@ -1517,6 +1546,16 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_change_told_as_done_is_a_claim() {
+        for said in ["Brightness set to 50%.", "Volume turned down.", "Wi-Fi turned off", "Dark mode switched on.", "The timer has been started.", "Your music is now paused."] {
+            assert!(claims_own_write(said), "{said}");
+        }
+        for said in ["Brightness can be set to 50% in Control Centre.", "You can turn the volume down with F11.", "To set a timer, open Clock.", "The capital of Australia is Canberra.", "Your meeting starts at 3."] {
+            assert!(!claims_own_write(said), "{said}");
+        }
+    }
 
     #[test]
     fn answers_stream_by_sentence_and_stop_before_an_unread_schedule() {

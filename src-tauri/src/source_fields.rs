@@ -66,7 +66,7 @@ const FAMILY: &[&str] = &[
 ];
 
 /// Verbs whose object is the person written to or called: "text Ana", "call mom".
-const DIRECT: &[&str] = &["text", "message", "imessage", "call", "facetime", "ring", "phone"];
+const DIRECT: &[&str] = &["text", "message", "imessage", "call", "facetime", "ring", "phone", "email", "send", "tell"];
 
 /// The person a requested email draft or text is for, by name, when the user's own words
 /// say exactly one: "Draft an email to Ana Silva", "reply to Ana's email", "write back to
@@ -151,7 +151,7 @@ pub fn named_recipient(goal: &str) -> Option<String> {
             && words.get(next + 1).is_some_and(|(word, _)| FAMILY.contains(&word.to_lowercase().as_str()))
         {
             next += 1;
-        } else if (cue == "to" || direct)
+        } else if (cue == "to" || (direct && cue != "send"))
             && words
                 .get(next)
                 .is_some_and(|(word, _)| ROLE_STARTS.contains(&word.to_lowercase().as_str()))

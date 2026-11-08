@@ -276,7 +276,7 @@ for line in sys.stdin:
             dir.path(),
             // Keep title unresolved: explicit titles are now bound before
             // inference, making title+clarified due a fully known proposal.
-            "Add a reminder about my lease due tomorrow",
+            "Add a reminder about this due tomorrow",
             &script,
         );
         flow.refresh_contract();
