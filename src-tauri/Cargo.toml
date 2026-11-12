@@ -35,7 +35,7 @@ futures-util = "0.3"
 walkdir = "2.5"
 scraper = "0.29"
 libc = "0.2"
-rfd = "0.17.2"
+rfd = "0.18.0"
 rusqlite = { version = "0.41", features = ["bundled"] }
 objc2-application-services = "0.3.2"
 objc2-core-foundation = "0.3.2"
