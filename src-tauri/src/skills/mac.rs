@@ -12,6 +12,8 @@ pub enum Command {
     Timer { seconds: u64 },
     CancelTimers,
     CancelAllTimers,
+    /// The focus timer's cycles (utilities/focus.rs).
+    Focus(crate::utilities::focus::Command),
 }
 
 #[derive(Debug, PartialEq)]
@@ -106,6 +108,10 @@ fn duration(text: &str) -> Option<u64> {
 }
 
 pub fn recognise(text: &str) -> Option<Command> {
+    // "Focus for 25 minutes" is the focus timer, before any plain timer.
+    if let Some(command) = crate::utilities::focus::recognise(text) {
+        return Some(Command::Focus(command));
+    }
     // All controls are direct requests. Mere mentions, explanations and negations
     // must never change the Mac's state.
     from_verb(
@@ -324,6 +330,7 @@ pub(crate) fn spoken(seconds: u64) -> String {
 
 pub async fn run(command: Command) -> Result<Outcome, String> {
     let answer = match command {
+        Command::Focus(command) => return crate::utilities::run_focus(command),
         Command::Volume(change) => {
             let (action, level) = match change {
                 Volume::Set(level) => ("set", level.to_string()),

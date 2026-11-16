@@ -253,6 +253,7 @@ struct Home: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
+                UtilityHomeButtons(pills: pills, send: send)
                 IslandButton(label: "Chat", prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
         }

@@ -71,6 +71,31 @@ pub fn set_overlay(overlay: Option<cards::utilities::Overlay>) {
     change(|hub| hub.overlay = overlay);
 }
 
+/// Every pill showing, most urgent first.
+pub fn pills() -> Vec<Pill> {
+    HUB.0.lock().unwrap().board.pills()
+}
+
+/// Hands an action to the part that owns its source, as if it came from a surface: a
+/// shortcut that opens a pill, say.
+pub fn act(action: Action) {
+    let handler = HANDLERS.lock().unwrap().get(&action.source).cloned();
+    if let Some(handler) = handler {
+        handler(action);
+    }
+}
+
+static MUTED: AtomicBool = AtomicBool::new(false);
+
+/// Silences the island's sounds (a shortcut toggles it).
+pub fn set_muted(muted: bool) {
+    MUTED.store(muted, Ordering::SeqCst);
+}
+
+pub fn muted() -> bool {
+    MUTED.load(Ordering::SeqCst)
+}
+
 /// Plays a sound once, when the Mac's sound rules allow.
 pub fn play(name: &str) {
     if !sounds_allowed() {
@@ -193,10 +218,11 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
     }
 }
 
-/// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus.
+/// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus;
+/// and the island not muted.
 #[cfg(not(test))]
 fn sounds_allowed() -> bool {
-    crate::pet::pet_sound_allowed()
+    !muted() && crate::pet::pet_sound_allowed()
 }
 
 #[cfg(test)]

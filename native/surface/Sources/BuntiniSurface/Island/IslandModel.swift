@@ -69,7 +69,7 @@ final class IslandModel: ObservableObject {
         case .nowPlaying: return 112
         case .timer: return 100
         case .capture: return 150
-        case .vitals: return 70
+        case .vitals: return 92
         case .update: return 112
         case .whatsNew: return 130
         case .drop: return 112

@@ -551,10 +551,13 @@
      "endsAt": 1763301500,
      "remaining": 1320.0,
      "total": 1500.0,
-     "paused": false
+     "paused": false,
+     "round": 2,
+     "rounds": 4
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",
@@ -585,6 +588,7 @@
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",
@@ -613,6 +617,7 @@
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",

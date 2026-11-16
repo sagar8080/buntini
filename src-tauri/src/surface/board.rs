@@ -119,6 +119,13 @@ impl Board {
         }
     }
 
+    /// Every pill, most urgent first.
+    pub fn pills(&self) -> Vec<Pill> {
+        let mut pills: Vec<&Pill> = self.sources.values().flat_map(|c| &c.pills).collect();
+        pills.sort_by_key(|pill| rank(pill.state));
+        pills.into_iter().cloned().collect()
+    }
+
     /// The next moment the picture can change without anyone publishing: a card expiring or a
     /// hold ending.
     pub fn next_change_ms(&self, now_ms: u64) -> Option<u64> {
