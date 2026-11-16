@@ -1,7 +1,8 @@
 //! The island at the notch and the cat that lives in it (stream A): the cat's look and mood,
 //! a hello on launch, files dropped on it, and the way to the chat. The cat that roams the
 //! desktop stays as it is; the island shows the same cat.
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::{Datelike, Local, NaiveDate};
@@ -71,6 +72,20 @@ impl Streak {
 }
 
 static STREAK: Mutex<Streak> = Mutex::new(Streak { started: None, last: None });
+/// Music plays in Music or Spotify (stream F).
+static MEDIA_PLAYING: AtomicBool = AtomicBool::new(false);
+/// The thread that keeps the cat's look, woken when the music starts or stops.
+static LOOK: OnceLock<std::thread::Thread> = OnceLock::new();
+
+/// Music started or stopped: the cat dances while it plays, unless sleepiness or something
+/// on the island sets its mood.
+pub fn media_playing(playing: bool) {
+    if MEDIA_PLAYING.swap(playing, Ordering::Relaxed) != playing {
+        if let Some(thread) = LOOK.get() {
+            thread.unpark();
+        }
+    }
+}
 
 /// A coding agent did something: the cat notices long stretches of work.
 pub fn agent_activity() {
@@ -95,12 +110,15 @@ pub fn start(app: AppHandle) {
         ttl_ms: Some(GREETING_MS),
     }]);
     std::thread::spawn(move || {
+        let _ = LOOK.set(std::thread::current());
         let mut shown = cat;
         loop {
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::park_timeout(Duration::from_secs(2));
             let mut next = look(&app);
             if STREAK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).sleepy(Instant::now()) {
                 next.mood = Mood::Sleepy;
+            } else if MEDIA_PLAYING.load(Ordering::Relaxed) {
+                next.mood = Mood::Dancing;
             }
             if next != shown {
                 surface::set_island(IslandState { home: Home::Desktop, placement: Placement::Auto, cat: next.clone() });
