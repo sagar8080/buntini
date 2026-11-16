@@ -19,7 +19,7 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
 |---|---|---|---|
 | Island (A) | `island/`, `surface/cards/island.rs` | `Cards/IslandCards.swift` | `Cards/IslandCardViews.swift`, `IslandWindow.swift`, `IslandRoot.swift` |
 | Agents (B) | `agents.rs`, `surface/cards/agents.rs` | `Cards/AgentCards.swift` | `Cards/AgentCardViews.swift` |
-| Voice (C) | `flow/`, `surface/cards/flow.rs` | `Cards/FlowCards.swift` | `Cards/FlowCardViews.swift`, `Pill/` |
+| Voice (C) | `flow/`, `surface/cards/flow.rs` | `Cards/FlowCards.swift` | `Cards/FlowCardViews.swift`, `Pill/`, `Flow/` (keys, paste, text field; C entry points in `Flow/FlowExports.swift`, called from `flow/native.rs`) |
 | Services (D) | `services/`, `surface/cards/services.rs` | `Cards/ServiceCards.swift` | `Cards/ServiceCardViews.swift` |
 | Mail (E) | `mail/`, `surface/cards/mail.rs` | `Cards/MailCards.swift` | `Cards/MailCardViews.swift` |
 | Media, utilities (F) | `media/`, `utilities/`, `surface/cards/{media,utilities}.rs` | `Cards/{Media,Utility}Cards.swift` | `Cards/{Media,Utility}CardViews.swift`, `Overlay/` |

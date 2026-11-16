@@ -1,0 +1,54 @@
+{
+ "note": "What the audio helper returned for a made-up call: two macOS voices on the far side, a third on the microphone with the far side leaking in 40 ms late (scratch check, 2026-11-16).",
+ "segments": [
+  {
+   "end": 4.617996692657471,
+   "side": "system",
+   "speaker": 1,
+   "start": 0,
+   "text": "Hi everyone. Thanks for joining. Let's start with the launch plan."
+  },
+  {
+   "end": 9.572,
+   "side": "system",
+   "speaker": 2,
+   "start": 4.617996692657471,
+   "text": "Sure, the build is ready, but the review found 2 problems in the onboarding flow."
+  },
+  {
+   "end": 11.876,
+   "side": "mic",
+   "speaker": 0,
+   "start": 9.884,
+   "text": "Can we fix those by Wednesday?"
+  },
+  {
+   "end": 15.993208885192871,
+   "side": "system",
+   "speaker": 1,
+   "start": 11.932,
+   "text": "I think so. Daniel, can you take the 1st one?"
+  },
+  {
+   "end": 20.58,
+   "side": "system",
+   "speaker": 2,
+   "start": 15.993208885192871,
+   "text": "Yes, I'll fix the sign and screen today and send it for review tomorrow."
+  },
+  {
+   "end": 24.676,
+   "side": "mic",
+   "speaker": 0,
+   "start": 20.892,
+   "text": "Great. I'll update the release notes until the support team."
+  },
+  {
+   "end": 27.256,
+   "side": "system",
+   "speaker": 1,
+   "start": 24.988,
+   "text": "Then we launch on Thursday morning."
+  }
+ ]
+}

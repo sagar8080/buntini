@@ -1,0 +1,13 @@
+{
+  "permission": [
+    {
+      "identifier": "library-ui",
+      "description": "The Library window: dictation history, statistics and call notes through flow_call, and nothing else.",
+      "commands": {
+        "allow": [
+          "flow_call"
+        ]
+      }
+    }
+  ]
+}

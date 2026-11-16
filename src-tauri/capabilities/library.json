@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "library",
+  "description": "The Library window may only call flow_call and listen for its updates.",
+  "windows": [
+    "library"
+  ],
+  "permissions": [
+    "library-ui",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

@@ -774,7 +774,10 @@
     "state": "listening",
     "text": null,
     "app": "Notes",
-    "locked": true
+    "locked": true,
+    "style": "natural",
+    "mode": "dictate",
+    "recording": 1794844800.0
    },
    "overlay": {
     "kind": "thumbnail",

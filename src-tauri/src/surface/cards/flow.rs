@@ -41,4 +41,9 @@ pub struct FlowPill {
     pub app: Option<String>,
     /// Hands-free.
     pub locked: bool,
+    /// How words come out in that app, for the right-click menu.
+    pub style: Option<crate::flow::text::Style>,
+    pub mode: Option<crate::flow::text::Mode>,
+    /// Since when a call has been recording, in seconds since 1970.
+    pub recording: Option<f64>,
 }
