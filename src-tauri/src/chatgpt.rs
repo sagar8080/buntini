@@ -836,38 +836,41 @@ mod tests {
 
     #[test]
     fn id_tokens_must_match_this_sign_in() {
+        // Made fresh, as a real sign-in makes them, rather than written into the test.
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
         let good = jwt(
-            serde_json::json!({"iss": ISSUER, "aud": "oaiapp_1", "nonce": "n1", "exp": now() + 600, "sub": "user-1", "email": "sam@example.com"}),
+            serde_json::json!({"iss": ISSUER, "aud": "oaiapp_1", "nonce": nonce, "exp": now() + 600, "sub": "user-1", "email": "sam@example.com"}),
         );
         assert_eq!(
-            verify_id_token(&good, "oaiapp_1", "n1").unwrap(),
+            verify_id_token(&good, "oaiapp_1", &nonce).unwrap(),
             ("user-1".to_string(), "sam@example.com".to_string())
         );
         assert!(
-            verify_id_token(&good, "oaiapp_2", "n1").is_err(),
+            verify_id_token(&good, "oaiapp_2", &nonce).is_err(),
             "audience"
         );
-        assert!(verify_id_token(&good, "oaiapp_1", "n2").is_err(), "nonce");
+        assert!(verify_id_token(&good, "oaiapp_1", &other).is_err(), "nonce");
         let expired = jwt(
-            serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1"], "nonce": "n1", "exp": now() - 1, "sub": "user-1"}),
+            serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1"], "nonce": nonce, "exp": now() - 1, "sub": "user-1"}),
         );
         assert!(
-            verify_id_token(&expired, "oaiapp_1", "n1").is_err(),
+            verify_id_token(&expired, "oaiapp_1", &nonce).is_err(),
             "expiry"
         );
         let foreign = jwt(
-            serde_json::json!({"iss": "https://evil.example", "aud": "oaiapp_1", "nonce": "n1", "exp": now() + 600, "sub": "u"}),
+            serde_json::json!({"iss": "https://evil.example", "aud": "oaiapp_1", "nonce": nonce, "exp": now() + 600, "sub": "u"}),
         );
         assert!(
-            verify_id_token(&foreign, "oaiapp_1", "n1").is_err(),
+            verify_id_token(&foreign, "oaiapp_1", &nonce).is_err(),
             "issuer"
         );
-        let mut claims = serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1", "other-app"], "nonce": "n1", "exp": now() + 600, "sub": "u"});
-        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        let mut claims = serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1", "other-app"], "nonce": nonce, "exp": now() + 600, "sub": "u"});
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", &nonce).is_err());
         claims["azp"] = "other-app".into();
-        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", &nonce).is_err());
         claims["azp"] = "oaiapp_1".into();
-        assert!(verify_id_token(&jwt(claims), "oaiapp_1", "n1").is_ok());
+        assert!(verify_id_token(&jwt(claims), "oaiapp_1", &nonce).is_ok());
     }
 
     #[test]
