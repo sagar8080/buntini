@@ -96,7 +96,7 @@ where
 }
 
 pub fn provider_valid(provider: &str) -> Result<(), String> {
-    if ["brave", "tavily", "ebay", "duffel"].contains(&provider) {
+    if ["brave", "tavily", "ebay", "duffel"].contains(&provider) || crate::services::KEY_IDS.contains(&provider) {
         Ok(())
     } else {
         Err("Unknown search provider.".into())

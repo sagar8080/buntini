@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Globe2, KeyRound, LoaderCircle, Plane, ShoppingBag } from 'lucide-react';
 import SearchBudget from './SearchBudget';
 import AddedTools from './AddedTools';
+import ServicesSection from './services/ServicesSection';
 import { errorMessage } from './bridge';
 import type { Diagnostics, KeyProvider, Settings } from './types';
 
@@ -21,7 +22,7 @@ function KeyField({ label, placeholder, secret = true, value, onChange }: { labe
   return <div className="key-input"><KeyRound size={14} /><input type={secret ? 'password' : 'text'} autoComplete="off" spellCheck={false} aria-label={label} placeholder={placeholder} value={value} onChange={event => onChange(event.target.value)} /></div>;
 }
 
-/** The Connections tab: web search, eBay, flights and tools you added. Search usage shows once a key is in. */
+/** The Connections tab: web search, eBay, flights, developer services and tools you added. Search usage shows once a key is in. */
 export default function Connections({ draft, update, diagnostics, onKey, onError }: Props) {
   const [searchKey, setSearchKey] = useState('');
   const [clientId, setClientId] = useState('');
@@ -56,6 +57,7 @@ export default function Connections({ draft, update, diagnostics, onKey, onError
         {actions('duffel', !!token.trim(), token.trim(), () => setToken(''), !!diagnostics.duffelConfigured)}
       </Service>
     </section>
+    <ServicesSection draft={draft} update={update} onError={onError} />
     <AddedTools onError={onError} />
   </>;
 }

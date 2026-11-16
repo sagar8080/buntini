@@ -1,0 +1,147 @@
+{
+ "source": "Recorded on 2026-11-16 from each fixed host with no key or a made-up key; no account was touched. The caller's address in GitHub's message is replaced with 203.0.113.7.",
+ "calcom_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "status": "error",
+   "timestamp": "2026-11-16T16:53:22.935Z",
+   "path": "/v2/bookings?status=upcoming&take=1",
+   "error": {
+    "code": "UnauthorizedException",
+    "message": "CustomThrottlerGuard - Invalid API Key",
+    "details": {
+     "message": "CustomThrottlerGuard - Invalid API Key",
+     "error": "Unauthorized",
+     "statusCode": 401
+    }
+   }
+  }
+ },
+ "gitea_user_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json;charset=utf-8",
+   "ratelimit-policy": "\"baseline\";q=2000;w=600",
+   "ratelimit": "\"baseline\";r=1999;t=600"
+  },
+  "body": {
+   "message": "token is malformed: token contains an invalid number of segments\naccess token does not exist [sha: 0000000000000000000000000000000000000000]\ntoken is malformed: token contains an invalid number of segments\ntask with token \"0000000000000000000000000000000000000000\": resource does not exist\nauthorized integration: parse JWT error: token is malformed: token contains an invalid number of segments",
+   "url": "https://codeberg.org/api/swagger"
+  }
+ },
+ "github_graphql_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "message": "Bad credentials",
+   "documentation_url": "https://docs.github.com/rest",
+   "status": "401"
+  }
+ },
+ "github_graphql_noauth": {
+  "status": 403,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "x-ratelimit-limit": "0",
+   "x-ratelimit-remaining": "0",
+   "x-ratelimit-used": "0",
+   "x-ratelimit-resource": "graphql",
+   "x-ratelimit-reset": "1794851595"
+  },
+  "body": {
+   "message": "API rate limit exceeded for 203.0.113.7. (But here's the good news: Authenticated requests get a higher rate limit. Check out the documentation for more details.)",
+   "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"
+  }
+ },
+ "gitlab_graphql_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "ratelimit-limit": "500",
+   "ratelimit-name": "throttle_unauthenticated_api",
+   "ratelimit-observed": "1",
+   "ratelimit-remaining": "499",
+   "ratelimit-reset": "1794848040"
+  },
+  "body": {
+   "errors": [
+    {
+     "message": "Invalid token"
+    }
+   ]
+  }
+ },
+ "gitlab_graphql_noauth": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "ratelimit-limit": "500",
+   "ratelimit-name": "throttle_unauthenticated_api",
+   "ratelimit-observed": "2",
+   "ratelimit-remaining": "498",
+   "ratelimit-reset": "1794848040"
+  },
+  "body": {
+   "data": {
+    "currentUser": null
+   }
+  }
+ },
+ "notion_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "object": "error",
+   "status": 401,
+   "code": "unauthorized",
+   "message": "API token is invalid.",
+   "additional_data": {
+    "reason": "token_invalid"
+   },
+   "request_id": "d8f09956-ee1e-4d1b-9e87-8be43f298a2a"
+  }
+ },
+ "resend_badkey": {
+  "status": 400,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "statusCode": 400,
+   "message": "API key is invalid",
+   "name": "validation_error"
+  }
+ },
+ "stripe_badkey": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json"
+  },
+  "body": {
+   "error": {
+    "message": "Invalid API Key provided: rk_test_********************0000",
+    "type": "invalid_request_error"
+   }
+  }
+ },
+ "vercel_badkey": {
+  "status": 403,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "error": {
+    "code": "forbidden",
+    "message": "Not authorized",
+    "invalidToken": true
+   }
+  }
+ }
+}

@@ -1,0 +1,89 @@
+{
+ "source": "Shaped after Vercel's REST reference (vercel.com/docs/rest-api: GET /v2/user, GET /v6/deployments); x-ratelimit-* headers as documented. The refusal in recorded.json was recorded from api.vercel.com. Not recorded from a live account.",
+ "user": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "user": {
+    "id": "u_1",
+    "username": "sagar",
+    "defaultTeamId": "team_8x2Kq"
+   }
+  }
+ },
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "x-ratelimit-limit": "100",
+   "x-ratelimit-remaining": "97",
+   "x-ratelimit-reset": "1794820380"
+  },
+  "body": {
+   "deployments": [
+    {
+     "uid": "dpl_9Gq1",
+     "name": "buntini-site",
+     "url": "buntini-site-9gq1.vercel.app",
+     "created": 1794837480000,
+     "state": "BUILDING",
+     "target": "production",
+     "inspectorUrl": "https://vercel.com/sagar/buntini-site/9Gq1",
+     "meta": {
+      "githubCommitRef": "main",
+      "githubCommitMessage": "Ship the services page\n\nLonger body"
+     }
+    },
+    {
+     "uid": "dpl_7Hx2",
+     "name": "buntini-site",
+     "url": "buntini-site-7hx2.vercel.app",
+     "created": 1794833400000,
+     "readyState": "ERROR",
+     "target": null,
+     "inspectorUrl": "https://vercel.com/sagar/buntini-site/7Hx2",
+     "meta": {
+      "githubCommitMessage": "Try the new hero"
+     }
+    },
+    {
+     "uid": "dpl_a1b2",
+     "name": "buntini-site",
+     "url": "buntini-site-a1b2.vercel.app",
+     "created": 1794301200000,
+     "state": "READY",
+     "target": "production",
+     "meta": {}
+    },
+    {
+     "name": "no uid"
+    }
+   ],
+   "pagination": {
+    "count": 3,
+    "next": null,
+    "prev": null
+   }
+  }
+ },
+ "rate_limited": {
+  "status": 429,
+  "headers": {
+   "x-ratelimit-limit": "100",
+   "x-ratelimit-remaining": "0",
+   "x-ratelimit-reset": "1794820365"
+  },
+  "body": {
+   "error": {
+    "code": "rate_limited",
+    "message": "Rate limit exceeded",
+    "limit": {
+     "remaining": 0,
+     "reset": 1794820365,
+     "resetMs": 1794820365000,
+     "total": 100
+    }
+   }
+  }
+ }
+}

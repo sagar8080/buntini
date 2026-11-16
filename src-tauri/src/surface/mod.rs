@@ -126,6 +126,11 @@ pub fn start() -> bool {
     false
 }
 
+/// Whether the native surfaces are open, so a part can stop work nobody would see.
+pub fn running() -> bool {
+    STARTED.load(Ordering::SeqCst)
+}
+
 /// Closes the native surfaces.
 pub fn stop() {
     if STARTED.swap(false, Ordering::SeqCst) {
