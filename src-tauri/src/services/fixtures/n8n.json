@@ -1,0 +1,101 @@
+{
+ "source": "Shaped after n8n's public API reference (docs.n8n.io/api: GET /api/v1/executions, GET /api/v1/workflows), including older versions without `status`. Not recorded from a live instance.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "data": [
+    {
+     "id": "1042",
+     "finished": false,
+     "mode": "trigger",
+     "startedAt": "2026-11-16T13:55:00.000Z",
+     "stoppedAt": null,
+     "workflowId": "wf1",
+     "status": "running"
+    },
+    {
+     "id": 1041,
+     "finished": false,
+     "mode": "trigger",
+     "startedAt": "2026-11-16T12:00:00.000Z",
+     "stoppedAt": "2026-11-16T12:00:09.000Z",
+     "workflowId": "wf2",
+     "status": "error"
+    },
+    {
+     "id": "1040",
+     "finished": true,
+     "mode": "trigger",
+     "startedAt": "2026-11-16T09:00:00.000Z",
+     "stoppedAt": "2026-11-16T09:00:03.000Z",
+     "workflowId": "wf1",
+     "status": "success"
+    },
+    {
+     "id": "1039",
+     "finished": true,
+     "mode": "manual",
+     "startedAt": "2026-11-15T09:00:00.000Z",
+     "stoppedAt": "2026-11-15T09:00:03.000Z",
+     "workflowId": "wf9"
+    },
+    {
+     "id": "1038",
+     "finished": false,
+     "mode": "trigger",
+     "startedAt": "2026-11-14T09:00:00.000Z",
+     "stoppedAt": "2026-11-14T09:00:01.000Z",
+     "workflowId": "wf2"
+    },
+    {
+     "workflowId": "wf1"
+    }
+   ],
+   "nextCursor": null
+  }
+ },
+ "workflows": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "data": [
+    {
+     "id": "wf1",
+     "name": "Daily report",
+     "active": true,
+     "nodes": [
+      {
+       "name": "Schedule",
+       "type": "n8n-nodes-base.scheduleTrigger",
+       "parameters": {}
+      }
+     ],
+     "connections": {}
+    },
+    {
+     "id": "wf2",
+     "name": "Sync invoices",
+     "active": true,
+     "nodes": [],
+     "connections": {}
+    },
+    {
+     "id": "wf3"
+    }
+   ],
+   "nextCursor": null
+  }
+ },
+ "unauthorized": {
+  "status": 401,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "message": "unauthorized"
+  }
+ }
+}

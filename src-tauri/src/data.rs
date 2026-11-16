@@ -277,6 +277,7 @@ where
     }
     for provider in ["brave", "tavily", "ebay", "duffel"]
         .into_iter()
+        .chain(crate::services::KEY_IDS)
         .chain(crate::cloud::PROVIDERS.iter().map(|provider| provider.id))
     {
         if let Err(error) = clear_credential(provider) {
@@ -407,6 +408,15 @@ mod tests {
                 "tavily",
                 "ebay",
                 "duffel",
+                "github",
+                "gitlab",
+                "gitea",
+                "vercel",
+                "stripe",
+                "n8n",
+                "notion",
+                "calcom",
+                "resend",
                 "anthropic",
                 "openai",
                 "gemini",
@@ -520,7 +530,7 @@ mod tests {
         }
         assert_eq!(
             calls.borrow().len(),
-            9,
+            18,
             "a failed credential never skips the remaining services"
         );
         assert!(state.store.lock().unwrap().memories().unwrap().is_empty());

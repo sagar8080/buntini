@@ -1,0 +1,160 @@
+{
+ "source": "Shaped after Stripe's API reference (docs.stripe.com/api/charges/list, errors and rate limits). The bad-key refusal in recorded.json was recorded from api.stripe.com. Not recorded from a live account.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json"
+  },
+  "body": {
+   "object": "list",
+   "url": "/v1/charges",
+   "has_more": false,
+   "data": [
+    {
+     "id": "ch_1",
+     "object": "charge",
+     "amount": 4900,
+     "amount_refunded": 0,
+     "currency": "eur",
+     "status": "succeeded",
+     "paid": true,
+     "refunded": false,
+     "created": 1794834120,
+     "livemode": true,
+     "payment_intent": "pi_3Abc",
+     "description": null,
+     "billing_details": {
+      "name": "Ana Silva",
+      "email": "ana@example.com"
+     }
+    },
+    {
+     "id": "ch_2",
+     "object": "charge",
+     "amount": 12000,
+     "amount_refunded": 2000,
+     "currency": "eur",
+     "status": "succeeded",
+     "paid": true,
+     "refunded": false,
+     "created": 1794830400,
+     "livemode": true,
+     "payment_intent": null,
+     "description": "Annual plan",
+     "billing_details": {
+      "name": null,
+      "email": null
+     }
+    },
+    {
+     "id": "ch_3",
+     "object": "charge",
+     "amount": 3000,
+     "amount_refunded": 0,
+     "currency": "eur",
+     "status": "failed",
+     "paid": false,
+     "refunded": false,
+     "created": 1794826800,
+     "livemode": true,
+     "payment_intent": null,
+     "description": null,
+     "billing_details": {
+      "name": null,
+      "email": null
+     },
+     "failure_message": "Your card was declined."
+    },
+    {
+     "id": "ch_4",
+     "object": "charge",
+     "amount": 1500,
+     "amount_refunded": 0,
+     "currency": "usd",
+     "status": "succeeded",
+     "paid": true,
+     "refunded": false,
+     "created": 1794823200,
+     "livemode": false,
+     "payment_intent": null,
+     "description": null,
+     "billing_details": {
+      "name": null,
+      "email": null
+     }
+    },
+    {
+     "id": "ch_5",
+     "object": "charge",
+     "amount": 1000,
+     "amount_refunded": 1000,
+     "currency": "eur",
+     "status": "succeeded",
+     "paid": true,
+     "refunded": true,
+     "created": 1794819600,
+     "livemode": true,
+     "payment_intent": null,
+     "description": null,
+     "billing_details": {
+      "name": null,
+      "email": null
+     }
+    }
+   ]
+  }
+ },
+ "more": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "object": "list",
+   "has_more": true,
+   "data": [
+    {
+     "id": "ch_9",
+     "object": "charge",
+     "amount": 5000,
+     "amount_refunded": 0,
+     "currency": "jpy",
+     "status": "succeeded",
+     "paid": true,
+     "refunded": false,
+     "created": 1794816000,
+     "livemode": true,
+     "payment_intent": null,
+     "description": null,
+     "billing_details": {
+      "name": null,
+      "email": null
+     }
+    }
+   ]
+  }
+ },
+ "missing_permission": {
+  "status": 403,
+  "headers": {
+   "content-type": "application/json"
+  },
+  "body": {
+   "error": {
+    "message": "The provided key 'rk_live_*********0000' does not have the required permissions for this endpoint on account 'acct_000'. Having the 'rak_charge_read' permission would allow this request to continue.",
+    "type": "invalid_request_error"
+   }
+  }
+ },
+ "rate_limited": {
+  "status": 429,
+  "headers": {
+   "content-type": "application/json"
+  },
+  "body": {
+   "error": {
+    "message": "Request rate limit exceeded. Learn more about rate limits here https://stripe.com/docs/rate-limits.",
+    "type": "invalid_request_error",
+    "code": "rate_limit"
+   }
+  }
+ }
+}

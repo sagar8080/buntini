@@ -1,0 +1,136 @@
+{
+ "source": "Shaped after Gitea's API reference (docs.gitea.com/api, /repos/issues/search, /repos/{owner}/{repo}/pulls/{index}, /commits/{ref}/status, /users/{username}/heatmap); the structured ratelimit header as codeberg.org sent it in a recorded answer. Not recorded from a live account.",
+ "mine": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json;charset=utf-8",
+   "ratelimit": "\"baseline\";r=1992;t=540"
+  },
+  "body": [
+   {
+    "id": 501,
+    "number": 6,
+    "title": "Add Forgejo",
+    "html_url": "https://git.example.com/sagar/buntini/pulls/6",
+    "updated_at": "2026-11-16T08:30:00+01:00",
+    "user": {
+     "login": "sagar"
+    },
+    "repository": {
+     "id": 3,
+     "name": "buntini",
+     "owner": "sagar",
+     "full_name": "sagar/buntini"
+    },
+    "pull_request": {
+     "draft": true,
+     "merged": false
+    }
+   },
+   {
+    "id": 502,
+    "number": 5,
+    "title": "Fix the tray",
+    "html_url": "https://git.example.com/sagar/buntini/pulls/5",
+    "updated_at": "2026-11-14T10:00:00+01:00",
+    "user": {
+     "login": "sagar"
+    },
+    "repository": {
+     "id": 3,
+     "name": "buntini",
+     "owner": "sagar",
+     "full_name": "sagar/buntini"
+    },
+    "pull_request": {
+     "draft": false,
+     "merged": false
+    }
+   }
+  ]
+ },
+ "reviews": {
+  "status": 200,
+  "headers": {},
+  "body": [
+   {
+    "id": 900,
+    "number": 40,
+    "title": "New landing page",
+    "html_url": "https://git.example.com/team/site/pulls/40",
+    "updated_at": "2026-11-16T11:00:00+01:00",
+    "user": {
+     "login": "ana"
+    },
+    "repository": {
+     "id": 9,
+     "name": "site",
+     "owner": "team",
+     "full_name": "team/site"
+    },
+    "pull_request": {
+     "draft": false,
+     "merged": false
+    }
+   }
+  ]
+ },
+ "pull": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "number": 5,
+   "title": "Fix the tray",
+   "head": {
+    "ref": "fix-tray",
+    "sha": "4f1c2e9",
+    "label": "fix-tray"
+   },
+   "base": {
+    "ref": "main"
+   }
+  }
+ },
+ "status": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "state": "failure",
+   "sha": "4f1c2e9",
+   "total_count": 2,
+   "statuses": [
+    {
+     "status": "failure",
+     "context": "ci/build"
+    },
+    {
+     "status": "success",
+     "context": "ci/lint"
+    }
+   ]
+  }
+ },
+ "heatmap": {
+  "status": 200,
+  "headers": {
+   "ratelimit": "\"baseline\";r=1990;t=500"
+  },
+  "body": [
+   {
+    "timestamp": 1794785400,
+    "contributions": 2
+   },
+   {
+    "timestamp": 1794816000,
+    "contributions": 3
+   },
+   {
+    "timestamp": 1794470400,
+    "contributions": 1
+   },
+   {
+    "timestamp": "nope"
+   }
+  ]
+ }
+}

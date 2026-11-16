@@ -101,6 +101,15 @@ pub fn display_name(provider: &str) -> &str {
         "tavily" => "Tavily",
         "ebay" => "eBay",
         "duffel" => "Duffel",
+        "github" => "GitHub",
+        "gitlab" => "GitLab",
+        "gitea" => "Gitea",
+        "vercel" => "Vercel",
+        "stripe" => "Stripe",
+        "n8n" => "n8n",
+        "notion" => "Notion",
+        "calcom" => "Cal.com",
+        "resend" => "Resend",
         other => other
             .strip_prefix("cloud-")
             .and_then(crate::cloud::provider)

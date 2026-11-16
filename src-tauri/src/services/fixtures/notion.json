@@ -1,0 +1,125 @@
+{
+ "source": "Shaped after Notion's API reference (developers.notion.com/reference/post-search, Notion-Version 2022-06-28). The bad-key refusal in recorded.json was recorded from api.notion.com. Not recorded from a live workspace.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "object": "list",
+   "has_more": false,
+   "next_cursor": null,
+   "type": "page_or_database",
+   "results": [
+    {
+     "object": "page",
+     "id": "1a2b3c",
+     "url": "https://www.notion.so/Roadmap-1a2b3c",
+     "last_edited_time": "2026-11-16T13:12:00.000Z",
+     "archived": false,
+     "in_trash": false,
+     "properties": {
+      "Name": {
+       "id": "title",
+       "type": "title",
+       "title": [
+        {
+         "type": "text",
+         "plain_text": "Road"
+        },
+        {
+         "type": "text",
+         "plain_text": "map"
+        }
+       ]
+      },
+      "Status": {
+       "id": "s",
+       "type": "status",
+       "status": {
+        "name": "Doing"
+       }
+      }
+     }
+    },
+    {
+     "object": "page",
+     "id": "2b3c4d",
+     "url": "https://www.notion.so/2b3c4d",
+     "last_edited_time": "2026-11-16T10:00:00.000Z",
+     "archived": false,
+     "properties": {
+      "title": {
+       "id": "title",
+       "type": "title",
+       "title": []
+      }
+     }
+    },
+    {
+     "object": "database",
+     "id": "db1",
+     "url": "https://www.notion.so/db1",
+     "last_edited_time": "2026-11-16T10:00:00.000Z",
+     "title": [
+      {
+       "plain_text": "Tasks"
+      }
+     ]
+    },
+    {
+     "object": "page",
+     "id": "3c4d5e",
+     "url": "https://www.notion.so/Old-3c4d5e",
+     "last_edited_time": "2026-11-16T09:00:00.000Z",
+     "archived": true,
+     "properties": {
+      "title": {
+       "id": "title",
+       "type": "title",
+       "title": [
+        {
+         "type": "text",
+         "plain_text": "Old"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "object": "page",
+     "id": "4d5e6f",
+     "url": "https://www.notion.so/Meeting-notes-4d5e6f",
+     "last_edited_time": "2026-11-12T09:00:00.000Z",
+     "archived": false,
+     "in_trash": false,
+     "properties": {
+      "title": {
+       "id": "title",
+       "type": "title",
+       "title": [
+        {
+         "type": "text",
+         "plain_text": "Meeting notes"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "rate_limited": {
+  "status": 429,
+  "headers": {
+   "retry-after": "2",
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "object": "error",
+   "status": 429,
+   "code": "rate_limited",
+   "message": "You have been rate limited. Please try again in a few minutes."
+  }
+ }
+}

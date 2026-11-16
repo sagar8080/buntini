@@ -1,0 +1,61 @@
+{
+ "source": "Shaped after Cal.com's API v2 reference (cal.com/docs/api-reference/v2/bookings, cal-api-version 2024-08-13). The bad-key refusal in recorded.json was recorded from api.cal.com. Not recorded from a live account.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "status": "success",
+   "data": [
+    {
+     "id": 1,
+     "uid": "bk_1",
+     "title": "Intro call",
+     "start": "2026-11-16T15:30:00.000Z",
+     "end": "2026-11-16T16:00:00.000Z",
+     "status": "accepted",
+     "attendees": [
+      {
+       "name": "Ana Silva",
+       "email": "ana@example.com",
+       "timeZone": "Europe/Lisbon"
+      }
+     ],
+     "meetingUrl": "https://app.cal.com/video/bk_1"
+    },
+    {
+     "id": 2,
+     "uid": "bk_2",
+     "title": "Called off",
+     "start": "2026-11-17T10:00:00.000Z",
+     "status": "cancelled",
+     "attendees": []
+    },
+    {
+     "id": 3,
+     "uid": "bk_3",
+     "title": "Design review",
+     "start": "2026-11-18T09:00:00.000Z",
+     "end": "2026-11-18T09:30:00.000Z",
+     "status": "pending",
+     "attendees": [
+      {
+       "name": "Ben"
+      }
+     ]
+    },
+    {
+     "id": 4,
+     "uid": "bk_4",
+     "title": "No start"
+    }
+   ],
+   "pagination": {
+    "totalItems": 3,
+    "remainingItems": 0,
+    "hasNextPage": false
+   }
+  }
+ }
+}

@@ -6,6 +6,9 @@ public struct ServiceCard: Codable, Equatable, Sendable {
     public let service: String
     public let title: String
     public let rows: [ServiceRow]
+    /// The activity graph: daily counts, oldest first, starting on a Sunday and ending today.
+    /// GitHub, GitLab and Gitea only.
+    public let graph: [UInt32]?
 }
 
 public struct ServiceRow: Codable, Equatable, Sendable {
@@ -13,5 +16,6 @@ public struct ServiceRow: Codable, Equatable, Sendable {
     public let title: String
     public let detail: String?
     public let state: PillState?
+    /// Opened through the `open` action, with this URL as its value.
     public let url: String?
 }
