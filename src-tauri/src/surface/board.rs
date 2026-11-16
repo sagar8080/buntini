@@ -63,6 +63,8 @@ pub struct Picked {
     pub overflow: Vec<String>,
     pub card: Option<Card>,
     pub held: bool,
+    /// The card is waiting or an alert, not news: the island opens for it.
+    pub interrupt: bool,
 }
 
 #[derive(Debug, Default)]
@@ -110,6 +112,7 @@ impl Board {
             overflow,
             card: front.map(|offer| offer.card.clone()),
             held,
+            interrupt: front.is_some_and(|offer| offer.urgency != Urgency::Info),
         }
     }
 
@@ -174,7 +177,9 @@ mod tests {
         board.set(Source::Agents, Contribution { pills: vec![], offers: vec![offer("approve", Urgency::Waiting, 500, None)] });
         let picked = board.pick(500);
         assert_eq!(picked.card.map(|card| card.id).as_deref(), Some("approve"));
-        assert!(picked.held);
+        assert!(picked.held && picked.interrupt);
+        board.set(Source::Agents, Contribution::default());
+        assert!(!board.pick(HOLD_MS * 2).interrupt, "news doesn't open the island");
     }
 
     #[test]

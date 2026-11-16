@@ -4,6 +4,17 @@ import AppKit
 import BuntiniSurface
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+
+// --recap <out.png>: the week's share picture, from a sample week.
+if let flag = arguments.firstIndex(of: "--recap"), arguments.indices.contains(flag + 1) {
+    let sample = #"{"week":"9–15 Nov","stats":[{"label":"Time","value":"6 h 40 min"},{"label":"Sessions","value":"14"},{"label":"Turns","value":"61"},{"label":"Lines","value":"+2,310 −480"},{"label":"Files","value":"37"},{"label":"Commands","value":"212"},{"label":"Top agent","value":"Claude Code"},{"label":"Busiest day","value":"Tuesday"},{"label":"Longest session","value":"1 h 52 min"}]}"#
+    let data = Array(sample.utf8)
+    let made = data.withUnsafeBufferPointer { bytes in
+        arguments[flag + 1].withCString { path in buntiniAgentsRecapPNG(bytes.baseAddress, bytes.count, path) }
+    }
+    print(made ? "written" : "failed")
+    exit(made ? 0 : 1)
+}
 guard let path = arguments.first else {
     FileHandle.standardError.write("Usage: SurfaceLab <fixture.json> [index] [--seconds N]\n".data(using: .utf8)!)
     exit(64)

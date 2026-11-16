@@ -11,6 +11,8 @@ public struct Approval: Codable, Equatable, Sendable {
     public let code: Bool
     /// "Always" can be offered.
     public let always: Bool
+    /// The agent's plan, waiting to be started.
+    public let plan: Bool
 }
 
 /// One to four questions an agent asks.

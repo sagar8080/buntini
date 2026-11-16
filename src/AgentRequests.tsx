@@ -41,7 +41,7 @@ export function AgentCard({ request, more, onAnswer, className = '' }: { request
     </> : <>
       <strong>{request.title}</strong>
       {request.detail && (request.code ? <pre>{request.detail}</pre> : <p>{request.detail}</p>)}
-      <div className="agent-actions">{terminal}<button type="button" disabled={busy} onClick={() => void answer({ kind: 'deny' })}>Deny</button><button type="button" className="agent-allow" disabled={busy} onClick={() => void answer({ kind: 'allow' })}>{busy ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}Allow</button></div>
+      <div className="agent-actions">{terminal}<button type="button" disabled={busy} onClick={() => void answer({ kind: 'deny' })}>{request.plan ? 'Keep planning' : 'Deny'}</button>{request.always && <button type="button" disabled={busy} onClick={() => void answer({ kind: 'always' })}>{request.plan ? 'Accept edits' : 'Always'}</button>}<button type="button" className="agent-allow" disabled={busy} onClick={() => void answer({ kind: 'allow' })}>{busy ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{request.plan ? 'Start' : 'Allow'}</button></div>
     </>}
   </div>;
 }

@@ -131,6 +131,10 @@ pub struct Scene {
     pub card: Option<Card>,
     /// Something waits on the person: the island stays open.
     pub held: bool,
+    /// The card in front asks for attention, so the island opens by itself. Otherwise it
+    /// shows once the island is opened.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub interrupt: bool,
     pub cat: Cat,
     pub flow: Option<flow::FlowPill>,
     pub overlay: Option<utilities::Overlay>,

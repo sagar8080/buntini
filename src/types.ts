@@ -171,12 +171,12 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 /** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 /** A coding agent's request, shown on the cat (agents.rs). `questions` is set when it asks rather than acts. */
-export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; createdAt: string }
+export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; createdAt: string }
 export interface AgentQuestion { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
 export interface AgentFinished { agent: string; project: string; message: string }
-export type AgentAnswer = { kind: 'allow' } | { kind: 'deny' } | { kind: 'terminal' } | { kind: 'answers'; answers: Record<string, string | string[]> };
+export type AgentAnswer = { kind: 'allow' } | { kind: 'always' } | { kind: 'deny' } | { kind: 'terminal' } | { kind: 'answers'; answers: Record<string, string | string[]> };
 /** Claude Code or Codex, and whether Buntini's hooks are in its settings (agent_setup.rs). */
-export interface CodingAgent { id: string; name: string; available: boolean; connected: boolean; heard: boolean; problem: string }
+export interface CodingAgent { id: string; name: string; available: boolean; connected: boolean; heard: boolean; problem: string; usage?: boolean | null }
 export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
 export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
 

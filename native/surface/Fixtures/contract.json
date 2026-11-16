@@ -77,7 +77,8 @@
      "title": "Run a command",
      "detail": "cargo test --locked",
      "code": true,
-     "always": true
+     "always": true,
+     "plan": false
     }
    },
    "held": true,
@@ -92,7 +93,8 @@
    },
    "flow": null,
    "overlay": null,
-   "sound": null
+   "sound": null,
+   "interrupt": true
   },
   {
    "contract": 1,
@@ -153,7 +155,8 @@
    },
    "flow": null,
    "overlay": null,
-   "sound": null
+   "sound": null,
+   "interrupt": true
   },
   {
    "contract": 1,

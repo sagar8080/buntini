@@ -13,6 +13,9 @@ pub struct Approval {
     pub code: bool,
     /// "Always" can be offered.
     pub always: bool,
+    /// The agent's plan, waiting to be started.
+    #[serde(default)]
+    pub plan: bool,
 }
 
 /// One to four questions an agent asks.

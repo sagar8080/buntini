@@ -9,11 +9,19 @@
 //!
 //! Nothing here goes to a model or leaves the Mac.
 
+mod dialect;
+mod diff;
+pub mod recap;
+pub mod session;
+mod surface;
+pub mod terminal;
+pub mod usage;
+
 use std::collections::HashMap;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -31,14 +39,16 @@ const READ_BUDGET: Duration = Duration::from_secs(5);
 /// its own prompt meanwhile; Codex waits for the hook first, so it gets less.
 fn decision_budget(agent: Agent) -> Duration {
     match agent {
-        Agent::Claude => Duration::from_secs(110),
         Agent::Codex => Duration::from_secs(60),
+        _ => Duration::from_secs(110),
     }
 }
 /// How often a waiting request checks that its hook is still running.
 const HOOK_CHECK: Duration = Duration::from_millis(400);
 /// A turn this long is worth saying it finished.
 const LONG_TURN: Duration = Duration::from_secs(20);
+/// A session quiet this long leaves the island.
+const SESSION_IDLE: Duration = Duration::from_secs(15 * 60);
 /// Longest command, path or plan shown on a request.
 const MAX_DETAIL: usize = 1_200;
 /// macOS keeps socket paths under 104 bytes, the terminating zero included.
@@ -49,15 +59,30 @@ const MAX_SOCKET_PATH: usize = 103;
 pub enum Agent {
     Claude,
     Codex,
+    Copilot,
+    Cursor,
+    Gemini,
+    Antigravity,
+    #[serde(rename = "opencode")]
+    OpenCode,
+    Amp,
+    Hermes,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+    pub const ALL: [Agent; 9] = [Agent::Claude, Agent::Codex, Agent::Copilot, Agent::Cursor, Agent::Gemini, Agent::Antigravity, Agent::OpenCode, Agent::Amp, Agent::Hermes];
 
     pub fn id(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
+            Agent::Copilot => "copilot",
+            Agent::Cursor => "cursor",
+            Agent::Gemini => "gemini",
+            Agent::Antigravity => "antigravity",
+            Agent::OpenCode => "opencode",
+            Agent::Amp => "amp",
+            Agent::Hermes => "hermes",
         }
     }
 
@@ -65,6 +90,13 @@ impl Agent {
         match self {
             Agent::Claude => "Claude Code",
             Agent::Codex => "Codex",
+            Agent::Copilot => "Copilot CLI",
+            Agent::Cursor => "Cursor",
+            Agent::Gemini => "Gemini CLI",
+            Agent::Antigravity => "Antigravity",
+            Agent::OpenCode => "OpenCode",
+            Agent::Amp => "Amp",
+            Agent::Hermes => "Hermes",
         }
     }
 
@@ -92,6 +124,10 @@ pub struct AgentRequest {
     pub code: bool,
     /// Set when the agent is asking the user something rather than asking to act.
     pub questions: Vec<AgentQuestion>,
+    /// "Always" can be offered: the agent suggested a rule, or this is its plan.
+    pub always: bool,
+    /// The agent's plan, waiting to be started.
+    pub plan: bool,
     pub created_at: String,
 }
 
@@ -124,6 +160,9 @@ pub struct AgentFinished {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Answer {
     Allow,
+    /// Allow, and keep allowing it: the rule the agent itself suggested, or for a plan,
+    /// accepting edits from now on.
+    Always,
     Deny,
     /// Leave it to the agent's own prompt.
     Terminal,
@@ -138,6 +177,8 @@ struct Waiting {
     tool: String,
     input: Value,
     reply: Option<oneshot::Sender<Answer>>,
+    /// When it showed, on the island's clock.
+    at_ms: u64,
 }
 
 #[derive(Default)]
@@ -145,11 +186,27 @@ struct Hub {
     app: Option<AppHandle>,
     next: u64,
     waiting: Vec<Waiting>,
-    turns: HashMap<(Agent, String), Instant>,
+    sessions: HashMap<(Agent, String), session::Session>,
+    /// Last week's recap while it shows.
+    recap: Option<(crate::surface::Card, u64)>,
+    /// Each agent's plan windows, as last heard.
+    usage: HashMap<Agent, crate::surface::cards::agents::Usage>,
+    /// A diff the person opened from the ticker: its card and when.
+    diff: Option<(crate::surface::Card, u64)>,
 }
 
 static HUB: LazyLock<Mutex<Hub>> = LazyLock::new(|| Mutex::new(Hub::default()));
 static DIR: OnceLock<PathBuf> = OnceLock::new();
+static RECAP: LazyLock<Mutex<recap::Recap>> = LazyLock::new(|| Mutex::new(socket_dir().map(|dir| recap::Recap::load(&recap::path(dir))).unwrap_or_default()));
+
+/// Counts something for the week and saves it.
+fn count(record: impl FnOnce(&mut recap::Recap)) {
+    let mut recap = RECAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    record(&mut recap);
+    if let Some(dir) = socket_dir() {
+        recap.save(&recap::path(dir));
+    }
+}
 
 fn hub() -> MutexGuard<'static, Hub> {
     HUB.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -163,7 +220,22 @@ pub fn socket_dir() -> Option<&'static Path> {
 /// Starts listening for every agent. Called once at launch.
 pub fn start(app: AppHandle, dir: PathBuf) {
     hub().app = Some(app);
+    surface::listen();
     let dir = DIR.get_or_init(|| dir).clone();
+    // Hooks written by an earlier Buntini listen to fewer events.
+    std::thread::spawn(|| {
+        crate::agent_setup::refresh();
+        if heard(Agent::Codex) {
+            refresh_codex_usage();
+        }
+    });
+    // On Monday morning, last week once.
+    tauri::async_runtime::spawn(async {
+        loop {
+            surface::offer_recap();
+            tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+        }
+    });
     for agent in Agent::ALL {
         let path = agent.socket(&dir);
         tauri::async_runtime::spawn(async move {
@@ -240,18 +312,67 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
     if !ours {
         return;
     }
-    let Ok(Some(payload)) = tokio::time::timeout(READ_BUDGET, read_payload(&mut stream)).await
+    let Ok(Some((host, hint, payload))) = tokio::time::timeout(READ_BUDGET, read_payload(&mut stream)).await
     else {
         return;
     };
-    let Some(event) = HookEvent::from_payload(&payload) else { return };
     mark_heard(agent);
+    // Antigravity waits for a word on every tool: "allow" hands the call to its own rules.
+    if agent == Agent::Antigravity && hint == "PreToolUse" {
+        let _ = stream.write_all(b"{\"decision\":\"allow\"}\n").await;
+        let _ = stream.shutdown().await;
+    }
+    // Claude Code's status line, wrapped by Buntini: its plan windows.
+    if hint == "statusline" {
+        if let Some(usage) = usage::from_status_line(&payload) {
+            let mut hub = hub();
+            if hub.usage.get(&Agent::Claude) != Some(&usage) {
+                hub.usage.insert(Agent::Claude, usage);
+                surface::publish(&hub);
+            }
+        }
+        return;
+    }
+    let socket_agent = agent;
+    let Some((agent, payload)) = dialect::normalize(agent, &hint, &payload) else { return };
+    let Some(mut event) = HookEvent::from_payload(&payload) else { return };
+    event.host = host;
     match event.name.as_str() {
-        "UserPromptSubmit" => started(agent, &event),
-        "PostToolUse" | "PostToolUseFailure" => settled(agent, &event),
-        "Stop" => finished(agent, &event),
+        "SessionStart" => track(agent, &event, |_, _| {}),
+        "UserPromptSubmit" => {
+            started(agent, &event);
+            track(agent, &event, |session, now| session.prompt(&event.prompt, now));
+        }
+        "PreToolUse" => {
+            if matches!(event.tool.as_str(), "Bash" | "shell" | "local_shell" | "exec_command" | "unified_exec" | "run_command" | "run_shell_command") {
+                count(|recap| recap.command(recap::today()));
+            }
+            track(agent, &event, |session, now| session.before(&event.tool, &event.input, now));
+        }
+        "PostToolUse" | "PostToolUseFailure" => {
+            settled(agent, &event);
+            let failed = event.name == "PostToolUseFailure";
+            let mut edit = None;
+            track(agent, &event, |session, now| edit = session.after(&event.tool, &event.input, failed, now));
+            if let Some((file, added, removed)) = edit {
+                count(|recap| recap.edit(recap::today(), &file, added as u64, removed as u64));
+            }
+        }
+        "Stop" | "StopFailure" => finished(agent, &event),
+        // The agent is asking in its own terminal.
+        "Notification" => {
+            let kind = payload.get("notification_type").or_else(|| payload.get("notificationType")).and_then(Value::as_str).unwrap_or_default().to_string();
+            if kind == "permission_prompt" && agent != Agent::Claude && agent != Agent::Codex {
+                track(agent, &event, |session, _| session.asking = true);
+            }
+        }
+        "SessionEnd" => {
+            let mut hub = hub();
+            hub.sessions.remove(&(agent, event.session.clone()));
+            surface::publish(&hub);
+        }
         "PermissionRequest" => {
-            if let Some(reply) = ask(agent, &event, &stream).await {
+            if let Some(reply) = ask(agent, socket_agent, &event, &stream).await {
                 let mut line = reply.into_bytes();
                 line.push(b'\n');
                 let _ = stream.write_all(&line).await;
@@ -262,17 +383,19 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
     }
 }
 
-/// The event as JSON. `nc` closes its sending side once the agent's input ends,
-/// but the value is taken as soon as it's whole either way.
-async fn read_payload(stream: &mut UnixStream) -> Option<Value> {
+/// The event as JSON, after the line of terminal details the note hook puts first (see
+/// `agent_setup::note_command`). `nc` closes its sending side once the agent's input
+/// ends, but the value is taken as soon as it's whole either way.
+async fn read_payload(stream: &mut UnixStream) -> Option<(session::Host, String, Value)> {
     let mut buffer = Vec::with_capacity(8 * 1024);
     let mut chunk = [0u8; 16 * 1024];
     loop {
         let read = stream.read(&mut chunk).await.ok()?;
         buffer.extend_from_slice(&chunk[..read]);
-        let body = buffer.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&buffer);
+        let (host, hint, rest) = split_header(&buffer)?;
+        let body = rest.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(rest);
         match serde_json::Deserializer::from_slice(body).into_iter::<Value>().next() {
-            Some(Ok(value)) => return Some(value),
+            Some(Ok(value)) => return Some((host, hint, value)),
             Some(Err(error)) if !error.is_eof() => return None,
             _ => {}
         }
@@ -280,6 +403,30 @@ async fn read_payload(stream: &mut UnixStream) -> Option<Value> {
             return None;
         }
     }
+}
+
+/// `BUNTINI<TAB>term<TAB>bundle<TAB>iTerm session<TAB>entry point<TAB>event` before the JSON,
+/// when the hook sent it; the event only for agents that leave it out of the payload.
+fn split_header(buffer: &[u8]) -> Option<(session::Host, String, &[u8])> {
+    const MARK: &[u8] = b"BUNTINI\t";
+    if !buffer.starts_with(MARK) {
+        return Some((session::Host::default(), String::new(), buffer));
+    }
+    let end = buffer.iter().position(|byte| *byte == b'\n');
+    let Some(end) = end else {
+        let rest: &[u8] = if buffer.len() > 4096 { &buffer[buffer.len()..] } else { &[] };
+        return Some((session::Host::default(), String::new(), rest));
+    };
+    let line = String::from_utf8_lossy(&buffer[MARK.len()..end]);
+    let mut parts = line.split('\t').map(|part| part.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
+    let host = session::Host {
+        term_program: parts.next().unwrap_or_default(),
+        bundle: parts.next().unwrap_or_default(),
+        iterm_session: parts.next().unwrap_or_default(),
+        entrypoint: parts.next().unwrap_or_default(),
+    };
+    let hint = parts.next().unwrap_or_default();
+    Some((host, hint, &buffer[end + 1..]))
 }
 
 /// The parts of a hook event Buntini uses. Claude Code and Codex share these names.
@@ -291,6 +438,10 @@ struct HookEvent {
     tool: String,
     input: Value,
     last_message: String,
+    prompt: String,
+    /// Rules the agent suggests for "don't ask again" (Claude Code's `permission_suggestions`).
+    suggestions: Vec<Value>,
+    host: session::Host,
 }
 
 impl HookEvent {
@@ -307,6 +458,9 @@ impl HookEvent {
             tool: text("tool_name"),
             input: payload.get("tool_input").cloned().unwrap_or(Value::Null),
             last_message: text("last_assistant_message"),
+            prompt: text("prompt"),
+            suggestions: payload.get("permission_suggestions").and_then(Value::as_array).cloned().unwrap_or_default(),
+            host: session::Host::default(),
         })
     }
 }
@@ -323,15 +477,32 @@ fn started(agent: Agent, event: &HookEvent) {
     // A new prompt means anything still showing for this session was settled in the terminal.
     let before = hub.waiting.len();
     hub.waiting.retain(|waiting| !(waiting.agent == agent && waiting.session == event.session));
-    let changed = hub.waiting.len() != before;
-    let now = Instant::now();
-    hub.turns.retain(|_, began| now.duration_since(*began) < Duration::from_secs(24 * 3600));
-    if hub.turns.len() < 500 {
-        hub.turns.insert((agent, event.session.clone()), now);
-    }
-    if changed {
+    if hub.waiting.len() != before {
         emit_requests(&hub);
     }
+}
+
+/// Updates the session the event belongs to, creating it on first sight.
+fn track(agent: Agent, event: &HookEvent, update: impl FnOnce(&mut session::Session, u64)) {
+    if event.session.is_empty() {
+        return;
+    }
+    let now = crate::surface::now_ms();
+    let mut hub = hub();
+    let idle = SESSION_IDLE.as_millis() as u64;
+    hub.sessions.retain(|_, session| now.saturating_sub(session.last_ms) < idle);
+    if hub.sessions.len() >= 64 && !hub.sessions.contains_key(&(agent, event.session.clone())) {
+        return;
+    }
+    let session = hub.sessions.entry((agent, event.session.clone())).or_insert_with(|| session::Session::new(agent.id(), &event.session, &event.cwd, now));
+    if !event.cwd.is_empty() {
+        session.cwd = event.cwd.clone();
+    }
+    if event.host != session::Host::default() {
+        session.host = event.host.clone();
+    }
+    update(session, now);
+    surface::publish(&hub);
 }
 
 /// The tool ran, so its request was answered, here or in the terminal. Agents
@@ -357,15 +528,32 @@ fn same_input(asked: &Value, ran: &Value) -> bool {
 }
 
 fn finished(agent: Agent, event: &HookEvent) {
-    let mut hub = hub();
     // The turn is over: nothing of it is still waiting.
-    let before = hub.waiting.len();
-    hub.waiting.retain(|waiting| !(waiting.agent == agent && waiting.session == event.session));
-    if hub.waiting.len() != before {
-        emit_requests(&hub);
+    {
+        let mut hub = hub();
+        let before = hub.waiting.len();
+        hub.waiting.retain(|waiting| !(waiting.agent == agent && waiting.session == event.session));
+        if hub.waiting.len() != before {
+            emit_requests(&hub);
+        }
     }
-    let Some(began) = hub.turns.remove(&(agent, event.session.clone())) else { return };
-    if began.elapsed() < LONG_TURN {
+    let failed = event.name == "StopFailure";
+    let mut turn = None;
+    let mut folder = String::new();
+    track(agent, event, |session, now| {
+        turn = session.turn_ms(now);
+        folder = session.project();
+        session.stop(&event.last_message, failed, now);
+        session.announce = failed || turn.is_some_and(|ms| ms >= LONG_TURN.as_millis() as u64);
+    });
+    if let Some(ms) = turn {
+        count(|recap| recap.turn(recap::today(), agent.id(), &event.session, &folder, ms / 1000));
+    }
+    if agent == Agent::Codex {
+        refresh_codex_usage();
+    }
+    let hub = hub();
+    if turn.is_none_or(|ms| ms < LONG_TURN.as_millis() as u64) {
         return;
     }
     let note = AgentFinished {
@@ -380,7 +568,7 @@ fn finished(agent: Agent, event: &HookEvent) {
 
 /// Shows the request and waits for the click, the hook going away, or the time limit.
 /// Returns what the hook prints back, if anything.
-async fn ask(agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<String> {
+async fn ask(agent: Agent, socket_agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<String> {
     let view = describe(agent, event)?;
     let id = view.id.clone();
     let (sender, receiver) = oneshot::channel();
@@ -393,6 +581,7 @@ async fn ask(agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<Str
             tool: event.tool.clone(),
             input: event.input.clone(),
             reply: Some(sender),
+            at_ms: crate::surface::now_ms(),
         });
         emit_requests(&hub);
     }
@@ -406,7 +595,12 @@ async fn ask(agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<Str
         hub.waiting.retain(|waiting| waiting.view.id != id);
         emit_requests(&hub);
     }
-    reply(&answer?, event)
+    let answer = answer?;
+    let line = decision(&answer, event).map(|decision| dialect::reply(socket_agent, decision).to_string());
+    if line.is_some() && event.tool != "AskUserQuestion" {
+        count(|recap| recap.decision(recap::today(), !matches!(answer, Answer::Deny)));
+    }
+    line
 }
 
 /// Resolves once the hook has gone: answered in the terminal, the agent stopped, or
@@ -426,6 +620,7 @@ fn emit_requests(hub: &Hub) {
     if let Some(app) = &hub.app {
         let _ = app.emit("agent-requests", views(hub));
     }
+    surface::publish(hub);
 }
 
 fn views(hub: &Hub) -> Vec<AgentRequest> {
@@ -488,6 +683,7 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
         "" => return None,
         tool => (format!("Use {}", words(tool)), compact(input), true),
     };
+    let always = agent == Agent::Claude && (event.tool == "ExitPlanMode" || (!event.suggestions.is_empty() && questions.is_empty()));
     Some(AgentRequest {
         id: next_id(),
         agent: agent.name().into(),
@@ -496,6 +692,8 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
         detail: clip(&detail, MAX_DETAIL),
         code,
         questions,
+        always,
+        plan: event.tool == "ExitPlanMode",
         created_at: crate::types::now(),
     })
 }
@@ -591,11 +789,31 @@ fn first_line(text: &str, max: usize) -> String {
     clip(line, max)
 }
 
-/// What the hook prints for the user's answer. Nothing allows anything unless the
-/// user clicked Allow, or answered the agent's questions with its own options.
+/// What Claude Code's hook prints for the user's answer. Nothing allows anything unless
+/// the user clicked Allow, or answered the agent's questions with its own options.
+#[cfg(test)]
 fn reply(answer: &Answer, event: &HookEvent) -> Option<String> {
-    let decision = match answer {
+    decision(answer, event).map(|decision| dialect::reply(Agent::Claude, decision).to_string())
+}
+
+/// The decision for the user's answer, before it's put in the agent's own words.
+fn decision(answer: &Answer, event: &HookEvent) -> Option<Value> {
+    Some(match answer {
         Answer::Terminal => return None,
+        // Leaving plan mode: the plan goes back as it was, and the mode the terminal's
+        // own choices set: edits asked one by one, or accepted from now on.
+        Answer::Allow | Answer::Always if event.tool == "ExitPlanMode" => {
+            let mode = if matches!(answer, Answer::Always) { "acceptEdits" } else { "default" };
+            json!({
+                "behavior": "allow",
+                "updatedInput": event.input,
+                "updatedPermissions": [{ "type": "setMode", "mode": mode, "destination": "session" }],
+            })
+        }
+        // Only the rules the agent itself suggested for this request, unchanged.
+        Answer::Always if event.tool != "AskUserQuestion" && !event.suggestions.is_empty() => {
+            json!({ "behavior": "allow", "updatedPermissions": event.suggestions })
+        }
         Answer::Allow if event.tool != "AskUserQuestion" => json!({ "behavior": "allow" }),
         Answer::Deny => json!({ "behavior": "deny", "message": "The user said no in Buntini." }),
         Answer::Answers { answers } if event.tool == "AskUserQuestion" && answers_fit(&event.input, answers) => {
@@ -604,8 +822,7 @@ fn reply(answer: &Answer, event: &HookEvent) -> Option<String> {
             json!({ "behavior": "allow", "updatedInput": input })
         }
         _ => return None,
-    };
-    Some(json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string())
+    })
 }
 
 /// True when `answers` answers exactly the questions asked, each with its own
@@ -632,6 +849,59 @@ fn answers_fit(input: &Value, answers: &Map<String, Value>) -> bool {
     })
 }
 
+/// Asks Codex for its plan windows in the background, at most once a minute.
+fn refresh_codex_usage() {
+    std::thread::spawn(|| {
+        if let Some(usage) = usage::read_codex() {
+            let mut hub = hub();
+            hub.usage.insert(Agent::Codex, usage);
+            surface::publish(&hub);
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn buntini_agents_recap_png(bytes: *const u8, length: usize, path: *const std::os::raw::c_char) -> bool;
+}
+
+/// Saves the latest week's picture to Downloads and shows it in Finder.
+fn share_recap() -> Result<PathBuf, String> {
+    let week = {
+        let recap = RECAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let shown = hub().recap.as_ref().map(|(card, _)| card.id.trim_start_matches("recap:").to_string());
+        recap.weeks.iter().rev().find(|week| shown.as_ref().is_none_or(|start| &week.start == start) && week.turns > 0).cloned()
+    };
+    let week = week.ok_or("There's no week to share yet.")?;
+    // The picture leaves project names out.
+    let body = crate::surface::cards::agents::Recap {
+        week: recap::title(&week.start),
+        stats: recap::stats(&week, |id| Agent::from_id(id).map_or_else(|| id.to_string(), |agent| agent.name().to_string()), false)
+            .into_iter()
+            .map(|(label, value)| crate::surface::cards::agents::RecapStat { label, value })
+            .collect(),
+    };
+    let json = serde_json::to_vec(&body).map_err(|error| error.to_string())?;
+    let downloads = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads")).ok_or("No home folder.")?;
+    let mut path = downloads.join(format!("Buntini week {}.png", week.start));
+    let mut n = 2;
+    while path.exists() {
+        path = downloads.join(format!("Buntini week {} ({n}).png", week.start));
+        n += 1;
+    }
+    let c_path = std::ffi::CString::new(path.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    // SAFETY: both buffers live for the call; Swift copies what it keeps.
+    let made = unsafe { buntini_agents_recap_png(json.as_ptr(), json.len(), c_path.as_ptr()) };
+    #[cfg(not(target_os = "macos"))]
+    let made = false;
+    if !made {
+        return Err("The picture couldn't be made.".into());
+    }
+    let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(&path).status();
+    Ok(path)
+}
+
 #[tauri::command]
 pub fn agent_requests() -> Vec<AgentRequest> {
     views(&hub())
@@ -643,8 +913,10 @@ pub fn answer_agent(id: String, answer: Answer) -> Result<(), String> {
     let gone = || "That request was already answered.".to_string();
     let waiting = hub.waiting.iter_mut().find(|waiting| waiting.view.id == id).ok_or_else(gone)?;
     let asking = !waiting.view.questions.is_empty();
+    let always = waiting.view.always;
     let fits = match &answer {
         Answer::Allow => !asking,
+        Answer::Always => !asking && always,
         Answer::Answers { .. } => asking,
         Answer::Deny | Answer::Terminal => true,
     };
@@ -673,12 +945,53 @@ impl Settings {
 pub enum Op {
     /// Answers true: the command is wired.
     Ping,
+    /// Folders agents worked in lately, newest first.
+    Projects,
+    /// Starts a session of `agent` in `project`, with `prompt` as its first message.
+    Start { agent: String, project: String, prompt: String },
+    /// Brings forward the terminal of the session behind an island pill.
+    Open { pill: String },
+    /// Pastes dropped files into a session's terminal.
+    Drop { pill: String, paths: Vec<String> },
+    /// The current week so far, and the weeks before it.
+    Recap,
+    /// Saves last week's picture to Downloads.
+    ShareRecap,
+    /// Claude Code's plan windows on the island, through its status line, or not.
+    PlanUsage { on: bool },
 }
 
 #[tauri::command]
-pub async fn agents_call(op: Op) -> Result<serde_json::Value, String> {
+pub async fn agents_call(app: AppHandle, op: Op) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
     match op {
-        Op::Ping => Ok(serde_json::Value::Bool(true)),
+        Op::Ping => Ok(Value::Bool(true)),
+        Op::Projects => Ok(json!(terminal::recent_projects())),
+        Op::Start { agent, project, prompt } => {
+            let agent = Agent::from_id(&agent).ok_or("Unknown coding agent.")?;
+            let scripts = app.path().app_cache_dir().map_err(|error| error.to_string())?.join("agent-scripts");
+            terminal::start(agent, Path::new(&project), &prompt, &scripts).map(|_| Value::Null)
+        }
+        Op::Open { pill } => terminal::open_for_pill(&pill).map(|_| Value::Null),
+        Op::Drop { pill, paths } => terminal::drop_files(&pill, &paths).map(|_| Value::Null),
+        Op::Recap => {
+            let recap = RECAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let name = |id: &str| Agent::from_id(id).map_or_else(|| id.to_string(), |agent| agent.name().to_string());
+            Ok(json!(recap.weeks.iter().rev().map(|week| json!({
+                "week": recap::title(&week.start),
+                "stats": recap::stats(week, name, true).into_iter().map(|(label, value)| json!({ "label": label, "value": value })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>()))
+        }
+        Op::ShareRecap => share_recap().map(|path| json!(path.to_string_lossy())),
+        Op::PlanUsage { on } => {
+            crate::agent_setup::set_plan_usage(on)?;
+            if !on {
+                let mut hub = hub();
+                hub.usage.remove(&Agent::Claude);
+                surface::publish(&hub);
+            }
+            Ok(Value::Null)
+        }
     }
 }
 
@@ -695,6 +1008,9 @@ mod tests {
             tool: tool.into(),
             input,
             last_message: String::new(),
+            prompt: String::new(),
+            suggestions: Vec::new(),
+            host: session::Host::default(),
         }
     }
 
@@ -726,6 +1042,53 @@ mod tests {
         assert!(reply(&Answer::Allow, &asking).is_none());
         // Half the questions answered is no answer.
         assert!(reply(&Answer::Answers { answers }, &asking).is_none());
+    }
+
+    #[test]
+    fn always_keeps_only_the_rule_the_agent_suggested() {
+        let mut command = event("Bash", json!({ "command": "npm test" }));
+        // Nothing suggested: no Always.
+        assert!(reply(&Answer::Always, &command).is_none());
+        assert!(!describe(Agent::Claude, &command).unwrap().always);
+        let rule = json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm test" }], "behavior": "allow", "destination": "localSettings" });
+        command.suggestions = vec![rule.clone()];
+        assert!(describe(Agent::Claude, &command).unwrap().always);
+        assert!(!describe(Agent::Codex, &command).unwrap().always, "Codex has no rules to keep");
+        let value: Value = serde_json::from_str(&reply(&Answer::Always, &command).unwrap()).unwrap();
+        let decision = &value["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["behavior"], "allow");
+        assert_eq!(decision["updatedPermissions"], json!([rule]));
+        // A question is never answered by Always.
+        let mut asking = event("AskUserQuestion", question_input());
+        asking.suggestions = command.suggestions.clone();
+        assert!(reply(&Answer::Always, &asking).is_none());
+    }
+
+    #[test]
+    fn a_plan_is_accepted_with_the_mode_to_work_in() {
+        let plan = event("ExitPlanMode", json!({ "plan": "1. Do it" }));
+        let view = describe(Agent::Claude, &plan).unwrap();
+        assert!(view.always);
+        for (answer, mode) in [(Answer::Allow, "default"), (Answer::Always, "acceptEdits")] {
+            let value: Value = serde_json::from_str(&reply(&answer, &plan).unwrap()).unwrap();
+            let decision = &value["hookSpecificOutput"]["decision"];
+            assert_eq!(decision["behavior"], "allow");
+            assert_eq!(decision["updatedInput"], json!({ "plan": "1. Do it" }));
+            assert_eq!(decision["updatedPermissions"], json!([{ "type": "setMode", "mode": mode, "destination": "session" }]));
+        }
+        assert!(!allows(&reply(&Answer::Deny, &plan).unwrap()));
+    }
+
+    #[test]
+    fn the_terminal_line_is_read_before_the_event() {
+        let (host, hint, rest) = split_header(b"BUNTINI\tiTerm.app\tcom.googlecode.iterm2\tw0t0p0\tcli\tpostToolUse\n{\"a\":1}").unwrap();
+        assert_eq!((host.term_program.as_str(), host.bundle.as_str(), host.iterm_session.as_str(), host.entrypoint.as_str(), hint.as_str()), ("iTerm.app", "com.googlecode.iterm2", "w0t0p0", "cli", "postToolUse"));
+        assert_eq!(rest, b"{\"a\":1}");
+        let (plain, hint, rest) = split_header(b"{\"a\":1}").unwrap();
+        assert_eq!((plain, hint), (session::Host::default(), String::new()));
+        assert_eq!(rest, b"{\"a\":1}");
+        // Still arriving: nothing yet.
+        assert_eq!(split_header(b"BUNTINI\tiTerm").unwrap().2, b"");
     }
 
     #[test]
@@ -791,8 +1154,8 @@ mod tests {
         let waiting = |questions: Vec<AgentQuestion>| {
             let (sender, receiver) = oneshot::channel();
             let id = next_id();
-            let view = AgentRequest { id: id.clone(), agent: "Claude Code".into(), project: String::new(), title: String::new(), detail: String::new(), code: false, questions, created_at: String::new() };
-            hub().waiting.push(Waiting { view, agent: Agent::Claude, session: String::new(), tool: String::new(), input: Value::Null, reply: Some(sender) });
+            let view = AgentRequest { id: id.clone(), agent: "Claude Code".into(), project: String::new(), title: String::new(), detail: String::new(), code: false, questions, always: false, plan: false, created_at: String::new() };
+            hub().waiting.push(Waiting { view, agent: Agent::Claude, session: String::new(), tool: String::new(), input: Value::Null, reply: Some(sender), at_ms: 0 });
             (id, receiver)
         };
         let (id, mut receiver) = waiting(Vec::new());
@@ -817,7 +1180,7 @@ mod tests {
         let view = describe(Agent::Claude, &asked).unwrap();
         let id = view.id.clone();
         let (sender, mut receiver) = oneshot::channel();
-        hub().waiting.push(Waiting { view, agent: Agent::Claude, session: asked.session.clone(), tool: asked.tool.clone(), input: asked.input.clone(), reply: Some(sender) });
+        hub().waiting.push(Waiting { view, agent: Agent::Claude, session: asked.session.clone(), tool: asked.tool.clone(), input: asked.input.clone(), reply: Some(sender), at_ms: 0 });
         let showing = || agent_requests().iter().any(|request| request.id == id);
         // Another tool, another session or another agent leaves it be.
         let mut other = asked.clone();
@@ -926,6 +1289,33 @@ mod tests {
         assert!(allows(out.trim()), "{out}");
         assert!(agent_requests().iter().all(|request| request.id != shown.id));
 
+        // The note hook carries the terminal it ran in, and the event, to the session.
+        let note = crate::agent_setup::note_command(&path);
+        let listener = runtime.block_on(async {
+            let _ = std::fs::remove_file(&path);
+            bind(&path).unwrap()
+        });
+        runtime.spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            serve(stream, Agent::Claude).await;
+        });
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&note)
+            .env("TERM_PROGRAM", "iTerm.app")
+            .env("__CFBundleIdentifier", "com.googlecode.iterm2")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(br#"{"hook_event_name":"PreToolUse","session_id":"note-1","cwd":"/tmp/shop","tool_name":"Bash","tool_input":{"command":"cargo test"}}"#).unwrap();
+        assert!(child.wait().unwrap().success());
+        let seen = (0..50).find_map(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            hub().sessions.get(&(Agent::Claude, "note-1".to_string())).map(|session| (session.host.term_program.clone(), session.steps.back().map(|step| step.label.clone())))
+        });
+        assert_eq!(seen, Some(("iTerm.app".to_string(), Some("Tests · cargo test".to_string()))));
+
         // Nobody listening: the hook says nothing and succeeds.
         let missing = crate::agent_setup::hook_command(&dir.path().join("none.sock"));
         let output = std::process::Command::new("/bin/sh").arg("-c").arg(missing).stdin(std::process::Stdio::null()).output().unwrap();
@@ -946,7 +1336,7 @@ mod tests {
         let listener = tauri::async_runtime::block_on(async { bind(&socket).unwrap() });
         tauri::async_runtime::spawn(accept(listener, Agent::Claude));
         let settings = dir.path().join("settings.json");
-        let hooks = crate::agent_setup::edited(None, Agent::Claude, Some(&crate::agent_setup::hook_command(&socket))).unwrap().unwrap();
+        let hooks = crate::agent_setup::edited(None, Agent::Claude, Some(&socket)).unwrap().unwrap();
         std::fs::write(&settings, hooks).unwrap();
         let project = project(&work.path().to_string_lossy());
         let ask = |prompt: &str, choose: &dyn Fn(&AgentRequest) -> Answer| -> (String, Vec<AgentRequest>) {
@@ -985,5 +1375,119 @@ mod tests {
 
         // Nothing is left showing once the turns are over.
         assert!(agent_requests().iter().all(|request| request.project != project));
+    }
+
+    /// Real Claude Code with every hook Buntini installs: the step ticker fills in, Always
+    /// keeps Claude Code's own suggested rule, and a plan starts in the mode chosen.
+    /// `cargo test --lib claude_code_ticker_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn claude_code_ticker_live() {
+        let dir = tempfile::Builder::new().prefix("buntini").tempdir().unwrap();
+        let work = tempfile::Builder::new().prefix("buntini-live").tempdir().unwrap();
+        let socket = Agent::Claude.socket(dir.path());
+        let listener = tauri::async_runtime::block_on(async { bind(&socket).unwrap() });
+        tauri::async_runtime::spawn(accept(listener, Agent::Claude));
+        let settings = dir.path().join("settings.json");
+        std::fs::write(&settings, crate::agent_setup::edited(None, Agent::Claude, Some(&socket)).unwrap().unwrap()).unwrap();
+        let folder = project(&work.path().to_string_lossy());
+        let run = |args: &[&str], prompt: &str, choose: &dyn Fn(&AgentRequest) -> Answer| -> Vec<AgentRequest> {
+            let mut command = std::process::Command::new("claude");
+            command.args(["-p", "--model", "haiku", "--settings"]).arg(&settings).args(args).arg(prompt).current_dir(work.path()).stdin(std::process::Stdio::null());
+            let child = std::thread::spawn(move || command.output().unwrap());
+            let mut seen: Vec<AgentRequest> = Vec::new();
+            while !child.is_finished() {
+                std::thread::sleep(Duration::from_millis(200));
+                for request in agent_requests().into_iter().filter(|request| request.project == folder) {
+                    if !seen.iter().any(|other| other.id == request.id) {
+                        println!("request: {} · {} · always {} · plan {}", request.title, request.detail.lines().next().unwrap_or_default(), request.always, request.plan);
+                        answer_agent(request.id.clone(), choose(&request)).unwrap();
+                        seen.push(request);
+                    }
+                }
+            }
+            let output = child.join().unwrap();
+            println!("claude said: {}", String::from_utf8_lossy(&output.stdout).trim());
+            seen
+        };
+
+        let seen = run(&[], "Use the Bash tool to run exactly: echo always > always.txt . Then reply with the single word done.", &|request| if request.always { Answer::Always } else { Answer::Allow });
+        assert!(work.path().join("always.txt").exists(), "{seen:?}");
+        let steps: Vec<String> = hub().sessions.values().filter(|session| session.project() == folder).flat_map(|session| session.steps.iter().map(|step| step.label.clone())).collect();
+        println!("steps: {steps:?}");
+        assert!(steps.iter().any(|label| label.starts_with("Runs · echo always")), "{steps:?}");
+        let rules = std::fs::read_to_string(work.path().join(".claude/settings.local.json")).unwrap_or_default();
+        println!("rules kept: {rules}");
+        if seen.iter().any(|request| request.always) {
+            assert!(rules.contains("echo always"), "Always didn't keep the rule");
+        }
+
+        let seen = run(&["--permission-mode", "plan"], "Make a one-line plan to create a file named planned.txt containing ok, present it with ExitPlanMode, and once approved create the file with the Write tool.", &|_| Answer::Allow);
+        println!("plan requests: {:?}", seen.iter().map(|request| (&request.title, request.plan)).collect::<Vec<_>>());
+        assert!(seen.iter().any(|request| request.plan), "no plan was shown");
+        assert!(work.path().join("planned.txt").exists(), "the plan didn't start");
+    }
+
+    /// Real Copilot CLI with Buntini's hook file: its camelCase and PascalCase events reach
+    /// the same session and steps. The file goes in `~/.copilot/hooks` for the run and is
+    /// removed after. `cargo test --lib copilot_ticker_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn copilot_ticker_live() {
+        let dir = tempfile::Builder::new().prefix("buntini").tempdir().unwrap();
+        let work = tempfile::Builder::new().prefix("buntini-live").tempdir().unwrap();
+        let socket = Agent::Copilot.socket(dir.path());
+        let listener = tauri::async_runtime::block_on(async { bind(&socket).unwrap() });
+        tauri::async_runtime::spawn(accept(listener, Agent::Copilot));
+        let hooks = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".copilot/hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let file = hooks.join("buntini-live-test.json");
+        std::fs::write(&file, crate::agent_setup::copilot_hooks(&socket)).unwrap();
+        struct Remove(std::path::PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _remove = Remove(file);
+        let copilot = usage::find_program("copilot").expect("copilot isn't installed");
+        let mut command = std::process::Command::new(copilot);
+        command.args(["-p", "Use your shell tool to run exactly: echo hi > copilot.txt . Then reply done.", "--allow-all-tools"]).current_dir(work.path()).stdin(std::process::Stdio::null());
+        let child = std::thread::spawn(move || command.output().unwrap());
+        // Copilot ends its session as it exits, so look while it runs.
+        let mut sessions: Vec<(String, Vec<String>, String)> = Vec::new();
+        let mut asked = Vec::new();
+        while !child.is_finished() {
+            std::thread::sleep(Duration::from_millis(100));
+            let hub = hub();
+            for (_, session) in hub.sessions.iter().filter(|((agent, _), _)| *agent == Agent::Copilot) {
+                let seen = (session.project(), session.steps.iter().map(|step| step.label.clone()).collect::<Vec<_>>(), format!("{:?}", session.phase));
+                sessions.retain(|(project, _, _)| *project != seen.0);
+                sessions.push(seen);
+            }
+            for waiting in &hub.waiting {
+                if !asked.contains(&waiting.view.title) {
+                    asked.push(waiting.view.title.clone());
+                }
+            }
+        }
+        let output = child.join().unwrap();
+        println!("copilot said: {}", String::from_utf8_lossy(&output.stdout).trim());
+        let folder = project(&work.path().to_string_lossy());
+        println!("sessions: {sessions:?}");
+        println!("asked: {asked:?}");
+        assert!(asked.is_empty(), "Copilot asks about every tool; Buntini must not hold them");
+        assert!(work.path().join("copilot.txt").exists());
+        assert!(sessions.iter().any(|(project, steps, _)| project == &folder && steps.iter().any(|label| label.contains("echo hi"))), "{sessions:?}");
+    }
+
+    /// Asks this Mac's Codex for its plan windows, as Buntini does after a Codex turn.
+    /// `cargo test --lib codex_usage_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn codex_usage_live() {
+        let usage = usage::read_codex();
+        println!("{usage:?}");
+        assert!(usage.is_some_and(|usage| !usage.windows.is_empty()));
     }
 }

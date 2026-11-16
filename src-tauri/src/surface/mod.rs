@@ -149,6 +149,7 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         overflow: picked.overflow,
         card: picked.card,
         held: picked.held,
+        interrupt: picked.interrupt,
         cat: hub.island.cat.clone(),
         flow: hub.flow.clone(),
         overlay: hub.overlay.clone(),

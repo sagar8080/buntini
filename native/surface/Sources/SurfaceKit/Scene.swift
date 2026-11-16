@@ -72,6 +72,11 @@ public struct SurfaceScene: Codable, Equatable, Sendable {
     public let card: Card?
     /// Something waits on the person: the island stays open.
     public let held: Bool
+    /// The card in front asks for attention, so the island opens by itself. Otherwise it
+    /// shows once the island is opened. Left out when false.
+    public let interrupt: Bool?
+
+    public var opens: Bool { interrupt ?? false }
     public let cat: Cat
     public let flow: FlowPill?
     public let overlay: Overlay?

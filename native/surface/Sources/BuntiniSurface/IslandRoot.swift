@@ -7,7 +7,7 @@ struct IslandRoot: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let scene = store.scene, scene.card != nil || !scene.pills.isEmpty {
+            if let scene = store.scene, (scene.card != nil && scene.opens) || !scene.pills.isEmpty {
                 IslandContent(scene: scene, send: send)
             }
             Spacer(minLength: 0)
@@ -28,7 +28,7 @@ struct IslandContent: View {
                     if !scene.overflow.isEmpty { Text("+\(scene.overflow.count)").font(.caption2.weight(.semibold)) }
                 }
             }
-            if let card = scene.card { CardView(card: card, send: send) }
+            if let card = scene.card, scene.opens { CardView(card: card, send: send) }
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 18)
@@ -63,10 +63,10 @@ struct CardView: View {
         switch card.body {
         case .approval(let value): ApprovalCardView(card: card, approval: value, send: send)
         case .question(let value): QuestionCardView(card: card, question: value, send: send)
-        case .ticker(let value): TickerCardView(ticker: value)
+        case .ticker(let value): TickerCardView(card: card, ticker: value, send: send)
         case .diff(let value): DiffCardView(diff: value)
         case .finished(let value): FinishedCardView(finished: value)
-        case .recap(let value): RecapCardView(recap: value)
+        case .recap(let value): RecapCardView(card: card, recap: value, send: send)
         case .usage(let value): UsageCardView(usage: value)
         case .service(let value): ServiceCardView(card: card, service: value, send: send)
         case .mail(let value): MailCardView(card: card, mail: value, send: send)

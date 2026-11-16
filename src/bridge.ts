@@ -55,10 +55,11 @@ function previewApps() {
 // Preview-only coding agents. `?agents-preview` puts a request and a question on the cat.
 function previewCodingAgents(): CodingAgent[] {
   const on = (id: string) => localStorage.getItem(`buntini-preview-agent-${id}`) === '1';
-  return [{ id: 'claude', name: 'Claude Code', available: true, connected: on('claude'), heard: true, problem: '' }, { id: 'codex', name: 'Codex', available: true, connected: on('codex'), heard: false, problem: '' }];
+  return [{ id: 'claude', name: 'Claude Code', available: true, connected: on('claude'), heard: true, problem: '', usage: on('claude-usage') }, { id: 'codex', name: 'Codex', available: true, connected: on('codex'), heard: false, problem: '' }, { id: 'copilot', name: 'Copilot CLI', available: true, connected: on('copilot'), heard: false, problem: '' }];
 }
 let previewAgentRequests: AgentRequest[] = import.meta.env.DEV && new URLSearchParams(location.search).has('agents-preview') ? [
-  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], createdAt: '2026-11-15T12:00:00Z' },
+  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], always: true, createdAt: '2026-11-15T12:00:00Z' },
+  { id: 'preview-agent-3', agent: 'Claude Code', project: 'buntini', title: 'Start on its plan', detail: '1. Add the island\n2. Wire the agents', code: false, questions: [], always: true, plan: true, createdAt: '2026-11-15T12:00:02Z' },
   { id: 'preview-agent-2', agent: 'Claude Code', project: 'buntini', title: '', detail: '', code: false, createdAt: '2026-11-15T12:00:05Z', questions: [{ question: 'Where should the request card go when the panel is open?', header: 'Placement', multiSelect: false, options: [{ label: 'Top of the panel', description: '' }, { label: 'Above the composer', description: '' }] }] },
 ] : [];
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.

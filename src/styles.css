@@ -1447,3 +1447,11 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 .pet--asleep.pet--act-dream .pet-mouth { transform-box: fill-box; transform-origin: center top; animation: cat-dream-mouth 1.4s ease-in-out; }
 @keyframes cat-dream-paw { 0%, 100% { transform: none; } 20%, 50% { transform: translateY(-2px) rotate(-6deg); } 35%, 65% { transform: translateY(-.5px) rotate(2deg); } }
 @keyframes cat-dream-mouth { 30%, 60% { transform: scaleY(1.35); } }
+
+/* Coding agents: a new session and the week so far. */
+.agent-start { margin-top: 8px; }
+.agent-week { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2, rgba(127, 127, 127, .08)); }
+.agent-week-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.agent-week dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
+.agent-week dt { font-size: 11px; opacity: .6; }
+.agent-week dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }

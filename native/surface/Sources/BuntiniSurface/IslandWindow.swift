@@ -44,8 +44,8 @@ final class IslandWindow {
     }
 
     func apply(_ scene: SurfaceScene) {
-        let visible = scene.card != nil || !scene.pills.isEmpty
-        panel.ignoresMouseEvents = scene.card == nil
+        let visible = (scene.card != nil && scene.opens) || !scene.pills.isEmpty
+        panel.ignoresMouseEvents = !(scene.card != nil && scene.opens)
         if visible {
             place()
             panel.orderFrontRegardless()
