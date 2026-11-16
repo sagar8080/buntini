@@ -33,57 +33,93 @@ struct IslandRoot: View {
 
     var body: some View {
         let mode = model.mode
-        let size = model.size
-        let radius: CGFloat = mode == .open ? 26 : mode == .peek ? model.band / 2 : 8
-        ZStack(alignment: .top) {
+        let rect = model.localRect
+        let corner = model.inCorner
+        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? 26 : mode == .peek ? model.band / 2 : 8
+        let shape = AnyShape(corner ? AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) : AnyShape(IslandShape(bottomRadius: radius)))
+        ZStack(alignment: .topLeading) {
             if !inPicture {
-                GlowView(island: size, held: model.scene?.held == true && mode == .open, tint: model.scene?.cat.accent ?? "#F2B33D")
+                GlowView(rect: rect, hangs: !corner, held: model.scene?.held == true && mode == .open, tint: model.scene?.cat.accent ?? "#F2B33D")
                     .frame(width: IslandGeometry.panel.width, height: IslandGeometry.panel.height)
                     .allowsHitTesting(false)
             }
             island(mode: mode)
-                .frame(width: size.width, height: size.height, alignment: .top)
-                .background(background(mode: mode, radius: radius))
-                .clipShape(IslandShape(bottomRadius: radius))
-                .opacity(mode == .hidden ? 0 : 1)
+                .frame(width: rect.width, height: rect.height, alignment: .top)
+                .background(background(shape: shape))
+                .clipShape(shape)
+                .shadow(color: .black.opacity(corner ? 0.35 : 0), radius: 14, y: 6)
+                .opacity(mode == .hidden && !corner ? 0 : 1)
+                .offset(x: rect.minX, y: rect.minY)
+            if let line = model.scene?.line, model.hover, mode == .peek {
+                HealthLine(text: line)
+                    .offset(x: rect.minX, y: model.placement == .bottomLeft || model.placement == .bottomRight ? rect.minY - 30 : rect.maxY + 8)
+                    .frame(width: rect.width, alignment: .center)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .frame(width: IslandGeometry.panel.width, height: IslandGeometry.panel.height, alignment: .top)
+        .frame(width: IslandGeometry.panel.width, height: IslandGeometry.panel.height, alignment: .topLeading)
         .animation(reduceMotion ? .easeOut(duration: 0.15) : mode == .open ? .spring(response: 0.5, dampingFraction: 0.72) : .timingCurve(0.45, 0, 0.2, 1, duration: 0.34), value: mode)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: size)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: rect)
+        .animation(.easeOut(duration: 0.2), value: model.hover)
     }
 
     /// Black at the notch, so it blends with the hardware; glass elsewhere on macOS 26.
     @ViewBuilder
-    private func background(mode: IslandMode, radius: CGFloat) -> some View {
-        if model.hasNotch {
+    private func background(shape: AnyShape) -> some View {
+        if model.hasNotch && !model.inCorner {
             Color.black
         } else if #available(macOS 26.0, *) {
-            Color.black.opacity(0.35).glassEffect(.regular, in: IslandShape(bottomRadius: radius))
+            Color.black.opacity(0.35).glassEffect(.regular, in: shape)
         } else {
             Color.black.opacity(0.85).background(.ultraThinMaterial)
         }
     }
 
+    /// The cat, which can be picked up and carried to a corner or back to the top.
+    private func cat(_ cat: SurfaceKit.Cat) -> some View {
+        CatView(cat: cat, active: !model.asleep)
+            .contextMenu { Wardrobe(cat: cat, send: send) }
+            .matchedGeometryEffect(id: "cat", in: space)
+            .opacity(model.carrying ? 0 : 1)
+            .gesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                    .onChanged { _ in
+                        if !model.carrying { model.carrying = true }
+                        model.carry(.moved)
+                    }
+                    .onEnded { _ in model.carry(.ended) }
+            )
+            .accessibilityAddTraits(.isButton)
+    }
+
     @ViewBuilder
     private func island(mode: IslandMode) -> some View {
         let scene = model.scene
+        let corner = model.inCorner
+        let trailing = model.placement == .topRight || model.placement == .bottomRight
         VStack(spacing: 0) {
-            // The top band: the cat on the left wing, pills on the right.
-            HStack(spacing: 0) {
-                if mode == .peek, let cat = scene?.cat {
-                    CatView(cat: cat, active: !model.asleep)
-                        .contextMenu { Wardrobe(cat: cat, send: send) }
-                        .matchedGeometryEffect(id: "cat", in: space)
-                        .frame(width: model.band - 2, height: model.band - 2)
-                        .padding(.leading, 16)
+            // The top band: the cat and the pills. At the notch the cat sits on the left wing;
+            // in a corner it rests in its tile, nearest the corner.
+            HStack(spacing: corner ? 10 : 0) {
+                if trailing, let scene, mode != .hidden {
+                    PillDots(pills: scene.pills, overflow: scene.overflow.count).padding(.leading, 14)
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
-                if let scene, mode != .hidden {
-                    PillDots(pills: scene.pills, overflow: scene.overflow.count)
-                        .padding(.trailing, 16)
+                if mode != .open, let cat = scene?.cat {
+                    self.cat(cat)
+                        .frame(width: corner ? IslandGeometry.tile.width - 10 : model.band - 2, height: corner ? IslandGeometry.tile.height - 10 : model.band - 2)
+                        .padding(.leading, corner ? (trailing ? 0 : 5) : 16)
+                        .padding(.trailing, corner && trailing ? 5 : 0)
+                }
+                if !trailing {
+                    Spacer(minLength: 0)
+                    if let scene, mode != .hidden {
+                        PillDots(pills: scene.pills, overflow: scene.overflow.count)
+                            .padding(.trailing, 16)
+                    }
                 }
             }
-            .frame(height: model.band)
+            .frame(height: corner ? (mode == .open ? 36 : IslandGeometry.tile.height) : model.band)
             .contentShape(Rectangle())
             .onTapGesture {
                 if scene?.opens != true { model.expanded.toggle() }
@@ -91,16 +127,13 @@ struct IslandRoot: View {
             if mode == .open {
                 HStack(alignment: .top, spacing: 14) {
                     if let cat = scene?.cat {
-                        CatView(cat: cat, active: !model.asleep)
-                            .contextMenu { Wardrobe(cat: cat, send: send) }
-                            .matchedGeometryEffect(id: "cat", in: space)
-                            .frame(width: 64, height: 68)
+                        self.cat(cat).frame(width: 64, height: 68)
                     }
                     content(scene)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 8)
+                .padding(.top, corner ? 0 : 8)
                 .padding(.bottom, 16)
                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
@@ -112,13 +145,29 @@ struct IslandRoot: View {
     private func content(_ scene: SurfaceScene?) -> some View {
         if model.dragging, scene?.card == nil {
             DropTarget()
-        } else if let card = scene?.card {
+        } else if let card = scene?.card, scene?.opens == true || !model.typing {
             CardView(card: card, send: send)
                 .id(card.id)
                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
         } else if let scene {
-            Home(pills: scene.pills, send: send)
+            Home(pills: scene.pills, model: model, send: send)
         }
+    }
+}
+
+/// One line about the Mac, under the island while the pointer is on it.
+struct HealthLine: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .background(Capsule().fill(.black.opacity(0.78)))
+            .fixedSize()
+            .accessibilityLabel(text)
     }
 }
 
@@ -171,10 +220,14 @@ struct PillDots: View {
     }
 }
 
-/// Opened with nothing to answer: what is running, and the way to the chat.
+/// Opened with nothing to answer: what is running, a question for Buntini, and the way to
+/// the chat.
 struct Home: View {
     let pills: [Pill]
+    @ObservedObject var model: IslandModel
     let send: (Action) -> Void
+    @State private var question = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -193,11 +246,33 @@ struct Home: View {
                 }
                 .buttonStyle(.plain)
             }
-            HStack {
-                Spacer()
-                IslandButton(label: "Chat", prominent: true) { send(Action(source: .island, card: nil, name: "openChat")) }
+            HStack(spacing: 8) {
+                TextField("Ask Buntini", text: $question)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .focused($focused)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(Capsule().fill(.white.opacity(0.1)))
+                    .onSubmit(ask)
+                    .onExitCommand {
+                        focused = false
+                        model.expanded = false
+                    }
+                IslandButton(label: "Chat", prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
         }
+        .onChange(of: focused) { now in model.typing = now }
+        .onDisappear { model.typing = false }
+    }
+
+    private func ask() {
+        let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        send(Action(source: .island, card: nil, name: "ask", value: .string(text)))
+        question = ""
+        focused = false
+        model.expanded = false
     }
 }
 

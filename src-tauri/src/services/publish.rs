@@ -246,6 +246,7 @@ mod tests {
             flow: None,
             overlay: None,
             sound: None,
+            line: None,
         };
         assert!(!scene.held);
         assert_eq!(scene.pills[0].state, PillState::Waiting);

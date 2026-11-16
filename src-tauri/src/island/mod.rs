@@ -22,15 +22,104 @@ const LONG_STRETCH: Duration = Duration::from_secs(2 * 3600);
 const BREAK: Duration = Duration::from_secs(20 * 60);
 
 /// Saved under `settings.island`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
-pub struct Settings {}
+pub struct Settings {
+    /// Where the island sits: `auto` (the notch, or the top of the screen) or the corner the
+    /// cat was dragged to. Set by dragging, never in a settings page.
+    pub placement: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { placement: "auto".into() }
+    }
+}
+
+const PLACEMENTS: [&str; 5] = ["auto", "topLeft", "topRight", "bottomLeft", "bottomRight"];
 
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if !PLACEMENTS.contains(&self.placement.as_str()) {
+            return Err("The island can sit at the top or in a corner.".into());
+        }
         Ok(())
     }
 }
+
+fn placement(name: &str) -> Placement {
+    match name {
+        "topLeft" => Placement::TopLeft,
+        "topRight" => Placement::TopRight,
+        "bottomLeft" => Placement::BottomLeft,
+        "bottomRight" => Placement::BottomRight,
+        _ => Placement::Auto,
+    }
+}
+
+/// The island as it should be now: the cat's look and mood, where it sits, the line about
+/// the Mac.
+fn state(app: &AppHandle) -> IslandState {
+    let mut cat = look(app);
+    if STREAK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).sleepy(Instant::now()) {
+        cat.mood = Mood::Sleepy;
+    }
+    let placement = settings(app).map(|settings| placement(&settings.island.placement)).unwrap_or_default();
+    let line = LINE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    IslandState { home: Home::Desktop, placement, cat, line }
+}
+
+static LINE: Mutex<Option<String>> = Mutex::new(None);
+
+/// What the Mac needs a look at, in a few words: busy (with the busiest apps), hot, or low on
+/// battery. None when it's fine.
+pub fn health_line(cpu: f32, thermal: i64, battery: Option<(u8, bool)>, busiest: &[String]) -> Option<String> {
+    if thermal >= 2 {
+        return Some("Your Mac is hot".into());
+    }
+    if let Some((percent, false)) = battery.filter(|(percent, _)| *percent <= 15) {
+        return Some(format!("Battery {percent}%"));
+    }
+    if cpu >= 85.0 {
+        let apps = busiest.iter().take(2).cloned().collect::<Vec<_>>().join(", ");
+        return Some(if apps.is_empty() { format!("CPU {}%", cpu.round()) } else { format!("CPU {}% · {apps}", cpu.round()) });
+    }
+    None
+}
+
+/// Looks at the Mac once a minute, from the readings the health card already keeps, and
+/// reads which apps are busy only when the Mac is.
+fn watch_health() {
+    std::thread::spawn(|| {
+        let mut busiest_at: Option<Instant> = None;
+        let mut busiest: Vec<String> = Vec::new();
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+            let Some(cpu) = sysinfo::System::new().ok().map(|mut system| {
+                system.refresh_cpu_usage();
+                std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL.max(Duration::from_millis(250)));
+                system.refresh_cpu_usage();
+                system.global_cpu_usage()
+            }) else {
+                continue;
+            };
+            let battery = crate::glance::battery_now().map(|battery| (battery.percent, battery.charging));
+            if cpu >= 85.0 && busiest_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(300)) {
+                busiest = crate::glance::read(false, false).map(|reading| reading.apps.into_iter().filter(|app| app.cpu_percent >= 10.0).map(|app| app.name).collect()).unwrap_or_default();
+                busiest_at = Some(Instant::now());
+            }
+            let line = health_line(cpu, crate::glance::thermal_state(), battery, &busiest);
+            let mut current = LINE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *current != line {
+                *current = line;
+                drop(current);
+                CHANGED.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    });
+}
+
+static CHANGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// What the UI asks of this part, through its one command.
 #[derive(Debug, Deserialize)]
@@ -85,9 +174,10 @@ pub fn start(app: AppHandle) {
             eprintln!("An island action didn't go through: {problem}");
         }
     });
-    let cat = look(&app);
+    let shown = state(&app);
     let name = settings(&app).map(|settings| settings.user_name.trim().to_string()).unwrap_or_default();
-    surface::set_island(IslandState { home: Home::Desktop, placement: Placement::Auto, cat: cat.clone() });
+    surface::set_island(shown.clone());
+    watch_health();
     publish(vec![Offer {
         card: Card { id: "greeting".into(), source: Source::Island, body: CardBody::Greeting(cards::Greeting { name: (!name.is_empty()).then(|| first_word(&name)) }) },
         urgency: Urgency::Alert,
@@ -95,15 +185,12 @@ pub fn start(app: AppHandle) {
         ttl_ms: Some(GREETING_MS),
     }]);
     std::thread::spawn(move || {
-        let mut shown = cat;
+        let mut shown = shown;
         loop {
             std::thread::sleep(Duration::from_secs(2));
-            let mut next = look(&app);
-            if STREAK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).sleepy(Instant::now()) {
-                next.mood = Mood::Sleepy;
-            }
-            if next != shown {
-                surface::set_island(IslandState { home: Home::Desktop, placement: Placement::Auto, cat: next.clone() });
+            let next = state(&app);
+            if next != shown || CHANGED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                surface::set_island(next.clone());
                 shown = next;
             }
         }
@@ -230,6 +317,32 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             let _ = app.emit("island-files", paths);
             Ok(())
         }
+        // Typed in the island: it goes to the chat, which opens with the answer.
+        "ask" => {
+            let text = action.value.as_ref().and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            if text.is_empty() || text.chars().count() > 8_000 {
+                return Ok(());
+            }
+            show_chat(app);
+            let _ = app.emit("island-ask", text);
+            Ok(())
+        }
+        // The cat was dragged to a corner, or back to the top.
+        "place" => {
+            let chosen = action.value.as_ref().and_then(Value::as_str).unwrap_or_default().to_string();
+            if !PLACEMENTS.contains(&chosen.as_str()) {
+                return Err("The island can sit at the top or in a corner.".into());
+            }
+            let state = app.try_state::<crate::controller::AppState>().ok_or("Buntini is still starting.")?;
+            let store = state.store.lock().map_err(|_| "Settings are busy.")?;
+            let mut settings = store.settings()?;
+            settings.island.placement = chosen;
+            settings.validate()?;
+            store.save_settings(&settings)?;
+            drop(store);
+            surface::set_island(self::state(app));
+            Ok(())
+        }
         // The wardrobe: `{ "key": "catCoat" | "catEyes" | "catAccessory" | "avatar", "value": … }`.
         "look" => {
             let value = action.value.as_ref().ok_or("Nothing was chosen.")?;
@@ -286,6 +399,25 @@ mod tests {
         assert!(!streak.sleepy(start + Duration::from_secs(151 * 60)));
         // And long after the last activity, the cat is rested.
         assert!(!Streak { started: Some(start), last: Some(start + LONG_STRETCH) }.sleepy(start + LONG_STRETCH + BREAK));
+    }
+
+    #[test]
+    fn the_line_names_what_needs_a_look_and_stays_quiet_otherwise() {
+        assert_eq!(health_line(30.0, 0, Some((80, false)), &[]), None);
+        assert_eq!(health_line(94.4, 0, None, &["node".into(), "Google Chrome".into(), "Mail".into()]).as_deref(), Some("CPU 94% · node, Google Chrome"));
+        assert_eq!(health_line(90.0, 0, None, &[]).as_deref(), Some("CPU 90%"));
+        assert_eq!(health_line(10.0, 0, Some((14, false)), &[]).as_deref(), Some("Battery 14%"));
+        assert_eq!(health_line(10.0, 0, Some((14, true)), &[]), None, "charging is fine");
+        assert_eq!(health_line(99.0, 2, Some((5, false)), &[]).as_deref(), Some("Your Mac is hot"));
+    }
+
+    #[test]
+    fn the_island_sits_only_where_it_can() {
+        assert!(Settings::default().validate().is_ok());
+        assert!(Settings { placement: "bottomLeft".into() }.validate().is_ok());
+        assert!(Settings { placement: "middle".into() }.validate().is_err());
+        assert_eq!(placement("topRight"), Placement::TopRight);
+        assert_eq!(placement("anything"), Placement::Auto);
     }
 
     #[test]

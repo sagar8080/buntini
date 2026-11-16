@@ -14,6 +14,14 @@ final class IslandModel: ObservableObject {
     @Published var dragging = false
     /// The screen is asleep or locked.
     @Published var asleep = false
+    /// The cat is being carried to a new place.
+    @Published var carrying = false
+    /// Someone is typing in the island.
+    @Published var typing = false
+    /// Set by the window: the cat was picked up, moved, or let go.
+    var carry: (CarryPhase) -> Void = { _ in }
+
+    enum CarryPhase { case moved, ended }
 
     init(screen: ScreenShape) {
         self.screen = screen
@@ -21,23 +29,33 @@ final class IslandModel: ObservableObject {
 
     var hasNotch: Bool { IslandGeometry.notch(screen) != nil }
 
+    var placement: Placement { scene?.placement ?? .auto }
+    var inCorner: Bool { placement != .auto }
+
     var mode: IslandMode {
         guard let scene, !asleep else { return .hidden }
         // Waiting requests and alerts open it; other cards wait until it's opened.
-        if (scene.card != nil && scene.opens) || expanded || dragging { return .open }
+        if (scene.card != nil && scene.opens) || expanded || dragging || typing { return .open }
         if hover || !scene.pills.isEmpty { return .peek }
         return .hidden
     }
 
+    /// Where the island is inside the panel (top-left origin).
+    var localRect: CGRect { IslandGeometry.localRect(size: size, placement: placement) }
+
     /// The top band: the notch, or the menu bar without one.
     var band: CGFloat { IslandGeometry.notch(screen)?.height ?? IslandGeometry.menuBar(screen) }
 
-    var size: CGSize { IslandGeometry.size(mode, screen: screen, openHeight: openHeight) }
+    var size: CGSize {
+        inCorner
+            ? IslandGeometry.cornerSize(mode, openHeight: openHeight, pills: scene?.pills.count ?? 0)
+            : IslandGeometry.size(mode, screen: screen, openHeight: openHeight)
+    }
 
     /// The room a card needs below the top band.
     var openHeight: CGFloat {
         if dragging && scene?.card == nil { return 110 }
-        guard let card = scene?.card else { return max(96, 52 + CGFloat(scene?.pills.count ?? 0) * 30) }
+        guard let card = scene?.card else { return max(130, 86 + CGFloat(scene?.pills.count ?? 0) * 30) }
         switch card.body {
         case .approval: return 138
         case .question(let q): return 120 + CGFloat(min(q.questions.first?.options.count ?? 2, 4) > 3 ? 40 : 0)

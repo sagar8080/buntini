@@ -139,6 +139,10 @@ pub struct Scene {
     pub flow: Option<flow::FlowPill>,
     pub overlay: Option<utilities::Overlay>,
     pub sound: Option<Sound>,
+    /// One line about the Mac under the island while the pointer is on it, when the Mac
+    /// needs a look: busy, hot or low on battery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// The card in front of the island.

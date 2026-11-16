@@ -52,6 +52,16 @@ guard original.isEqual(written) else {
     fail("the fixture writes back differently")
 }
 
+// Where a dropped cat sends the island.
+let screen = ScreenShape(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), visibleFrame: CGRect(x: 0, y: 70, width: 1512, height: 880), safeTop: 32, auxLeft: 664, auxRight: 664, statusBar: 24)
+guard IslandGeometry.placement(dropAt: CGPoint(x: 40, y: 900), screen: screen) == .topLeft,
+      IslandGeometry.placement(dropAt: CGPoint(x: 1480, y: 100), screen: screen) == .bottomRight,
+      IslandGeometry.placement(dropAt: CGPoint(x: 756, y: 960), screen: screen) == .auto,
+      IslandGeometry.placement(dropAt: CGPoint(x: 756, y: 500), screen: screen) == nil else { fail("a dropped cat lands in the wrong place") }
+let corner = IslandGeometry.panelFrame(screen, placement: .bottomRight)
+let tile = IslandGeometry.screenRect(panel: corner, size: IslandGeometry.tile, placement: .bottomRight)
+guard tile.maxX == screen.visibleFrame.maxX - IslandGeometry.cornerMargin, tile.minY == screen.visibleFrame.minY + IslandGeometry.cornerMargin else { fail("the corner tile isn't in its corner: \(tile)") }
+
 if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(problem)") }
 if let problem = SurfaceSounds.problem() { fail(problem) }
 

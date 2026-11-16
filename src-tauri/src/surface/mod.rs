@@ -24,6 +24,8 @@ pub struct IslandState {
     pub home: Home,
     pub placement: Placement,
     pub cat: Cat,
+    /// The line about the Mac under the island, if it needs a look.
+    pub line: Option<String>,
 }
 
 type Handler = Arc<dyn Fn(Action) + Send + Sync>;
@@ -187,6 +189,7 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         flow: hub.flow.clone(),
         overlay: hub.overlay.clone(),
         sound: hub.sound.clone(),
+        line: hub.island.line.clone(),
     }
 }
 

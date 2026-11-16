@@ -387,7 +387,9 @@ export default function App() {
     const brain = listen<string>('brain-changed', event => { setNotice(event.payload); void refresh().catch(() => {}); });
     // The island's wardrobe changed the cat's look.
     const look = listen('settings-changed', () => { void refresh().catch(() => {}); });
-    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); };
+    // Typed in the island: asked here, where the answer shows.
+    const asked = listen<string>('island-ask', event => { void expand(true); void submitRef.current(event.payload); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); void asked.then(unlisten => unlisten()); };
   }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;

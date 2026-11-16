@@ -558,7 +558,7 @@ fn swap_used() -> u64 {
     };
     if status == 0 { usage.xsu_used } else { 0 }
 }
-fn thermal_state() -> i64 {
+pub(crate) fn thermal_state() -> i64 {
     objc2_foundation::NSProcessInfo::processInfo().thermalState().0 as i64
 }
 
@@ -582,7 +582,7 @@ fn output_within(program: &str, args: &[&str], limit: Duration) -> Option<String
     }
 }
 
-fn battery_now() -> Option<Battery> {
+pub(crate) fn battery_now() -> Option<Battery> {
     let output = output_within("/usr/bin/pmset", &["-g", "batt"], Duration::from_secs(3))?;
     let (percent, charging) = crate::world::parse_battery(&output)?;
     Some(Battery { percent, charging, minutes_left: parse_minutes_left(&output), health_percent: None, cycles: None })

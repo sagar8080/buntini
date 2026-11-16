@@ -81,6 +81,8 @@ public struct SurfaceScene: Codable, Equatable, Sendable {
     public let flow: FlowPill?
     public let overlay: Overlay?
     public let sound: Sound?
+    /// One line about the Mac under the island while the pointer is on it. Left out when none.
+    public let line: String?
 }
 
 /// What the person did, sent back to Rust.
