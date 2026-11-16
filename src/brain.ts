@@ -28,16 +28,40 @@ export function offersChatGPT(reason?: string): boolean {
   return reason !== undefined && reason !== 'checking' && !appleStatus(reason).ready;
 }
 
-// Mirrors src-tauri/src/cloud.rs PROVIDERS (suggested models and list prices, October 2026).
-export const cloudProviders: { id: CloudProvider; name: string; model: string; input: number; output: number; keys: string }[] = [
-  { id: 'anthropic', name: 'Anthropic', model: 'claude-opus-5-5', input: 4, output: 20, keys: 'console.anthropic.com' },
-  { id: 'openai', name: 'OpenAI', model: 'gpt-5-mini', input: 0.25, output: 2, keys: 'platform.openai.com' },
-  { id: 'gemini', name: 'Google Gemini', model: 'gemini-2.5-flash', input: 0.3, output: 2.5, keys: 'aistudio.google.com' },
+/** How a cloud brain is reached: an API key, the ChatGPT sign-in, a server, or a
+    command-line tool signed in on this Mac. */
+export type ProviderKind = 'key' | 'plan' | 'server' | 'tool';
+
+// Mirrors src-tauri/src/cloud.rs PROVIDERS and cli.rs TOOLS (suggested models and list prices).
+export const cloudProviders: { id: CloudProvider; name: string; model: string; input: number; output: number; keys: string; kind: ProviderKind; signIn?: string }[] = [
+  { id: 'anthropic', name: 'Anthropic', model: 'claude-opus-5-5', input: 4, output: 20, keys: 'console.anthropic.com', kind: 'key' },
+  { id: 'openai', name: 'OpenAI', model: 'gpt-5-mini', input: 0.25, output: 2, keys: 'platform.openai.com', kind: 'key' },
+  { id: 'gemini', name: 'Google Gemini', model: 'gemini-2.5-flash', input: 0.3, output: 2.5, keys: 'aistudio.google.com', kind: 'key' },
+  { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-flash', input: 0.3, output: 1.2, keys: 'platform.deepseek.com', kind: 'key' },
+  { id: 'qwen', name: 'Qwen', model: 'qwen-plus', input: 0.4, output: 1.2, keys: 'modelstudio.console.alibabacloud.com', kind: 'key' },
+  { id: 'moonshot', name: 'Kimi', model: 'kimi-k3.1-pro', input: 2, output: 10, keys: 'platform.kimi.ai', kind: 'key' },
   // Your own ChatGPT plan through Sign in with ChatGPT: no key, no per-token price.
-  { id: 'chatgpt', name: 'ChatGPT', model: '', input: 0, output: 0, keys: 'chatgpt.com' },
-  // The user's own server at an address they give: Ollama, LM Studio and the like.
-  { id: 'custom', name: 'Your server', model: '', input: 0, output: 0, keys: '' },
+  { id: 'chatgpt', name: 'ChatGPT', model: '', input: 0, output: 0, keys: 'chatgpt.com', kind: 'plan' },
+  // Command-line tools on the person's own plan, shown only when installed here.
+  { id: 'claude-code', name: 'Claude Code', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'claude' },
+  { id: 'codex', name: 'Codex', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'codex login' },
+  { id: 'gemini-cli', name: 'Gemini CLI', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'gemini' },
+  { id: 'cursor', name: 'Cursor', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'cursor-agent login' },
+  { id: 'copilot', name: 'Copilot', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'copilot login' },
+  // LM Studio's server on this Mac, ready-made.
+  { id: 'lmstudio', name: 'LM Studio', model: '', input: 0, output: 0, keys: '', kind: 'server' },
+  // The user's own server at an address they give: Ollama and the like.
+  { id: 'custom', name: 'Your server', model: '', input: 0, output: 0, keys: '', kind: 'server' },
 ];
+
+/** The providers to offer: every one, except command-line tools that aren't installed
+    (one already chosen stays, so it can be seen and changed). */
+export function offeredProviders(installed: string[] | undefined, chosen: CloudProvider) {
+  return cloudProviders.filter(item => item.kind !== 'tool' || item.id === chosen || (installed ?? []).includes(item.id));
+}
+
+/** LM Studio's usual address on this Mac. */
+export const lmStudioAddress = 'localhost:1234';
 
 export const backendLabel: Record<ModelBackend, string> = { apple: 'Apple Intelligence', mlx: 'Local MLX model', cloud: 'Cloud model' };
 

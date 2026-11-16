@@ -21,6 +21,8 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod cli;
+mod attach;
 mod helper;
 mod glance;
 mod cloud;
@@ -347,6 +349,10 @@ pub fn run() {
             skills::photos::show_photo,
             apps::new_shortcut,
             apps::connect_app,
+            attach::pet_drop,
+            attach::forget_window,
+            attach::pick_files,
+            cli::cli_status,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

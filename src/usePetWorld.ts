@@ -7,6 +7,8 @@ import type { PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
 
 type Moving = Move['kind'] | null;
+/** A window the cat was let go over, read and kept by attach.rs. */
+export type DroppedWindow = { id: string; app: string; title: string };
 const ASK_EVERY = 15 * 60_000;
 const reactions: Partial<Record<string, PetAction>> = { welcome: 'wave', break: 'stretch', 'focus-done': 'proud', late: 'yawn', battery: 'sad', cpu: 'curious' };
 
@@ -14,9 +16,11 @@ const reactions: Partial<Record<string, PetAction>> = { welcome: 'wave', break: 
    land when dropped, nap while the user is away, vanish during meetings and full screen,
    and offer the occasional helpful nudge. Signals come from world.rs and never leave
    this window. */
-export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expanded, petState, react, onAction }: {
+export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expanded, petState, react, onAction, onWindow, onWindowError }: {
   enabled: boolean; roam: boolean; aware: boolean; nudges: boolean; motion: PetMotion; scale: number; expanded: boolean; petState: PetState;
   react: (kind: PetAction) => void; onAction: (action: NudgeAction) => void;
+  /** The cat was let go over another app's window, which is now attached. */
+  onWindow: (window: DroppedWindow) => void; onWindowError: (message: string) => void;
 }) {
   const [moving, setMoving] = useState<Moving>(null);
   const [speed, setSpeed] = useState(90);
@@ -37,8 +41,10 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   const perched = useRef(false);
   const pendingPerch = useRef<number | undefined>(undefined);
   const rules = useRef(new NudgeRules());
-  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction });
-  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction };
+  const live = useRef({ roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction, onWindow, onWindowError });
+  live.current = { roam, aware, nudges, motion, scale, expanded, petState, asleep, held, quiet, nudge, ask, react, onAction, onWindow, onWindowError };
+  // One drag at a time is watched for where it's let go.
+  const watchingDrop = useRef(false);
   const putDown = useCallback(() => { window.clearTimeout(heldTimer.current); setHeld(false); }, []);
 
   // Our own position updates can still arrive just after a move ends; they are not drags.
@@ -210,6 +216,14 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     // Picked up by the scruff, unless it's the open panel being moved. If the window never
     // moves, it's put straight back down.
     if (!live.current.expanded) { setHeld(true); window.clearTimeout(heldTimer.current); heldTimer.current = window.setTimeout(putDown, 1500); }
+    // Let go over another app's window, the cat brings that window to the chat.
+    if (!live.current.expanded && !watchingDrop.current) {
+      watchingDrop.current = true;
+      void command<DroppedWindow | null>('pet_drop')
+        .then(dropped => { if (dropped) { live.current.react('happy'); live.current.onWindow(dropped); } })
+        .catch(error => { live.current.react('tilt'); live.current.onWindowError(typeof error === 'string' ? error : error instanceof Error ? error.message : 'I couldn’t read that window.'); })
+        .finally(() => { watchingDrop.current = false; });
+    }
   }, [putDown]);
 
   return { moving, facing, speed: moving ? speed : speeds[motion], landing: landingNow, asleep, held, quiet, nudge, act, beforeDrag, ask: !!ask, knock };

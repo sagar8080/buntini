@@ -14,6 +14,10 @@ struct DropCardView: View {
                 Text(drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).font(.callout.weight(.semibold)).lineLimit(2)
             }
             FlowRow(spacing: 6) {
+                // Into the chat, attached to the next message.
+                IslandButton(label: "Chat") {
+                    send(Action(source: .island, card: card.id, name: "dropChat", value: .object(["paths": .array(drop.files.map(JSONValue.string))])))
+                }
                 ForEach(drop.targets, id: \.pill) { target in
                     IslandButton(label: target.label) {
                         send(Action(source: .island, card: card.id, name: "dropInto", value: .object(["pill": .string(target.pill), "paths": .array(drop.files.map(JSONValue.string))])))

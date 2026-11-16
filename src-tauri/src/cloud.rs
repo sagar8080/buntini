@@ -24,15 +24,25 @@ pub struct Provider {
     /// Suggested list prices per million tokens (USD), as published in October 2026.
     pub input_per_m: f64,
     pub output_per_m: f64,
+    /// Where a provider that speaks OpenAI's chat format answers: a fixed HTTPS address, or
+    /// LM Studio's usual one on this Mac. None for the others.
+    pub base: Option<&'static str>,
+    /// Whether it can be shown pictures with the suggested model.
+    pub sees_images: bool,
 }
 
-pub const PROVIDERS: [Provider; 5] = [
+/// LM Studio's server on this Mac, as it starts by default.
+pub const LM_STUDIO: &str = "http://localhost:1234/v1";
+
+pub const PROVIDERS: [Provider; 9] = [
     Provider {
         id: "anthropic",
         name: "Anthropic",
         model: "claude-opus-5-5",
         input_per_m: 4.0,
         output_per_m: 20.0,
+        base: None,
+        sees_images: true,
     },
     Provider {
         id: "openai",
@@ -40,6 +50,8 @@ pub const PROVIDERS: [Provider; 5] = [
         model: "gpt-5-mini",
         input_per_m: 0.25,
         output_per_m: 2.0,
+        base: None,
+        sees_images: true,
     },
     Provider {
         id: "gemini",
@@ -47,6 +59,39 @@ pub const PROVIDERS: [Provider; 5] = [
         model: "gemini-2.5-flash",
         input_per_m: 0.30,
         output_per_m: 2.50,
+        base: None,
+        sees_images: true,
+    },
+    // OpenAI's chat format at fixed addresses, with the user's own key. DeepSeek's peak-hour
+    // price, so the cap is never reached later than it should be.
+    Provider {
+        id: "deepseek",
+        name: "DeepSeek",
+        model: "deepseek-flash",
+        input_per_m: 0.30,
+        output_per_m: 1.20,
+        base: Some("https://api.deepseek.com"),
+        sees_images: false,
+    },
+    // Alibaba Cloud Model Studio, international (Singapore), up to 256K tokens of input.
+    Provider {
+        id: "qwen",
+        name: "Qwen",
+        model: "qwen-plus",
+        input_per_m: 0.40,
+        output_per_m: 1.20,
+        base: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        sees_images: false,
+    },
+    // Moonshot AI's Kimi.
+    Provider {
+        id: "moonshot",
+        name: "Kimi",
+        model: "kimi-k3.1-pro",
+        input_per_m: 2.0,
+        output_per_m: 10.0,
+        base: Some("https://api.moonshot.ai/v1"),
+        sees_images: false,
     },
     // Your own ChatGPT plan through Sign in with ChatGPT: no key and no per-token cost;
     // the model comes from the account's own list.
@@ -56,17 +101,36 @@ pub const PROVIDERS: [Provider; 5] = [
         model: "",
         input_per_m: 0.0,
         output_per_m: 0.0,
+        base: None,
+        sees_images: true,
     },
-    // The user's own server at an address they give: Ollama, LM Studio, or anything else
-    // that speaks OpenAI's chat format. A key is optional, and it isn't priced here.
+    // LM Studio's server on this Mac, ready-made: the user's own server at its usual address.
+    Provider {
+        id: "lmstudio",
+        name: "LM Studio",
+        model: "",
+        input_per_m: 0.0,
+        output_per_m: 0.0,
+        base: Some(LM_STUDIO),
+        sees_images: false,
+    },
+    // The user's own server at an address they give: Ollama, or anything else that speaks
+    // OpenAI's chat format. A key is optional, and it isn't priced here.
     Provider {
         id: "custom",
         name: "Your server",
         model: "",
         input_per_m: 0.0,
         output_per_m: 0.0,
+        base: None,
+        sees_images: false,
     },
 ];
+
+/// The user's own server: one they give the address of, or LM Studio's.
+pub fn own_server(id: &str) -> bool {
+    id == "custom" || id == "lmstudio"
+}
 
 /// The address of the user's own server as Buntini uses it, or why it can't. "localhost:11434"
 /// is enough, and a bare address gets Ollama's and LM Studio's usual `/v1`. Plain http would show
@@ -139,15 +203,18 @@ pub async fn server_models(base: &str, key: &str) -> Result<Vec<String>, String>
     Ok(models)
 }
 
-/// The OpenAI request as any server takes it: only what every one of them understands.
-fn for_server(mut request: Request, base: &str, key: &str) -> Request {
+/// The OpenAI request as any server takes it: only what every one of them understands. A
+/// hosted provider is still asked for its usage, which the spending cap settles on.
+fn for_server(mut request: Request, base: &str, key: &str, hosted: bool) -> Request {
     request.url = format!("{base}/chat/completions");
     if key.is_empty() {
         request.headers.clear();
     }
     if let Some(body) = request.body.as_object_mut() {
         for extra in ["stream_options", "parallel_tool_calls", "reasoning_effort"] {
-            body.remove(extra);
+            if !(hosted && extra == "stream_options") {
+                body.remove(extra);
+            }
         }
         if let Some(most) = body.remove("max_completion_tokens") {
             body.insert("max_tokens".into(), most);
@@ -156,8 +223,9 @@ fn for_server(mut request: Request, base: &str, key: &str) -> Request {
     request
 }
 
+/// A brain under Cloud model: a provider here, or a command-line tool (`cli.rs`).
 pub fn provider(id: &str) -> Option<&'static Provider> {
-    PROVIDERS.iter().find(|provider| provider.id == id)
+    PROVIDERS.iter().find(|provider| provider.id == id).or_else(|| crate::cli::provider(id))
 }
 
 /// The usage table key, so cloud spending never mixes with search counts.
@@ -183,14 +251,34 @@ pub fn price(usage: Usage, input_per_m: f64, output_per_m: f64) -> f64 {
     usage.input as f64 * input_per_m / 1e6 + usage.output as f64 * output_per_m / 1e6
 }
 
-/// A cautious upper estimate before sending: about three characters per input token,
-/// and the full reply allowance.
+/// What a picture is reckoned at before sending: above what the providers charge for one
+/// at the size Buntini sends.
+const IMAGE_TOKENS: u64 = 2_000;
+
+/// A cautious upper estimate before sending: about three characters per input token, each
+/// picture at `IMAGE_TOKENS`, and the full reply allowance.
 pub fn estimate(payload: &Value) -> Usage {
     let chars = payload["messages"].to_string().len() + payload["tools"].to_string().len();
+    let images = payload["images"].as_array().map_or(0, Vec::len) as u64;
     Usage {
-        input: (chars / 3 + 64) as u64,
+        input: (chars / 3 + 64) as u64 + images * IMAGE_TOKENS,
         output: payload["max_tokens"].as_u64().unwrap_or(1024),
     }
+}
+
+/// Pictures the user attached, as (media type, base64 data). They go with the last user
+/// message, which is the request itself.
+fn images(payload: &Value) -> Vec<(String, String)> {
+    payload["images"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|image| Some((image["media_type"].as_str()?.to_string(), image["data"].as_str()?.to_string())))
+        .collect()
+}
+
+fn last_user(messages: &[Value]) -> Option<usize> {
+    messages.iter().rposition(|message| message["role"] == "user")
 }
 
 #[derive(Debug)]
@@ -249,6 +337,9 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
     let messages = payload["messages"].as_array().cloned().unwrap_or_default();
     let tools = payload["tools"].as_array().cloned().unwrap_or_default();
     let max_tokens = payload["max_tokens"].as_u64().unwrap_or(1024);
+    let pictures = images(payload);
+    // Index of the message the pictures go with, when there are any.
+    let shown = last_user(&messages).filter(|_| !pictures.is_empty());
     let system = messages
         .iter()
         .filter(|m| m["role"] == "system")
@@ -259,7 +350,7 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
         "openai" => {
             let mut out = Vec::new();
             let mut call = 0;
-            for message in &messages {
+            for (index, message) in messages.iter().enumerate() {
                 match message["role"].as_str().unwrap_or("") {
                     "assistant" => match assistant_call(message) {
                         Some((name, arguments)) => {
@@ -269,6 +360,11 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
                         None => out.push(json!({"role":"assistant","content":text(&message["content"])})),
                     },
                     "tool" => out.push(json!({"role":"tool","tool_call_id":format!("call_{call}"),"content":text(&message["content"])})),
+                    "user" if shown == Some(index) => {
+                        let mut parts = vec![json!({"type":"text","text":text(&message["content"])})];
+                        parts.extend(pictures.iter().map(|(kind, data)| json!({"type":"image_url","image_url":{"url":format!("data:{kind};base64,{data}")}})));
+                        out.push(json!({"role":"user","content":parts}));
+                    }
                     role => out.push(json!({"role":role,"content":text(&message["content"])})),
                 }
             }
@@ -293,9 +389,14 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
         "anthropic" => {
             let mut out: Vec<Value> = Vec::new();
             let mut call = 0;
-            for message in &messages {
+            for (index, message) in messages.iter().enumerate() {
                 match message["role"].as_str().unwrap_or("") {
                     "system" => {}
+                    "user" if shown == Some(index) => {
+                        let mut blocks: Vec<Value> = pictures.iter().map(|(kind, data)| json!({"type":"image","source":{"type":"base64","media_type":kind,"data":data}})).collect();
+                        blocks.push(json!({"type":"text","text":text(&message["content"])}));
+                        out.push(json!({"role":"user","content":blocks}));
+                    }
                     "assistant" => {
                         // Replies from this conversation go back exactly as received, thinking included.
                         let content = match &message["provider_content"] {
@@ -379,9 +480,14 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
         "gemini" => {
             let mut contents: Vec<Value> = Vec::new();
             let mut last_call = String::new();
-            for message in &messages {
+            for (index, message) in messages.iter().enumerate() {
                 match message["role"].as_str().unwrap_or("") {
                     "system" => {}
+                    "user" if shown == Some(index) => {
+                        let mut parts: Vec<Value> = pictures.iter().map(|(kind, data)| json!({"inlineData":{"mimeType":kind,"data":data}})).collect();
+                        parts.push(json!({"text":text(&message["content"])}));
+                        contents.push(json!({"role":"user","parts":parts}));
+                    }
                     "assistant" => {
                         let parts = match &message["provider_content"] {
                             Value::Array(parts) => parts.clone(),
@@ -427,9 +533,14 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
             // in `instructions`, nothing is stored, and the reply always streams.
             let mut input: Vec<Value> = Vec::new();
             let mut call = 0;
-            for message in &messages {
+            for (index, message) in messages.iter().enumerate() {
                 match message["role"].as_str().unwrap_or("") {
                     "system" => {}
+                    "user" if shown == Some(index) => {
+                        let mut parts = vec![json!({"type":"input_text","text":text(&message["content"])})];
+                        parts.extend(pictures.iter().map(|(kind, data)| json!({"type":"input_image","image_url":format!("data:{kind};base64,{data}")})));
+                        input.push(json!({"role":"user","content":parts}));
+                    }
                     "assistant" => match &message["provider_content"] {
                         Value::Array(items) => {
                             if items.iter().any(|item| item["type"] == "function_call") {
@@ -481,7 +592,7 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
                 body,
             })
         }
-        _ => Err("Choose Anthropic, OpenAI, Gemini or ChatGPT.".into()),
+        _ => Err("Choose a cloud model in Settings → Brain.".into()),
     }
 }
 
@@ -652,13 +763,15 @@ impl Decoder {
                 if let Some(reason) = choice["finish_reason"].as_str() {
                     self.stop = reason.into();
                 }
-                if value["usage"].is_object() {
+                // Kimi reports usage inside the last choice rather than beside it.
+                let usage = if value["usage"].is_object() { &value["usage"] } else { &choice["usage"] };
+                if usage.is_object() {
                     self.usage = Usage {
-                        input: value["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
-                        output: value["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+                        input: usage["prompt_tokens"].as_u64().unwrap_or(0),
+                        output: usage["completion_tokens"].as_u64().unwrap_or(0),
                     };
-                    self.input_reported = value["usage"]["prompt_tokens"].as_u64().is_some();
-                    self.output_reported = value["usage"]["completion_tokens"].as_u64().is_some();
+                    self.input_reported = usage["prompt_tokens"].as_u64().is_some();
+                    self.output_reported = usage["completion_tokens"].as_u64().is_some();
                 }
             }
             "anthropic" => {
@@ -1140,10 +1253,13 @@ where
     if cancel.load(Ordering::SeqCst) {
         return Err(Failure::Rejected("Task cancelled.".into()));
     }
-    let wire = if server.is_some() { "openai" } else { provider.id };
+    // The user's own server, or a provider at its fixed HTTPS address: OpenAI's format.
+    let hosted = provider.base.filter(|_| server.is_none() && !own_server(provider.id));
+    let base = server.or(hosted);
+    let wire = if base.is_some() { "openai" } else { provider.id };
     let mut request = build(wire, model, key, payload).map_err(Failure::Rejected)?;
-    if let Some(base) = server {
-        request = for_server(request, base, key);
+    if let Some(base) = base {
+        request = for_server(request, base, key, hosted.is_some());
     }
     // A big model on the user's own machine can take minutes to load before its first word.
     let client = crate::web::private_client_builder()
@@ -1335,6 +1451,57 @@ mod tests {
         drop(listener);
         let failed = generate(provider("custom").unwrap(), "m", "", &server_payload(), Some(&base), Arc::new(AtomicBool::new(false)), |_| {}).await;
         assert!(matches!(failed, Err(Failure::Rejected(message)) if message.contains("your server")));
+    }
+
+    #[test]
+    fn named_providers_use_openai_s_format_at_their_own_https_address() {
+        for (id, url) in [("deepseek", "https://api.deepseek.com/chat/completions"), ("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"), ("moonshot", "https://api.moonshot.ai/v1/chat/completions")] {
+            let provider = provider(id).unwrap();
+            assert!(provider.input_per_m > 0.0 && provider.output_per_m > 0.0 && !provider.model.is_empty(), "{id} is priced for the cap");
+            let request = for_server(build("openai", provider.model, "key", &server_payload()).unwrap(), provider.base.unwrap(), "key", true);
+            assert_eq!(request.url, url);
+            assert_eq!(request.body["stream_options"]["include_usage"], true, "{id}: usage settles the cap");
+            assert_eq!(request.body["max_tokens"], 50);
+            assert!(request.body.get("max_completion_tokens").is_none() && request.body.get("parallel_tool_calls").is_none());
+            assert!(crate::web::credential_valid(id).is_ok(), "{id}'s key goes to the Keychain");
+        }
+        assert_eq!(provider("lmstudio").unwrap().base, Some(LM_STUDIO));
+        assert!(server_is_this_mac(LM_STUDIO));
+        assert!(own_server("lmstudio") && own_server("custom") && !own_server("deepseek"));
+        assert!(crate::web::credential_valid("codex").is_err(), "a command-line tool has no key");
+        let mut decoder = Decoder::new("openai");
+        decoder.event(r#"{"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop","usage":{"prompt_tokens":12,"completion_tokens":3}}]}"#, &mut |_| {}).unwrap();
+        decoder.event("[DONE]", &mut |_| {}).unwrap();
+        assert_eq!(decoder.finish_reported().unwrap().1, Some(Usage { input: 12, output: 3 }), "Kimi's usage inside the choice");
+    }
+
+    #[test]
+    fn pictures_go_with_the_request_in_each_provider_s_own_form() {
+        let mut payload = payload(None);
+        payload["messages"].as_array_mut().unwrap().push(json!({"role":"user","content":"what is this?"}));
+        payload["images"] = json!([{"media_type":"image/png","data":"AAAA","name":"cat.png"}]);
+        let openai = build("openai", "gpt-5-mini", "k", &payload).unwrap();
+        let last = openai.body["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA");
+        assert_eq!(last["content"][0]["text"], "what is this?");
+        let anthropic = build("anthropic", "claude-opus-5-5", "k", &payload).unwrap();
+        let last = anthropic.body["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["content"][0]["source"], json!({"type":"base64","media_type":"image/png","data":"AAAA"}));
+        let gemini = build("gemini", "gemini-2.5-flash", "k", &payload).unwrap();
+        assert_eq!(gemini.body["contents"].as_array().unwrap().last().unwrap()["parts"][0]["inlineData"]["mimeType"], "image/png");
+        let chatgpt = build("chatgpt", "gpt-6.1-sol", "t", &payload).unwrap();
+        assert_eq!(chatgpt.body["input"].as_array().unwrap().last().unwrap()["content"][1]["type"], "input_image");
+        // Only the request carries them: earlier user messages stay text.
+        let first_user = openai.body["messages"].as_array().unwrap().iter().find(|m| m["role"] == "user").unwrap().clone();
+        assert!(first_user["content"].is_string());
+        // A picture is reckoned at a fixed size, never at its base64's length.
+        assert_eq!(estimate(&payload).input - estimate(&json!({"messages":payload["messages"],"tools":payload["tools"]})).input, IMAGE_TOKENS);
+        for id in ["anthropic", "openai", "gemini", "chatgpt", "codex", "copilot"] {
+            assert!(provider(id).unwrap().sees_images, "{id}");
+        }
+        for id in ["deepseek", "qwen", "moonshot", "lmstudio", "custom", "claude-code", "gemini-cli", "cursor"] {
+            assert!(!provider(id).unwrap().sees_images, "{id}");
+        }
     }
 
     #[tokio::test]

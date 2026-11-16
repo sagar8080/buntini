@@ -146,6 +146,15 @@ button svg { vertical-align: middle; }
 .composer { border: 1px solid var(--hairline); border-radius: 20px; padding: 11px 8px 6px 14px; background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%); box-shadow: inset 0 1px 0 var(--highlight), var(--float-shadow); transition: border-color .2s, box-shadow .2s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: inset 0 1px 0 var(--highlight), 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--float-shadow); }
 .composer.is-recording { border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
+.composer.is-dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface)); }
+.attached-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: -3px 4px 8px -6px; }
+.attached-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 200px; padding: 3px 3px 3px 8px; font-size: 11.5px; font-weight: 550; color: var(--text); background: var(--surface-soft); border: 1px solid var(--hairline); border-radius: 12px; animation: rise .2s var(--ease-out); }
+.attached-chip > svg { flex: none; color: var(--accent); }
+.attached-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.attached-chip > button { display: grid; place-items: center; flex: none; width: 18px; height: 18px; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); }
+.attached-chip > button:hover:not(:disabled) { color: var(--text); background: var(--hairline); }
+.attach-button { background: transparent; color: var(--muted); width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; transition: color .15s, background .15s; }
+.attach-button:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
 .composer textarea { width: 100%; height: 24px; min-height: 24px; max-height: 132px; resize: none; overflow-y: auto; border: 0; padding: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.5; display: block; outline: 0; }
 .composer textarea::placeholder { color: var(--muted); opacity: .85; font-family: var(--voice); }
 .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 32px; }

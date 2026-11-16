@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowUp, AudioLines, Bell, CalendarDays, Check, ChevronRight, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mail, Mic, Minus, MoreHorizontal, Play, Plus, Power, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AudioLines, Bell, CalendarDays, Check, ChevronRight, Clock3, Command, Folder, Globe2, History, Laptop, LoaderCircle, Mail, Mic, Minus, MoreHorizontal, Paperclip, Play, Plus, Power, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import Pet from './Pet';
 import { ApprovalSheet, ResultCards } from './Online';
@@ -35,7 +36,9 @@ import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import { applyFlowOnSave } from './flow/api';
 import { callUtilities } from './utilities/api';
-import type { AgentAnswer, AgentFinished, AgentRequest, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import { addFiles, addWindow, removeAttached } from './attachments';
+import AttachedChips from './AttachedChips';
+import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
@@ -90,6 +93,9 @@ export default function App() {
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<Mode>('auto');
   const [input, setInput] = useState('');
+  // Files and a window that go with the next messages, until removed or a new topic.
+  const [attached, setAttached] = useState<Attached[]>([]);
+  const [dropping, setDropping] = useState(false);
   const [turns, setTurns] = useState<TaskRecord[]>([]);
   const [live, setLive] = useState<TaskRecord | null>(null);
   const [conversationId, setConversationId] = useState('');
@@ -330,6 +336,18 @@ export default function App() {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
   const nudgeAction = useRef<(action: NudgeAction) => void>(() => {});
+  const attachedRef = useRef<Attached[]>([]);
+  attachedRef.current = attached;
+  const attachFiles = useCallback((paths: string[]) => {
+    if (!paths.length) return;
+    setAttached(current => addFiles(current, paths));
+    setPage('home');
+    void expand(true);
+  }, [expand]);
+  const detach = useCallback((item: Attached) => {
+    if (item.kind === 'window') void command('forget_window', { id: item.id }).catch(() => {});
+    setAttached(current => removeAttached(current, item));
+  }, []);
   // Less motion calms the cat; it never stops it walking. Wander decides that.
   const lessMotion = stillMotion(data?.settings.reducedMotion);
   const petMotion = lessMotion && data?.settings.petMotion !== 'sleepy' ? 'calm' : data?.settings.petMotion || 'playful';
@@ -342,7 +360,31 @@ export default function App() {
     scale: data?.settings.companionScale || 1,
     expanded, petState: agentAsking && petState === 'idle' ? 'approval' : petState, react,
     onAction: action => nudgeAction.current(action),
+    // Let go over another app's window: it goes with the next messages, and the chat opens.
+    onWindow: dropped => {
+      const { next, replaced } = addWindow(attachedRef.current, { kind: 'window', ...dropped });
+      if (replaced) void command('forget_window', { id: replaced.id }).catch(() => {});
+      setAttached(next); setPage('home'); void expand(true);
+    },
+    onWindowError: message => { setNotice(message); setPage('home'); void expand(true); },
   });
+  // Files dropped on the island and sent to the chat with its Chat button.
+  useEffect(() => {
+    if (!desktop) return;
+    const subscription = listen<string[]>('island-files', event => attachFiles(Array.isArray(event.payload) ? event.payload.filter(path => typeof path === 'string') : []));
+    return () => { void subscription.then(unlisten => unlisten()); };
+  }, [attachFiles]);
+  // Files dragged onto the chat, or onto the cat.
+  useEffect(() => {
+    if (!desktop) return;
+    const subscription = getCurrentWebview().onDragDropEvent(event => {
+      const payload = event.payload;
+      if (payload.type === 'enter' || payload.type === 'over') setDropping(true);
+      else if (payload.type === 'leave') setDropping(false);
+      else if (payload.type === 'drop') { setDropping(false); if (pageRef.current === 'home') attachFiles(payload.paths); }
+    });
+    return () => { setDropping(false); void subscription.then(unlisten => unlisten()); };
+  }, [attachFiles]);
   // A request from a coding agent shows above the cat, ahead of any nudge.
   const agentBubble = !expanded && !world.quiet && (!!agentAsking || !!agentDone);
   const nudging = !expanded && !!world.nudge && !agentBubble;
@@ -508,11 +550,13 @@ export default function App() {
   const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
     // A spoken question arrives as the recording winds down, so it isn't held back by it.
     if (!prompt.trim() || (sheetWaiting.current && !approvalId) || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
+    // What's attached goes with an ordinary message only, never a lookup or a resumed one.
+    const sending = chosenMode === 'auto' && !approvalId ? attachedRef.current : [];
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
     }
-    const forChatGpt = chosenMode === 'auto' && !approvalId ? askChatGptQuestion(prompt) : null;
+    const forChatGpt = chosenMode === 'auto' && !approvalId && !sending.length ? askChatGptQuestion(prompt) : null;
     if (forChatGpt) {
       if (data?.diagnostics.chatgptPlan === 'usable') await askChatGpt(forChatGpt);
       else { setInput(''); await openChatGpt(forChatGpt); }
@@ -543,7 +587,7 @@ export default function App() {
         else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || 'Working on it'); }
         else if (event.type === 'error') streamError = event.text || 'The task could not finish.';
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('curious'); }
-      }, approvalId);
+      }, approvalId, sending);
       setLive(null);
       setTurns(previous => mergeTurns(previous, [result]));
       // A failed turn already says so in the thread; only an error it doesn't show gets a toast.
@@ -854,7 +898,7 @@ export default function App() {
   async function newTopic() {
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
     switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;
-    try { showConversation(await command<ConversationPage>('new_topic')); setInput(''); setProposal(null); setApproval(null); setNotice(''); await refresh(); }
+    try { showConversation(await command<ConversationPage>('new_topic')); setInput(''); attachedRef.current.forEach(item => { if (item.kind === 'window') void command('forget_window', { id: item.id }).catch(() => {}); }); setAttached([]); setProposal(null); setApproval(null); setNotice(''); await refresh(); }
     catch (e) { setError(errorMessage(e)); }
     finally { switchingThreadRef.current = false; setSwitchingThread(false); }
   }
@@ -988,10 +1032,12 @@ export default function App() {
             {toastAnchored && toast}
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>One moment…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
-            <form className={`composer ${recording ? 'is-recording' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
+            <form className={`composer ${recording ? 'is-recording' : ''} ${dropping ? 'is-dropping' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
+              {attached.length > 0 && <AttachedChips items={attached} disabled={busy} onRemove={detach} />}
               <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? 'Listening…' : 'Getting the microphone ready…') : transcribing ? 'Turning your voice into words…' : mode === 'auto' && glance[0]?.kind === 'event' ? `Ask about ${glance[0].title}…` : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
               <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : null}</span><div>
                 {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label="Cancel voice input" title="Cancel (Esc)" onClick={() => void cancelVoice()}><X size={15} /></button>}
+                {desktop && !recording && !transcribing && <button type="button" className="attach-button" aria-label="Attach files" title="Attach" disabled={busy} onClick={() => void command<string[]>('pick_files').then(attachFiles).catch(error => setError(errorMessage(error)))}><Paperclip size={16} /></button>}
                 <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree && speaking ? 'Interrupt' : 'Send') : 'Talk'} aria-label={recording ? (handsFree && speaking ? 'Interrupt' : handsFree ? 'Send what you said now' : 'Let go to send') : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
                 {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>

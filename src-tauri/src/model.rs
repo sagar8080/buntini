@@ -54,9 +54,30 @@ pub struct ModelHub {
 /// The user's own server counts as this Mac only when its address can only be this Mac and
 /// they said nothing goes further: a local port can still forward to the cloud.
 pub fn on_this_mac(settings: &Settings) -> bool {
-    settings.cloud_provider == "custom"
-        && settings.cloud_on_this_mac
-        && cloud::server_base(&settings.cloud_url).is_ok_and(|base| cloud::server_is_this_mac(&base))
+    settings.cloud_on_this_mac && server_address(settings).is_some_and(|base| base.is_ok_and(|base| cloud::server_is_this_mac(&base)))
+}
+
+/// The user's own server's address: the one they gave, or LM Studio's on this Mac.
+pub fn server_address(settings: &Settings) -> Option<Result<String, String>> {
+    match settings.cloud_provider.as_str() {
+        "custom" => Some(cloud::server_base(&settings.cloud_url)),
+        "lmstudio" => Some(Ok(cloud::LM_STUDIO.to_string())),
+        _ => None,
+    }
+}
+
+/// Whether the brain these settings use can be shown pictures.
+pub fn sees_images(settings: &Settings) -> bool {
+    backend(settings) == Backend::Cloud && cloud::provider(&settings.cloud_provider).is_some_and(|provider| provider.sees_images)
+}
+
+/// The brain's name, for saying what it can't do.
+pub fn brain_name(settings: &Settings) -> String {
+    match backend(settings) {
+        Backend::Apple => "Apple Intelligence".into(),
+        Backend::Mlx => "The model on this Mac".into(),
+        Backend::Cloud => cloud::provider(&settings.cloud_provider).map_or("This brain", |provider| provider.name).into(),
+    }
 }
 
 pub fn backend(settings: &Settings) -> Backend {
@@ -156,9 +177,12 @@ impl ModelHub {
                 if provider.id == "chatgpt" {
                     return if crate::chatgpt::saved() { Ok(()) } else { Err("Sign in with ChatGPT in Settings → Brain to use your ChatGPT plan.".into()) };
                 }
-                if provider.id == "custom" {
-                    cloud::server_base(&settings.cloud_url).map_err(|_| "Add your server’s address in Settings → Brain.".to_string())?;
-                    return if settings.cloud_model.trim().is_empty() { Err("Choose a model on your server in Settings → Brain.".into()) } else { Ok(()) };
+                if let Some(tool) = crate::cli::tool(provider.id) {
+                    return crate::cli::ready(tool);
+                }
+                if let Some(address) = server_address(settings) {
+                    address.map_err(|_| "Add your server’s address in Settings → Brain.".to_string())?;
+                    return if settings.cloud_model.trim().is_empty() { Err(format!("Choose a model on {} in Settings → Brain.", if provider.id == "custom" { "your server" } else { provider.name })) } else { Ok(()) };
                 }
                 if !crate::web::credential_saved(provider.id) {
                     return Err(format!(
@@ -225,7 +249,9 @@ impl ModelHub {
                         .map(|provider| provider.name)
                         .unwrap_or("Cloud"),
                     Self::cloud_model(settings)
-                ),
+                )
+                .trim_end()
+                .to_string(),
                 Err(advice) => advice,
             },
         }
@@ -436,9 +462,13 @@ impl ModelHub {
     {
         let provider = cloud::provider(&settings.cloud_provider)
             .ok_or("Choose a cloud provider in Settings → Brain.")?;
+        // A command-line tool answers on the person's own plan, signed in as in a terminal.
+        if let Some(tool) = crate::cli::tool(provider.id) {
+            return crate::cli::generate(tool, settings.cloud_model.trim(), &payload, cancel, on_token).await;
+        }
         // The user's own server isn't billed by Buntini's count, and its key is optional.
-        if provider.id == "custom" {
-            let base = cloud::server_base(&settings.cloud_url)?;
+        if let Some(address) = server_address(settings) {
+            let base = address?;
             let key = crate::web::credential(provider.id).unwrap_or_default();
             return match cloud::generate(provider, settings.cloud_model.trim(), &key, &payload, Some(&base), cancel, on_token).await {
                 Ok((turn, _)) => Ok(turn),
