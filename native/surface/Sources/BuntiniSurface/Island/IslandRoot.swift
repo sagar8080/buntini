@@ -195,6 +195,7 @@ struct Home: View {
             }
             HStack {
                 Spacer()
+                UtilityHomeButtons(pills: pills, send: send)
                 IslandButton(label: "Chat", prominent: true) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
         }

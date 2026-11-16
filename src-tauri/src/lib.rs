@@ -95,7 +95,7 @@ mod device_live_tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
@@ -221,12 +221,8 @@ pub fn run() {
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
-            if let Err(error) = app
-                .global_shortcut()
-                .register("CommandOrControl+Shift+Space")
-            {
-                eprintln!("Global shortcut unavailable: {error}");
-            }
+            // The shortcuts you can change (⇧⌘Space among them), the focus timer and captures.
+            utilities::start(app.handle().clone());
             use tauri::{
                 menu::{Menu, MenuItem},
                 tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},

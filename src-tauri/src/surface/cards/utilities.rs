@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct TimerCard {
     pub label: String,
-    /// `focus` or `rest` for focus cycles.
+    /// `focus`, `rest`, `longRest`, or `done` when a set of focus cycles ends.
     pub phase: Option<String>,
     /// Unix seconds; absent while paused.
     pub ends_at: Option<i64>,
@@ -13,8 +13,14 @@ pub struct TimerCard {
     pub remaining: f64,
     pub total: f64,
     pub paused: bool,
+    /// The focus round, 1…`rounds`.
+    #[serde(default)]
+    pub round: Option<u32>,
+    #[serde(default)]
+    pub rounds: Option<u32>,
 }
 
+/// A capture waiting on the island. An empty path: Screen Recording isn't allowed yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capture {
@@ -44,11 +50,12 @@ pub struct WhatsNew {
     pub lines: Vec<String>,
 }
 
-/// A picture shown over the desktop, such as a screenshot's thumbnail.
+/// Shown over the desktop: a screenshot's thumbnail in the corner, or the dimmer for choosing
+/// an area (which has no picture).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overlay {
-    /// `thumbnail`.
+    /// `thumbnail` or `select`.
     pub kind: String,
     pub path: String,
     pub width: i64,

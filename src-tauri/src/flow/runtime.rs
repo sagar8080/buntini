@@ -1016,8 +1016,13 @@ async fn deliver(app: &AppHandle, flow: &Settings, event: Value, started: native
         return Outcome::Empty;
     }
     let paste = native::should_paste(&target);
+    // A capture on screen while you spoke goes in first, then the words.
+    let picture = paste.then(|| crate::utilities::capture::for_dictation(Duration::from_millis(speaking_ms + 15_000))).flatten();
     let words = typed.clone();
     let pasted = tokio::task::spawn_blocking(move || {
+        if let Some(picture) = picture {
+            crate::utilities::capture::paste(&picture);
+        }
         if paste && native::paste(&words) {
             return true;
         }

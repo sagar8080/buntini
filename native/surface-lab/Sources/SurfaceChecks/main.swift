@@ -54,5 +54,6 @@ guard original.isEqual(written) else {
 
 if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(problem)") }
 if let problem = SurfaceSounds.problem() { fail(problem) }
+if let problem = MarkupCheck.problem() { fail(problem) }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions; shaders compile; sounds play")
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions; shaders compile; sounds play; mark-up draws")

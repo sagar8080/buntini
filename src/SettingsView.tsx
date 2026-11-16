@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import Customization from './Customization';
 import FlowSettings from './flow/FlowSettings';
+import Shortcuts from './utilities/Shortcuts';
+import SettingsSearch from './utilities/SettingsSearch';
 import BrainSettings from './BrainSettings';
 import Connections from './Connections';
 import PrivacyTab from './PrivacyTab';
@@ -54,6 +56,7 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
   }, [saver]);
   return <div className="subpage settings-page">
     <div className="settings-top">
+      <SettingsSearch onTab={setTab} />
       <div className="settings-tabs" role="tablist" aria-label="Settings" onKeyDown={event => {
         // Arrow keys move between tabs, as in native tab bars.
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
@@ -70,6 +73,7 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
       {tab === 'buntini' && <FlowSettings draft={draft} update={update} onError={onError} />}
+      {tab === 'buntini' && <Shortcuts onError={onError} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       {tab === 'apps' && <AppsTab draft={draft} update={update} onError={onError} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}
