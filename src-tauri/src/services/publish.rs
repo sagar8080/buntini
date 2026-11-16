@@ -241,6 +241,7 @@ mod tests {
             overflow: picked.overflow,
             card: picked.card,
             held: picked.held,
+            interrupt: picked.interrupt,
             cat: Cat::default(),
             flow: None,
             overlay: None,
