@@ -13,4 +13,5 @@
   <key>NSContactsUsageDescription</key><string>Buntini looks up the people you name, such as who to address a draft to, only after you allow Contacts in Settings → Apps.</string>
   <key>NSPhotoLibraryUsageDescription</key><string>Buntini finds and shows the photos you ask for, only after you allow Photos in Settings → Apps. It never changes your library.</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string><string>zh-Hant</string><string>hi</string><string>es</string><string>ar</string><string>fr</string><string>bn</string><string>pt-BR</string><string>ru</string><string>id</string><string>de</string><string>tr</string><string>th</string><string>ko</string><string>ja</string></array>
 </dict></plist>

@@ -223,7 +223,7 @@ private struct MailOpenView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Button { act("close", nil) } label: { Image(systemName: "chevron.left").font(.caption.weight(.semibold)) }
+                Button { act("close", nil) } label: { Image(systemName: "chevron.left").font(.caption.weight(.semibold)).flipsForRightToLeftLayoutDirection(true) }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L(.back))
                 Text(open.from).font(.caption.weight(.semibold)).lineLimit(1)

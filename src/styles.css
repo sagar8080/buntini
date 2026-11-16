@@ -72,6 +72,10 @@ button svg { vertical-align: middle; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 .desktop-stage { height: 100dvh; width: 100%; padding: 24px; display: flex; align-items: flex-end; justify-content: flex-end; overflow: hidden; }
+/* Right to left: the cat and its window keep their place on screen; what's written reads right to left. */
+[dir='rtl'] .desktop-stage { direction: ltr; }
+[dir='rtl'] .panel, [dir='rtl'] .pet-caption, [dir='rtl'] .dock-menu { direction: rtl; }
+[dir='rtl'] .dock-menu > button { text-align: start; }
 .companion { width: 128px; height: 136px; position: relative; display: grid; grid-template-rows: 1fr; min-height: 0; min-width: 0; }
 .is-expanded .companion { width: min(420px, 100%); height: min(620px, 100%); grid-template-rows: minmax(0, 1fr) 120px; }
 /* The panel is solid, warm content that grows out of the cat; only floating controls are glass. */

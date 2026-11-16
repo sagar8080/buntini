@@ -216,7 +216,7 @@ struct UpdateCardView: View {
                 } else if !update.notes.isEmpty, stage != "ask" {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(update.notes.prefix(stage == "failed" ? 1 : 2).enumerated()), id: \.offset) { _, note in
-                            Text(stage == "failed" ? note : "· \(note)").font(.caption).opacity(0.7).lineLimit(1)
+                            Text(stage == "failed" ? note : "· \(note)").font(.caption).opacity(0.7).lineLimit(stage == "failed" ? 2 : 1).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

@@ -218,7 +218,7 @@ struct UsageCardView: View {
             Text(usage.agent).font(.caption2.weight(.semibold)).opacity(0.6)
             ForEach(usage.windows, id: \.label) { window in
                 HStack(spacing: 8) {
-                    Text(window.label).font(.caption).frame(width: 64, alignment: .leading)
+                    Text(window.label).font(.caption).lineLimit(1).fixedSize().frame(minWidth: 64, alignment: .leading)
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.white.opacity(0.12))

@@ -70,7 +70,8 @@ final class IslandModel: ObservableObject {
         case .timer: return 100
         case .capture: return 150
         case .vitals: return 92
-        case .update: return 112
+        // A failure's reason may take two lines in longer languages.
+        case .update(let update): return update.stage == "failed" ? 128 : 112
         case .whatsNew: return 130
         case .drop: return 112
         case .greeting: return 84

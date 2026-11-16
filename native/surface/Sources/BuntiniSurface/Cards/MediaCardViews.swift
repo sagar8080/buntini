@@ -58,6 +58,8 @@ struct NowPlayingCardView: View {
                 Spacer(minLength: 4)
                 if let clock = PlaybackClock(playing), playing.duration != nil {
                     ScrubBar(clock: clock, tint: tint) { seconds in act("seek", .number(seconds)) }
+                        // Time runs left to right in every language, as in Apple's players.
+                        .environment(\.layoutDirection, .leftToRight)
                     Spacer(minLength: 2)
                 }
                 controls(tint: tint)
@@ -100,6 +102,8 @@ struct NowPlayingCardView: View {
         }
         // The first symbol lines up with the title, not its button's edge.
         .padding(.leading, -5)
+        // Playback controls keep their order in every language, as in Apple's players.
+        .environment(\.layoutDirection, .leftToRight)
     }
 
     /// Off, all, one, and round again; Spotify has no repeat-one to script.
