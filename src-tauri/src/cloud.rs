@@ -26,7 +26,7 @@ pub struct Provider {
     pub output_per_m: f64,
 }
 
-pub const PROVIDERS: [Provider; 4] = [
+pub const PROVIDERS: [Provider; 5] = [
     Provider {
         id: "anthropic",
         name: "Anthropic",
@@ -57,7 +57,104 @@ pub const PROVIDERS: [Provider; 4] = [
         input_per_m: 0.0,
         output_per_m: 0.0,
     },
+    // The user's own server at an address they give: Ollama, LM Studio, or anything else
+    // that speaks OpenAI's chat format. A key is optional, and it isn't priced here.
+    Provider {
+        id: "custom",
+        name: "Your server",
+        model: "",
+        input_per_m: 0.0,
+        output_per_m: 0.0,
+    },
 ];
+
+/// The address of the user's own server as Buntini uses it, or why it can't. "localhost:11434"
+/// is enough, and a bare address gets Ollama's and LM Studio's usual `/v1`. Plain http would show
+/// what's sent to anyone along the way, so it's only for this Mac and the local network.
+pub fn server_base(address: &str) -> Result<String, String> {
+    let address = address.trim();
+    let written = if address.contains("://") { address.to_string() } else { format!("http://{address}") };
+    let url = reqwest::Url::parse(&written).map_err(|_| "That doesn’t look like a server address.".to_string())?;
+    if !["http", "https"].contains(&url.scheme()) || url.host().is_none() {
+        return Err("That doesn’t look like a server address.".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+        return Err("Enter just the server’s address, without a password or anything after it.".into());
+    }
+    if url.scheme() == "http" && !host_is_local(&url) {
+        return Err("A server outside your network needs an https address.".into());
+    }
+    let mut base = url.as_str().trim_end_matches('/').to_string();
+    if url.path() == "/" {
+        base.push_str("/v1");
+    }
+    Ok(base)
+}
+
+fn host_is_local(url: &reqwest::Url) -> bool {
+    let name = url.host_str().unwrap_or_default().to_lowercase();
+    match host_ip(url) {
+        Some(ip) => !crate::research::is_public_ip(ip),
+        None => name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local"),
+    }
+}
+
+fn host_ip(url: &reqwest::Url) -> Option<std::net::IpAddr> {
+    url.host_str()?.trim_matches(|c| c == '[' || c == ']').parse().ok()
+}
+
+/// Whether an address can only be this Mac. It says nothing of where that server sends what it
+/// gets, which is why the user is asked as well (`Settings::cloud_on_this_mac`).
+pub fn server_is_this_mac(base: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base) else { return false };
+    match host_ip(&url) {
+        Some(ip) => ip.is_loopback(),
+        None => url.host_str().is_some_and(|name| name.eq_ignore_ascii_case("localhost")),
+    }
+}
+
+/// The models a server offers.
+pub async fn server_models(base: &str, key: &str) -> Result<Vec<String>, String> {
+    let client = crate::web::private_client_builder()
+        .https_only(false)
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|_| "Cannot prepare a connection.".to_string())?;
+    let mut request = client.get(format!("{base}/models"));
+    if !key.is_empty() {
+        request = request.bearer_auth(key);
+    }
+    let response = request.send().await.map_err(|_| "Couldn’t reach that server. Check that it’s running and the address is right.".to_string())?;
+    if matches!(response.status().as_u16(), 401 | 403) {
+        return Err("That server wants an API key.".into());
+    }
+    if !response.status().is_success() {
+        return Err("That address answered, but not like an AI server.".into());
+    }
+    let listed: Value = response.json().await.map_err(|_| "That address answered, but not like an AI server.".to_string())?;
+    let models: Vec<String> = listed["data"].as_array().into_iter().flatten().filter_map(|model| model["id"].as_str()).filter(|id| model_valid(id)).map(str::to_string).collect();
+    if models.is_empty() {
+        return Err("That server has no models yet.".into());
+    }
+    Ok(models)
+}
+
+/// The OpenAI request as any server takes it: only what every one of them understands.
+fn for_server(mut request: Request, base: &str, key: &str) -> Request {
+    request.url = format!("{base}/chat/completions");
+    if key.is_empty() {
+        request.headers.clear();
+    }
+    if let Some(body) = request.body.as_object_mut() {
+        for extra in ["stream_options", "parallel_tool_calls", "reasoning_effort"] {
+            body.remove(extra);
+        }
+        if let Some(most) = body.remove("max_completion_tokens") {
+            body.insert("max_tokens".into(), most);
+        }
+    }
+    request
+}
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
     PROVIDERS.iter().find(|provider| provider.id == id)
@@ -372,6 +469,10 @@ pub fn build(provider: &str, model: &str, key: &str, payload: &Value) -> Result<
                 body["tools"] = tools.iter().map(|tool| json!({"type":"function","name":tool["name"],"description":tool["description"],"parameters":tool["parameters"]})).collect();
                 body["tool_choice"] = "auto".into();
                 body["parallel_tool_calls"] = false.into();
+            } else if payload["web_search"] == true {
+                // Hosted by OpenAI: the reply comes back with it done, not as a tool to run.
+                body["tools"] = json!([{"type":"web_search"}]);
+                body["tool_choice"] = "auto".into();
             }
             let _ = max_tokens; // A reply-length cap isn't accepted on this route.
             Ok(Request {
@@ -1029,6 +1130,7 @@ pub async fn generate<F>(
     model: &str,
     key: &str,
     payload: &Value,
+    server: Option<&str>,
     cancel: Arc<AtomicBool>,
     mut on_token: F,
 ) -> Result<(Turn, Option<Usage>), Failure>
@@ -1038,16 +1140,23 @@ where
     if cancel.load(Ordering::SeqCst) {
         return Err(Failure::Rejected("Task cancelled.".into()));
     }
-    let request = build(provider.id, model, key, payload).map_err(Failure::Rejected)?;
+    let wire = if server.is_some() { "openai" } else { provider.id };
+    let mut request = build(wire, model, key, payload).map_err(Failure::Rejected)?;
+    if let Some(base) = server {
+        request = for_server(request, base, key);
+    }
+    // A big model on the user's own machine can take minutes to load before its first word.
     let client = crate::web::private_client_builder()
-        .read_timeout(Duration::from_secs(60))
+        .https_only(server.is_none())
+        .read_timeout(Duration::from_secs(if server.is_some() { 170 } else { 60 }))
         .build()
         .map_err(|_| Failure::Rejected("Cannot prepare a secure connection.".into()))?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+    let response = loop {
     let mut builder = client.post(&request.url).json(&request.body);
     for (name, value) in &request.headers {
         builder = builder.header(*name, value);
     }
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     let response = {
         let sending = builder.send();
         tokio::pin!(sending);
@@ -1066,7 +1175,7 @@ where
             tokio::select! {
                 response = &mut sending => break response.map_err(|error| {
                     if error.is_connect() {
-                        Failure::Rejected(format!("Couldn’t reach {}. Check your internet connection.", provider.name))
+                        Failure::Rejected(if server.is_some() { "Couldn’t reach your server. Check that it’s running.".to_string() } else { format!("Couldn’t reach {}. Check your internet connection.", provider.name) })
                     } else {
                         Failure::Failed(format!("The connection to {} failed.", provider.name))
                     }
@@ -1078,14 +1187,25 @@ where
     let status = response.status();
     if !status.is_success() {
         let body = rejection_body(response.bytes_stream(), &cancel, deadline).await?;
+        // Not every model on someone's server can use tools. It can still answer: without
+        // them it reads nothing, and what checks its answers then holds it to that.
+        if server.is_some() && status.as_u16() == 400 && body.to_lowercase().contains("tool") {
+            if let Some(fields) = request.body.as_object_mut() {
+                if fields.remove("tools").is_some() {
+                    continue;
+                }
+            }
+        }
         return Err(Failure::Rejected(rejection(
             provider.name,
             status.as_u16(),
             &body,
         )));
     }
+    break response;
+    };
     let mut sse = Sse::default();
-    let mut decoder = Decoder::new(provider.id);
+    let mut decoder = Decoder::new(wire);
     let mut stream = response.bytes_stream();
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -1118,6 +1238,111 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_server_address_is_read_as_people_write_it() {
+        assert_eq!(server_base("localhost:11434").unwrap(), "http://localhost:11434/v1");
+        assert_eq!(server_base(" http://127.0.0.1:1234/ ").unwrap(), "http://127.0.0.1:1234/v1");
+        assert_eq!(server_base("http://192.168.1.20:8000/v1").unwrap(), "http://192.168.1.20:8000/v1");
+        assert_eq!(server_base("http://studio.local:11434").unwrap(), "http://studio.local:11434/v1");
+        assert_eq!(server_base("https://integrate.api.nvidia.com/v1").unwrap(), "https://integrate.api.nvidia.com/v1");
+        for refused in ["http://example.com:8000", "http://8.8.8.8/v1", "ftp://localhost", "", "http://user:pw@localhost:1", "http://localhost:1/v1?key=1"] {
+            assert!(server_base(refused).is_err(), "{refused}");
+        }
+    }
+
+    #[test]
+    fn only_a_loopback_address_can_be_this_mac() {
+        for here in ["http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://[::1]:1/v1"] {
+            assert!(server_is_this_mac(here), "{here}");
+        }
+        for elsewhere in ["http://192.168.1.20:8000/v1", "http://studio.local:1/v1", "https://localhost.example.com/v1"] {
+            assert!(!server_is_this_mac(elsewhere), "{elsewhere}");
+        }
+    }
+
+    /// A server that answers one request per connection, keeps what it was sent, and replies
+    /// with `replies` in turn.
+    async fn fake_server(replies: Vec<(u16, String)>) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        tokio::spawn(async move {
+            for (status, reply) in replies {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 8192];
+                loop {
+                    let count = stream.read(&mut buffer).await.unwrap();
+                    request.extend_from_slice(&buffer[..count]);
+                    let text = String::from_utf8_lossy(&request).to_string();
+                    let Some(end) = text.find("\r\n\r\n") else { continue };
+                    let length = text.lines().find_map(|line| line.to_lowercase().strip_prefix("content-length: ").map(|value| value.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                kept.lock().unwrap().push(String::from_utf8_lossy(&request).to_string());
+                let head = format!("HTTP/1.1 {status} X\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", reply.len());
+                stream.write_all(head.as_bytes()).await.unwrap();
+                stream.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        (base, seen)
+    }
+
+    fn server_payload() -> Value {
+        json!({"messages":[{"role":"user","content":"hi"}],"max_tokens":50,"tools":[{"name":"read_mail","description":"d","parameters":{"type":"object","properties":{}}}]})
+    }
+
+    const WORDS: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+
+    #[tokio::test]
+    async fn a_server_gets_only_what_every_server_understands() {
+        let (base, seen) = fake_server(vec![(200, WORDS.into())]).await;
+        let (turn, _) = generate(provider("custom").unwrap(), "llama3.2:latest", "", &server_payload(), Some(&base), Arc::new(AtomicBool::new(false)), |_| {}).await.ok().unwrap();
+        assert_eq!(turn.text, "Hello");
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(sent.starts_with("POST /v1/chat/completions"), "{sent}");
+        assert!(!sent.to_lowercase().contains("authorization"), "no key, no header: {sent}");
+        for extra in ["stream_options", "parallel_tool_calls", "max_completion_tokens"] {
+            assert!(!sent.contains(extra), "{extra}: {sent}");
+        }
+        assert!(sent.contains("\"max_tokens\":50") && sent.contains("\"tools\""), "{sent}");
+    }
+
+    #[tokio::test]
+    async fn a_key_is_sent_only_when_there_is_one() {
+        let (base, seen) = fake_server(vec![(200, WORDS.into())]).await;
+        generate(provider("custom").unwrap(), "m", "secret", &server_payload(), Some(&base), Arc::new(AtomicBool::new(false)), |_| {}).await.ok().unwrap();
+        assert!(seen.lock().unwrap()[0].to_lowercase().contains("authorization: bearer secret"));
+    }
+
+    #[tokio::test]
+    async fn a_model_that_cant_use_tools_still_answers() {
+        let refused = r#"{"error":{"message":"model does not support tools"}}"#;
+        let (base, seen) = fake_server(vec![(400, refused.into()), (200, WORDS.into())]).await;
+        let (turn, _) = generate(provider("custom").unwrap(), "m", "", &server_payload(), Some(&base), Arc::new(AtomicBool::new(false)), |_| {}).await.ok().unwrap();
+        assert_eq!(turn.text, "Hello");
+        assert!(!seen.lock().unwrap()[1].contains("\"tools\""));
+    }
+
+    #[tokio::test]
+    async fn a_server_thats_off_says_so() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        drop(listener);
+        let failed = generate(provider("custom").unwrap(), "m", "", &server_payload(), Some(&base), Arc::new(AtomicBool::new(false)), |_| {}).await;
+        assert!(matches!(failed, Err(Failure::Rejected(message)) if message.contains("your server")));
+    }
+
+    #[tokio::test]
+    async fn a_server_lists_its_models() {
+        let (base, _) = fake_server(vec![(200, r#"{"data":[{"id":"llama3.2:latest"},{"id":"bad model!"},{"id":"qwen"}]}"#.into())]).await;
+        assert_eq!(server_models(&base, "").await.unwrap(), ["llama3.2:latest", "qwen"]);
+    }
+
 
     fn tools() -> Value {
         crate::tools::offer(&["search_files"])
@@ -1606,6 +1831,7 @@ mod tests {
             "gpt-5-mini",
             "unused",
             &payload(None),
+            None,
             Arc::new(AtomicBool::new(true)),
             |_| {},
         )

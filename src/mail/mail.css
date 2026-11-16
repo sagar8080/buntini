@@ -1,0 +1,33 @@
+/* Mail under Settings → Apps (stream E). */
+.mail-settings input:not([type=checkbox]), .mail-settings select, .mail-settings textarea { min-width: 0; background: var(--panel); color: var(--text); border: 1px solid var(--hairline); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.mail-settings select { color: var(--muted); }
+.mail-words { margin-top: 4px; }
+.mail-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.mail-chips:empty { display: none; }
+.mail-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 8px; border-radius: 999px; background: var(--surface-soft); font-size: 11px; }
+.mail-chip button { display: inline-flex; padding: 1px; border-radius: 50%; background: transparent; color: var(--muted); }
+.mail-chip button:hover { color: var(--accent); }
+.mail-add, .mail-rule-form { display: flex; gap: 6px; margin-top: 7px; }
+.mail-add input { flex: 1; }
+.mail-rule-form { display: grid; grid-template-columns: minmax(0, 112px) minmax(0, 1fr) auto; align-items: center; }
+.mail-rule-form input { grid-column: 2 / 4; }
+.mail-rule-form select:nth-of-type(2) { grid-column: 1; }
+.mail-settings .mail-rule-form select { width: 100%; height: 30px; margin: 0; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+.mail-rule-form .secondary-button { grid-column: 3; }
+.mail-add .secondary-button, .mail-rule-form .secondary-button, .mail-actions .secondary-button { padding: 6px 10px; font-size: 11px; }
+.mail-rule { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.mail-rule span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.mail-actions .primary-button { margin-left: auto; font-size: 12px; padding: 6px 12px; min-height: 0; }
+.mail-request { width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.5; margin-top: 4px; }
+.mail-pending strong { font-size: 12px; }
+.mail-pending ul, .mail-result, .mail-log { list-style: none; padding: 0; margin: 6px 0 0; font-size: 11px; line-height: 1.7; }
+.mail-pending .primary-button { font-size: 11px; padding: 6px 12px; min-height: 0; }
+.mail-left-out li, .mail-problem { color: var(--danger); }
+.mail-result { color: var(--muted); margin-top: 10px; }
+.mail-log li { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 1px solid var(--hairline); }
+.mail-log li:first-child { border-top: 0; }
+.mail-log li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-log li.undone > span { color: var(--muted); text-decoration: line-through; }
+.mail-log time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mail-log .text-button { font-size: 11px; }

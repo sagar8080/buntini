@@ -445,6 +445,8 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
     match tool {
         "draft_email" => "Buntini drafted an email and needs your OK.",
         "reply_email" => "Buntini drafted a reply and needs your OK.",
+        "send_message" => "Buntini wrote a text and needs your OK.",
+        "start_call" => "Buntini wants to start a call and needs your OK.",
         "add_reminder" => "Buntini prepared a reminder and needs your OK.",
         "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
         // A change names no item: "Dentist" or "Divorce lawyer" is as private as a title.
@@ -460,6 +462,7 @@ pub(crate) fn approval_body(tool: &str) -> &'static str {
         "remember" => "Buntini wants to remember something and needs your OK.",
         "set_timer" => "Buntini wants to set a timer and needs your OK.",
         "change_mac_setting" => "Buntini wants to change a Mac setting and needs your OK.",
+        crate::glance::QUIT_TOOL => "Buntini wants to quit an app and needs your OK.",
         "create_saved_search" | "create_price_watch" => {
             "Buntini set up a recurring check and needs your OK."
         }

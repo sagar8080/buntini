@@ -178,6 +178,7 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         sources: Vec::new(),
         files: Vec::new(),
         system: None,
+        glance: None,
         research: vec![],
         research_report: None,
         prices: vec![],
@@ -186,6 +187,7 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
         touched: vec![],
         handoff: None,
         action: None,
+        choices: vec![],
     };
     let cancel = Arc::new(AtomicBool::new(false));
     let active_key = format!("saved-search-{id}");
@@ -279,6 +281,8 @@ async fn run(app: &tauri::AppHandle, id: &str, scheduled: bool) -> Result<TaskRe
                 "Saved search update",
                 if task.state == "error" {
                     "A saved search needs attention. Open Buntini to review it."
+                } else if task.sources.is_empty() {
+                    "A saved search found nothing this time. Open Buntini to review it."
                 } else {
                     "A saved search has new results. Open Buntini to review them."
                 },
@@ -339,6 +343,7 @@ pub fn start(app: tauri::AppHandle) {
             }
             crate::routines::run_due(&app).await;
             crate::nudges::run_due(&app).await;
+            crate::services::run_due(&app).await;
             // The sleep's clock stops while the Mac sleeps; a wake cuts it short.
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}

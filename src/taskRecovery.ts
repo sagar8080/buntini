@@ -14,3 +14,10 @@ export function missingTaskFields(progress?: TaskProgress) {
     && progress?.contract?.outcomes.some(outcome => outcome.id === field.outcomeId && outcome.kind === 'write' && ['ready', 'pending'].includes(outcome.status)))
     .map(field => ({ ...field, label: labels[field.field], key: `${field.outcomeId}:${field.field}`, date: field.field === 'due' || field.field === 'start' }));
 }
+
+/** Whether a task's steps left anything undone. Nothing ran means nothing to show. */
+export function stillOpen(progress: TaskProgress) {
+  if (!progress.steps.length) return false;
+  const outcomes = progress.contract?.outcomes ?? [];
+  return outcomes.length ? outcomes.some(outcome => outcome.status !== 'complete') : progress.steps.some(step => step.state !== 'succeeded' && step.state !== 'superseded');
+}

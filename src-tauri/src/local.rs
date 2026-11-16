@@ -486,6 +486,7 @@ pub(crate) fn singular_search_term(term: &str) -> Option<String> {
     Some(lower[..lower.len() - drop].to_string())
 }
 
+#[cfg(test)]
 pub fn search(
     roots: &[String],
     query: &str,
@@ -566,9 +567,11 @@ pub(crate) fn search_group(
     let mut result = Vec::new();
     let mut fallback = Vec::new();
     let mut scanned = 0;
+    let mut unreadable: Vec<String> = Vec::new();
     for root_str in roots {
         let root = PathBuf::from(root_str);
-        if root.canonicalize().ok().as_ref() != Some(&root) {
+        if root.canonicalize().ok().as_ref() != Some(&root) || std::fs::read_dir(&root).is_err() {
+            unreadable.push(root_str.to_string());
             continue;
         }
         for item in WalkDir::new(&root)
@@ -581,6 +584,9 @@ pub(crate) fn search_group(
                 return Err("Task cancelled.".into());
             }
             scanned += 1;
+            if scanned > MAX_ENTRIES && result.is_empty() && fallback.is_empty() {
+                return Err("Those folders hold too many files for me to search them all, and I found nothing in the part I read.".into());
+            }
             if scanned > MAX_ENTRIES || result.len() >= MAX_HITS {
                 return Ok(prefer_literal(result, fallback));
             }
@@ -679,6 +685,9 @@ pub(crate) fn search_group(
                 fallback.push(hit);
             }
         }
+    }
+    if result.is_empty() && fallback.is_empty() && !unreadable.is_empty() {
+        return Err(format!("I couldn’t read {}. Check it’s still there and that Buntini may open it.", unreadable.join(", ")));
     }
     Ok(prefer_literal(result, fallback))
 }
@@ -1213,6 +1222,14 @@ printf '%s\n' '{{"text":"Lease renewal total 680","truncated":false}}'"#,
         assert!(hits[0].2.contains("Finch lease renewal costs 745"), "{}", hits[0].2);
         assert!(!hits[0].2.contains("tracker.invalid"));
     }
+    #[test]
+    fn a_folder_that_cant_be_read_is_not_a_folder_with_nothing_in_it() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let gone = search_group(&["/nonexistent-buntini-folder".to_string()], "lease", &Documents::none(), &cancel);
+        let message = gone.err().expect("a missing folder is an error");
+        assert!(message.contains("couldn’t read"), "{message}");
+    }
+
     #[test]
     #[ignore = "Run explicitly on the target Mac to record current tool latency"]
     fn measure_system_snapshot_latency() {

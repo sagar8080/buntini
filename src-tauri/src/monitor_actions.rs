@@ -22,6 +22,24 @@ fn text(args: &Map<String, Value>, key: &str, max: usize) -> Result<String, Stri
     }
     Ok(value.into())
 }
+/// The words to search for, not the sentence asking: a model can hand back "search for
+/// Nikon Z8 deals every hour" whole. Runs once, on what the model proposed, so what the sheet
+/// shows is what's saved. Only the whole sentence counts: "Entertainment Weekly" and
+/// "search engine news" are real searches.
+pub fn search_words(asked: &str) -> String {
+    let trimmed = asked.trim().trim_end_matches(['.', '!', '?']).trim();
+    let lower = trimmed.to_lowercase();
+    const TAILS: [&str; 8] = [" every hour", " every day", " every week", " every morning", " every night", " hourly", " daily", " weekly"];
+    const LEADS: [&str; 8] = ["keep checking for ", "keep searching for ", "search the web for ", "search for ", "look up ", "check for ", "search ", "find "];
+    let (Some(lead), Some(tail)) = (LEADS.iter().find(|lead| lower.starts_with(**lead)), TAILS.iter().find(|tail| lower.ends_with(**tail))) else {
+        return asked.trim().to_string();
+    };
+    if lead.len() + tail.len() >= trimmed.len() {
+        return asked.trim().to_string();
+    }
+    trimmed[lead.len()..trimmed.len() - tail.len()].trim().to_string()
+}
+
 pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, String> {
     if tool == crate::routines::TOOL {
         return crate::routines::validate(args);
@@ -97,7 +115,7 @@ pub fn describe(tool: &str, args: &Map<String, Value>) -> (String, Vec<Field>, S
     if tool == "create_saved_search" {
         ("Run this search regularly?".into(), vec![field("query", "Search sent to your selected search provider"), field("interval_minutes", "Check every (minutes)")], "Allow authorizes repeated searches for this exact query, starting after the chosen interval. Each check can use your configured search allowance or budget. New or changed results appear in Buntini; desktop alerts need notification permission. Checks run while Buntini is open and your Mac is awake. You can pause or delete this search in Scheduled work.".into())
     } else {
-        ("Track this product's price?".into(), vec![field("url", "Public product page"), field("label", "Watch name"), field("currency", "Currency code"), field("threshold", "Alert at or below"), field("interval_minutes", "Check every (minutes)")], "Allow authorizes repeated reads of this exact public HTTPS page, starting after the chosen interval. Buntini tracks a published exact structured price; pages requiring a login or JavaScript checkout are unsupported. This creates a watch; it does not verify the current price. Checks run while Buntini is open and your Mac is awake. You can pause or delete it in Scheduled work.".into())
+        ("Track this product's price?".into(), vec![field("url", "Public product page"), field("label", "Watch name"), field("currency", "Currency code"), field("threshold", "Alert at or below"), field("interval_minutes", "Check every (minutes)")], "Allow authorizes repeated reads of this exact public HTTPS page, starting now and then at the chosen interval. Pages requiring a login are unsupported. Checks run while Buntini is open and your Mac is awake. You can pause or delete it in Scheduled work.".into())
     }
 }
 fn failure(tool: &str, outcome: ActionOutcome, message: String) -> ActionReceipt {
@@ -401,6 +419,18 @@ mod tests {
         );
         assert!(store.price_watches().unwrap().is_empty());
     }
+    #[test]
+    fn a_saved_search_keeps_the_words_to_search_for() {
+        assert_eq!(search_words("search for Nikon Z8 camera deals every hour"), "Nikon Z8 camera deals");
+        assert_eq!(search_words("Search for Apple AirPods Pro 2 at Walmart every hour."), "Apple AirPods Pro 2 at Walmart");
+        assert_eq!(search_words("search for Find My iPhone alternatives every day"), "Find My iPhone alternatives");
+        for real in ["mechanical keyboards under $120", "Entertainment Weekly", "The Daily", "search engine optimization news", "find apartments", "cargo bikes hourly", "search for every hour"] {
+            assert_eq!(search_words(real), real, "{real}");
+        }
+        // Once only: the saved words go through the check again unchanged.
+        assert_eq!(search_words(&search_words("search for look up tables every week")), "look up tables");
+    }
+
     #[test]
     fn export_and_erase_cover_approved_intents_timers_and_monitor_history() {
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();

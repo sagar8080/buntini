@@ -8,6 +8,10 @@ pub fn now() -> String {
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct Settings {
     pub model_backend: String,
+    /// Buntini chooses the brain (`brain::pick`) until the user picks one. Saved settings
+    /// from before this existed read as false, so an update never moves anyone's brain.
+    #[serde(default)]
+    pub brain_auto: bool,
     pub python_path: String,
     pub model_path: String,
     pub whisper_model: String,
@@ -73,18 +77,31 @@ pub struct Settings {
     /// the person name; the suggested model uses `cloud::PROVIDERS` (see `cloud_prices`).
     pub cloud_provider: String,
     pub cloud_model: String,
+    /// The user's own server (`custom`): its address, and whether they said it runs only on
+    /// this Mac. Until they do, it's treated like any other cloud brain.
+    pub cloud_url: String,
+    pub cloud_on_this_mac: bool,
     pub cloud_budget_usd: f64,
     pub cloud_input_price: f64,
     pub cloud_output_price: f64,
+    /// Each part of the Coucou-parity work keeps its own settings in its own module.
+    pub island: crate::island::Settings,
+    pub agents: crate::agents::Settings,
+    pub flow: crate::flow::Settings,
+    pub services: crate::services::Settings,
+    pub mail: crate::mail::Settings,
+    pub media: crate::media::Settings,
+    pub utilities: crate::utilities::Settings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         // Product defaults never point at a particular Mac. Developers can preset local
         // model folders with environment variables before the first launch.
-        let preset = |name: &str| std::env::var(name).unwrap_or_default();
+        let preset = |name: &str| if cfg!(debug_assertions) { std::env::var(name).unwrap_or_default() } else { String::new() };
         Self {
             model_backend: "apple".into(),
+            brain_auto: true,
             // Never guess `python3`: on a fresh Mac that launches the Command Line Tools installer.
             python_path: preset("BUNTINI_PYTHON"),
             model_path: preset("BUNTINI_MODEL_PATH"),
@@ -131,10 +148,19 @@ impl Default for Settings {
             apps: Vec::new(),
             cloud_provider: "anthropic".into(),
             cloud_model: String::new(),
+            cloud_url: String::new(),
+            cloud_on_this_mac: false,
             cloud_budget_usd: 5.0,
             cloud_input_price: crate::cloud::PROVIDERS[0].input_per_m,
             cloud_output_price: crate::cloud::PROVIDERS[0].output_per_m,
             vad_model_path: preset("BUNTINI_VAD_MODEL_PATH"),
+            island: Default::default(),
+            agents: Default::default(),
+            flow: Default::default(),
+            services: Default::default(),
+            mail: Default::default(),
+            media: Default::default(),
+            utilities: Default::default(),
         }
     }
 }
@@ -271,6 +297,9 @@ impl Settings {
         if !crate::model::BACKENDS.contains(&self.model_backend.as_str()) {
             return Err("Choose Apple Intelligence, a local MLX model, or a cloud model.".into());
         }
+        if !self.cloud_url.trim().is_empty() {
+            crate::cloud::server_base(&self.cloud_url)?;
+        }
         if crate::cloud::provider(&self.cloud_provider).is_none()
             || !crate::cloud::model_valid(self.cloud_model.trim())
         {
@@ -303,6 +332,13 @@ impl Settings {
                 return Err("Model paths must point to existing local model directories. Buntini does not download models.".into());
             }
         }
+        self.island.validate()?;
+        self.agents.validate()?;
+        self.flow.validate()?;
+        self.services.validate()?;
+        self.mail.validate()?;
+        self.media.validate()?;
+        self.utilities.validate()?;
         Ok(())
     }
 }
@@ -373,6 +409,9 @@ pub struct TaskRecord {
     pub files: Vec<FileHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemSnapshot>,
+    /// The Mac at a glance card this reply shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glance: Option<crate::glance::Glance>,
     #[serde(default)]
     pub research: Vec<crate::research::ResearchContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -395,6 +434,16 @@ pub struct TaskRecord {
     /// With handoff "action": the proposal the approval sheet shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<serde_json::Value>,
+    /// Answers the user can pick when Buntini asked them something. Each sends its prompt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Choice {
+    pub label: String,
+    pub prompt: String,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -408,6 +457,29 @@ pub struct ResultCard {
     pub url: Option<String>,
     pub attribution: String,
     pub retrieved_at: String,
+    /// A map of the results, drawn on this Mac.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<CardMap>,
+    /// Photos from the user's library, shown as thumbnails.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub photos: Vec<CardPhoto>,
+}
+/// One photo a reply shows: its Photos library id (to open it there), its thumbnail in
+/// the cache (read back with `photo_thumbnail`), when it was taken and whether it moves.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CardPhoto {
+    pub id: String,
+    pub thumb: String,
+    pub taken: String,
+    pub video: bool,
+}
+/// A saved map picture (read back with `map_picture`) and the Maps view it shows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CardMap {
+    pub id: String,
+    pub url: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -528,6 +600,10 @@ pub struct Diagnostics {
     pub cloud_spend_usd: f64,
     /// The ChatGPT account Buntini is signed in to, if any.
     pub chatgpt_account: Option<String>,
+    /// "none", "usable" or "refused": what this Mac's ChatGPT sign-in allows.
+    pub chatgpt_plan: String,
+    /// Public internet questions go to ChatGPT without the sheet.
+    pub chatgpt_always_allow: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

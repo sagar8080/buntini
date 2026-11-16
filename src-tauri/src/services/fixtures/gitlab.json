@@ -1,0 +1,91 @@
+{
+ "source": "Shaped after GitLab's GraphQL reference (docs.gitlab.com/api/graphql/reference) for the query in gitlab.rs, and the profile calendar.json; ratelimit-* headers as gitlab.com sent them in a recorded answer. Not recorded from a live account.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "ratelimit-limit": "2000",
+   "ratelimit-remaining": "1995",
+   "ratelimit-reset": "1794820380"
+  },
+  "body": {
+   "data": {
+    "currentUser": {
+     "username": "sagar",
+     "authoredMergeRequests": {
+      "count": 2,
+      "nodes": [
+       {
+        "iid": "8",
+        "title": "Draw the island",
+        "webUrl": "https://gitlab.com/sagar/buntini/-/merge_requests/8",
+        "draft": true,
+        "updatedAt": "2026-11-16T09:15:00Z",
+        "project": {
+         "fullPath": "sagar/buntini"
+        },
+        "headPipeline": {
+         "status": "RUNNING"
+        }
+       },
+       {
+        "iid": "9",
+        "title": "Poll services",
+        "webUrl": "https://gitlab.com/sagar/buntini/-/merge_requests/9",
+        "draft": false,
+        "updatedAt": "2026-11-15T09:15:00Z",
+        "project": {
+         "fullPath": "sagar/buntini"
+        },
+        "headPipeline": {
+         "status": "FAILED"
+        }
+       }
+      ]
+     },
+     "reviewRequestedMergeRequests": {
+      "count": 2,
+      "nodes": [
+       {
+        "iid": "31",
+        "title": "Cache tokens",
+        "webUrl": "https://gitlab.com/acme/api/-/merge_requests/31",
+        "updatedAt": "2026-11-16T11:00:00Z",
+        "project": {
+         "fullPath": "acme/api"
+        },
+        "author": {
+         "username": "ana"
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ },
+ "calendar": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+   "2026-11-16": 4,
+   "2026-11-12": 2,
+   "2026-03-03": 7,
+   "2024-01-01": 9,
+   "not a date": 3
+  }
+ },
+ "throttled": {
+  "status": 429,
+  "headers": {
+   "retry-after": "30",
+   "ratelimit-remaining": "0",
+   "ratelimit-reset": "1794820350"
+  },
+  "body": {
+   "message": "Retry later"
+  }
+ }
+}

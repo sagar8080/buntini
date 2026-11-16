@@ -1,8 +1,9 @@
 // First-run setup, guided by Buntini in the chat bubble. Pure step logic: what Buntini
 // says, what the user's answer reads like, what blocks a step, and the settings it saves.
 import { appleStatus, cloudProviders } from './brain.ts';
+import { sharedSentence } from './cloudShares.ts';
 import { coats } from './petOptions.ts';
-import type { CatCoat, CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
+import type { AppConnection, AppStatus, CatCoat, CloudProvider, Diagnostics, ModelBackend, Settings } from './types';
 
 // Online lookups need no setup (browser research works without a key), so setup asks
 // only what Buntini can't decide for itself: names, a brain and whether it may roam.
@@ -14,22 +15,32 @@ export const questions = steps.length - 1;
 export interface Answers {
   userName: string; assistantName: string; coat: CatCoat;
   backend: ModelBackend; pythonPath: string; modelPath: string;
-  cloudProvider: CloudProvider; cloudKey: string;
+  /** The local model is being set up; setup needn't wait for it. */
+  localStarted: boolean;
+  cloudProvider: CloudProvider;
+  /** What a cloud brain may see (Settings::externalShares). */
+  shares: string[];
   roam: boolean; awareness: boolean; nudges: boolean;
 }
 
 /** The cloud cap setup uses when none was saved; it can be changed in Settings → Brain. */
 export const defaultCloudBudget = 5;
 // Apple Intelligence can be turned on later in these cases; in the others it never runs here.
-const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady', 'checking', undefined];
+const appleLater = ['available', 'appleIntelligenceNotEnabled', 'modelNotReady', 'modelStuck', 'languageNotSupported', 'checking', undefined];
 
 export function initialAnswers(settings: Settings, diagnostics: Diagnostics): Answers {
-  const appleUsable = appleLater.includes(diagnostics.appleIntelligence);
-  const backend: ModelBackend = settings.modelBackend === 'apple' && !appleUsable ? (settings.modelPath ? 'mlx' : 'cloud') : settings.modelBackend;
+  // A brain the user picked stays. Otherwise: Apple Intelligence, their ChatGPT plan, a local model.
+  const auto = settings.brainAuto;
+  const appleOut = !appleLater.includes(diagnostics.appleIntelligence);
+  const usablePlan = diagnostics.chatgptPlan === 'usable';
+  const elsewhere: ModelBackend = !usablePlan && (settings.modelPath || diagnostics.chatgptPlan === 'refused') ? 'mlx' : 'cloud';
+  const backend: ModelBackend = !auto ? settings.modelBackend
+    : appleStatus(diagnostics.appleIntelligence).ready ? 'apple'
+    : appleOut || usablePlan ? elsewhere : 'apple';
   return {
     userName: settings.userName, assistantName: settings.assistantName, coat: settings.catCoat,
-    backend, pythonPath: settings.pythonPath, modelPath: settings.modelPath,
-    cloudProvider: settings.cloudProvider, cloudKey: '',
+    backend, pythonPath: settings.pythonPath, modelPath: settings.modelPath, localStarted: false,
+    cloudProvider: auto ? 'chatgpt' : settings.cloudProvider, shares: settings.externalShares ?? [],
     roam: settings.petRoam, awareness: settings.petAwareness, nudges: settings.petNudges,
   };
 }
@@ -45,12 +56,13 @@ export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics):
     if (answers.userName.trim().length > 40) return 'Your name can be up to 40 characters.';
   }
   if (step === 'brain') {
-    if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return `${appleStatus(diagnostics.appleIntelligence).advice || 'Apple Intelligence can’t run here.'} Choose a local or cloud model instead.`;
-    if (answers.backend === 'mlx' && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Choose the Python environment and the model folder for your local model, or pick another brain.';
+    if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return `${appleStatus(diagnostics.appleIntelligence).advice || 'Apple Intelligence can’t run here.'} Sign in with ChatGPT or set up on this Mac.`;
+    if (answers.backend === 'mlx' && !answers.localStarted && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Finish setting up on this Mac, or sign in with ChatGPT.';
     if (answers.backend === 'cloud' && answers.cloudProvider === 'chatgpt') {
-      if (!diagnostics.chatgptAccount) return 'Sign in with ChatGPT, or choose another brain.';
+      if (!diagnostics.chatgptAccount) return 'Sign in with ChatGPT, or set up on this Mac.';
+      if (diagnostics.chatgptPlan === 'refused') return 'This ChatGPT account can’t use its plan in other apps. Set up on this Mac instead.';
     } else if (answers.backend === 'cloud') {
-      if (!answers.cloudKey.trim() && !diagnostics.cloudKeys?.includes(answers.cloudProvider)) return 'Paste your API key, or choose another brain.';
+      if (!diagnostics.cloudKeys?.includes(answers.cloudProvider)) return 'Add your API key in Settings → Brain, or sign in with ChatGPT.';
     }
   }
   return '';
@@ -63,8 +75,10 @@ export function message(step: Step, answers: Answers, diagnostics: Diagnostics):
     case 'hello': return 'Hi! I’m the little cat in the corner of your screen. What should I call you?';
     case 'brain': {
       const apple = appleStatus(diagnostics.appleIntelligence);
-      const nudge = apple.ready ? '' : ` Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}).`;
-      return `Nice to meet you${you ? `, ${you}` : ''}! Which brain should I think with?${nudge}`;
+      const hello = `Nice to meet you${you ? `, ${you}` : ''}!`;
+      if (apple.ready) return `${hello} I’ll think with Apple Intelligence.`;
+      if (diagnostics.appleIntelligence === 'checking' || diagnostics.appleIntelligence === undefined) return `${hello} Let me check how I can think on this Mac.`;
+      return `${hello} Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}). How should I think?`;
     }
     case 'roam': return 'Last one: may I wander around your screen and notice which apps you’re using?';
     case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything.`;
@@ -80,10 +94,10 @@ export function reply(step: Step, answers: Answers, settings?: Pick<Settings, 'c
     }
     case 'brain': {
       if (answers.backend === 'apple') return 'Use Apple Intelligence.';
-      if (answers.backend === 'mlx') return 'Use my local MLX model.';
+      if (answers.backend === 'mlx') return 'Set up on this Mac.';
       const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
-      if (provider.id === 'chatgpt') return 'Use ChatGPT with my own plan.';
-      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month.`;
+      if (provider.id === 'chatgpt') return `Use ChatGPT with my own plan. ${sharedSentence(answers.shares)}`;
+      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month. ${sharedSentence(answers.shares)}`;
     }
     case 'roam': return answers.roam ? `Roam around${answers.awareness ? ' and notice what I’m up to' : ''}.` : 'Stay put for now.';
     case 'done': return '';
@@ -103,6 +117,8 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
     // A new provider starts on its suggested model and list prices; the cap carries over.
     cloudProvider: answers.cloudProvider, cloudModel: sameProvider ? settings.cloudModel : '', cloudBudgetUsd: cloudBudget(settings),
     cloudInputPrice: sameProvider ? settings.cloudInputPrice : provider.input, cloudOutputPrice: sameProvider ? settings.cloudOutputPrice : provider.output,
+    // Only a cloud brain was asked; choosing another leaves the Privacy choices as they were.
+    externalShares: answers.backend === 'cloud' ? answers.shares : settings.externalShares,
     petRoam: answers.roam, petAwareness: answers.awareness, petNudges: answers.awareness && answers.nudges,
   };
 }
@@ -122,9 +138,21 @@ export function shortcutNeeds(shortcut: Shortcut, allowed: string[]): { apps: st
   return reads.some(app => allowed.includes(app)) ? null : { apps, ask, allow };
 }
 
-/** Keys typed during setup, saved to the Keychain before the settings. */
-export function keysToSave(answers: Answers): [KeyProvider, string][] {
-  const keys: [KeyProvider, string][] = [];
-  if (answers.backend === 'cloud' && answers.cloudProvider !== 'chatgpt' && answers.cloudKey.trim()) keys.push([answers.cloudProvider, answers.cloudKey.trim()]);
-  return keys;
+/** The apps the connect card offers. */
+const CONNECTABLE = ['mail', 'calendar'];
+export type ConnectRow = AppStatus & { state: AppConnection | 'off' };
+/** The card's rows. An app allowed before needs no second look; `found` is what connecting
+ * just found, and null is a try that failed, which can be tried again. */
+export function connectRows(apps: AppStatus[], allowed: string[], found: Record<string, AppConnection | null>): ConnectRow[] {
+  return CONNECTABLE.flatMap(id => {
+    const app = apps.find(item => item.id === id);
+    if (!app?.installed) return [];
+    const known = found[id];
+    return [{ ...app, state: known === null ? 'off' as const : known ?? (allowed.includes(id) ? 'ready' as const : 'off' as const) }];
+  });
+}
+/** Where System Settings can fix a row, if anywhere. */
+export function connectPane(row: ConnectRow) {
+  if (row.state === 'noAccount') return 'accounts';
+  return row.state === 'denied' ? (row.id === 'mail' ? 'automation' : 'calendars') : null;
 }

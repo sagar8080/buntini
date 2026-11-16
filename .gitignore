@@ -6,6 +6,10 @@ native/buntini-fm
 native/buntini-audio-*
 native/buntini-fm-*
 native/.build/
+native/surface/.build/
+native/surface/.swiftpm/
+native/surface-lab/.build/
+native/surface-lab/.swiftpm/
 __pycache__/
 *.pyc
 .venv/
@@ -25,3 +29,5 @@ dist-release/
 *.p12
 *.p8
 *.keychain-db
+native/audio/.build/
+native/audio/.swiftpm/

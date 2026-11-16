@@ -541,6 +541,8 @@ pub(crate) fn action_title(goal: &str, tool: &str) -> Option<String> {
                     .flatten()
                 })
             };
+            // "A note called Packing list: passport, charger": the colon starts its body.
+            let value = value.map(|value| if tool == "create_note" { value.split(": ").next().unwrap_or(value) } else { value });
             if let Some(value) = value.and_then(|value| field_prefix(value, 200, false)) {
                 titles.push(value);
             }
@@ -815,6 +817,11 @@ fn note_fields(clause: &str) -> Result<Option<Value>, String> {
                 && word(&rest[*index..], "with body").is_some()
         })
         .collect();
+    // "Make a note called Packing list: passport, charger": the title's colon starts the
+    // body, an everyday note `request_fields` reads.
+    if delimiters.is_empty() && rest.contains(": ") {
+        return Ok(None);
+    }
     if delimiters.len() != 1 {
         return Err("Give this note one title followed by ‘with body’ and its exact contents. Quote any field that itself contains ‘with body’.".into());
     }

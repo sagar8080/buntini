@@ -64,18 +64,69 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Whether this Mac has a sign-in that Buntini can use.
+pub fn saved() -> bool {
+    #[cfg(test)]
+    if let Some(session) = TEST_SESSION.lock().unwrap().as_ref() {
+        return session.is_some();
+    }
+    crate::web::credential_saved(KEYCHAIN_ID)
+}
+
+/// A live test signs in for one run and keeps it here, away from the app's own Keychain entry.
+#[cfg(test)]
+pub(crate) static TEST_SESSION: std::sync::Mutex<Option<Option<Session>>> = std::sync::Mutex::new(None);
+
+/// Not secrets: who is signed in and whether they allowed plan use, noted at sign-in so that
+/// opening Buntini doesn't have to decode the session. A sign-in from before these were noted
+/// shows a plain name until it's next used, and finds out about its plan then.
+const ACCOUNT: &str = "chatgpt-account";
+const NO_PLAN: &str = "chatgpt-no-plan-scope";
+
+pub fn note(store: &crate::store::Store, session: &Session) -> Result<(), String> {
+    store.set_preference(ACCOUNT, &session.email)?;
+    store.set_preference(NO_PLAN, if session.plan_allowed() { "" } else { "1" })
+}
+
+pub fn account(store: &crate::store::Store) -> Option<String> {
+    saved().then(|| store.preference(ACCOUNT).ok().flatten().filter(|email| !email.is_empty()).unwrap_or_else(|| "your ChatGPT account".into()))
+}
+
+pub fn plan_noted(store: &crate::store::Store) -> bool {
+    store.preference(NO_PLAN).ok().flatten().is_none_or(|value| value.is_empty())
+}
+
+/// Whether a sign-in from before these were noted still has to be.
+pub fn account_unnoted(store: &crate::store::Store) -> bool {
+    store.preference(ACCOUNT).ok().flatten().is_none()
+}
+
 pub fn load() -> Option<Session> {
+    #[cfg(test)]
+    if let Some(session) = TEST_SESSION.lock().unwrap().as_ref() {
+        return session.clone();
+    }
     crate::web::credential(KEYCHAIN_ID)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
 }
 fn save(session: &Session) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(saved) = TEST_SESSION.lock().unwrap().as_mut() {
+        *saved = Some(session.clone());
+        return Ok(());
+    }
     crate::web::set_credential(
         KEYCHAIN_ID,
         &serde_json::to_string(session).map_err(|e| e.to_string())?,
     )
 }
 fn forget() -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(saved) = TEST_SESSION.lock().unwrap().as_mut() {
+        *saved = None;
+        return Ok(());
+    }
     crate::web::set_credential(KEYCHAIN_ID, "")
 }
 
@@ -588,13 +639,25 @@ pub async fn models() -> Result<Vec<ModelInfo>, String> {
     Ok(list)
 }
 
+/// This account can't use its plan in other apps.
+pub const PLAN_NOT_ELIGIBLE: &str = "This ChatGPT account can’t use its plan in other apps.";
+
+/// Whether this message says ChatGPT can't answer at the moment, rather than won't.
+pub fn unavailable(message: &str) -> bool {
+    message == PLAN_NOT_ELIGIBLE
+        || message.contains("reached the limit for using your ChatGPT plan")
+        || message == "ChatGPT is busy right now. Try again in a moment."
+        || message.starts_with("Couldn’t reach ChatGPT")
+        || message.starts_with("The connection to ChatGPT failed")
+}
+
 /// Plain-language advice for ChatGPT plan errors (HTTP responses or failed streams).
 pub fn plan_error(code: &str, param: &str) -> Option<String> {
     Some(match code {
         "subscription_sharing_usage_limit_exceeded" => "You’ve reached the limit for using your ChatGPT plan in apps like Buntini. Check ChatGPT → Settings → Usage.".into(),
         "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable" => "ChatGPT is busy right now. Try again in a moment.".into(),
         "subscription_sharing_invalid_user" => "ChatGPT didn’t accept this sign-in. If you disconnected Buntini in ChatGPT, sign in again in Settings → Brain.".into(),
-        "subscription_sharing_user_not_eligible" => "Your ChatGPT workspace doesn’t allow its plan to be used in other apps.".into(),
+        "subscription_sharing_user_not_eligible" => PLAN_NOT_ELIGIBLE.into(),
         "subscription_sharing_unsupported_capability" => format!("ChatGPT doesn’t support {} here. Choose another model in Settings → Brain.", if param.is_empty() { "that request" } else { param }),
         _ => return None,
     })
@@ -613,6 +676,7 @@ fn host_id(store: &crate::store::Store) -> Result<String, String> {
 #[tauri::command]
 pub async fn chatgpt_sign_in(
     state: tauri::State<'_, crate::controller::AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let (host, saved) = {
         let store = state.store.lock().unwrap();
@@ -624,7 +688,11 @@ pub async fn chatgpt_sign_in(
         .lock()
         .unwrap()
         .set_preference("chatgpt-client-id", &session.client_id)?;
+    note(&state.store.lock().unwrap(), &session)?;
     state.audit("chatgpt.signed_in", "Signed in with ChatGPT");
+    state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_in(&state.store.lock().unwrap())?;
+    crate::brain::settle_after_sign_in(&app).await;
     if !session.plan_allowed() {
         return Err("You’re signed in, but Buntini wasn’t allowed to use your ChatGPT plan. Sign in again and allow plan usage.".into());
     }
@@ -641,8 +709,12 @@ pub fn chatgpt_cancel_sign_in() {
 #[tauri::command]
 pub async fn chatgpt_sign_out(
     state: tauri::State<'_, crate::controller::AppState>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
     let confirmed = sign_out().await?;
+    state.store.lock().unwrap().set_preference(crate::brain::PLAN_REFUSED, "")?;
+    crate::helper::signed_out(&state.store.lock().unwrap())?;
+    crate::brain::settle_and_tell(&app).await;
     state.audit(
         "chatgpt.signed_out",
         if confirmed {
@@ -764,38 +836,41 @@ mod tests {
 
     #[test]
     fn id_tokens_must_match_this_sign_in() {
+        // Made fresh, as a real sign-in makes them, rather than written into the test.
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
         let good = jwt(
-            serde_json::json!({"iss": ISSUER, "aud": "oaiapp_1", "nonce": "n1", "exp": now() + 600, "sub": "user-1", "email": "sam@example.com"}),
+            serde_json::json!({"iss": ISSUER, "aud": "oaiapp_1", "nonce": nonce, "exp": now() + 600, "sub": "user-1", "email": "sam@example.com"}),
         );
         assert_eq!(
-            verify_id_token(&good, "oaiapp_1", "n1").unwrap(),
+            verify_id_token(&good, "oaiapp_1", &nonce).unwrap(),
             ("user-1".to_string(), "sam@example.com".to_string())
         );
         assert!(
-            verify_id_token(&good, "oaiapp_2", "n1").is_err(),
+            verify_id_token(&good, "oaiapp_2", &nonce).is_err(),
             "audience"
         );
-        assert!(verify_id_token(&good, "oaiapp_1", "n2").is_err(), "nonce");
+        assert!(verify_id_token(&good, "oaiapp_1", &other).is_err(), "nonce");
         let expired = jwt(
-            serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1"], "nonce": "n1", "exp": now() - 1, "sub": "user-1"}),
+            serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1"], "nonce": nonce, "exp": now() - 1, "sub": "user-1"}),
         );
         assert!(
-            verify_id_token(&expired, "oaiapp_1", "n1").is_err(),
+            verify_id_token(&expired, "oaiapp_1", &nonce).is_err(),
             "expiry"
         );
         let foreign = jwt(
-            serde_json::json!({"iss": "https://evil.example", "aud": "oaiapp_1", "nonce": "n1", "exp": now() + 600, "sub": "u"}),
+            serde_json::json!({"iss": "https://evil.example", "aud": "oaiapp_1", "nonce": nonce, "exp": now() + 600, "sub": "u"}),
         );
         assert!(
-            verify_id_token(&foreign, "oaiapp_1", "n1").is_err(),
+            verify_id_token(&foreign, "oaiapp_1", &nonce).is_err(),
             "issuer"
         );
-        let mut claims = serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1", "other-app"], "nonce": "n1", "exp": now() + 600, "sub": "u"});
-        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        let mut claims = serde_json::json!({"iss": ISSUER, "aud": ["oaiapp_1", "other-app"], "nonce": nonce, "exp": now() + 600, "sub": "u"});
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", &nonce).is_err());
         claims["azp"] = "other-app".into();
-        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", "n1").is_err());
+        assert!(verify_id_token(&jwt(claims.clone()), "oaiapp_1", &nonce).is_err());
         claims["azp"] = "oaiapp_1".into();
-        assert!(verify_id_token(&jwt(claims), "oaiapp_1", "n1").is_ok());
+        assert!(verify_id_token(&jwt(claims), "oaiapp_1", &nonce).is_ok());
     }
 
     #[test]

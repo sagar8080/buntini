@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { taskRecovery, missingTaskFields } from './taskRecovery.ts';
+import { taskRecovery, missingTaskFields, stillOpen } from './taskRecovery.ts';
 import type { TaskProgress, TaskRecord } from './types';
 
 const progress = (state: string, canResume?: boolean): TaskProgress => ({ id: 'task', goal: 'Read calendar then add a reminder', state, canResume, updatedAt: '', steps: [] });
@@ -44,4 +44,14 @@ test('clarification targets missing inputs on unfinished actions only', () => {
   assert.equal(fields[0].outcomeId, 'outcome-1');
   assert.equal(fields[0].date, true);
   assert.deepEqual(missingTaskFields(), []);
+});
+
+test('a finished task shows nothing about how it got there', () => {
+  const step = (state: string) => ({ id: state, tool: 'read_mail', state }) as TaskProgress['steps'][number];
+  const task = (steps: TaskProgress['steps'], outcomes?: string[]) => ({ steps, contract: outcomes && { outcomes: outcomes.map((status, at) => ({ id: String(at), description: '', status })) } }) as unknown as TaskProgress;
+  assert.equal(stillOpen(task([])), false);
+  assert.equal(stillOpen(task([step('succeeded'), step('superseded')])), false);
+  assert.equal(stillOpen(task([step('succeeded')], ['complete', 'complete'])), false);
+  assert.equal(stillOpen(task([step('failed')])), true);
+  assert.equal(stillOpen(task([step('succeeded')], ['complete', 'ready'])), true);
 });

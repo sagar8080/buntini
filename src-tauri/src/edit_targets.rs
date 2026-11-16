@@ -171,7 +171,7 @@ fn resolve(clock: Clock, near: u32) -> u32 {
 }
 
 /// A day the user named, relative to `today`. A weekday is the next one after today.
-fn day(word: &str, today: NaiveDate) -> Option<NaiveDate> {
+pub(crate) fn day(word: &str, today: NaiveDate) -> Option<NaiveDate> {
     let weekday = match word {
         "today" | "tonight" => return Some(today),
         "tomorrow" => return today.succ_opt(),

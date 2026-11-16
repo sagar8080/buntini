@@ -16,12 +16,14 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }
+# Builds and links native/surface, the Swift package behind the island and the pill.
+swift-rs = { version = "1.0.9", features = ["build"] }
 
 [dependencies]
 tauri = { version = "2.11.2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-global-shortcut = "2.3.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1.54.1", features = ["process", "io-util", "sync", "time", "rt-multi-thread", "macros", "net"] }
 # Sign in with ChatGPT: PKCE (SHA-256, base64url) and random state, nonce and verifier.
 sha2 = "0.11"
@@ -47,8 +49,10 @@ tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"
 objc2 = "0.6.5"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWindow", "NSColor", "NSApplication", "NSScreen", "NSWorkspace", "NSRunningApplication", "NSHapticFeedback", "libc"] }
-objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError", "NSArray", "NSDictionary", "NSValue", "NSUserDefaults"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWindow", "NSColor", "NSApplication", "NSScreen", "NSWorkspace", "NSRunningApplication", "NSHapticFeedback", "NSPasteboard", "libc"] }
+# Pasting a dropped file's path into an agent's terminal.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGEvent", "CGEventSource", "CGEventTypes", "CGRemoteOperation"] }
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError", "NSArray", "NSDictionary", "NSValue", "NSUserDefaults", "NSData"] }
 objc2-user-notifications = { version = "0.3.2", features = ["block2"] }
 block2 = "0.6"
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import Customization from './Customization';
+import FlowSettings from './flow/FlowSettings';
 import BrainSettings from './BrainSettings';
 import Connections from './Connections';
 import PrivacyTab from './PrivacyTab';
@@ -36,6 +37,11 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
   useEffect(() => { if (edited.current) saver.edit(draft); }, [draft]);
   // Open at login is saved as what macOS confirmed: when it refused, the switch says so.
   useEffect(() => saver.subscribeSaved((sent, saved) => {
+    // Left to Buntini, the brain it chose on saving is the one to show.
+    if (sent.modelBackend !== saved.modelBackend || sent.cloudProvider !== saved.cloudProvider) {
+      edited.current = false;
+      setDraft(previous => ({ ...previous, modelBackend: saved.modelBackend, cloudProvider: saved.cloudProvider, cloudModel: saved.cloudModel, cloudInputPrice: saved.cloudInputPrice, cloudOutputPrice: saved.cloudOutputPrice }));
+    }
     if (sent.openAtLogin === saved.openAtLogin) { setLoginProblem(''); return; }
     edited.current = false;
     setDraft(previous => ({ ...previous, openAtLogin: saved.openAtLogin }));
@@ -63,6 +69,7 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
     {loginProblem && <p className="settings-problem" role="alert">{loginProblem}</p>}
     <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
+      {tab === 'buntini' && <FlowSettings draft={draft} update={update} onError={onError} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       {tab === 'apps' && <AppsTab draft={draft} update={update} onError={onError} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}

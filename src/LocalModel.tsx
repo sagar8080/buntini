@@ -1,18 +1,22 @@
 import { useState } from 'react';
 import { Check, CircleAlert, FolderOpen, LoaderCircle } from 'lucide-react';
 import ModelAdvisor from './ModelAdvisor';
+import LocalSetup from './LocalSetup';
 import { command, errorMessage } from './bridge';
 import { folderName, setupLines, type SetupReport } from './brain.ts';
 import type { Settings } from './types';
 
 // `testable` is off in first-run setup: the check reads saved settings, and setup saves at the end.
-type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void; testable?: boolean };
+type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void; testable?: boolean; onStart?: () => void; onStop?: () => void };
 
 /** The local model, set up by choosing folders in Finder rather than typing paths. */
-export default function LocalModel({ draft, update, onError, testable = true }: Props) {
+export default function LocalModel({ draft, update, onError, testable = true, onStart, onStop }: Props) {
   const [testing, setTesting] = useState(false);
   const [lines, setLines] = useState<ReturnType<typeof setupLines> | null>(null);
+  const [folders, setFolders] = useState(false);
   const chosen = !!draft.pythonPath.trim() && !!draft.modelPath.trim();
+  // A Python Buntini fetched itself lives in its own folder; any other was chosen by hand.
+  const byHand = !!draft.pythonPath.trim() && !draft.pythonPath.includes('/local-brain/');
   async function choose(kind: 'environment' | 'model') {
     try {
       const path = await command<string | null>('choose_local_folder', { kind });
@@ -30,6 +34,13 @@ export default function LocalModel({ draft, update, onError, testable = true }: 
     <span><strong>{label}</strong><small title={value || undefined}>{value ? folderName(value) : hint}</small></span>
     <button type="button" className="secondary-button" onClick={() => void choose(kind)}>{value ? 'Change…' : 'Choose…'}</button>
   </div>;
+  const setup = <LocalSetup removable={testable} onStart={onStart} onStop={onStop} onError={onError}
+    onReady={(python, model) => { if (draft.pythonPath !== python) update('pythonPath', python); if (draft.modelPath !== model) update('modelPath', model); }}
+    onRemoved={() => { update('pythonPath', ''); update('modelPath', ''); }} />;
+  if (!byHand && !folders) return <>
+    {setup}
+    <button type="button" className="text-button" onClick={() => setFolders(true)}>Use a model I already have</button>
+  </>;
   return <>
     {!chosen && <ModelAdvisor draft={draft} update={update} />}
     <div className="local-choices">
