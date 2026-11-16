@@ -12,6 +12,7 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
   - What the person does comes back as an `Action` through one C callback.
   - `surface::on_action(source, …)` hands it to the part that owns it.
 - **Voice bands** skip the scene: `surface::levels([f32; 9])`.
+- **Words** are the `surface.*` keys of `locales/<language>.json`. Rust sends them with the first scene and when the language changes (`words`); Swift keeps the last ones (`Words.swift`, `L(.chat)`). A new label goes in `Word`, in `locales/*.json` and in the fixture's first scene.
 
 ## Who owns what
 
