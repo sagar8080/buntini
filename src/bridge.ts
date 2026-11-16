@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
+import type { AgentRequest, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
@@ -50,6 +50,15 @@ function previewApps() {
   const names: Record<string, string> = { mail: 'Mail', calendar: 'Calendar', reminders: 'Reminders', notes: 'Notes', music: 'Music', spotify: 'Spotify', tv: 'TV', shortcuts: 'Shortcuts', facetime: 'FaceTime', photos: 'Photos', messages: 'Messages', safari: 'Safari', chrome: 'Google Chrome', brave: 'Brave Browser', edge: 'Microsoft Edge', arc: 'Arc' };
   return { apps: Object.keys(names).map(id => ({ id, name: names[id], can: can[id], note: id === 'safari' ? 'Safari doesn’t say which windows are private, so Buntini can see those too. Close private windows before asking.' : null, installed: !['spotify', 'edge', 'arc'].includes(id), allowed: false })), others: ['Figma', 'Slack', 'Visual Studio Code', 'Xcode'] };
 }
+// Preview-only coding agents. `?agents-preview` puts a request and a question on the cat.
+function previewCodingAgents(): CodingAgent[] {
+  const on = (id: string) => localStorage.getItem(`buntini-preview-agent-${id}`) === '1';
+  return [{ id: 'claude', name: 'Claude Code', available: true, connected: on('claude'), heard: true, problem: '' }, { id: 'codex', name: 'Codex', available: true, connected: on('codex'), heard: false, problem: '' }];
+}
+let previewAgentRequests: AgentRequest[] = import.meta.env.DEV && new URLSearchParams(location.search).has('agents-preview') ? [
+  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], createdAt: '2026-11-15T12:00:00Z' },
+  { id: 'preview-agent-2', agent: 'Claude Code', project: 'buntini', title: '', detail: '', code: false, createdAt: '2026-11-15T12:00:05Z', questions: [{ question: 'Where should the request card go when the panel is open?', header: 'Placement', multiSelect: false, options: [{ label: 'Top of the panel', description: '' }, { label: 'Above the composer', description: '' }] }] },
+] : [];
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
 function previewTasks(): TaskRecord[] {
   if (reliabilityPreview) return previewReliabilityTasks;
@@ -145,6 +154,10 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'mac_glance_now') return JSON.parse(localStorage.getItem('buntini-preview-glance-now') || 'null') as T;
     if (name === 'chatgpt_always_allow_off') { localStorage.removeItem('buntini-preview-chatgpt-always'); return undefined as T; }
     if (name === 'app_list') return previewApps() as T;
+    if (name === 'coding_agents') return previewCodingAgents() as T;
+    if (name === 'connect_coding_agent') { localStorage.setItem(`buntini-preview-agent-${args?.id}`, args?.on ? '1' : ''); return previewCodingAgents().find(agent => agent.id === args?.id) as T; }
+    if (name === 'agent_requests') return previewAgentRequests as T;
+    if (name === 'answer_agent') { previewAgentRequests = previewAgentRequests.filter(request => request.id !== args?.id); return undefined as T; }
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;
     if (name === 'stop_recording') return 'What’s on my calendar today?' as T;

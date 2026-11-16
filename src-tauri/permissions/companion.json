@@ -5,6 +5,10 @@
       "description": "Privileged controller commands for the bundled main companion UI only. Browser workspaces receive none.",
       "commands": {
         "allow": [
+          "agent_requests",
+          "answer_agent",
+          "coding_agents",
+          "connect_coding_agent",
           "bootstrap",
           "capture_focus",
           "save_settings",

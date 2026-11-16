@@ -30,9 +30,10 @@ import { relativeTime } from './format';
 import { SpeechQueue } from './speech';
 import { speakable } from './markdown';
 import ConnectApps from './ConnectApps';
+import { AgentCard, AgentDone } from './AgentRequests';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
-import type { Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import type { AgentAnswer, AgentFinished, AgentRequest, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
@@ -140,6 +141,41 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const setHandsFreeMode = (on: boolean) => { handsFreeRef.current = on; setHandsFree(on); };
   const [listenSeconds, setListenSeconds] = useState(0);
+  // Claude Code and Codex asking for something (agents.rs), oldest first, and a long turn that finished.
+  const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
+  const [agentDone, setAgentDone] = useState<AgentFinished | null>(null);
+  const expandedRef = useRef(false);
+  expandedRef.current = expanded;
+  useEffect(() => {
+    void command<AgentRequest[]>('agent_requests').then(setAgentRequests).catch(() => {});
+    if (!desktop) return;
+    const requests = listen<AgentRequest[]>('agent-requests', event => setAgentRequests(event.payload));
+    const finished = listen<AgentFinished>('agent-finished', event => {
+      react('happy');
+      const { agent, project } = event.payload;
+      if (expandedRef.current) setNotice(`${agent} is done${project ? ` · ${project}` : ''}`);
+      else setAgentDone(event.payload);
+    });
+    return () => { void requests.then(unlisten => unlisten()); void finished.then(unlisten => unlisten()); };
+  }, []);
+  useEffect(() => {
+    if (!agentDone) return;
+    const id = window.setTimeout(() => setAgentDone(null), 9000);
+    return () => window.clearTimeout(id);
+  }, [agentDone]);
+  const agentAsking = agentRequests[0];
+  useEffect(() => {
+    if (agentAsking) setAnnouncement(`${agentAsking.agent}: ${agentAsking.questions[0]?.question || agentAsking.title}`);
+  }, [agentAsking?.id]);
+  async function answerAgent(id: string, answer: AgentAnswer) {
+    try { await command('answer_agent', { id, answer }); }
+    catch (error) { setError(errorMessage(error)); }
+    // Answered, or already settled in the terminal: either way it's done here.
+    setAgentRequests(previous => previous.filter(request => request.id !== id));
+  }
+  // The bubble above the cat has a fixed width; its height decides the window's.
+  const agentBubbleRef = useRef<HTMLDivElement>(null);
+  const [agentBubbleHeight, setAgentBubbleHeight] = useState(0);
   // Petting the cat is announced to screen readers: once when it purrs, once when it kneads.
   useEffect(() => {
     const said = (event: Event) => setAnnouncement(`${data?.settings.assistantName || 'Buntini'} is ${(event as CustomEvent<PetFeeling>).detail}`);
@@ -289,17 +325,31 @@ export default function App() {
     nudges: !!data?.settings.petNudges && !!data?.settings.petAwareness,
     motion: data?.settings.petMotion || 'playful',
     scale: data?.settings.companionScale || 1,
-    expanded, petState, react,
+    expanded, petState: agentAsking && petState === 'idle' ? 'approval' : petState, react,
     onAction: action => nudgeAction.current(action),
   });
-  const nudging = !expanded && !!world.nudge;
+  // A request from a coding agent shows above the cat, ahead of any nudge.
+  const agentBubble = !expanded && !world.quiet && (!!agentAsking || !!agentDone);
+  const nudging = !expanded && !!world.nudge && !agentBubble;
+  useEffect(() => {
+    const element = agentBubbleRef.current;
+    if (!agentBubble || !element) { setAgentBubbleHeight(0); return; }
+    const measure = () => setAgentBubbleHeight(Math.ceil(element.getBoundingClientRect().height));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [agentBubble, agentAsking?.id, !!agentDone]);
+  const collapsedHeight = (scale: number) => agentBubble ? Math.max(136, Math.round(agentBubbleHeight + 124 * scale)) : Math.max(136, Math.round(136 * scale));
   useEffect(() => {
     if (!desktop) return;
+    // Wait for the bubble's height rather than sizing the window twice.
+    if (agentBubble && !agentBubbleHeight) return;
     const scale = data?.settings.companionScale || 1;
     // A nudge borrows room above the pet for its speech bubble.
     const size = panelScale[data?.settings.panelSize || 'standard'] ?? 1;
-    const width = expanded ? Math.round(420 * size) : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
-    const height = expanded ? Math.round((page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * size) + Math.round(120 * (scale - 1)) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
+    const width = expanded ? Math.round(420 * size) : agentBubble ? Math.max(300, Math.round(128 * scale)) : nudging ? Math.round(252 * scale) : Math.max(128, Math.round(128 * scale));
+    const height = expanded ? Math.round((page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * size) + Math.round(120 * (scale - 1)) : agentBubble ? collapsedHeight(scale) : nudging ? Math.round(250 * scale) : Math.max(136, Math.round(136 * scale));
     resizeQueue.current = resizeQueue.current.then(async () => {
       const window = getCurrentWindow();
       const [position, before, monitor] = await Promise.all([window.outerPosition(), window.outerSize(), currentMonitor()]);
@@ -315,7 +365,7 @@ export default function App() {
       }
       await window.setPosition(new PhysicalPosition(x, y));
     }).catch(e => setError(errorMessage(e)));
-  }, [expanded, nudging, page, chatting, !!approval, !!needs, data?.settings.companionScale, data?.settings.panelSize]);
+  }, [expanded, nudging, agentBubble, agentBubbleHeight, page, chatting, !!approval, !!needs, data?.settings.companionScale, data?.settings.panelSize]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen('companion-toggle', () => { void expand(true); });
@@ -886,7 +936,7 @@ export default function App() {
   const companionScale = data?.settings.companionScale || 1;
 
   return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
-    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : Math.max(136, 136 * companionScale) } : {}) } as CSSProperties}>
+    <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : agentBubble ? collapsedHeight(companionScale) : Math.max(136, 136 * companionScale), ...(agentBubble ? { width: 300 } : {}) } : {}) } as CSSProperties}>
       {expanded && <section className="panel" aria-label="Buntini companion">
         <header className="panel-header">
           <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong>{(busy || recording || speaking) && <span className="header-status is-busy" aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (live?.answer && (!activity || activity === 'Thinking it over') ? 'Writing…' : activity || 'On it…') : 'Talking'}</span>}</span></button>
@@ -897,6 +947,7 @@ export default function App() {
             <button className="icon-button" title="Collapse companion" aria-label="Collapse companion" onClick={() => void expand(false)}><Minus size={17} /></button>
           </div>
         </header>
+        {agentAsking && <AgentCard key={agentAsking.id} className="in-panel" request={agentAsking} more={agentRequests.length - 1} onAnswer={answer => answerAgent(agentAsking.id, answer)} />}
 
         {page === 'home' && onboarding && data && <Onboarding data={data} onFinish={finishSetup} onSkip={() => safeAction(() => command('finish_onboarding'))} onRefresh={async () => { await refresh(); }} toast={toastAnchored ? toast : null} />}
         {page === 'home' && !onboarding && <>
@@ -973,6 +1024,7 @@ export default function App() {
 
       <div className="pet-dock">
         {!expanded && !nudging && world.ask && <button className="pet-ask" aria-label={`Let ${assistantName} paw at this window`} onClick={world.knock}><svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="12" cy="16" rx="5.2" ry="4.4" /><ellipse cx="5.6" cy="10.6" rx="2.1" ry="2.6" /><ellipse cx="9.4" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="14.6" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="18.4" cy="10.6" rx="2.1" ry="2.6" /></svg></button>}
+        {agentBubble && <div className="agent-bubble" ref={agentBubbleRef}>{agentAsking ? <AgentCard key={agentAsking.id} request={agentAsking} more={agentRequests.length - 1} onAnswer={answer => answerAgent(agentAsking.id, answer)} /> : agentDone && <AgentDone note={agentDone} onClose={() => setAgentDone(null)} />}</div>}
         {nudging && world.nudge && <div className="nudge-bubble" role="status" aria-live="polite"><p>{world.nudge.text}</p><div>{world.nudge.actions.map(item => <button key={item.label} onClick={() => world.act(item.action)}>{item.label}</button>)}</div></div>}
         {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? 'All ears.' : petState === 'thinking' ? 'A little thinking…' : petState === 'working' ? 'On it, one moment.' : petState === 'speaking' ? 'Something to say.' : 'Here when you need me.'}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
         <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
@@ -988,7 +1040,7 @@ export default function App() {
           };
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
-        }}><Pet state={petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
+        }}><Pet state={agentAsking && petState === 'idle' ? 'approval' : petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
         <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>Pet {assistantName}</button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => { setMenu(false); void submit('How’s my Mac?', 'auto'); }}><Laptop size={13} /> Your Mac</button><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}

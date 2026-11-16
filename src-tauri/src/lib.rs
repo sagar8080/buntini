@@ -1,4 +1,6 @@
 mod actions;
+mod agent_setup;
+mod agents;
 #[cfg(debug_assertions)]
 pub mod acceptance_apps;
 mod advisor;
@@ -194,6 +196,8 @@ pub fn run() {
             focus::start();
             memory_index::start(app.handle().clone());
             // Before any timer or approval alert can be answered.
+            // Claude Code and Codex hand their requests over once their hooks are on.
+            agents::start(app.handle().clone(), app.path().app_data_dir()?);
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
@@ -358,7 +362,11 @@ pub fn run() {
             nudges::dismiss_heads_up,
             notifications::take_heads_up_request,
             goals::update_goal,
-            goals::delete_goal
+            goals::delete_goal,
+            agents::agent_requests,
+            agents::answer_agent,
+            agent_setup::coding_agents,
+            agent_setup::connect_coding_agent
         ])
         .build(app_context())
         .expect("Buntini could not start")
@@ -394,6 +402,7 @@ pub fn run() {
                         state.models.shutdown().await;
                         mcp::stop_all();
                         app.exit(0);
+                        agents::stop();
                     });
                 }
             }

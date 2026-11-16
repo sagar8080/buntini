@@ -23,6 +23,7 @@ A little cat that lives on your screen, chats with you, notices what you’re wo
 - **Works with your apps.** Mail, Calendar, Reminders, Notes, Music, Spotify, Shortcuts and your browser tabs, on your Mac with no accounts, once you allow each one.
 - **Gets things done, with your OK.** Review reminders, calendar events, notes, Mail drafts, Shortcuts and model-proposed apps/links before they run. Direct commands such as “open YouTube” run immediately.
 - **Continues saved tasks.** Multi-step tasks retain approvals, inputs and verified receipts across restarts. Review the next step or add missing details; uncertain writes stop without automatic replay.
+- **Keeps an eye on your coding agents.** When Claude Code or Codex needs permission or has a question, the cat shows it, so you can allow, deny or answer without going back to the terminal.
 - **Looks things up.** Weather, exchange rates, Wikipedia, places, flights, eBay and web search, inside a budget you set.
 - **Remembers.** Saved conversation threads, the facts you ask it to keep, and an optional morning brief.
 

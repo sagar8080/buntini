@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Toggle from './Toggle';
 import { command, errorMessage } from './bridge';
-import type { AppList, Settings } from './types';
+import type { AppList, CodingAgent, Settings } from './types';
 
 type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void };
 
@@ -10,7 +10,17 @@ export default function AppsTab({ draft, update, onError }: Props) {
   const [list, setList] = useState<AppList | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [assisting, setAssisting] = useState<boolean | null>(null);
+  const [agents, setAgents] = useState<CodingAgent[]>([]);
+  const [connecting, setConnecting] = useState('');
   useEffect(() => { command<AppList>('app_list').then(setList).catch(error => onError(errorMessage(error))); }, []);
+  // Claude Code and Codex: on writes Buntini's hooks into the agent's own settings, off takes them out.
+  useEffect(() => { command<CodingAgent[]>('coding_agents').then(setAgents).catch(() => {}); }, []);
+  async function connect(id: string, on: boolean) {
+    setConnecting(id);
+    try { const next = await command<CodingAgent>('connect_coding_agent', { id, on }); setAgents(previous => previous.map(agent => agent.id === id ? next : agent)); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setConnecting(''); }
+  }
   // Accessibility lets Buntini press buttons and read pages in other apps; macOS may take a
   // moment to report a new permission, so look again when the window comes back into focus.
   useEffect(() => {
@@ -36,6 +46,14 @@ export default function AppsTab({ draft, update, onError }: Props) {
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
     </section>
+    {agents.some(agent => agent.available) && <section className="settings-section">
+      <div className="settings-section-heading"><h3>Coding agents</h3></div>
+      {agents.filter(agent => agent.available).map(agent => <div key={agent.id} className="app-permission">
+        <Toggle label={agent.name} detail={agent.id === 'claude' ? 'Approve, deny and answer from the cat · Know when it’s done' : 'Approve and deny from the cat · Know when it’s done'} checked={agent.connected} disabled={connecting === agent.id} onChange={on => void connect(agent.id, on)} />
+        {agent.problem && <p className="field-help">{agent.problem}</p>}
+        {agent.id === 'codex' && agent.connected && !agent.heard && <p className="field-help app-note">In Codex, type /hooks and trust Buntini’s hooks.</p>}
+      </div>)}
+    </section>}
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Accessibility</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>
       <p className="field-help">{assisting ? 'Allowed' : 'Spotify, browser pages, screen lock'}</p>
