@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Toggle from './Toggle';
+import MailSection from './mail/MailSection';
 import { command, errorMessage } from './bridge';
 import type { AppList, Settings } from './types';
 import AgentsSection from './agents/AgentsSection';
@@ -37,6 +38,7 @@ export default function AppsTab({ draft, update, onError }: Props) {
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
     </section>
+    {draft.apps.includes('mail') && <MailSection value={draft.mail} onChange={mail => update('mail', mail)} onError={onError} />}
     <AgentsSection onError={onError} />
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Accessibility</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>

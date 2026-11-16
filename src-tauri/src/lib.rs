@@ -211,6 +211,7 @@ pub fn run() {
             } else {
                 eprintln!("Native surfaces unavailable");
             }
+            mail::start(app.handle().clone());
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
