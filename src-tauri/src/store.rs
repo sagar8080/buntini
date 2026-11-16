@@ -39,6 +39,7 @@ impl Store {
         crate::mcp::initialize(&store.db)?;
         crate::nudges::initialize(&store.db)?;
         crate::goals::initialize(&store)?;
+        crate::flow::history::initialize(&store.db)?;
         let has_spend: bool = {
             let mut statement = store
                 .db
@@ -587,6 +588,7 @@ impl Store {
                  DELETE FROM memory_records; DELETE FROM memory_fts; DELETE FROM nudges; DELETE FROM nudge_marks; DELETE FROM nudge_sent; DELETE FROM mac_history;",
             )
             .map_err(|e| e.to_string())?;
+        crate::flow::history::erase(&tx)?;
         self.bump_index();
         crate::triage::forget_cache();
         // The empty database already uses the new thread schema. A task saved before
@@ -628,6 +630,7 @@ impl Store {
             UPDATE audit SET detail='';
             DELETE FROM goals WHERE json_extract(data,'$.state') IN ('done','ended');
             UPDATE goals SET data=json_remove(data,'$.lastTaskId','$.note');").map_err(|e| e.to_string())?;
+        crate::flow::history::clear(&tx)?;
         // Heads-ups name events, reminders and emails, so they go with the history. What
         // was already said (hashed keys and send times, no text) stays, so none repeats.
         crate::triage::forget_cache();

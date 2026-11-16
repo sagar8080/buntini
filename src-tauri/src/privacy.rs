@@ -45,10 +45,12 @@ pub enum Share {
     Shortcuts,
     /// What tools the user added (local MCP servers) return. Untrusted evidence.
     Connectors,
+    /// What the user dictates, and notes of the calls they record.
+    Dictation,
 }
 
 impl Share {
-    pub const ALL: [Share; 15] = [
+    pub const ALL: [Share; 16] = [
         Share::Activity,
         Share::System,
         Share::Files,
@@ -64,6 +66,7 @@ impl Share {
         Share::Contacts,
         Share::Shortcuts,
         Share::Connectors,
+        Share::Dictation,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -82,6 +85,7 @@ impl Share {
             Share::Contacts => "contacts",
             Share::Shortcuts => "shortcuts",
             Share::Connectors => "tools",
+            Share::Dictation => "dictation",
         }
     }
 }
@@ -96,7 +100,7 @@ pub fn allows(locality: Locality, settings: &Settings, share: Share) -> bool {
 pub fn validate_shares(shares: &[String]) -> Result<(), String> {
     for (index, id) in shares.iter().enumerate() {
         if !Share::ALL.iter().any(|share| share.id() == id) || shares[..index].contains(id) {
-            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, photos, browser, selection, contacts, shortcuts or tools at most once each.".into());
+            return Err("External model sharing must list activity, system, files, history, memory, mail, calendar, notes, music, photos, browser, selection, contacts, shortcuts, tools or dictation at most once each.".into());
         }
     }
     Ok(())

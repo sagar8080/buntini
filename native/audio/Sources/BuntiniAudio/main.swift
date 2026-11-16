@@ -5,16 +5,20 @@ import Foundation
 import Speech
 #endif
 
-// A deliberately small, local-only subprocess. Only JSONL is written to stdout.
-private func emit(_ event: String, _ fields: [String: Any] = [:]) {
+// A local-only subprocess. Only JSONL is written to stdout, one whole line at a time even
+// when events come from several threads.
+private let emitLock = NSLock()
+func emit(_ event: String, _ fields: [String: Any] = [:]) {
     var payload = fields
     payload["event"] = event
-    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { return }
+    guard var data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { return }
+    data.append(0x0a)
+    emitLock.lock()
     FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data([0x0a]))
+    emitLock.unlock()
 }
 
-private struct CaptureError: LocalizedError {
+struct CaptureError: LocalizedError {
     let code: String
     let message: String
     var errorDescription: String? { message }
@@ -146,21 +150,23 @@ private final class WaveWriter {
 
 /// Live, on-device speech recognition fed straight from the microphone. Audio stays in
 /// memory: nothing is written to disk, and Apple's on-device model does the recognition.
-private protocol LiveText: AnyObject {
+protocol LiveText: AnyObject {
     var format: AVAudioFormat { get }
+    /// How sure the recognizer was of the words so far, 0…1; 0 when it doesn't say.
+    var confidence: Double { get }
     func append(_ buffer: AVAudioPCMBuffer)
     func finish() async -> String
     func cancel() async
 }
 
 /// Collapses the recognizer's spacing so partial and final text compare cleanly.
-private func tidy(_ text: String) -> String {
+func tidy(_ text: String) -> String {
     text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
 }
 
 #if compiler(>=6.2) && canImport(Speech)
 @available(macOS 26.0, *)
-private final class LiveTranscriber: LiveText, @unchecked Sendable {
+final class LiveTranscriber: LiveText, @unchecked Sendable {
     let format: AVAudioFormat
     private let analyzer: SpeechAnalyzer
     private let transcriber: SpeechTranscriber
@@ -168,6 +174,7 @@ private final class LiveTranscriber: LiveText, @unchecked Sendable {
     private let lock = NSLock()
     private var finalized = ""
     private var volatile = ""
+    private var confidences: [Double] = []
     private var results: Task<Void, Never>?
 
     private init(format: AVAudioFormat, analyzer: SpeechAnalyzer, transcriber: SpeechTranscriber, input: AsyncStream<AnalyzerInput>.Continuation) {
@@ -179,9 +186,9 @@ private final class LiveTranscriber: LiveText, @unchecked Sendable {
 
     /// Nil with a reason when this Mac cannot transcribe live: an unsupported language,
     /// a speech model that is not installed (and may not be downloaded), or a failed start.
-    static func prepare(download: Bool, onPreparing: @escaping () -> Void, onText: @escaping @Sendable (String) -> Void) async -> (LiveTranscriber?, String) {
-        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { return (nil, "unsupported_language") }
-        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+    static func prepare(download: Bool, locale wanted: Locale = .current, onPreparing: @escaping () -> Void, onText: @escaping @Sendable (String) -> Void) async -> (LiveTranscriber?, String) {
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: wanted) else { return (nil, "unsupported_language") }
+        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults], attributeOptions: [.transcriptionConfidence])
         do {
             switch await AssetInventory.status(forModules: [transcriber]) {
             case .installed: break
@@ -211,6 +218,11 @@ private final class LiveTranscriber: LiveText, @unchecked Sendable {
         do {
             for try await result in transcriber.results {
                 let text = String(result.text.characters)
+                if result.isFinal {
+                    for run in result.text.runs {
+                        if let value = run.transcriptionConfidence { record(value) }
+                    }
+                }
                 let current = update(text, final: result.isFinal)
                 onText(current)
             }
@@ -224,6 +236,18 @@ private final class LiveTranscriber: LiveText, @unchecked Sendable {
         defer { lock.unlock() }
         if final { finalized += " " + text; volatile = "" } else { volatile = text }
         return tidy(finalized + " " + volatile)
+    }
+
+    private func record(_ value: Double) {
+        lock.lock()
+        confidences.append(value)
+        lock.unlock()
+    }
+
+    var confidence: Double {
+        lock.lock()
+        defer { lock.unlock() }
+        return confidences.isEmpty ? 0 : confidences.reduce(0, +) / Double(confidences.count)
     }
 
     private func current() -> String {
@@ -251,11 +275,11 @@ private final class LiveTranscriber: LiveText, @unchecked Sendable {
 
 /// Prepares live recognition, then calls back on `queue`. Older macOS gets nil, so the
 /// caller records a WAV for the existing file transcription instead.
-private func prepareLive(queue: DispatchQueue, download: Bool, onPreparing: @escaping () -> Void, onText: @escaping @Sendable (String) -> Void, then: @escaping (LiveText?, String) -> Void) {
+func prepareLive(queue: DispatchQueue, download: Bool, locale: Locale = .current, onPreparing: @escaping () -> Void, onText: @escaping @Sendable (String) -> Void, then: @escaping (LiveText?, String) -> Void) {
     #if compiler(>=6.2) && canImport(Speech)
     if #available(macOS 26.0, *) {
         Task {
-            let (live, reason) = await LiveTranscriber.prepare(download: download, onPreparing: onPreparing, onText: onText)
+            let (live, reason) = await LiveTranscriber.prepare(download: download, locale: locale, onPreparing: onPreparing, onText: onText)
             queue.async { then(live, reason) }
         }
         return
@@ -627,8 +651,12 @@ private final class Capture: @unchecked Sendable {
     }
 }
 
+if CommandLine.arguments.contains("--service") {
+    Service.main()
+}
+
 if CommandLine.arguments.contains("--help") {
-    print("Usage: buntini-audio [--transcribe] [--output /absolute/file.wav] [--max-seconds 30] [--self-test | --self-test-live [--input /absolute/audio]]\nCapture stdin: stop\\n or cancel\\n. Output: JSONL events (ready, preparing, recording, level, partial, stopped, cancelled, error).\n--transcribe recognizes speech live on this Mac and writes no audio; --output is then only used where live recognition is unavailable.\n--self-test and --self-test-live use synthetic audio only.")
+    print("Usage: buntini-audio [--transcribe] [--output /absolute/file.wav] [--max-seconds 30] [--self-test | --self-test-live [--input /absolute/audio]]\n       buntini-audio --service --models /absolute/folder   (JSON-lines commands on stdin; see Service.swift)\nCapture stdin: stop\\n or cancel\\n. Output: JSONL events (ready, preparing, recording, level, partial, stopped, cancelled, error).\n--transcribe recognizes speech live on this Mac and writes no audio; --output is then only used where live recognition is unavailable.\n--self-test and --self-test-live use synthetic audio only.")
     exit(EXIT_SUCCESS)
 }
 

@@ -140,7 +140,7 @@ fn model_of(base: &Path, repo: &str) -> PathBuf {
     base.join("models").join(repo)
 }
 
-fn free_bytes(path: &Path) -> u64 {
+pub(crate) fn free_bytes(path: &Path) -> u64 {
     let Ok(disks) = sysinfo::Disks::new_with_refreshed_list() else {
         return 0;
     };
@@ -201,7 +201,7 @@ enum Fetch {
     Stop(String),
 }
 
-fn download_client() -> Result<reqwest::Client, String> {
+pub(crate) fn download_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .https_only(true)
         .connect_timeout(Duration::from_secs(30))
@@ -274,7 +274,7 @@ fn sha256_of(path: &Path) -> std::io::Result<String> {
 
 /// Fetches one file to `dest`. It only gets that name once its hash matches, so a file there
 /// is a checked one. Connection trouble waits and resumes for as long as it takes.
-async fn fetch(client: &reqwest::Client, url: &str, sha256: &str, bytes: u64, dest: &Path, cancel: &AtomicBool, waiting: &mut (impl FnMut(&str) + Send), progress: &mut (impl FnMut(u64) + Send)) -> Result<(), String> {
+pub(crate) async fn fetch(client: &reqwest::Client, url: &str, sha256: &str, bytes: u64, dest: &Path, cancel: &AtomicBool, waiting: &mut (impl FnMut(&str) + Send), progress: &mut (impl FnMut(u64) + Send)) -> Result<(), String> {
     if tokio::fs::metadata(dest).await.is_ok_and(|meta| meta.len() == bytes) {
         progress(bytes);
         return Ok(());
@@ -390,7 +390,7 @@ async fn install_packages(base: &Path, cancel: &AtomicBool) -> Result<(), String
 }
 
 /// A model's file, only ever inside its own folder.
-fn safe_relative(path: &str) -> bool {
+pub(crate) fn safe_relative(path: &str) -> bool {
     !path.is_empty() && Path::new(path).components().all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 

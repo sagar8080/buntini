@@ -33,6 +33,7 @@ import ConnectApps from './ConnectApps';
 import { AgentCard, AgentDone } from './AgentRequests';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
+import { applyFlowOnSave } from './flow/api';
 import type { AgentAnswer, AgentFinished, AgentRequest, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
@@ -268,6 +269,17 @@ export default function App() {
   useEffect(() => saver.current!.subscribe((state, problem) => {
     if (state === 'error' && pageRef.current !== 'settings') setError(`Your settings weren’t saved. ${problem}`);
   }), []);
+  // Dictation picks up a new key, language or wake word as soon as it is saved.
+  const loaded = !!data;
+  useEffect(() => data ? applyFlowOnSave(saver.current!, data.settings.flow) : undefined, [loaded]);
+  // "Hey Buntini" was heard: open and listen, as the mic button does.
+  const wakeVoice = useRef<() => void>(() => {});
+  wakeVoice.current = () => { void expand(true); void startVoice(); };
+  useEffect(() => {
+    if (!desktop) return;
+    const subscription = listen('voice-wake', () => wakeVoice.current());
+    return () => { void subscription.then(unlisten => unlisten()); };
+  }, []);
   // The thread loads once; later turns are added as they finish.
   useEffect(() => {
     if (!data || threadLoaded.current) return;

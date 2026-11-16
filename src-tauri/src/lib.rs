@@ -103,6 +103,10 @@ pub fn run_public_desktop_browser_smoke() {
     browser_session::run_public_smoke();
 }
 
+/// Dictation on this Mac with a recorded file for a voice (`examples/flow_host.rs`).
+#[cfg(debug_assertions)]
+pub use flow::smoke::run as run_flow_smoke;
+
 pub(crate) fn show_companion(app: &tauri::AppHandle) {
     // Before Buntini takes focus: what "this" means is whatever the user was just in.
     focus::capture();
@@ -212,6 +216,8 @@ pub fn run() {
                 eprintln!("Native surfaces unavailable");
             }
             mail::start(app.handle().clone());
+            // Dictation anywhere, call notes and the wake word; idle until switched on.
+            flow::start(app.handle().clone());
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());

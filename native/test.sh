@@ -70,6 +70,46 @@ assert [path.name for path in root.glob("*.wav")] == ["test.wav"], "live recogni
 print("Live speech checks passed:", len(partials), "partial results, final transcript", repr(stopped["transcript"]))
 PY
 
+# Service mode: one long-lived helper for dictation, call notes and the wake word. A
+# recording plays in place of the microphone; with no speech model downloaded, Apple's
+# recognizer does the words where macOS has it. Nothing is fetched and no microphone opens.
+mkdir -p "$BUNTINI_AUDIO_TEST_DIR/models"
+python3 - "$BUNTINI_NATIVE_DIR/buntini-audio" "$BUNTINI_AUDIO_TEST_DIR" <<'PY'
+import json, subprocess, sys
+binary, root = sys.argv[1], sys.argv[2]
+service = subprocess.Popen([binary, "--service", "--models", root + "/models"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+def send(command):
+    service.stdin.write(json.dumps(command) + "\n"); service.stdin.flush()
+def until(*names):
+    seen = []
+    while True:
+        event = json.loads(service.stdout.readline())
+        seen.append(event)
+        if event["event"] in names:
+            return event, seen
+ready, _ = until("ready")
+assert ready["protocolVersion"] == 3 and ready["parakeet"] is False, ready
+send({"op": "dictate", "id": 7, "languages": ["en-US"], "input": root + "/speech.aiff"})
+listening, _ = until("listening", "error")
+assert listening["event"] == "listening", listening
+import time; time.sleep(3.2)
+send({"op": "stop", "id": 7})
+final, events = until("final", "error")
+bands = [event for event in events if event["event"] == "bands"]
+assert bands and all(len(event["values"]) == 9 and all(0 <= value <= 1 for value in event["values"]) for event in bands), "nine bands, 0 to 1"
+if final["event"] == "error":
+    assert final["code"] == "no_recognizer", final
+    print("Service checks passed without a recognizer on this Mac:", len(bands), "band updates")
+else:
+    assert "calendar" in final["text"].lower(), final
+    send({"op": "transcribe", "id": 8, "path": root + "/speech.aiff", "engine": "apple", "languages": ["en-US"]})
+    transcribed, _ = until("transcribed", "error")
+    assert "calendar" in transcribed["text"].lower(), transcribed
+    print("Service checks passed:", len(bands), "band updates, dictated", repr(final["text"]), "with", final.get("engine"))
+send({"op": "quit"})
+assert service.wait(timeout=10) == 0
+PY
+
 # Apple Intelligence helper: builds where the SDK allows, then reports availability.
 # Machines without Apple Intelligence still pass; the helper must answer either way.
 "$BUNTINI_NATIVE_DIR/build-fm.sh"

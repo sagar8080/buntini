@@ -29,3 +29,5 @@ dist-release/
 *.p12
 *.p8
 *.keychain-db
+native/audio/.build/
+native/audio/.swiftpm/

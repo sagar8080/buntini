@@ -112,7 +112,20 @@ mod tests {
         );
         assert_eq!(
             config["app"]["security"]["capabilities"],
-            serde_json::json!(["main"])
+            serde_json::json!(["main", "library"])
         );
+        // The Library window gets dictation's one command and its events, nothing more.
+        let library: Value =
+            serde_json::from_str(include_str!("../capabilities/library.json")).unwrap();
+        assert_eq!(library["windows"], serde_json::json!(["library"]));
+        assert!(library.get("remote").is_none());
+        assert_eq!(
+            library["permissions"],
+            serde_json::json!(["library-ui", "core:event:allow-listen", "core:event:allow-unlisten"])
+        );
+        let library_ui: Value =
+            serde_json::from_str(include_str!("../permissions/library.json")).unwrap();
+        assert_eq!(library_ui["permission"][0]["identifier"], "library-ui");
+        assert_eq!(library_ui["permission"][0]["commands"]["allow"], serde_json::json!(["flow_call"]));
     }
 }
