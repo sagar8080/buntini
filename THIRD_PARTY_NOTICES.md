@@ -2,7 +2,7 @@
 
 ## Coucou
 
-Parts of Buntini's island, coding-agent, dictation and notes features follow the design and
+Parts of Buntini's island, coding-agent, dictation, notes and mail features follow the design and
 logic of Coucou (https://github.com/louis-cfm/coucou), whose code is under the MIT licence
 below. Coucou's name, its character Mochi, its icon, sounds and media are not covered by that
 licence and are not used in Buntini.

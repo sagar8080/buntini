@@ -882,6 +882,12 @@ const REPLY: &str = r#"    tell application "Mail"
           end repeat
         end repeat
       end if
+      -- Mailboxes on this Mac, which belong to no account.
+      if (count of found) is 0 then
+        repeat with b in mailboxes
+          set found to found & (every message of b whose id is originalNumber)
+        end repeat
+      end if
       if (count of found) is not 1 then error "The email to answer is no longer in Mail."
       set original to item 1 of found
       set originalMessageID to message id of original

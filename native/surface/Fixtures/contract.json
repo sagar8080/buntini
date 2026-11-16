@@ -443,7 +443,39 @@
        "flagged": true,
        "at": 1763200000
       }
-     ]
+     ],
+     "query": "",
+     "unread": 1,
+     "sortable": 2,
+     "more": false,
+     "open": {
+      "id": "msg-1",
+      "from": "Ana",
+      "subject": "Dinner on Tuesday",
+      "at": 1763290000,
+      "body": "Are we still on?\nLet me know.",
+      "attachments": [
+       "menu.pdf"
+      ],
+      "flagged": false,
+      "unread": true
+     },
+     "pending": null,
+     "plan": null,
+     "log": [
+      {
+       "id": "e1",
+       "label": "To Newsletters · This week in tech",
+       "undoable": true
+      },
+      {
+       "id": "e2",
+       "label": "Draft to ana@example.org · Payslip",
+       "undoable": false
+      }
+     ],
+     "status": null,
+     "closed": false
     }
    },
    "held": false,
@@ -786,6 +818,80 @@
     "name": "finish",
     "sequence": 7
    }
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "m2",
+    "source": "mail",
+    "body": {
+     "kind": "mail",
+     "filter": "all",
+     "messages": [
+      {
+       "id": "msg-1",
+       "from": "Ana",
+       "subject": "Dinner on Tuesday",
+       "preview": "Are we still on?",
+       "unread": true,
+       "flagged": false,
+       "at": 1763290000
+      },
+      {
+       "id": "msg-2",
+       "from": "Bank",
+       "subject": "Statement",
+       "preview": null,
+       "unread": false,
+       "flagged": true,
+       "at": 1763200000
+      }
+     ],
+     "query": "from:ana",
+     "unread": 1,
+     "sortable": 2,
+     "more": false,
+     "open": null,
+     "pending": {
+      "id": "p1",
+      "title": "Junk",
+      "lines": [
+       "Prize Desk · You won the lottery!!!"
+      ]
+     },
+     "plan": {
+      "id": "pl1",
+      "summary": "Sort and send payslips",
+      "lines": [
+       "To Newsletters · Weekly · This week",
+       "2 drafts · Your payslip · Ana Ruiz, Bo Ruiz"
+      ],
+      "problems": [
+       "Step 3: no email 41"
+      ]
+     },
+     "log": [],
+     "status": "Mail is closed.",
+     "closed": true
+    }
+   },
+   "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
   }
  ],
  "actions": [
@@ -823,6 +929,15 @@
    "value": [
     "/Users/me/Desktop/report.pdf"
    ]
+  },
+  {
+   "source": "mail",
+   "card": "m1",
+   "name": "reply",
+   "value": {
+    "id": "msg-1",
+    "body": "Yes, see you then."
+   }
   }
  ]
 }

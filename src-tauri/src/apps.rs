@@ -1003,6 +1003,11 @@ async fn no_prompt_unasked(app: &str) -> Result<(), String> {
     }
 }
 
+/// Whether a script for `app` can run now without macOS asking: for reads nobody asked for.
+pub(crate) async fn may_script_silently(app: &str) -> bool {
+    no_prompt_unasked(app).await.is_ok()
+}
+
 async fn osascript_if(
     source: &'static str,
     app: &str,

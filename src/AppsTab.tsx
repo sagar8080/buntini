@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Toggle from './Toggle';
+import MailSection from './mail/MailSection';
 import { command, errorMessage } from './bridge';
 import type { AppList, CodingAgent, Settings } from './types';
 
@@ -46,6 +47,7 @@ export default function AppsTab({ draft, update, onError }: Props) {
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
     </section>
+    {draft.apps.includes('mail') && <MailSection value={draft.mail} onChange={mail => update('mail', mail)} onError={onError} />}
     {agents.some(agent => agent.available) && <section className="settings-section">
       <div className="settings-section-heading"><h3>Coding agents</h3></div>
       {agents.filter(agent => agent.available).map(agent => <div key={agent.id} className="app-permission">

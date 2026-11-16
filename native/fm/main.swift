@@ -1366,6 +1366,71 @@ enum Documents {
     }
 }
 
+/// `--split-pdf`: each page of the PDF on standard input as its own one-page PDF, for a mail
+/// merge. Like `--extract-document`, the bytes arrive on standard input and the process
+/// confines itself before parsing, so it never opens a path, writes a file or reaches out;
+/// Buntini writes the pages it attaches. Prints one JSON line per page,
+/// `{"page":n,"text":…,"pdf":<base64>}`, or one `{"error":code}`.
+enum PageSplit {
+    static let maxPages = 200
+    static let maxText = 4_000
+    static let seconds = 30.0
+
+    static func run(_ arguments: [String]) -> Int32 {
+        guard arguments.count == 2 else {
+            FileHandle.standardError.write(Data("invalid-arguments: --split-pdf takes the PDF on standard input.\n".utf8))
+            return 2
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+            emit(["error": "timed_out"])
+            exit(3)
+        }
+        var data = Data()
+        while data.count <= Documents.maxBytes, let chunk = try? FileHandle.standardInput.read(upToCount: 1 << 20), !chunk.isEmpty {
+            data.append(chunk)
+        }
+        guard data.count <= Documents.maxBytes else {
+            emit(["error": "too_large"])
+            return 0
+        }
+        guard Documents.confine() else {
+            emit(["error": "unavailable"])
+            return 0
+        }
+        guard let document = PDFDocument(data: data) else {
+            emit(["error": "unreadable"])
+            return 0
+        }
+        guard !document.isLocked else {
+            emit(["error": "locked"])
+            return 0
+        }
+        guard document.pageCount > 0 else {
+            emit(["error": "empty"])
+            return 0
+        }
+        guard document.pageCount <= maxPages else {
+            emit(["error": "too_many_pages"])
+            return 0
+        }
+        for index in 0..<document.pageCount {
+            guard let page = document.page(at: index)?.copy() as? PDFPage else {
+                emit(["error": "unreadable"])
+                return 0
+            }
+            let single = PDFDocument()
+            single.insert(page, at: 0)
+            guard let bytes = single.dataRepresentation() else {
+                emit(["error": "unreadable"])
+                return 0
+            }
+            let text = Documents.clean(page.string ?? "", characters: maxText, truncated: false).text
+            emit(["page": index + 1, "text": text, "pdf": bytes.base64EncodedString()])
+        }
+        return 0
+    }
+}
+
 /// Document readers on documents made here: formats, caps, refusals and confinement.
 func documentChecks(_ require: (Bool, String) throws -> Void) throws {
     func pdf(_ pages: [String], password: String? = nil) -> Data {
@@ -2429,6 +2494,9 @@ struct Helper {
         }
         if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--extract-document" {
             exit(Documents.run(CommandLine.arguments))
+        }
+        if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--split-pdf" {
+            exit(PageSplit.run(CommandLine.arguments))
         }
         if CommandLine.arguments.contains("--self-test-contracts") {
             exit(await contractSelfTest())
