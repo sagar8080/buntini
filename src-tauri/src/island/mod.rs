@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod demo;
+
 use crate::surface::cards::island as cards;
 use crate::surface::{self, Action, Card, CardBody, Cat, Contribution, Home, IslandState, Mood, Offer, Placement, Source, Urgency};
 
@@ -63,6 +65,9 @@ fn state(app: &AppHandle) -> IslandState {
     let mut cat = look(app);
     if STREAK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).sleepy(Instant::now()) {
         cat.mood = Mood::Sleepy;
+    }
+    if let Some(mood) = *demo::MOOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        cat.mood = mood;
     }
     let placement = settings(app).map(|settings| placement(&settings.island.placement)).unwrap_or_default();
     let line = LINE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
@@ -273,6 +278,11 @@ fn show_chat(app: &AppHandle) {
 }
 
 fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
+    // A click on the tour only moves it along.
+    if action.card.as_deref().is_some_and(|card| card.starts_with("demo:")) {
+        demo::advance();
+        return Ok(());
+    }
     match action.name.as_str() {
         "openChat" => {
             show_chat(app);

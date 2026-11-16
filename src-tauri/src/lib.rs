@@ -233,8 +233,9 @@ pub fn run() {
             };
             let show = MenuItem::with_id(app, "show", "Show companion", true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", "Hide companion", true, None::<&str>)?;
+            let tour = MenuItem::with_id(app, "tour", "Island tour", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Buntini", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &hide, &tour, &quit])?;
             TrayIconBuilder::with_id("buntini-tray")
                 // A template silhouette, so macOS tints it for light and dark menu bars.
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
@@ -251,6 +252,7 @@ pub fn run() {
                             let _ = w.hide();
                         }
                     }
+                    "tour" => island::demo::start(),
                     "quit" => app.exit(0),
                     _ => {}
                 })
