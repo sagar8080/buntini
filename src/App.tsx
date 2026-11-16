@@ -373,7 +373,9 @@ export default function App() {
     const apple = listen('apple-status', () => { void refresh().catch(() => {}); });
     // Buntini moved to the brain that's now usable: say so once.
     const brain = listen<string>('brain-changed', event => { setNotice(event.payload); void refresh().catch(() => {}); });
-    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); };
+    // The island's wardrobe changed the cat's look.
+    const look = listen('settings-changed', () => { void refresh().catch(() => {}); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); };
   }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;

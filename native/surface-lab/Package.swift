@@ -11,7 +11,7 @@ let package = Package(
     dependencies: [.package(path: "../surface")],
     targets: [
         .executableTarget(name: "SurfaceLab", dependencies: [.product(name: "BuntiniSurface", package: "surface")]),
-        .executableTarget(name: "SurfaceChecks", dependencies: [.product(name: "SurfaceKit", package: "surface")]),
+        .executableTarget(name: "SurfaceChecks", dependencies: [.product(name: "SurfaceKit", package: "surface"), .product(name: "BuntiniSurface", package: "surface")]),
     ],
     swiftLanguageVersions: [.v5]
 )

@@ -65,6 +65,8 @@ pub struct Picked {
     pub held: bool,
     /// The card is waiting or an alert, not news: the island opens for it.
     pub interrupt: bool,
+    /// How urgent the card in front is.
+    pub urgency: Option<Urgency>,
 }
 
 #[derive(Debug, Default)]
@@ -113,6 +115,7 @@ impl Board {
             card: front.map(|offer| offer.card.clone()),
             held,
             interrupt: front.is_some_and(|offer| offer.urgency != Urgency::Info),
+            urgency: front.map(|offer| offer.urgency),
         }
     }
 

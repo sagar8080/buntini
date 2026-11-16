@@ -34,6 +34,23 @@ guard scenes.count == raw.count else {
     exit(65)
 }
 
+// --render <dir>: write a picture of every scene, in each state, and stop.
+if let flag = arguments.firstIndex(of: "--render"), arguments.indices.contains(flag + 1) {
+    let folder = URL(fileURLWithPath: arguments[flag + 1])
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    for (number, scene) in scenes.enumerated() where index == nil || index == number {
+        let kind = scene.card.map { "\($0.body.kind)" } ?? "none"
+        for (name, screen) in [("notch", SurfaceSnapshot.notchedScreen), ("plain", SurfaceSnapshot.plainScreen)] {
+            for (state, hover, expanded) in [("rest", false, false), ("hover", true, false), ("open", true, true)] {
+                if scene.card != nil && state != "rest" { continue }
+                guard let png = MainActor.assumeIsolated({ SurfaceSnapshot.png(scene: scene, screen: screen, hover: hover, expanded: expanded) }) else { continue }
+                try? png.write(to: folder.appendingPathComponent(String(format: "%02d-%@-%@-%@.png", number, kind, name, state)))
+            }
+        }
+    }
+    exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let runtime = SurfaceRuntime.shared
@@ -56,7 +73,14 @@ if let index {
     }
     step()
 }
+if arguments.contains("--frames") { SurfaceFrames.start() }
 if let seconds {
-    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { exit(0) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+        if arguments.contains("--frames") {
+            let frames = SurfaceFrames.report()
+            print(String(format: "frames %d · median %.2f ms · p95 %.2f ms · display %.0f Hz", frames.count, frames.median, frames.p95, frames.display))
+        }
+        exit(0)
+    }
 }
 app.run()

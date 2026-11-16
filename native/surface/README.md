@@ -17,7 +17,7 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
 
 | Part | Rust | Swift payloads | Swift views |
 |---|---|---|---|
-| Island (A) | `island/`, `surface/cards/island.rs` | `Cards/IslandCards.swift` | `Cards/IslandCardViews.swift`, `IslandWindow.swift`, `IslandRoot.swift` |
+| Island (A) | `island/`, `surface/cards/island.rs` | `Cards/IslandCards.swift`, `IslandGeometry.swift` | `Cards/IslandCardViews.swift`, `Island/`, `Character/`, `Metal/`, `Sound/` |
 | Agents (B) | `agents.rs`, `surface/cards/agents.rs` | `Cards/AgentCards.swift` | `Cards/AgentCardViews.swift` |
 | Voice (C) | `flow/`, `surface/cards/flow.rs` | `Cards/FlowCards.swift` | `Cards/FlowCardViews.swift`, `Pill/` |
 | Services (D) | `services/`, `surface/cards/services.rs` | `Cards/ServiceCards.swift` | `Cards/ServiceCardViews.swift` |
@@ -39,5 +39,11 @@ On the React side, each part has its own folder: `src/<part>/model.ts` and `src/
 
 - `swift run --package-path native/surface-lab SurfaceLab native/surface/Fixtures/contract.json [index]` opens the real island with fixture scenes and prints every action.
 - `cargo run --example surface_host [kind]` does the same through Rust and the C entry points. Here `kind` is a card kind, for example `approval`.
+- `swift run --package-path native/surface-lab SurfaceLab <fixture> --render <folder>` draws every scene into pictures without a screen. AppKit views (the Metal glow, the pointer probe) are left out of pictures.
+- `SurfaceLab <fixture> <index> --seconds 10 --frames` shows a scene live and reports frame times while the cat moves.
+- Measured on a 14-inch MacBook Pro at 120 Hz, release build, on 2026-11-16:
+  - frame times while the cat moves: median 8.33 ms, 95th percentile 8.6 ms;
+  - average CPU over ten seconds: 2.9% open with the glow, 2.1% peeking, 0.4% hidden.
+- The cat is drawn every frame only while it moves; at rest it isn't drawn at all. The glow is drawn once; Core Animation makes it breathe.
 
 Don't run `swift build` inside this folder. Cargo watches it, and a `.build` folder here makes every Rust build start over. Build through `native/surface-lab` instead.

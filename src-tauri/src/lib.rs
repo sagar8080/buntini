@@ -103,7 +103,7 @@ pub fn run_public_desktop_browser_smoke() {
     browser_session::run_public_smoke();
 }
 
-fn show_companion(app: &tauri::AppHandle) {
+pub(crate) fn show_companion(app: &tauri::AppHandle) {
     // Before Buntini takes focus: what "this" means is whatever the user was just in.
     focus::capture();
     if let Some(window) = app.get_webview_window("main") {
@@ -206,7 +206,9 @@ pub fn run() {
             // Claude Code and Codex hand their requests over once their hooks are on.
             agents::start(app.handle().clone(), app.path().app_data_dir()?);
             // The island and the dictation pill: drawn natively, empty until something shows.
-            if !surface::start() {
+            if surface::start() {
+                island::start(app.handle().clone());
+            } else {
                 eprintln!("Native surfaces unavailable");
             }
             notifications::install(app.handle());

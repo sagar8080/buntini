@@ -36,6 +36,8 @@ struct Hub {
     overlay: Option<cards::utilities::Overlay>,
     sound: Option<scene::Sound>,
     dirty: bool,
+    /// The card last in front, to notice a new one worth a sound.
+    front: Option<String>,
 }
 
 static HUB: LazyLock<(Mutex<Hub>, Condvar)> = LazyLock::new(Default::default);
@@ -67,8 +69,11 @@ pub fn set_overlay(overlay: Option<cards::utilities::Overlay>) {
     change(|hub| hub.overlay = overlay);
 }
 
-/// Plays a sound once.
+/// Plays a sound once, when the Mac's sound rules allow.
 pub fn play(name: &str) {
+    if !sounds_allowed() {
+        return;
+    }
     let sequence = SOUNDS.fetch_add(1, Ordering::Relaxed) + 1;
     change(|hub| hub.sound = Some(scene::Sound { name: name.into(), sequence }));
 }
@@ -141,6 +146,29 @@ fn change(edit: impl FnOnce(&mut Hub)) {
 
 fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
     let picked = hub.board.pick(now_ms);
+    let mut cat = hub.island.cat.clone();
+    // The cat reacts to what the island shows.
+    match (&picked.card, picked.urgency) {
+        (_, Some(Urgency::Waiting)) => cat.mood = Mood::Alert,
+        (Some(card), Some(Urgency::Alert)) if matches!(card.body, CardBody::Finished(_) | CardBody::Greeting(_) | CardBody::Recap(_)) => cat.mood = Mood::Happy,
+        _ => {}
+    }
+    // A sound when something new asks for you, or news arrives.
+    let front = picked.card.as_ref().filter(|_| picked.interrupt).map(|card| card.id.clone());
+    if front.is_some() && front != hub.front {
+        let cue = match (&picked.card, picked.urgency) {
+            (_, Some(Urgency::Waiting)) => Some("ask"),
+            (Some(card), _) if matches!(card.body, CardBody::Greeting(_)) => Some("hello"),
+            (Some(card), _) if matches!(card.body, CardBody::Drop(_)) => None,
+            (_, Some(Urgency::Alert)) => Some("done"),
+            _ => None,
+        };
+        if let Some(cue) = cue.filter(|_| sounds_allowed()) {
+            let sequence = SOUNDS.fetch_add(1, Ordering::Relaxed) + 1;
+            hub.sound = Some(scene::Sound { name: cue.into(), sequence });
+        }
+    }
+    hub.front = front;
     Scene {
         contract: CONTRACT,
         home: hub.island.home,
@@ -150,11 +178,22 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         card: picked.card,
         held: picked.held,
         interrupt: picked.interrupt,
-        cat: hub.island.cat.clone(),
+        cat,
         flow: hub.flow.clone(),
         overlay: hub.overlay.clone(),
         sound: hub.sound.clone(),
     }
+}
+
+/// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus.
+#[cfg(not(test))]
+fn sounds_allowed() -> bool {
+    crate::pet::pet_sound_allowed()
+}
+
+#[cfg(test)]
+fn sounds_allowed() -> bool {
+    false
 }
 
 /// Sends a scene when something changed or a card's time is up, at most once a frame.

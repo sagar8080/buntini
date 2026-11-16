@@ -670,6 +670,12 @@
      "files": [
       "/Users/me/Desktop/report.pdf",
       "/Users/me/Desktop/photo.heic"
+     ],
+     "targets": [
+      {
+       "pill": "agent:claude:s1",
+       "label": "Claude Code · buntini"
+      }
      ]
     }
    },

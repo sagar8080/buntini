@@ -8,7 +8,19 @@ struct DropCardView: View {
     let send: (Action) -> Void
 
     var body: some View {
-        CardHeading(from: "\(drop.files.count)", title: drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: drop.files.count > 1 ? "doc.on.doc.fill" : "doc.fill").font(.title3).opacity(0.85)
+                Text(drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).font(.callout.weight(.semibold)).lineLimit(2)
+            }
+            FlowRow(spacing: 6) {
+                ForEach(drop.targets, id: \.pill) { target in
+                    IslandButton(label: target.label) {
+                        send(Action(source: .island, card: card.id, name: "dropInto", value: .object(["pill": .string(target.pill), "paths": .array(drop.files.map(JSONValue.string))])))
+                    }
+                }
+            }
+        }
     }
 }
 

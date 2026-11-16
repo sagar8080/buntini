@@ -1,6 +1,7 @@
 // Checks the Swift side of the surface contract against the fixture Rust also checks
 // (src-tauri/src/surface/mod.rs): everything decodes, writes back the same, and every card
 // kind is covered. Exits 1 on the first failure.
+import BuntiniSurface
 import Foundation
 import SurfaceKit
 
@@ -51,4 +52,7 @@ guard original.isEqual(written) else {
     fail("the fixture writes back differently")
 }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions")
+if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(problem)") }
+if let problem = SurfaceSounds.problem() { fail(problem) }
+
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions; shaders compile; sounds play")

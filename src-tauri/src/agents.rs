@@ -503,6 +503,22 @@ fn track(agent: Agent, event: &HookEvent, update: impl FnOnce(&mut session::Sess
     }
     update(session, now);
     surface::publish(&hub);
+    crate::island::agent_activity();
+}
+
+/// Sessions a dropped file's path can be pasted into, newest first: (pill, label).
+pub fn drop_targets() -> Vec<(String, String)> {
+    let hub = hub();
+    let mut sessions: Vec<&session::Session> = hub.sessions.values().filter(|session| terminal::app_for(&session.host).is_some()).collect();
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.last_ms));
+    sessions
+        .into_iter()
+        .map(|session| {
+            let name = Agent::from_id(&session.agent).map_or(session.agent.as_str(), |agent| agent.name());
+            let project = session.project();
+            (format!("agent:{}:{}", session.agent, session.id), if project.is_empty() { name.to_string() } else { format!("{name} · {project}") })
+        })
+        .collect()
 }
 
 /// The tool ran, so its request was answered, here or in the terminal. Agents
