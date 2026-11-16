@@ -1,4 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
+import { streamDefaults, streamPreviews } from './streams';
 import type { AgentRequest, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
@@ -9,6 +10,7 @@ const defaults: Settings = {
   modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
   monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudUrl: '', cloudOnThisMac: false, cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
+  ...streamDefaults,
 };
 export async function bootstrap(): Promise<Bootstrap> {
   if (desktop) return invoke('bootstrap');
@@ -157,6 +159,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'coding_agents') return previewCodingAgents() as T;
     if (name === 'connect_coding_agent') { localStorage.setItem(`buntini-preview-agent-${args?.id}`, args?.on ? '1' : ''); return previewCodingAgents().find(agent => agent.id === args?.id) as T; }
     if (name === 'agent_requests') return previewAgentRequests as T;
+    if (streamPreviews[name]) return streamPreviews[name](args?.op as never) as T;
     if (name === 'answer_agent') { previewAgentRequests = previewAgentRequests.filter(request => request.id !== args?.id); return undefined as T; }
     // Voice controls can be looked at without a microphone; nothing is recorded.
     if (name === 'start_recording' || name === 'cancel_recording') return undefined as T;

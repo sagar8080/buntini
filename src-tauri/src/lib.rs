@@ -33,16 +33,20 @@ mod data;
 mod delivery;
 mod embedding;
 mod explicit_fields;
+mod flow;
 mod focus;
 mod goals;
 mod indexer;
 mod intent;
+mod island;
 mod integrations;
 mod local;
 mod local_setup;
 mod login;
 mod mac_settings;
+mod mail;
 mod mcp;
+mod media;
 mod memory_index;
 mod migration;
 mod model;
@@ -69,13 +73,16 @@ mod search_pipeline_tests;
 mod scenario_evals;
 mod scheduler;
 mod security;
+mod services;
 mod skills;
 mod store;
+pub mod surface;
 mod support;
 mod task_contract;
 mod tools;
 mod triage;
 mod types;
+mod utilities;
 mod voice;
 mod watches;
 mod web;
@@ -198,6 +205,10 @@ pub fn run() {
             // Before any timer or approval alert can be answered.
             // Claude Code and Codex hand their requests over once their hooks are on.
             agents::start(app.handle().clone(), app.path().app_data_dir()?);
+            // The island and the dictation pill: drawn natively, empty until something shows.
+            if !surface::start() {
+                eprintln!("Native surfaces unavailable");
+            }
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
@@ -366,7 +377,14 @@ pub fn run() {
             agents::agent_requests,
             agents::answer_agent,
             agent_setup::coding_agents,
-            agent_setup::connect_coding_agent
+            agent_setup::connect_coding_agent,
+            agents::agents_call,
+            island::island_call,
+            flow::flow_call,
+            services::services_call,
+            mail::mail_call,
+            media::media_call,
+            utilities::utilities_call
         ])
         .build(app_context())
         .expect("Buntini could not start")
@@ -403,6 +421,7 @@ pub fn run() {
                         mcp::stop_all();
                         app.exit(0);
                         agents::stop();
+                        surface::stop();
                     });
                 }
             }

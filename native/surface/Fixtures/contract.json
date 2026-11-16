@@ -1,0 +1,828 @@
+{
+ "scenes": [
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": null,
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "claude-1",
+     "source": "agents",
+     "label": "Claude Code",
+     "tint": "#D97757",
+     "state": "waiting",
+     "badge": "buntini",
+     "progress": null
+    },
+    {
+     "id": "codex-1",
+     "source": "agents",
+     "label": "Codex",
+     "tint": "#10A37F",
+     "state": "working",
+     "badge": null,
+     "progress": null
+    },
+    {
+     "id": "github",
+     "source": "services",
+     "label": "GitHub",
+     "tint": "#6E7681",
+     "state": "error",
+     "badge": "CI",
+     "progress": null
+    },
+    {
+     "id": "music",
+     "source": "media",
+     "label": "Music",
+     "tint": "#FA2D48",
+     "state": "idle",
+     "badge": null,
+     "progress": 0.42
+    }
+   ],
+   "overflow": [
+    "claude-2",
+    "claude-3"
+   ],
+   "card": {
+    "id": "a1",
+    "source": "agents",
+    "body": {
+     "kind": "approval",
+     "agent": "Claude Code",
+     "project": "buntini",
+     "title": "Run a command",
+     "detail": "cargo test --locked",
+     "code": true,
+     "always": true
+    }
+   },
+   "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "q1",
+    "source": "agents",
+    "body": {
+     "kind": "question",
+     "agent": "Claude Code",
+     "project": null,
+     "questions": [
+      {
+       "header": "Branch",
+       "question": "Which branch?",
+       "options": [
+        {
+         "label": "main",
+         "description": null
+        },
+        {
+         "label": "coucou-parity",
+         "description": "Where the island lives"
+        }
+       ],
+       "multi": false
+      },
+      {
+       "header": null,
+       "question": "Run the tests?",
+       "options": [
+        {
+         "label": "Yes",
+         "description": null
+        },
+        {
+         "label": "No",
+         "description": null
+        }
+       ],
+       "multi": true
+      }
+     ]
+    }
+   },
+   "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "t1",
+    "source": "agents",
+    "body": {
+     "kind": "ticker",
+     "agent": "Codex",
+     "project": "buntini",
+     "steps": [
+      {
+       "label": "Reads · lib.rs",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": false
+      },
+      {
+       "label": "Edits · surface.rs",
+       "detail": "src-tauri/src/surface.rs",
+       "added": 12,
+       "removed": 3,
+       "failed": false
+      },
+      {
+       "label": "Runs · cargo test",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": true
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "d1",
+    "source": "agents",
+    "body": {
+     "kind": "diff",
+     "file": "src/App.tsx",
+     "added": 2,
+     "removed": 1,
+     "lines": [
+      {
+       "kind": "same",
+       "text": "const a = 1;"
+      },
+      {
+       "kind": "remove",
+       "text": "const b = 2;"
+      },
+      {
+       "kind": "add",
+       "text": "const b = 3;"
+      },
+      {
+       "kind": "add",
+       "text": "const c = 4;"
+      },
+      {
+       "kind": "gap",
+       "text": ""
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "f1",
+    "source": "agents",
+    "body": {
+     "kind": "finished",
+     "agent": "Claude Code",
+     "project": "buntini",
+     "message": "All 934 tests pass."
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "r1",
+    "source": "agents",
+    "body": {
+     "kind": "recap",
+     "week": "10–16 Nov",
+     "stats": [
+      {
+       "label": "Sessions",
+       "value": "42"
+      },
+      {
+       "label": "Lines",
+       "value": "+3,210 −870"
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "u1",
+    "source": "agents",
+    "body": {
+     "kind": "usage",
+     "agent": "Claude",
+     "windows": [
+      {
+       "label": "5 hours",
+       "percent": 37.5,
+       "resetsAt": 1763300000
+      },
+      {
+       "label": "Week",
+       "percent": 12.0,
+       "resetsAt": null
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "s1",
+    "source": "services",
+    "body": {
+     "kind": "service",
+     "service": "github",
+     "title": "2 reviews requested",
+     "rows": [
+      {
+       "id": "pr-12",
+       "title": "Add the island",
+       "detail": "example/buntini#12",
+       "state": "waiting",
+       "url": "https://github.com/example/buntini/pull/12"
+      },
+      {
+       "id": "ci",
+       "title": "CI failed on main",
+       "detail": null,
+       "state": "error",
+       "url": null
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "m1",
+    "source": "mail",
+    "body": {
+     "kind": "mail",
+     "filter": "unread",
+     "messages": [
+      {
+       "id": "msg-1",
+       "from": "Ana",
+       "subject": "Dinner on Tuesday",
+       "preview": "Are we still on?",
+       "unread": true,
+       "flagged": false,
+       "at": 1763290000
+      },
+      {
+       "id": "msg-2",
+       "from": "Bank",
+       "subject": "Statement",
+       "preview": null,
+       "unread": false,
+       "flagged": true,
+       "at": 1763200000
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "n1",
+    "source": "media",
+    "body": {
+     "kind": "nowPlaying",
+     "player": "spotify",
+     "title": "Instant Crush",
+     "artist": "Daft Punk",
+     "album": "Random Access Memories",
+     "artwork": null,
+     "playing": true,
+     "position": 61.5,
+     "duration": 337.0,
+     "shuffle": false,
+     "repeatMode": "off",
+     "volume": 0.6
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "dancing",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "tm1",
+    "source": "utilities",
+    "body": {
+     "kind": "timer",
+     "label": "Focus",
+     "phase": "focus",
+     "endsAt": 1763301500,
+     "remaining": 1320.0,
+     "total": 1500.0,
+     "paused": false
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "c1",
+    "source": "utilities",
+    "body": {
+     "kind": "capture",
+     "path": "/Users/me/Desktop/capture.png",
+     "width": 1280,
+     "height": 720
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "v1",
+    "source": "utilities",
+    "body": {
+     "kind": "vitals",
+     "line": "CPU 94% · node, Google Chrome"
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "up1",
+    "source": "utilities",
+    "body": {
+     "kind": "update",
+     "version": "0.3.0",
+     "notes": [
+      "The island",
+      "Dictation anywhere"
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "w1",
+    "source": "utilities",
+    "body": {
+     "kind": "whatsNew",
+     "version": "0.3.0",
+     "lines": [
+      "The island",
+      "Dictation anywhere"
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "dr1",
+    "source": "island",
+    "body": {
+     "kind": "drop",
+     "files": [
+      "/Users/me/Desktop/report.pdf",
+      "/Users/me/Desktop/photo.heic"
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "g1",
+    "source": "island",
+    "body": {
+     "kind": "greeting",
+     "name": "Sagar"
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "no1",
+    "source": "flow",
+    "body": {
+     "kind": "note",
+     "id": "note-1",
+     "title": "Call with Ana",
+     "state": "ready",
+     "seconds": 1834.0,
+     "lines": [
+      {
+       "speaker": "You",
+       "text": "Shall we start?"
+      },
+      {
+       "speaker": null,
+       "text": "Yes."
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 1,
+   "home": "desktop",
+   "placement": "topRight",
+   "pills": [],
+   "overflow": [],
+   "card": null,
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": {
+    "state": "listening",
+    "text": null,
+    "app": "Notes",
+    "locked": true
+   },
+   "overlay": {
+    "kind": "thumbnail",
+    "path": "/Users/me/Desktop/shot.png",
+    "width": 3024,
+    "height": 1964
+   },
+   "sound": {
+    "name": "finish",
+    "sequence": 7
+   }
+  }
+ ],
+ "actions": [
+  {
+   "source": "agents",
+   "card": "a1",
+   "name": "allow"
+  },
+  {
+   "source": "agents",
+   "card": "q1",
+   "name": "answer",
+   "value": {
+    "Which branch?": "main",
+    "Run the tests?": [
+     "Yes"
+    ]
+   }
+  },
+  {
+   "source": "media",
+   "card": "n1",
+   "name": "seek",
+   "value": 120.5
+  },
+  {
+   "source": "flow",
+   "name": "copy",
+   "value": null
+  },
+  {
+   "source": "island",
+   "card": null,
+   "name": "drop",
+   "value": [
+    "/Users/me/Desktop/report.pdf"
+   ]
+  }
+ ]
+}

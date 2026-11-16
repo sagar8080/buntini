@@ -16,6 +16,8 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }
+# Builds and links native/surface, the Swift package behind the island and the pill.
+swift-rs = { version = "1.0.9", features = ["build"] }
 
 [dependencies]
 tauri = { version = "2.11.2", features = ["tray-icon", "macos-private-api", "image-png"] }

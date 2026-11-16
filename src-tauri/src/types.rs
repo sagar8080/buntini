@@ -84,6 +84,14 @@ pub struct Settings {
     pub cloud_budget_usd: f64,
     pub cloud_input_price: f64,
     pub cloud_output_price: f64,
+    /// Each part of the Coucou-parity work keeps its own settings in its own module.
+    pub island: crate::island::Settings,
+    pub agents: crate::agents::Settings,
+    pub flow: crate::flow::Settings,
+    pub services: crate::services::Settings,
+    pub mail: crate::mail::Settings,
+    pub media: crate::media::Settings,
+    pub utilities: crate::utilities::Settings,
 }
 
 impl Default for Settings {
@@ -146,6 +154,13 @@ impl Default for Settings {
             cloud_input_price: crate::cloud::PROVIDERS[0].input_per_m,
             cloud_output_price: crate::cloud::PROVIDERS[0].output_per_m,
             vad_model_path: preset("BUNTINI_VAD_MODEL_PATH"),
+            island: Default::default(),
+            agents: Default::default(),
+            flow: Default::default(),
+            services: Default::default(),
+            mail: Default::default(),
+            media: Default::default(),
+            utilities: Default::default(),
         }
     }
 }
@@ -317,6 +332,13 @@ impl Settings {
                 return Err("Model paths must point to existing local model directories. Buntini does not download models.".into());
             }
         }
+        self.island.validate()?;
+        self.agents.validate()?;
+        self.flow.validate()?;
+        self.services.validate()?;
+        self.mail.validate()?;
+        self.media.validate()?;
+        self.utilities.validate()?;
         Ok(())
     }
 }

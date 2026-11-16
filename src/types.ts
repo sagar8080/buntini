@@ -1,3 +1,10 @@
+import type { IslandSettings } from './island/model';
+import type { AgentsSettings } from './agents/model';
+import type { FlowSettings } from './flow/model';
+import type { ServicesSettings } from './services/model';
+import type { MailSettings } from './mail/model';
+import type { MediaSettings } from './media/model';
+import type { UtilitiesSettings } from './utilities/model';
 export type Mode = 'auto' | 'files' | 'system' | 'web';
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
@@ -74,6 +81,13 @@ export interface Settings {
   cloudBudgetUsd: number;
   cloudInputPrice: number;
   cloudOutputPrice: number;
+  island: IslandSettings;
+  agents: AgentsSettings;
+  flow: FlowSettings;
+  services: ServicesSettings;
+  mail: MailSettings;
+  media: MediaSettings;
+  utilities: UtilitiesSettings;
 }
 export interface Source { title: string; url: string; snippet: string; retrievedAt: string }
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }

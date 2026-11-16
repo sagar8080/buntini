@@ -343,6 +343,7 @@ pub fn start(app: tauri::AppHandle) {
             }
             crate::routines::run_due(&app).await;
             crate::nudges::run_due(&app).await;
+            crate::services::run_due(&app).await;
             // The sleep's clock stops while the Mac sleeps; a wake cuts it short.
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}

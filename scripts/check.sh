@@ -61,6 +61,8 @@ echo "Checking Python JSONL worker without models..."
 "$BUNTINI_CHECK_PYTHON" -m unittest discover -s worker/tests -v
 echo "Checking release preflight rejection paths..."
 "$BUNTINI_CHECK_PYTHON" -m unittest discover -s scripts/tests -v
+echo "Checking the native surfaces read the scenes Rust sends..."
+swift run --package-path "$BUNTINI_CHECK_ROOT/native/surface-lab" SurfaceChecks "$BUNTINI_CHECK_ROOT/native/surface/Fixtures/contract.json"
 echo "Checking native audio with synthetic input (microphone stays closed)..."
 bash "$BUNTINI_CHECK_ROOT/native/test.sh"
 echo "Checking the release build has no warnings, so unused code can't build up..."
