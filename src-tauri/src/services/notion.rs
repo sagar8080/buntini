@@ -4,8 +4,9 @@ use chrono::{DateTime, FixedOffset};
 use serde_json::{json, Value};
 
 use super::fetch::{Failure, Net};
-use super::snapshot::{self, flag, is_today, list, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, flag, is_today, list, short, text, time, when, Row, Snapshot};
 use super::Kind;
+use crate::i18n::{t, tn};
 
 pub const HOST: &str = "api.notion.com";
 pub const CAP: usize = 1024 * 1024;
@@ -30,7 +31,7 @@ fn title(page: &Value) -> String {
         .map(|(_, property)| list(property, "/title").iter().filter_map(|part| text(part, "/plain_text")).collect::<String>())
         .unwrap_or_default();
     if title.trim().is_empty() {
-        "Untitled".into()
+        t("services.notion.untitled")
     } else {
         title
     }
@@ -50,7 +51,7 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
         }
         rows.push(Row::new(text(page, "/id").unwrap_or_default(), title(page)).detail([edited.map(|at| when(at, now))]).url(text(page, "/url")));
     }
-    let title = if today > 0 { format!("{} today", plural(today, "page changed", "pages changed")) } else { "No pages changed today".into() };
+    let title = if today > 0 { tn("services.notion.pagesChangedToday", today as u64, &[]) } else { t("services.notion.noPages") };
     rows.truncate(snapshot::MAX_ROWS);
     Ok(Snapshot { title, badge: (today > 0).then(|| short(today)), rows, graph: None, busy: false })
 }

@@ -504,8 +504,8 @@ mod live {
         println!("{quiet:?} {asked:?} {listed:?} {open:?}");
         assert!(!running(), "Mail was opened");
         assert!(hub().closed);
-        assert_eq!(listed.unwrap_err(), script::CLOSED_TEXT);
-        assert_eq!(open.unwrap_err(), script::CLOSED_TEXT);
+        assert_eq!(listed.unwrap_err(), "Mail is closed.");
+        assert_eq!(open.unwrap_err(), "Mail is closed.");
         assert!(contribution(&hub()).pills.is_empty());
     }
 

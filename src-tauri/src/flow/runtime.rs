@@ -5,6 +5,7 @@
 use super::{history, keys, models, native, notes, service::{self, Service}, text, wake, Choices, Op, Settings};
 use crate::{
     controller::AppState,
+    i18n::{t, tf},
     privacy::{Locality, Share},
     surface::{
         self,
@@ -148,7 +149,7 @@ fn open_library(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(app, "library", tauri::WebviewUrl::App("index.html".into()))
-        .title("Library")
+        .title(t("surface.pill.library"))
         .inner_size(860.0, 620.0)
         .min_inner_size(560.0, 420.0)
         .on_navigation(|url| crate::security::ui_navigation_allowed(url, cfg!(dev)))
@@ -469,7 +470,7 @@ impl Runtime {
         tauri::async_runtime::spawn(async move {
             let outcome = match tokio::time::timeout(FINAL_WAIT, words).await {
                 Ok(Ok(event)) => deliver(&app, &flow, event, dictation.focus, speaking_ms).await,
-                _ => Outcome::Failed("The words didn’t come back. Try again.".into()),
+                _ => Outcome::Failed(t("flow.error.wordsLost")),
             };
             send(Input::Finished { outcome });
         });
@@ -713,7 +714,7 @@ impl Runtime {
                     self.dictation = None;
                     self.machine.ended();
                     self.after_listening().await;
-                    let message = event.get("message").and_then(Value::as_str).unwrap_or("The microphone didn’t open.").to_string();
+                    let message = event.get("message").and_then(Value::as_str).map_or_else(|| t("flow.error.micDidntOpen"), str::to_string);
                     self.flash(FlowState::Error, Some(message));
                 }
             }
@@ -753,7 +754,7 @@ impl Runtime {
                     self.fail_note(&recording.id);
                 }
                 self.after_notes().await;
-                let message = event.get("message").and_then(Value::as_str).unwrap_or("The call couldn’t be recorded.").to_string();
+                let message = event.get("message").and_then(Value::as_str).map_or_else(|| t("flow.error.callNotRecorded"), str::to_string);
                 self.flash(FlowState::Error, Some(message));
             }
             "exited" => {
@@ -763,7 +764,7 @@ impl Runtime {
                 if self.dictation.take().is_some() {
                     self.machine.ended();
                     self.conditions.dictating = false;
-                    self.flash(FlowState::Error, Some("The microphone stopped. Try again.".into()));
+                    self.flash(FlowState::Error, Some(t("flow.error.micStopped")));
                 }
                 if let Some(recording) = self.recording.take() {
                     self.fail_note(&recording.id);
@@ -801,19 +802,21 @@ impl Runtime {
 
     async fn start_notes(&mut self) -> Result<(), String> {
         if self.recording.is_some() {
-            return Err("A call is already recording.".into());
+            return Err(t("flow.error.alreadyRecording"));
         }
         if !self.settings.record_calls {
-            return Err("Turn on Record calls in Settings first.".into());
+            return Err(t("flow.error.recordCallsOff"));
         }
         let folder = self.notes_folder();
-        std::fs::create_dir_all(&folder).map_err(|_| "Buntini couldn’t make a folder for the recording.".to_string())?;
+        std::fs::create_dir_all(&folder).map_err(|_| t("flow.error.noRecordingFolder"))?;
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700));
         let id = uuid::Uuid::new_v4().to_string();
         self.service.send(json!({"op": "notes", "id": id, "folder": folder})).await?;
         let now = chrono::Utc::now();
-        let title = format!("Call at {}", now.with_timezone(&chrono::Local).format("%-I:%M %p"));
+        // English reads a 12-hour clock; other languages a 24-hour one.
+        let clock = if crate::i18n::language() == "en" { "%-I:%M %p" } else { "%H:%M" };
+        let title = tf("flow.note.callAt", &[("time", &now.with_timezone(&chrono::Local).format(clock))]);
         let note = history::Note { id: id.clone(), title, created_at: now.to_rfc3339(), seconds: 0.0, state: "recording".into(), lines: vec![], summary: String::new(), key_points: vec![], todos: vec![] };
         history::save_note(&self.state().store.lock().unwrap().db, &note)?;
         self.state().audit("microphone.start", "Recording a call: microphone and the Mac's sound");
@@ -829,7 +832,7 @@ impl Runtime {
     }
 
     async fn stop_notes(&mut self) -> Result<(), String> {
-        let Some(recording) = self.recording.as_mut() else { return Err("No call is recording.".into()) };
+        let Some(recording) = self.recording.as_mut() else { return Err(t("flow.error.notRecording")) };
         if recording.stopping {
             return Ok(());
         }
@@ -857,7 +860,7 @@ impl Runtime {
             .map(|recording| Pill {
                 id: "flow-notes".into(),
                 source: Source::Flow,
-                label: if recording.stopping { "Writing notes".into() } else { "Recording".into() },
+                label: if recording.stopping { t("flow.pill.writingNotes") } else { t("surface.pill.recording") },
                 tint: "#E5484D".into(),
                 state: if recording.stopping { PillState::Working } else { PillState::Waiting },
                 badge: None,

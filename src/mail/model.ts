@@ -1,4 +1,5 @@
 // Shared shapes for Mail in the island and the app (stream E). No bridge import, so the bridge can use them.
+import { t } from '../i18n.ts';
 
 /** A mailbox by its account's name (empty for On My Mac) and its path; mirrors `mail::Mailbox`. */
 export type Mailbox = { account: string; path: string };
@@ -56,9 +57,26 @@ export function sameMailbox(a: Mailbox, b: Mailbox): boolean {
 
 /** What a rule does, as one line. */
 export function ruleLine(rule: MailRule): string {
-  const field = { sender: 'From', domain: 'Domain', subject: 'Subject' }[rule.field];
-  const action = rule.action === 'move' && rule.to ? `To ${rule.to.path}` : { move: 'Move', flag: 'Flag', read: 'Read', junk: 'Junk' }[rule.action];
-  return `${field} “${rule.value}” → ${action}`;
+  return t('settings.mail.ruleLine', { field: fieldName(rule.field), value: rule.value, action: actionName(rule) });
+}
+
+/** What a rule looks at, as the rule form names it. */
+export function fieldName(field: RuleField): string {
+  switch (field) {
+    case 'sender': return t('settings.mail.field.sender');
+    case 'domain': return t('settings.mail.field.domain');
+    case 'subject': return t('settings.mail.field.subject');
+  }
+}
+
+function actionName(rule: MailRule): string {
+  if (rule.action === 'move' && rule.to) return t('settings.mail.toMailbox', { mailbox: rule.to.path });
+  switch (rule.action) {
+    case 'move': return t('settings.mail.action.move');
+    case 'flag': return t('settings.mail.action.flag');
+    case 'read': return t('settings.mail.action.read');
+    case 'junk': return t('settings.mail.action.junk');
+  }
 }
 
 /** A word list with `entry` added once, ignoring case. */
@@ -89,6 +107,6 @@ export function preview(op: MailOp): unknown {
     case 'mailboxes': return [{ account: '', path: 'Newsletters' }, { account: 'iCloud', path: 'Archive' }] satisfies Mailbox[];
     case 'planned': return null;
     case 'pickPdf': return null;
-    default: throw new Error('Open the desktop app to use this.');
+    default: throw new Error(t('common.desktopOnly'));
   }
 }

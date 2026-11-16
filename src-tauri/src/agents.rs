@@ -30,6 +30,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 
+use crate::i18n::{t, tf};
+
 /// Longest event read from a hook. Events Buntini listens to are a few KB.
 const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 /// How long a hook may take to hand over its event.
@@ -672,7 +674,7 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
                 _ => return None,
             };
             let said = string("description");
-            (if said.is_empty() { "Run a command".into() } else { said }, command, true)
+            (if said.is_empty() { t("agents.request.runCommand") } else { said }, command, true)
         }
         "apply_patch" => {
             let patch = match input.get("command").or_else(|| input.get("patch")).or_else(|| input.get("input")) {
@@ -681,27 +683,27 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
                 _ => String::new(),
             };
             let files = patch_files(&patch, &event.cwd);
-            ("Change files".into(), if files.is_empty() { patch } else { files.join("\n") }, true)
+            (t("agents.request.changeFiles"), if files.is_empty() { patch } else { files.join("\n") }, true)
         }
-        "Edit" | "MultiEdit" => (format!("Edit {}", file_name(&string("file_path"))), path("file_path"), true),
-        "Write" => (format!("Write {}", file_name(&string("file_path"))), path("file_path"), true),
-        "NotebookEdit" => (format!("Edit {}", file_name(&string("notebook_path"))), path("notebook_path"), true),
-        "Read" => (format!("Read {}", file_name(&string("file_path"))), path("file_path"), true),
+        "Edit" | "MultiEdit" => (file_name(&string("file_path")).map_or_else(|| t("agents.request.editAFile"), |file| tf("agents.request.edit", &[("file", &file)])), path("file_path"), true),
+        "Write" => (file_name(&string("file_path")).map_or_else(|| t("agents.request.writeAFile"), |file| tf("agents.request.write", &[("file", &file)])), path("file_path"), true),
+        "NotebookEdit" => (file_name(&string("notebook_path")).map_or_else(|| t("agents.request.editAFile"), |file| tf("agents.request.edit", &[("file", &file)])), path("notebook_path"), true),
+        "Read" => (file_name(&string("file_path")).map_or_else(|| t("agents.request.readAFile"), |file| tf("agents.request.read", &[("file", &file)])), path("file_path"), true),
         "Glob" | "Grep" => {
             let place = string("path");
-            ("Search files".into(), [string("pattern"), relative(&place, &event.cwd)].iter().filter(|part| !part.is_empty()).cloned().collect::<Vec<_>>().join("  ·  "), true)
+            (t("agents.request.searchFiles"), [string("pattern"), relative(&place, &event.cwd)].iter().filter(|part| !part.is_empty()).cloned().collect::<Vec<_>>().join("  ·  "), true)
         }
-        "WebFetch" => ("Open a web page".into(), string("url"), true),
-        "WebSearch" => ("Search the web".into(), string("query"), false),
-        "ExitPlanMode" => ("Start on its plan".into(), string("plan"), false),
+        "WebFetch" => (t("agents.request.openWebPage"), string("url"), true),
+        "WebSearch" => (t("agents.request.searchWeb"), string("query"), false),
+        "ExitPlanMode" => (t("agents.request.startPlan"), string("plan"), false),
         tool if tool.starts_with("mcp__") => {
             let mut parts = tool.splitn(3, "__").skip(1);
             let server = parts.next().unwrap_or_default();
             let name = parts.next().unwrap_or_default();
-            (format!("Use {} from {}", words(name), server), compact(input), true)
+            (tf("agents.request.useFrom", &[("tool", &words(name)), ("server", &server)]), compact(input), true)
         }
         "" => return None,
-        tool => (format!("Use {}", words(tool)), compact(input), true),
+        tool => (tf("agents.request.use", &[("tool", &words(tool))]), compact(input), true),
     };
     let always = agent == Agent::Claude && (event.tool == "ExitPlanMode" || (!event.suggestions.is_empty() && questions.is_empty()));
     Some(AgentRequest {
@@ -773,11 +775,8 @@ fn relative(path: &str, cwd: &str) -> String {
     }
 }
 
-fn file_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "a file".into())
+fn file_name(path: &str) -> Option<String> {
+    Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned())
 }
 
 fn words(name: &str) -> String {

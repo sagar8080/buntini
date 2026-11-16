@@ -1,6 +1,7 @@
 //! The audio helper in service mode: one long-lived `buntini-audio --service` speaking JSON
 //! lines. Rust sends `{"op": …}` commands; the helper answers with `{"event": …}` lines.
 //! Voice bands go straight to the pill; every other event goes to whoever listens.
+use crate::i18n::t;
 use serde_json::Value;
 use std::{path::PathBuf, process::Stdio};
 use tokio::{
@@ -51,11 +52,11 @@ impl Service {
             *running = Some(self.spawn()?);
         }
         let service = running.as_mut().expect("just started");
-        let mut line = serde_json::to_vec(&command).map_err(|_| "Buntini couldn’t talk to its audio helper.".to_string())?;
+        let mut line = serde_json::to_vec(&command).map_err(|_| t("flow.error.helperTalk"))?;
         line.push(b'\n');
         if service.input.write_all(&line).await.is_err() || service.input.flush().await.is_err() {
             *running = None;
-            return Err("The audio helper stopped. Try again.".into());
+            return Err(t("flow.error.helperStopped"));
         }
         Ok(())
     }
@@ -74,7 +75,7 @@ impl Service {
 
     fn spawn(&self) -> Result<Running, String> {
         if !self.helper.is_file() {
-            return Err("The local audio helper is missing. Reinstall Buntini to use dictation.".into());
+            return Err(t("flow.error.helperMissing"));
         }
         let mut child = Command::new(&self.helper)
             .arg("--service")
@@ -85,9 +86,9 @@ impl Service {
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|_| "The local audio helper could not start.".to_string())?;
-        let input = child.stdin.take().ok_or("Cannot open the audio helper.")?;
-        let output = child.stdout.take().ok_or("Cannot read the audio helper.")?;
+            .map_err(|_| t("flow.error.helperStart"))?;
+        let input = child.stdin.take().ok_or_else(|| t("flow.error.helperInput"))?;
+        let output = child.stdout.take().ok_or_else(|| t("flow.error.helperOutput"))?;
         let events = self.events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::with_capacity(1 << 16, output).lines();

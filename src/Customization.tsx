@@ -5,19 +5,20 @@ import Toggle from './Toggle';
 import { command, desktop, errorMessage } from './bridge';
 import { accessories, characters, coats, eyeColors, eyes, lookFrom } from './petOptions';
 import { presets } from './themes.ts';
-import { languages, t } from './i18n';
+import { languages, number, t } from './i18n.ts';
 import { follow } from './locales';
 import type { BackgroundStatus, LoginStatus, Settings, Voice } from './types';
 
 const pick = <T,>(items: { id: T }[]) => items[Math.floor(Math.random() * items.length)].id;
-// A personality also sets how lively the cat is, so there's no separate motion choice.
-const personalities: { label: string; text: string; motion: Settings['petMotion'] }[] = [
-  { label: 'Companion', text: 'Warm, concise, practical, and honest.', motion: 'playful' },
-  { label: 'Curious', text: 'Curious and playful. Use clear examples and gentle humor.', motion: 'playful' },
-  { label: 'Focused', text: 'Direct and focused. Give short, actionable answers.', motion: 'calm' },
+// A personality also sets how lively the cat is, so there's no separate motion choice. Its
+// `text` is the model's instruction and is matched against saved settings, so it stays English.
+const personalities: { labelKey: string; text: string; motion: Settings['petMotion'] }[] = [
+  { labelKey: 'settings.personality.companion', text: 'Warm, concise, practical, and honest.', motion: 'playful' },
+  { labelKey: 'settings.personality.curious', text: 'Curious and playful. Use clear examples and gentle humor.', motion: 'playful' },
+  { labelKey: 'settings.personality.focused', text: 'Direct and focused. Give short, actionable answers.', motion: 'calm' },
 ];
 // Text size brings the panel along, so larger text never sits in a cramped bubble.
-const sizes: [Settings['textSize'], Settings['panelSize'], string][] = [['small', 'compact', 'Small'], ['medium', 'standard', 'Medium'], ['large', 'large', 'Large']];
+const sizes: [Settings['textSize'], Settings['panelSize'], string][] = [['small', 'compact', 'settings.size.small'], ['medium', 'standard', 'settings.size.medium'], ['large', 'large', 'settings.size.large']];
 type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void; onPreviewVoice: (voiceId: string, rate: number, text: string) => Promise<void>; onRestartSetup: () => void };
 
 /** The Buntini tab: how it looks, sounds and behaves, with a few good choices for each. */
@@ -61,55 +62,55 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
     try {
       const allowed = await command<boolean>('request_notification_permission');
       setNotificationStatus(allowed ? 'authorized' : 'denied');
-      if (!allowed) onError('Notifications are off for Buntini in System Settings → Notifications.');
+      if (!allowed) onError(t('settings.outAbout.notificationsOff'));
     } catch (error) { onError(errorMessage(error)); }
   }
   return <>
     <section className="settings-section">
-      <div className="profile-card"><Pet avatar={draft.avatar} look={look} state="idle" alive /><label className="profile-name"><span>Name</span><input value={draft.assistantName} onChange={event => update('assistantName', event.target.value)} maxLength={40} required aria-label="Assistant name" /></label></div>
-      <div className="character-options" aria-label="Character">{characters.map(item => <button type="button" key={item.id} aria-pressed={draft.avatar === item.id} className={draft.avatar === item.id ? 'active' : ''} onClick={() => update('avatar', item.id)}><Pet avatar={item.id} look={look} state="idle" /><span>{item.label}</span></button>)}</div>
+      <div className="profile-card"><Pet avatar={draft.avatar} look={look} state="idle" alive /><label className="profile-name"><span>{t('settings.name.label')}</span><input value={draft.assistantName} onChange={event => update('assistantName', event.target.value)} maxLength={40} required aria-label={t('settings.name.aria')} /></label></div>
+      <div className="character-options" aria-label={t('settings.character')}>{characters.map(item => <button type="button" key={item.id} aria-pressed={draft.avatar === item.id} className={draft.avatar === item.id ? 'active' : ''} onClick={() => update('avatar', item.id)}><Pet avatar={item.id} look={look} state="idle" /><span>{item.label}</span></button>)}</div>
     </section>
     {draft.avatar === 'cat' && <section className="settings-section">
-      <div className="settings-section-heading"><h3>Look</h3><button type="button" className="surprise-button" onClick={() => { update('catCoat', pick(coats)); update('catEyes', pick(eyes)); update('catAccessory', pick(accessories)); }}><Shuffle size={12} />Surprise me</button></div>
-      <div className="pet-swatches" aria-label="Coat">{coats.map(item => <button type="button" key={item.id} aria-pressed={draft.catCoat === item.id} className={draft.catCoat === item.id ? 'active' : ''} onClick={() => update('catCoat', item.id)} title={item.label}><Pet look={{ ...look, coat: item.id, accessory: 'none' }} state="idle" /><span>{item.label}</span></button>)}</div>
-      <div className="chip-row" aria-label="Eye color">{eyes.map(item => <button type="button" key={item.id} aria-pressed={draft.catEyes === item.id} className={draft.catEyes === item.id ? 'active' : ''} onClick={() => update('catEyes', item.id)}><i style={{ background: item.id === 'odd' ? `linear-gradient(90deg, ${eyeColors.blue} 50%, ${eyeColors.amber} 50%)` : eyeColors[item.id] }} />{item.label}</button>)}</div>
-      <div className="pet-swatches" aria-label="Accessory">{accessories.map(item => <button type="button" key={item.id} aria-pressed={draft.catAccessory === item.id} className={draft.catAccessory === item.id ? 'active' : ''} onClick={() => update('catAccessory', item.id)} title={item.label}><Pet look={{ ...look, accessory: item.id }} state="idle" /><span>{item.label}</span></button>)}</div>
+      <div className="settings-section-heading"><h3>{t('settings.look.title')}</h3><button type="button" className="surprise-button" onClick={() => { update('catCoat', pick(coats)); update('catEyes', pick(eyes)); update('catAccessory', pick(accessories)); }}><Shuffle size={12} />{t('settings.look.surprise')}</button></div>
+      <div className="pet-swatches" aria-label={t('surface.wardrobe.coat')}>{coats.map(item => <button type="button" key={item.id} aria-pressed={draft.catCoat === item.id} className={draft.catCoat === item.id ? 'active' : ''} onClick={() => update('catCoat', item.id)} title={item.label}><Pet look={{ ...look, coat: item.id, accessory: 'none' }} state="idle" /><span>{item.label}</span></button>)}</div>
+      <div className="chip-row" aria-label={t('settings.look.eyeColor')}>{eyes.map(item => <button type="button" key={item.id} aria-pressed={draft.catEyes === item.id} className={draft.catEyes === item.id ? 'active' : ''} onClick={() => update('catEyes', item.id)}><i style={{ background: item.id === 'odd' ? `linear-gradient(90deg, ${eyeColors.blue} 50%, ${eyeColors.amber} 50%)` : eyeColors[item.id] }} />{item.label}</button>)}</div>
+      <div className="pet-swatches" aria-label={t('surface.wardrobe.accessory')}>{accessories.map(item => <button type="button" key={item.id} aria-pressed={draft.catAccessory === item.id} className={draft.catAccessory === item.id ? 'active' : ''} onClick={() => update('catAccessory', item.id)} title={item.label}><Pet look={{ ...look, accessory: item.id }} state="idle" /><span>{item.label}</span></button>)}</div>
     </section>}
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Theme</h3></div>
-      <div className="theme-presets" role="radiogroup" aria-label="Theme">{presets.map(item => <button type="button" key={item.id} role="radio" aria-checked={draft.themePreset === item.id} className={draft.themePreset === item.id ? 'active' : ''} onClick={() => theme(item.id)}>
+      <div className="settings-section-heading"><h3>{t('settings.theme.title')}</h3></div>
+      <div className="theme-presets" role="radiogroup" aria-label={t('settings.theme.title')}>{presets.map(item => <button type="button" key={item.id} role="radio" aria-checked={draft.themePreset === item.id} className={draft.themePreset === item.id ? 'active' : ''} onClick={() => theme(item.id)}>
         <span className="theme-swatch"><i style={{ background: item.light.panel }} /><i style={{ background: item.dark.panel }} /><b style={{ background: item.dark.accent }} /></span>{item.label}
       </button>)}</div>
-      <div className="chip-row" aria-label="Appearance">{[{ id: 'light', icon: Sun, label: 'Light' }, { id: 'dark', icon: Moon, label: 'Dark' }, { id: 'system', icon: Laptop, label: 'Auto' }].map(item => <button key={item.id} type="button" aria-pressed={draft.theme === item.id} className={draft.theme === item.id ? 'active' : ''} onClick={() => update('theme', item.id as Settings['theme'])}><item.icon size={13} />{item.label}</button>)}</div>
+      <div className="chip-row" aria-label={t('settings.appearance.title')}>{[{ id: 'light', icon: Sun, label: t('settings.appearance.light') }, { id: 'dark', icon: Moon, label: t('settings.appearance.dark') }, { id: 'system', icon: Laptop, label: t('settings.appearance.auto') }].map(item => <button key={item.id} type="button" aria-pressed={draft.theme === item.id} className={draft.theme === item.id ? 'active' : ''} onClick={() => update('theme', item.id as Settings['theme'])}><item.icon size={13} />{item.label}</button>)}</div>
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Size and motion</h3></div>
-      <div className="setting-label">Text size</div>
-      <div className="chip-row" role="radiogroup" aria-label="Text size">{sizes.map(([text, panel, label]) => <button type="button" key={text} role="radio" aria-checked={draft.textSize === text} className={draft.textSize === text ? 'active' : ''} onClick={() => { update('textSize', text); update('panelSize', panel); }}>{label}</button>)}</div>
-      {chips('Cat size', 'companionScale', [[.8, 'Small'], [1, 'Medium'], [1.2, 'Large']])}
-      <Toggle label="Less motion" checked={draft.reducedMotion} onChange={value => update('reducedMotion', value)} />
+      <div className="settings-section-heading"><h3>{t('settings.sizeMotion')}</h3></div>
+      <div className="setting-label">{t('settings.textSize')}</div>
+      <div className="chip-row" role="radiogroup" aria-label={t('settings.textSize')}>{sizes.map(([text, panel, labelKey]) => <button type="button" key={text} role="radio" aria-checked={draft.textSize === text} className={draft.textSize === text ? 'active' : ''} onClick={() => { update('textSize', text); update('panelSize', panel); }}>{t(labelKey)}</button>)}</div>
+      {chips(t('settings.catSize'), 'companionScale', [[.8, t('settings.size.small')], [1, t('settings.size.medium')], [1.2, t('settings.size.large')]])}
+      <Toggle label={t('settings.lessMotion')} checked={draft.reducedMotion} onChange={value => update('reducedMotion', value)} />
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Personality</h3></div>
-      <div className="chip-row" aria-label="Personality">{personalities.map(item => <button type="button" key={item.label} aria-pressed={preset === item} className={preset === item ? 'active' : ''} onClick={() => personality(item)}>{item.label}</button>)}</div>
-      <details className="disclosure" open={!preset}><summary>Write your own</summary><textarea aria-label="Personality" value={draft.personality} onChange={event => update('personality', event.target.value)} maxLength={1200} rows={3} /></details>
+      <div className="settings-section-heading"><h3>{t('settings.personality.title')}</h3></div>
+      <div className="chip-row" aria-label={t('settings.personality.title')}>{personalities.map(item => <button type="button" key={item.labelKey} aria-pressed={preset === item} className={preset === item ? 'active' : ''} onClick={() => personality(item)}>{t(item.labelKey)}</button>)}</div>
+      <details className="disclosure" open={!preset}><summary>{t('settings.personality.custom')}</summary><textarea aria-label={t('settings.personality.title')} value={draft.personality} onChange={event => update('personality', event.target.value)} maxLength={1200} rows={3} /></details>
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Voice</h3></div>
-      <div className="voice-row"><select aria-label="Speaking voice" value={draft.voiceId} onChange={event => update('voiceId', event.target.value)}><option value="">System voice</option>{voices.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.language}</option>)}{draft.voiceId && voices.length > 0 && !voices.some(voice => voice.id === draft.voiceId) && <option value={draft.voiceId}>{draft.voiceId}</option>}</select>
-        <button type="button" className="icon-button" aria-label="Try this voice" title="Try this voice" disabled={previewing || !desktop} onClick={async () => { setPreviewing(true); try { await onPreviewVoice(draft.voiceId, draft.voiceRate, `Hi, I'm ${draft.assistantName || 'your companion'}.`); } catch (error) { onError(errorMessage(error)); } finally { setPreviewing(false); } }}>{previewing ? <LoaderCircle size={14} className="spin" /> : <AudioLines size={14} />}</button></div>
-      <label className="range-row"><span>Pace</span><input type="range" min="100" max="300" step="10" value={draft.voiceRate} onChange={event => update('voiceRate', Number(event.target.value))} aria-label="Speaking pace" /><span>{draft.voiceRate}</span></label>
-      <Toggle label="Answer out loud when I talk" checked={draft.speakVoiceReplies || draft.speakResponses} disabled={draft.speakResponses} onChange={value => update('speakVoiceReplies', value)} />
-      <Toggle label="Read every reply aloud" checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
+      <div className="settings-section-heading"><h3>{t('settings.voice.title')}</h3></div>
+      <div className="voice-row"><select aria-label={t('settings.voice.speaking')} value={draft.voiceId} onChange={event => update('voiceId', event.target.value)}><option value="">{t('settings.voice.system')}</option>{voices.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.language}</option>)}{draft.voiceId && voices.length > 0 && !voices.some(voice => voice.id === draft.voiceId) && <option value={draft.voiceId}>{draft.voiceId}</option>}</select>
+        <button type="button" className="icon-button" aria-label={t('settings.voice.try')} title={t('settings.voice.try')} disabled={previewing || !desktop} onClick={async () => { setPreviewing(true); try { await onPreviewVoice(draft.voiceId, draft.voiceRate, draft.assistantName ? t('settings.voice.sample', { name: draft.assistantName }) : t('settings.voice.sampleUnnamed')); } catch (error) { onError(errorMessage(error)); } finally { setPreviewing(false); } }}>{previewing ? <LoaderCircle size={14} className="spin" /> : <AudioLines size={14} />}</button></div>
+      <label className="range-row"><span>{t('settings.voice.pace')}</span><input type="range" min="100" max="300" step="10" value={draft.voiceRate} onChange={event => update('voiceRate', Number(event.target.value))} aria-label={t('settings.voice.paceAria')} /><span>{number(draft.voiceRate)}</span></label>
+      <Toggle label={t('settings.voice.answerAloud')} checked={draft.speakVoiceReplies || draft.speakResponses} disabled={draft.speakResponses} onChange={value => update('speakVoiceReplies', value)} />
+      <Toggle label={t('settings.voice.readAloud')} checked={draft.speakResponses} onChange={value => update('speakResponses', value)} />
     </section>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Out and about</h3></div>
-      <Toggle label="Wander around the screen" checked={draft.petRoam} onChange={value => update('petRoam', value)} />
-      <Toggle label="Offer a hand" detail={draft.petAwareness ? undefined : 'Needs “Notice what I’m doing” in Privacy'} disabled={!draft.petAwareness} checked={draft.petNudges && draft.petAwareness} onChange={value => update('petNudges', value)} />
-      <Toggle label="Morning brief" checked={draft.morningBrief} onChange={value => update('morningBrief', value)} />
-      <Toggle label="Heads-ups" checked={draft.headsUps} onChange={value => { update('headsUps', value); if (value && !draft.notificationsEnabled) void notifications(true); }} />
-      <Toggle label="Desktop notifications" detail={notificationStatus === 'denied' ? 'Turned off in System Settings' : notificationStatus === 'unavailable' ? 'Works in the installed app' : undefined} checked={draft.notificationsEnabled} onChange={value => void notifications(value)} />
-      <Toggle label="Open at login" detail={loginStatus === 'unavailable' ? 'Works in the installed app' : loginStatus === 'requiresApproval' ? 'Allow in System Settings → Login Items' : draft.openAtLogin && loginStatus && loginStatus !== 'enabled' ? 'Turned off in System Settings' : undefined} disabled={loginStatus === 'unavailable' && !draft.openAtLogin} checked={draft.openAtLogin} onChange={value => update('openAtLogin', value)} />
+      <div className="settings-section-heading"><h3>{t('settings.outAbout.title')}</h3></div>
+      <Toggle label={t('settings.outAbout.wander')} checked={draft.petRoam} onChange={value => update('petRoam', value)} />
+      <Toggle label={t('settings.outAbout.offerHand')} detail={draft.petAwareness ? undefined : t('settings.outAbout.needsIn', { setting: t('settings.privacy.notice'), tab: t('settings.tabs.privacy') })} disabled={!draft.petAwareness} checked={draft.petNudges && draft.petAwareness} onChange={value => update('petNudges', value)} />
+      <Toggle label={t('settings.outAbout.morningBrief')} checked={draft.morningBrief} onChange={value => update('morningBrief', value)} />
+      <Toggle label={t('settings.outAbout.headsUps')} checked={draft.headsUps} onChange={value => { update('headsUps', value); if (value && !draft.notificationsEnabled) void notifications(true); }} />
+      <Toggle label={t('settings.outAbout.notifications')} detail={notificationStatus === 'denied' ? t('settings.outAbout.offInSystemSettings') : notificationStatus === 'unavailable' ? t('settings.outAbout.installedOnly') : undefined} checked={draft.notificationsEnabled} onChange={value => void notifications(value)} />
+      <Toggle label={t('settings.outAbout.openAtLogin')} detail={loginStatus === 'unavailable' ? t('settings.outAbout.installedOnly') : loginStatus === 'requiresApproval' ? t('settings.outAbout.allowLoginItems') : draft.openAtLogin && loginStatus && loginStatus !== 'enabled' ? t('settings.outAbout.offInSystemSettings') : undefined} disabled={loginStatus === 'unavailable' && !draft.openAtLogin} checked={draft.openAtLogin} onChange={value => update('openAtLogin', value)} />
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.language.title')}</h3></div>
@@ -118,6 +119,6 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
         {languages.map(item => <option key={item.code} value={item.code} lang={item.code}>{item.name}</option>)}
       </select>
     </section>
-    <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={14} /><span>Run setup again</span><ChevronRight size={14} /></button>
+    <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={14} /><span>{t('settings.runSetupAgain')}</span><ChevronRight size={14} /></button>
   </>;
 }

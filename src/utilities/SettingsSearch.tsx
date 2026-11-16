@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { searchSettings, tabNames, type SettingEntry, type SettingsTab } from './model';
+import { searchSettings, tabName, type SettingEntry, type SettingsTab } from './model';
+import { t } from '../i18n.ts';
 import './utilities.css';
 
 const plain = (text: string) => text.toLowerCase().replace(/[’']/g, '').replace(/\s+/g, ' ').trim();
@@ -81,7 +82,7 @@ export default function SettingsSearch({ onTab }: { onTab: (tab: SettingsTab) =>
 
   return <div className="settings-search" role="search">
     <Search size={13} aria-hidden="true" />
-    <input ref={field} type="search" value={query} placeholder="Search settings" aria-label="Search settings" aria-expanded={results.length > 0} aria-controls="settings-search-results" aria-activedescendant={results.length ? `settings-result-${active}` : undefined} role="combobox" autoComplete="off" spellCheck={false}
+    <input ref={field} type="search" value={query} placeholder={t('settings.search.placeholder')} aria-label={t('settings.search.placeholder')} aria-expanded={results.length > 0} aria-controls="settings-search-results" aria-activedescendant={results.length ? `settings-result-${active}` : undefined} role="combobox" autoComplete="off" spellCheck={false}
       onChange={event => { setQuery(event.target.value); setActive(0); }}
       onKeyDown={event => {
         if (event.key === 'ArrowDown' && results.length) { event.preventDefault(); setActive((active + 1) % results.length); }
@@ -89,13 +90,13 @@ export default function SettingsSearch({ onTab }: { onTab: (tab: SettingsTab) =>
         else if (event.key === 'Enter' && results[active]) { event.preventDefault(); go(results[active]); }
         else if (event.key === 'Escape' && query) { event.preventDefault(); event.stopPropagation(); setQuery(''); }
       }} />
-    {query && <button type="button" className="settings-search-clear" aria-label="Clear" onClick={() => { setQuery(''); field.current?.focus(); }}><X size={12} /></button>}
+    {query && <button type="button" className="settings-search-clear" aria-label={t('common.clear')} onClick={() => { setQuery(''); field.current?.focus(); }}><X size={12} /></button>}
     {query.trim() && <div className="settings-search-results" id="settings-search-results" role="listbox">
       {results.length
         ? results.map((entry, index) => <button type="button" role="option" id={`settings-result-${index}`} aria-selected={index === active} key={`${entry.tab}-${entry.label}`} className={index === active ? 'active' : ''} onMouseEnter={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => go(entry)}>
-            <span>{entry.label}</span><small>{tabNames[entry.tab]}</small>
+            <span>{entry.label}</span><small>{tabName(entry.tab)}</small>
           </button>)
-        : <p className="settings-search-empty">No matches</p>}
+        : <p className="settings-search-empty">{t('settings.search.noMatches')}</p>}
     </div>}
   </div>;
 }

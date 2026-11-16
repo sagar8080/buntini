@@ -1,6 +1,6 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { streamDefaults, streamPreviews } from './streams';
-import { resolve } from './i18n';
+import { resolve } from './i18n.ts';
 import type { AgentRequest, Attached, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();

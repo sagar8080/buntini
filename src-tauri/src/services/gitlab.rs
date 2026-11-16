@@ -8,8 +8,9 @@ use serde_json::{json, Value};
 
 use super::fetch::{Failure, Net};
 use super::github::graphql_errors;
-use super::snapshot::{self, flag, graph, list, number, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, flag, graph, list, number, short, text, time, when, Row, Snapshot};
 use super::{Kind, Memo};
+use crate::i18n::{t, tf, tn};
 use crate::surface::PillState;
 
 pub const CAP: usize = 512 * 1024;
@@ -49,11 +50,11 @@ pub fn calendar(value: &Value, now: DateTime<FixedOffset>) -> Vec<u32> {
     graph(&days, now.date_naive())
 }
 
-fn pipeline(status: Option<&str>) -> (PillState, Option<&'static str>) {
+fn pipeline(status: Option<&str>) -> (PillState, Option<String>) {
     match status {
-        Some("FAILED") => (PillState::Error, Some("Pipeline failed")),
-        Some("SUCCESS") => (PillState::Done, Some("Pipeline passed")),
-        Some("CREATED" | "WAITING_FOR_RESOURCE" | "PREPARING" | "WAITING_FOR_CALLBACK" | "PENDING" | "RUNNING" | "SCHEDULED") => (PillState::Working, Some("Pipeline running")),
+        Some("FAILED") => (PillState::Error, Some(t("services.pipeline.failed"))),
+        Some("SUCCESS") => (PillState::Done, Some(t("services.pipeline.passed"))),
+        Some("CREATED" | "WAITING_FOR_RESOURCE" | "PREPARING" | "WAITING_FOR_CALLBACK" | "PENDING" | "RUNNING" | "SCHEDULED") => (PillState::Working, Some(t("services.pipeline.running"))),
         _ => (PillState::Idle, None),
     }
 }
@@ -77,7 +78,7 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph: Option<Vec<u32>>)
                 .detail([Some(place(mr)), text(mr, "/author/username"), updated(mr)])
                 .state(Some(PillState::Waiting))
                 .url(text(mr, "/webUrl"))
-                .alert("Review requested", true)
+                .alert(t("services.alert.reviewRequested"), true)
         })
         .collect();
     let mut failing = vec![];
@@ -87,10 +88,10 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph: Option<Vec<u32>>)
         let (state, label) = pipeline(text(mr, "/headPipeline/status").as_deref());
         busy |= state == PillState::Working;
         let row = Row::new(format!("mr-{}", place(mr)), text(mr, "/title").unwrap_or_default())
-            .detail([Some(place(mr)), flag(mr, "/draft").then(|| "Draft".into()), label.map(str::to_string), updated(mr)])
+            .detail([Some(place(mr)), flag(mr, "/draft").then(|| t("services.draft")), label, updated(mr)])
             .state(Some(state))
             .url(text(mr, "/webUrl"))
-            .alert("Pipeline failed", state == PillState::Error);
+            .alert(t("services.pipeline.failed"), state == PillState::Error);
         if state == PillState::Error {
             failing.push(row);
         } else {
@@ -100,11 +101,11 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph: Option<Vec<u32>>)
     let review_count = number(user, "/reviewRequestedMergeRequests/count").map_or(rows.len(), |count| count.max(0) as usize);
     let open = number(user, "/authoredMergeRequests/count").map_or(failing.len() + others.len(), |count| count.max(0) as usize);
     let title = if review_count > 0 {
-        plural(review_count, "review requested", "reviews requested")
+        tn("services.reviewsRequested", review_count as u64, &[])
     } else if let Some(first) = failing.first() {
-        format!("Pipeline failed on {}", first.title)
+        tf("services.pipelineFailedOn", &[("title", &first.title)])
     } else {
-        plural(open, "open merge request", "open merge requests")
+        tn("services.openMergeRequests", open as u64, &[])
     };
     let badge = if review_count > 0 { Some(short(review_count)) } else { (open > 0).then(|| short(open)) };
     rows.extend(failing);
@@ -129,7 +130,7 @@ mod tests {
         assert_eq!(snapshot.title, "2 reviews requested");
         let ids: Vec<&str> = snapshot.rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids, ["review-acme/api!31", "mr-sagar/buntini!9", "mr-sagar/buntini!8"]);
-        assert_eq!(snapshot.rows[1].alert, Some("Pipeline failed"));
+        assert_eq!(snapshot.rows[1].alert.as_deref(), Some("Pipeline failed"));
         assert_eq!(snapshot.rows[2].state, Some(PillState::Working));
         assert_eq!(snapshot.rows[2].detail.as_deref(), Some("sagar/buntini!8 · Draft · Pipeline running · 10:15"));
         assert_eq!(snapshot.rows[0].url.as_deref(), Some("https://gitlab.com/acme/api/-/merge_requests/31"));

@@ -1,4 +1,5 @@
 // Shared shapes for the island at the notch and its cat (stream A). No bridge import, so the bridge can use them.
+import { t } from '../i18n.ts';
 
 /** Saved under `settings.island`; mirrors `island::Settings` in Rust. */
 export interface IslandSettings {
@@ -15,5 +16,5 @@ export type IslandOp = { op: 'ping' };
 /** What the browser preview answers for `island_call`. */
 export function preview(op: IslandOp): unknown {
   if (op.op === 'ping') return true;
-  throw new Error('Open the desktop app to use this.');
+  throw new Error(t('common.desktopOnly'));
 }

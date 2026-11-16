@@ -20,6 +20,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::i18n::{t, tf};
 use crate::integrations::USER_AGENT;
 use crate::surface::cards::utilities::{Update, WhatsNew};
 use crate::surface::{self, Card, CardBody, Offer, Source, Urgency};
@@ -224,7 +225,7 @@ async fn prepare(app: &AppHandle, release: &Release) -> Result<PathBuf, String> 
     this_app()?;
     let folder = updates_dir(app)?.join(&release.version);
     let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).map_err(|_| "Couldn't make room for the download.".to_string())?;
+    std::fs::create_dir_all(&folder).map_err(|_| t("updates.error.noRoom"))?;
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15 * 60))
@@ -232,9 +233,9 @@ async fn prepare(app: &AppHandle, release: &Release) -> Result<PathBuf, String> 
         .https_only(true)
         .user_agent(USER_AGENT)
         .build()
-        .map_err(|_| "Cannot initialize a secure connection.".to_string())?;
+        .map_err(|_| t("updates.error.secureConnection"))?;
 
-    let expected = sums(&String::from_utf8_lossy(&fetch(&client, &release.sums.url, 64 * 1024, |_| {}, None).await?)).ok_or("The release has no checksum for the Mac app.")?;
+    let expected = sums(&String::from_utf8_lossy(&fetch(&client, &release.sums.url, 64 * 1024, |_| {}, None).await?)).ok_or_else(|| t("updates.error.noChecksum"))?;
     let zip = folder.join(ZIP);
     let mut last = 0.0;
     let digest = fetch(&client, &release.zip.url, release.zip.size, |done| {
@@ -247,47 +248,47 @@ async fn prepare(app: &AppHandle, release: &Release) -> Result<PathBuf, String> 
     .await?;
     let size = std::fs::metadata(&zip).map(|meta| meta.len()).unwrap_or(0);
     if size != release.zip.size || hex(&digest) != expected {
-        return Err("The download didn't match the release. Nothing was changed.".into());
+        return Err(t("updates.error.mismatch"));
     }
 
     show(app, Stage::Checking(release.clone()));
     let version = release.version.clone();
     let unpacked = folder.join("app");
     tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
-        run("/usr/bin/ditto", &["-x".as_ref(), "-k".as_ref(), zip.as_os_str(), unpacked.as_os_str()]).map_err(|_| "The download couldn't be opened.".to_string())?;
+        run("/usr/bin/ditto", &["-x".as_ref(), "-k".as_ref(), zip.as_os_str(), unpacked.as_os_str()]).map_err(|_| t("updates.error.unzip"))?;
         let _ = std::fs::remove_file(&zip);
         let new_app = unpacked.join("Buntini.app");
         verify(&new_app, &version)?;
         Ok(new_app)
     })
     .await
-    .map_err(|_| "The check stopped.".to_string())?
+    .map_err(|_| t("updates.error.checkStopped"))?
 }
 
 /// Downloads `url` (following GitHub's redirect to its file servers), at most `cap` bytes,
 /// into `file` or memory. Answers the SHA-256 when saving to a file, else the bytes.
 async fn fetch(client: &reqwest::Client, url: &str, cap: u64, mut progress: impl FnMut(u64), file: Option<&Path>) -> Result<Vec<u8>, String> {
-    let mut url = reqwest::Url::parse(url).map_err(|_| "The release link is unusable.".to_string())?;
+    let mut url = reqwest::Url::parse(url).map_err(|_| t("updates.error.badLink"))?;
     let mut response = None;
     for _ in 0..4 {
         if !github_host(&url) {
-            return Err("The release pointed somewhere other than GitHub.".into());
+            return Err(t("updates.error.notGitHub"));
         }
-        let answer = client.get(url.clone()).send().await.map_err(|_| "Couldn't reach GitHub. Check your internet connection.".to_string())?;
+        let answer = client.get(url.clone()).send().await.map_err(|_| t("updates.error.unreachable"))?;
         if answer.status().is_redirection() {
-            let to = answer.headers().get("location").and_then(|value| value.to_str().ok()).ok_or("GitHub gave a broken link.")?;
-            url = url.join(to).map_err(|_| "GitHub gave a broken link.".to_string())?;
+            let to = answer.headers().get("location").and_then(|value| value.to_str().ok()).ok_or_else(|| t("updates.error.brokenLink"))?;
+            url = url.join(to).map_err(|_| t("updates.error.brokenLink"))?;
             continue;
         }
         if !answer.status().is_success() {
-            return Err(format!("GitHub couldn't give the download (HTTP {}).", answer.status().as_u16()));
+            return Err(tf("updates.error.http", &[("status", &answer.status().as_u16())]));
         }
         response = Some(answer);
         break;
     }
-    let response = response.ok_or("GitHub redirected too many times.")?;
+    let response = response.ok_or_else(|| t("updates.error.tooManyRedirects"))?;
     let mut out = match file {
-        Some(path) => Some(std::fs::File::create(path).map_err(|_| "Couldn't save the download.".to_string())?),
+        Some(path) => Some(std::fs::File::create(path).map_err(|_| t("updates.error.save"))?),
         None => None,
     };
     let mut hasher = Sha256::new();
@@ -295,14 +296,14 @@ async fn fetch(client: &reqwest::Client, url: &str, cap: u64, mut progress: impl
     let mut done = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "The download was interrupted.".to_string())?;
+        let chunk = chunk.map_err(|_| t("updates.error.interrupted"))?;
         done += chunk.len() as u64;
         if done > cap {
-            return Err("The download was bigger than the release said.".into());
+            return Err(t("updates.error.tooBig"));
         }
         match out.as_mut() {
             Some(out) => {
-                out.write_all(&chunk).map_err(|_| "Couldn't save the download.".to_string())?;
+                out.write_all(&chunk).map_err(|_| t("updates.error.save"))?;
                 hasher.update(&chunk);
             }
             None => bytes.extend_from_slice(&chunk),
@@ -345,21 +346,21 @@ fn run(program: &str, args: &[&std::ffi::OsStr]) -> Result<std::process::Output,
 /// lets it open.
 fn verify(app: &Path, version: &str) -> Result<(), String> {
     if !app.join("Contents/Info.plist").is_file() {
-        return Err("The download has no Buntini app in it.".into());
+        return Err(t("updates.error.noApp"));
     }
     let path = app.as_os_str();
-    run("/usr/bin/codesign", &["--verify".as_ref(), "--deep".as_ref(), "--strict".as_ref(), path]).map_err(|_| "The new copy's signature is broken. Nothing was changed.".to_string())?;
-    let details = Command::new("/usr/bin/codesign").args(["-dv".as_ref(), "--verbose=2".as_ref(), path]).output().map_err(|_| "Couldn't read the new copy's signature.".to_string())?;
+    run("/usr/bin/codesign", &["--verify".as_ref(), "--deep".as_ref(), "--strict".as_ref(), path]).map_err(|_| t("updates.error.brokenSignature"))?;
+    let details = Command::new("/usr/bin/codesign").args(["-dv".as_ref(), "--verbose=2".as_ref(), path]).output().map_err(|_| t("updates.error.readSignature"))?;
     let (identifier, team) = signed_by(&String::from_utf8_lossy(&details.stderr));
     if identifier.as_deref() != Some(BUNDLE) || team.as_deref() != Some(TEAM) {
-        return Err("The new copy isn't signed by Buntini's developer. Nothing was changed.".into());
+        return Err(t("updates.error.otherDeveloper"));
     }
     let plist = app.join("Contents/Info.plist");
-    let shown = run("/usr/libexec/PlistBuddy", &["-c".as_ref(), "Print :CFBundleShortVersionString".as_ref(), plist.as_os_str()]).map_err(|_| "Couldn't read the new copy's version.".to_string())?;
+    let shown = run("/usr/libexec/PlistBuddy", &["-c".as_ref(), "Print :CFBundleShortVersionString".as_ref(), plist.as_os_str()]).map_err(|_| t("updates.error.readVersion"))?;
     if String::from_utf8_lossy(&shown.stdout).trim() != version {
-        return Err("The new copy is a different version than the release. Nothing was changed.".into());
+        return Err(t("updates.error.otherVersion"));
     }
-    run("/usr/sbin/spctl", &["--assess".as_ref(), "--type".as_ref(), "execute".as_ref(), path]).map_err(|_| "Gatekeeper wouldn't open the new copy. Nothing was changed.".to_string())?;
+    run("/usr/sbin/spctl", &["--assess".as_ref(), "--type".as_ref(), "execute".as_ref(), path]).map_err(|_| t("updates.error.gatekeeper"))?;
     Ok(())
 }
 
@@ -371,20 +372,20 @@ pub(crate) fn signed_by(text: &str) -> (Option<String>, Option<String>) {
 
 /// This copy of Buntini, when it runs as an app it can replace.
 fn this_app() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|_| "Couldn't find this copy of Buntini.".to_string())?;
-    let app = exe.ancestors().nth(3).filter(|path| path.extension().is_some_and(|ext| ext == "app")).map(Path::to_path_buf).ok_or("Updates install in the Buntini app.")?;
+    let exe = std::env::current_exe().map_err(|_| t("updates.error.findSelf"))?;
+    let app = exe.ancestors().nth(3).filter(|path| path.extension().is_some_and(|ext| ext == "app")).map(Path::to_path_buf).ok_or_else(|| t("updates.error.notApp"))?;
     if app.to_string_lossy().contains("/AppTranslocation/") {
-        return Err("Move Buntini to Applications first.".into());
+        return Err(t("updates.error.translocated"));
     }
-    let parent = app.parent().ok_or("Couldn't find this copy of Buntini.")?;
+    let parent = app.parent().ok_or_else(|| t("updates.error.findSelf"))?;
     let probe = parent.join(".buntini-update");
-    std::fs::write(&probe, b"").map_err(|_| format!("Buntini can't write to {}.", parent.display()))?;
+    std::fs::write(&probe, b"").map_err(|_| tf("updates.error.cannotWrite", &[("folder", &parent.display())]))?;
     let _ = std::fs::remove_file(probe);
     Ok(app)
 }
 
 fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_cache_dir().map(|dir| dir.join("updates")).map_err(|_| "Couldn't find the cache folder.".to_string())
+    app.path().app_cache_dir().map(|dir| dir.join("updates")).map_err(|_| t("updates.error.noCache"))
 }
 
 /// Puts the new copy in this one's place once Buntini has quit, and opens it.
@@ -400,13 +401,13 @@ open "$old"
 fn restart(app: &AppHandle, release: &Release, new_app: &Path) -> Result<(), String> {
     let old = this_app()?;
     if !new_app.is_dir() {
-        return Err("The new copy is gone. Try again.".into());
+        return Err(t("updates.error.copyGone"));
     }
     let dir = updates_dir(app)?;
     let keep = dir.join("Buntini-previous.app");
     let _ = std::fs::remove_dir_all(&keep);
     let script = dir.join("relaunch.sh");
-    std::fs::write(&script, RELAUNCH).map_err(|_| "Couldn't prepare the restart.".to_string())?;
+    std::fs::write(&script, RELAUNCH).map_err(|_| t("updates.error.prepareRestart"))?;
     let notes = serde_json::json!({ "version": release.version, "lines": release.notes });
     set_preference(app, WHATS_NEW, &notes.to_string());
     use std::os::unix::process::CommandExt;
@@ -421,7 +422,7 @@ fn restart(app: &AppHandle, release: &Release, new_app: &Path) -> Result<(), Str
         .stderr(std::process::Stdio::null())
         .process_group(0)
         .spawn()
-        .map_err(|_| "Couldn't start the restart.".to_string())?;
+        .map_err(|_| t("updates.error.startRestart"))?;
     app.exit(0);
     Ok(())
 }

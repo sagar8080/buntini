@@ -2,9 +2,11 @@
 //! reading fields, times as people read them, money and the activity graph.
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc, Weekday};
 use serde_json::Value;
 
+use crate::agents::recap::month_short;
+use crate::i18n::{t, tf};
 use crate::surface::PillState;
 
 /// Rows a card carries; the island shows the first few.
@@ -34,7 +36,7 @@ pub struct Row {
     pub url: Option<String>,
     /// A CI failure or a review request, worth interrupting for when it is new: what it is,
     /// for the alert's title.
-    pub alert: Option<&'static str>,
+    pub alert: Option<String>,
 }
 
 impl Row {
@@ -58,8 +60,8 @@ impl Row {
         self
     }
 
-    pub fn alert(mut self, label: &'static str, when: bool) -> Self {
-        self.alert = when.then_some(label);
+    pub fn alert(mut self, label: impl Into<String>, when: bool) -> Self {
+        self.alert = when.then(|| label.into());
         self
     }
 }
@@ -148,14 +150,28 @@ pub fn time(value: &Value, pointer: &str) -> Option<DateTime<Utc>> {
 pub fn when(at: DateTime<Utc>, now: DateTime<FixedOffset>) -> String {
     let local = at.with_timezone(now.offset());
     let days = (local.date_naive() - now.date_naive()).num_days();
+    let clock = local.format("%H:%M").to_string();
     if days == 0 {
-        local.format("%H:%M").to_string()
+        clock
     } else if days.abs() < 7 {
-        local.format("%a %H:%M").to_string()
+        tf("services.when.weekday", &[("weekday", &weekday_short(local.weekday())), ("time", &clock)])
     } else if local.year() == now.year() {
-        local.format("%-d %b").to_string()
+        tf("services.when.date", &[("day", &local.day()), ("month", &month_short(local.month()))])
     } else {
-        local.format("%-d %b %Y").to_string()
+        tf("services.when.dateYear", &[("day", &local.day()), ("month", &month_short(local.month())), ("year", &local.year())])
+    }
+}
+
+/// A day of the week, short: `Tue`.
+fn weekday_short(day: Weekday) -> String {
+    match day {
+        Weekday::Mon => t("common.weekdayShort.mon"),
+        Weekday::Tue => t("common.weekdayShort.tue"),
+        Weekday::Wed => t("common.weekdayShort.wed"),
+        Weekday::Thu => t("common.weekdayShort.thu"),
+        Weekday::Fri => t("common.weekdayShort.fri"),
+        Weekday::Sat => t("common.weekdayShort.sat"),
+        Weekday::Sun => t("common.weekdayShort.sun"),
     }
 }
 
@@ -221,11 +237,6 @@ pub fn short(count: usize) -> String {
     } else {
         format!("{:.1}k", count as f64 / 1000.0)
     }
-}
-
-/// `1 thing`, `2 things`.
-pub fn plural(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub mod demo;
 pub mod updates;
 
+use crate::i18n::{t, tf};
 use crate::surface::cards::island as cards;
 use crate::surface::{self, Action, Card, CardBody, Cat, Contribution, Home, IslandState, Mood, Offer, Placement, Source, Urgency};
 
@@ -86,14 +87,15 @@ static LINE: Mutex<Option<String>> = Mutex::new(None);
 /// battery. None when it's fine.
 pub fn health_line(cpu: f32, thermal: i64, battery: Option<(u8, bool)>, busiest: &[String]) -> Option<String> {
     if thermal >= 2 {
-        return Some("Your Mac is hot".into());
+        return Some(t("island.health.hot"));
     }
     if let Some((percent, false)) = battery.filter(|(percent, _)| *percent <= 15) {
-        return Some(format!("Battery {percent}%"));
+        return Some(tf("island.health.battery", &[("percent", &percent)]));
     }
     if cpu >= 85.0 {
         let apps = busiest.iter().take(2).cloned().collect::<Vec<_>>().join(", ");
-        return Some(if apps.is_empty() { format!("CPU {}%", cpu.round()) } else { format!("CPU {}% · {apps}", cpu.round()) });
+        let line = tf("island.health.cpu", &[("percent", &cpu.round())]);
+        return Some(if apps.is_empty() { line } else { format!("{line} · {apps}") });
     }
     None
 }

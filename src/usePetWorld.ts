@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { command, desktop } from './bridge';
+import { t } from './i18n.ts';
 import { chooseMove, landing, nextRoamDelay, NudgeRules, speeds, type Move, type Nudge, type NudgeAction, type World } from './petWorld';
 import type { PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
@@ -221,7 +222,7 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
       watchingDrop.current = true;
       void command<DroppedWindow | null>('pet_drop')
         .then(dropped => { if (dropped) { live.current.react('happy'); live.current.onWindow(dropped); } })
-        .catch(error => { live.current.react('tilt'); live.current.onWindowError(typeof error === 'string' ? error : error instanceof Error ? error.message : 'I couldn’t read that window.'); })
+        .catch(error => { live.current.react('tilt'); live.current.onWindowError(typeof error === 'string' ? error : error instanceof Error ? error.message : t('pet.window.unreadable')); })
         .finally(() => { watchingDrop.current = false; });
     }
   }, [putDown]);

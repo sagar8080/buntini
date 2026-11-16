@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { errorMessage } from '../bridge';
 import { callUtilities } from './api';
 import { held, keycaps, shortcutFrom, type Shortcut, type ShortcutRow } from './model';
+import { t } from '../i18n.ts';
 import './utilities.css';
 
 const same = (a: Shortcut | null, b: Shortcut | null) => (a?.label ?? '') === (b?.label ?? '');
@@ -61,18 +62,18 @@ export default function Shortcuts({ onError }: { onError: (message: string) => v
   if (!rows) return null;
   const changed = rows.some(row => !same(row.shortcut, row.default));
   return <section className="settings-section shortcuts">
-    <div className="settings-section-heading"><h3>Shortcuts</h3>{changed && <button type="button" className="text-button" onClick={() => void callUtilities<ShortcutRow[]>({ op: 'resetShortcuts' }).then(next => { setRows(next); setProblem(null); }).catch(error => onError(errorMessage(error)))}>Restore defaults</button>}</div>
+    <div className="settings-section-heading"><h3>{t('settings.shortcuts.title')}</h3>{changed && <button type="button" className="text-button" onClick={() => void callUtilities<ShortcutRow[]>({ op: 'resetShortcuts' }).then(next => { setRows(next); setProblem(null); }).catch(error => onError(errorMessage(error)))}>{t('settings.shortcuts.restore')}</button>}</div>
     {rows.map(row => {
       const live = recording === row.id;
       const wrong = problem?.id === row.id ? problem.text : row.problem;
       return <div key={row.id} className={`shortcut-row ${wrong ? 'has-problem' : ''}`}>
         <span className="shortcut-name">{row.label}</span>
-        <button type="button" className={`shortcut-key ${live ? 'is-recording' : ''}`} aria-label={`${row.label}: ${row.shortcut?.label ?? 'none'}`} aria-pressed={live} onClick={() => { setProblem(null); setRecording(live ? null : row.id); }}>
+        <button type="button" className={`shortcut-key ${live ? 'is-recording' : ''}`} aria-label={t('settings.shortcuts.current', { action: row.label, keys: row.shortcut?.label ?? t('settings.shortcuts.none') })} aria-pressed={live} onClick={() => { setProblem(null); setRecording(live ? null : row.id); }}>
           {live
-            ? holding ? keycaps(holding).map(cap => <kbd key={cap}>{cap}</kbd>) : <span className="shortcut-hint">Press keys</span>
+            ? holding ? keycaps(holding).map(cap => <kbd key={cap}>{cap}</kbd>) : <span className="shortcut-hint">{t('settings.shortcuts.pressKeys')}</span>
             : row.shortcut ? keycaps(row.shortcut.label).map(cap => <kbd key={cap}>{cap}</kbd>) : <span className="shortcut-hint">—</span>}
         </button>
-        <button type="button" className="icon-button shortcut-clear" aria-label={`No shortcut for ${row.label}`} title="None" disabled={!row.shortcut || live} onClick={() => void choose(row.id, null)}><X size={12} /></button>
+        <button type="button" className="icon-button shortcut-clear" aria-label={t('settings.shortcuts.clear', { action: row.label })} title={t('settings.shortcuts.noneTitle')} disabled={!row.shortcut || live} onClick={() => void choose(row.id, null)}><X size={12} /></button>
         {wrong && <small className="shortcut-problem" role="status">{wrong}</small>}
       </div>;
     })}

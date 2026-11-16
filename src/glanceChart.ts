@@ -1,3 +1,4 @@
+import { number, t } from './i18n.ts';
 import type { GlanceApp, GlanceMetric, GlanceSample, MacBattery, MacGlance, MemoryState } from './types';
 
 export const RING_RADIUS = 32;
@@ -23,26 +24,37 @@ export function ringSegments<T extends { key: string; bytes: number }>(parts: T[
 export type Tone = 'good' | 'warn' | 'critical';
 /** Memory has no meaningful percentage, so the ring shows the state: easy is a third full. */
 export const memoryFill: Record<MemoryState, number> = { easy: .3, tight: .65, struggling: .95 };
-export const memoryWord: Record<MemoryState, string> = { easy: 'Easy', tight: 'Tight', struggling: 'Struggling' };
+const memoryWords: Record<MemoryState, string> = { easy: 'glance.memory.easy', tight: 'glance.memory.tight', struggling: 'glance.memory.struggling' };
+export const memoryWord = (state: MemoryState) => t(memoryWords[state]);
 export const memoryTone: Record<MemoryState, Tone> = { easy: 'good', tight: 'warn', struggling: 'critical' };
 export function batteryTone(battery: MacBattery): Tone {
   if (battery.charging) return 'good';
   return battery.percent < 15 ? 'critical' : battery.percent < 30 ? 'warn' : 'good';
 }
 
+/** A whole percentage, as the language writes one. */
+export const percent = (value: number) => number(Math.round(value) / 100, { style: 'percent', maximumFractionDigits: 0 });
+
 /** Decimal, as macOS counts storage. */
 export function gigabytes(bytes: number) {
   const value = bytes / 1e9;
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
+  return number(value, value >= 10 ? { maximumFractionDigits: 0, useGrouping: false } : { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
+/** "4.3 GB". */
+export const sizeInGigabytes = (bytes: number) => t('glance.gigabytes', { size: gigabytes(bytes) });
 export function timeLeft(minutes: number) {
   const hours = Math.floor(minutes / 60), rest = minutes % 60;
-  if (!hours) return `${rest} min`;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  if (!hours) return t('glance.time.minutes', { minutes: number(rest) });
+  return rest ? t('glance.time.hoursMinutes', { hours: number(hours), minutes: number(rest) }) : t('glance.time.hours', { hours: number(hours) });
 }
 export function batteryNote(battery: MacBattery) {
-  if (battery.charging) return 'charging';
-  return battery.minutesLeft ? `${timeLeft(battery.minutesLeft)} left` : '';
+  if (battery.charging) return t('glance.battery.charging');
+  return battery.minutesLeft ? t('glance.battery.timeLeft', { time: timeLeft(battery.minutesLeft) }) : '';
+}
+/** The note inside the battery ring, where a long "1 h 54 min left" drops "left". */
+export function batteryRingNote(battery: MacBattery) {
+  const note = batteryNote(battery);
+  return note.length > 9 && !battery.charging && battery.minutesLeft ? timeLeft(battery.minutesLeft) : note;
 }
 
 export type Series = 'cpu' | 'memory' | 'battery';
@@ -52,8 +64,8 @@ const valueOf = (sample: GlanceSample, series: Series) =>
   series === 'cpu' ? sample.cpu : series === 'battery' ? sample.battery : memoryFill[pressureState(sample.pressure)] * 100;
 /** What a chart reads at one point. Memory is a state, so it reads as one. */
 export function seriesValue(series: Series, value: number) {
-  if (series !== 'memory') return `${Math.round(value)}%`;
-  return value >= memoryFill.struggling * 100 ? memoryWord.struggling : value >= memoryFill.tight * 100 ? memoryWord.tight : memoryWord.easy;
+  if (series !== 'memory') return percent(value);
+  return memoryWord(value >= memoryFill.struggling * 100 ? 'struggling' : value >= memoryFill.tight * 100 ? 'tight' : 'easy');
 }
 
 export type TrendPoint = { at: number; value: number; x: number; y: number };
@@ -88,9 +100,9 @@ export function nearestPoint(points: TrendPoint[], x: number) {
 }
 export function describeTrend(points: TrendPoint[], name: string, series: Series = 'cpu') {
   const values = points.map(point => point.value);
-  if (series === 'memory') return `${name}: at worst ${seriesValue('memory', Math.max(...values))}`;
+  if (series === 'memory') return t('glance.trend.worst', { name, value: seriesValue('memory', Math.max(...values)) });
   const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-  return `${name}: average ${Math.round(average)}%, lowest ${Math.round(Math.min(...values))}%, highest ${Math.round(Math.max(...values))}%`;
+  return t('glance.trend.summary', { name, average: percent(average), lowest: percent(Math.min(...values)), highest: percent(Math.max(...values)) });
 }
 
 const measure = (app: GlanceApp, metric: GlanceMetric) => metric === 'cpu' ? app.cpuPercent : metric === 'memory' ? app.memoryBytes : app.energy ?? 0;
@@ -101,13 +113,13 @@ export function rankApps(apps: GlanceApp[], metric: GlanceMetric, most = 3) {
 /** How long an app's bar is, and what it says. CPU and memory are shares of the whole Mac;
  * energy has no ceiling, so it's relative to whatever uses the most. */
 export function appBar(app: GlanceApp, metric: GlanceMetric, memoryTotal: number, apps: GlanceApp[]) {
-  if (metric === 'memory') return { fraction: memoryTotal ? Math.min(1, app.memoryBytes / memoryTotal) : 0, value: `${gigabytes(app.memoryBytes)} GB` };
+  if (metric === 'memory') return { fraction: memoryTotal ? Math.min(1, app.memoryBytes / memoryTotal) : 0, value: sizeInGigabytes(app.memoryBytes) };
   if (metric === 'energy') {
     const energy = (item: GlanceApp) => item.energy ?? 0;
     const top = Math.max(...apps.map(energy), 0);
-    return { fraction: top ? energy(app) / top : 0, value: top ? `${Math.round(energy(app))}` : '' };
+    return { fraction: top ? energy(app) / top : 0, value: top ? number(Math.round(energy(app))) : '' };
   }
-  return { fraction: Math.min(1, app.cpuPercent / 100), value: `${Math.round(app.cpuPercent)}%` };
+  return { fraction: Math.min(1, app.cpuPercent / 100), value: percent(app.cpuPercent) };
 }
 
 export type Section = 'overview' | 'storage' | 'memory' | 'battery';
@@ -122,4 +134,5 @@ export function sectionView(section: Section, glance: MacGlance): { series: Seri
   return { series: 'cpu', metric: glance.metric };
 }
 /** The ring's middle while one part of the disk is pointed at. */
-export const partNote: Record<string, string> = { apps: 'GB apps', caches: 'GB caches', folders: 'GB folders', other: 'GB other', free: 'GB free' };
+const partNotes: Record<string, string> = { apps: 'glance.part.apps', caches: 'glance.part.caches', folders: 'glance.part.folders', other: 'glance.part.otherData', free: 'glance.part.free' };
+export const partNote = (key: string) => partNotes[key] ? t(partNotes[key]) : undefined;

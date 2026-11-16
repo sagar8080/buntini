@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, FileJson, LoaderCircle, Plug, Plus } from 'lucide-react';
 import Toggle from './Toggle';
 import { command, desktop, errorMessage } from './bridge';
+import { t } from './i18n.ts';
 
 /** A local MCP server the user added. Environment values never come back from the app, only their names. */
 export interface AddedTool { id: string; name: string; command: string; env: string[]; tools: { name: string; description: string; safe: boolean; unusable?: string | null }[] }
@@ -12,13 +13,13 @@ function Server({ server, busy, onSafe, onReconnect, onRemove }: { server: Added
   return <div className={`service-row ${open ? 'is-open' : ''}`}>
     <button type="button" className="service-summary" aria-expanded={open} onClick={() => setOpen(!open)}><Plug size={18} /><span><strong>{server.name}</strong><small title={server.command}>{server.command}</small></span><ChevronDown size={14} /></button>
     {open && <div className="service-body">
-      {server.env.length > 0 && <p className="field-help">Uses {server.env.join(', ')}</p>}
+      {server.env.length > 0 && <p className="field-help">{t('settings.tools.uses', { names: server.env.join(', ') })}</p>}
       {server.tools.map(tool => tool.unusable
         ? <p className="field-help" key={tool.name}>{tool.name}: {tool.unusable}</p>
-        : <Toggle key={tool.name} label={tool.name} detail={tool.safe ? 'Runs without asking' : 'Asks first'} checked={tool.safe} disabled={busy} onChange={safe => onSafe(tool.name, safe)} />)}
+        : <Toggle key={tool.name} label={tool.name} detail={tool.safe ? t('settings.tools.runsFreely') : t('settings.tools.asksFirst')} checked={tool.safe} disabled={busy} onChange={safe => onSafe(tool.name, safe)} />)}
       <div className="service-actions">
-        <button type="button" className="secondary-button" disabled={busy} onClick={onReconnect}>{busy ? <LoaderCircle size={13} className="spin" /> : 'Reconnect'}</button>
-        <button type="button" className="text-button danger" disabled={busy} onClick={onRemove}>Remove</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={onReconnect}>{busy ? <LoaderCircle size={13} className="spin" /> : t('settings.tools.reconnect')}</button>
+        <button type="button" className="text-button danger" disabled={busy} onClick={onRemove}>{t('common.remove')}</button>
       </div>
     </div>}
   </div>;
@@ -57,21 +58,21 @@ export default function AddedTools({ onError }: { onError: (error: string) => vo
       onError(message);
     } finally { setBusy(''); }
   }
-  const nameField = (key: string) => naming === key && <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label="Name for this tool" placeholder="GitHub Work" value={name} onChange={event => setName(event.target.value)} /></div>;
+  const nameField = (key: string) => naming === key && <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label={t('settings.tools.nameAria')} placeholder={t('settings.tools.nameExample')} value={name} onChange={event => setName(event.target.value)} /></div>;
   return <section className="settings-section">
-    <div className="settings-section-heading"><h3>Tools you added</h3></div>
+    <div className="settings-section-heading"><h3>{t('settings.tools.title')}</h3></div>
     {servers.map(server => <Server key={server.id} server={server} busy={busy === server.id}
       onSafe={(tool, safe) => void run(server.id, async () => replace(await command<AddedTool>('set_tool_safe', { id: server.id, tool, safe })))}
       onReconnect={() => void run(server.id, async () => replace(await command<AddedTool>('reconnect_tool_server', { id: server.id })))}
       onRemove={() => void run(server.id, async () => { await command('remove_tool_server', { id: server.id }); setServers(list => list.filter(item => item.id !== server.id)); })} />)}
-    <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label="Command that starts an MCP server" placeholder="npx -y @modelcontextprotocol/server-github" value={line} onChange={event => { setLine(event.target.value); if (naming === 'paste') setNaming(null); }} /></div>
+    <div className="key-input"><Plug size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label={t('settings.tools.commandAria')} placeholder="npx -y @modelcontextprotocol/server-github" value={line} onChange={event => { setLine(event.target.value); if (naming === 'paste') setNaming(null); }} /></div>
     {nameField('paste')}
     <div className="row-actions">
-      <button type="button" className="secondary-button" disabled={!line.trim() || !!busy} onClick={() => void add('paste', name => command<AddedTool>('add_tool_server', { command: line.trim(), name }))}>{busy === 'paste' ? <LoaderCircle size={13} className="spin" /> : <Plus size={13} />}Add</button>
-      <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('pick', async () => setFound(await command<Found[] | null>('pick_tool_config')))}><FileJson size={12} />From config file</button>
+      <button type="button" className="secondary-button" disabled={!line.trim() || !!busy} onClick={() => void add('paste', name => command<AddedTool>('add_tool_server', { command: line.trim(), name }))}>{busy === 'paste' ? <LoaderCircle size={13} className="spin" /> : <Plus size={13} />}{t('common.add')}</button>
+      <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('pick', async () => setFound(await command<Found[] | null>('pick_tool_config')))}><FileJson size={12} />{t('settings.tools.fromConfig')}</button>
     </div>
     {found?.map(item => <div key={item.name}><div className="root-item"><span title={item.command}>{item.name}{item.unsupported ? ` · ${item.unsupported}` : ''}</span>
-      {!item.unsupported && <button type="button" aria-label={`Add ${item.name}`} title="Add" disabled={!!busy} onClick={() => void add(`config:${item.name}`, name => command<AddedTool>('add_tool_server_from_config', { entry: item.name, name }))}>{busy === `config:${item.name}` ? <LoaderCircle size={13} className="spin" /> : <Plus size={14} />}</button>}
+      {!item.unsupported && <button type="button" aria-label={t('settings.tools.addNamed', { name: item.name })} title={t('common.add')} disabled={!!busy} onClick={() => void add(`config:${item.name}`, name => command<AddedTool>('add_tool_server_from_config', { entry: item.name, name }))}>{busy === `config:${item.name}` ? <LoaderCircle size={13} className="spin" /> : <Plus size={14} />}</button>}
     </div>{nameField(`config:${item.name}`)}</div>)}
   </section>;
 }

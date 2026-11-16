@@ -1,3 +1,4 @@
+import { number, t, tn } from './i18n.ts';
 import type { PetMotion } from './types';
 
 /* Pure decision logic for the roaming pet: where it can stand, what it does next,
@@ -164,7 +165,7 @@ export class NudgeRules {
     } else {
       if (this.awaySince !== null && now - this.awaySince >= 10 * MINUTE && this.ready('welcome', now, 0, true)) {
         const minutes = Math.round((now - this.awaySince) / MINUTE);
-        welcome = this.make('welcome', now, minutes >= 60 ? `Welcome back! You were away ${Math.floor(minutes / 60)}h ${minutes % 60}m.` : `Welcome back! You were away ${minutes} minutes.`, [{ label: 'Hi!', action: 'dismiss' }], 8000);
+        welcome = this.make('welcome', now, minutes >= 60 ? t('pet.nudge.welcomeHours', { hours: number(Math.floor(minutes / 60)), minutes: number(minutes % 60) }) : tn('pet.nudge.welcomeMinutes', minutes), [{ label: t('pet.nudge.hi'), action: 'dismiss' }], 8000);
       }
       this.awaySince = null;
       this.activeSince ??= now;
@@ -176,44 +177,44 @@ export class NudgeRules {
     if (this.focusEndsAt !== null && now >= this.focusEndsAt) {
       this.focusEndsAt = null;
       this.breakDueAt = now + this.breakAfter;
-      if (!this.focusQuiet) return this.make('focus-done', now, 'Focus session done. Nice work! Take five?', [{ label: 'Okay', action: 'dismiss' }, { label: 'Another 25 min', action: 'focus' }]);
+      if (!this.focusQuiet) return this.make('focus-done', now, t('pet.nudge.focusDone'), [{ label: t('pet.nudge.okay'), action: 'dismiss' }, { label: t('pet.nudge.anotherFocus'), action: 'focus' }]);
     }
     const battery = world.health?.batteryPercent;
     if (world.health?.charging || battery == null || battery > 20) this.batteryWarned = false;
     if (battery != null && !world.health?.charging && battery <= 15 && !this.batteryWarned && this.ready('battery', now, 0, battery <= 5)) {
       this.batteryWarned = true;
-      return this.make('battery', now, `Battery at ${battery}%. Time to plug in?`, [{ label: 'Got it', action: 'dismiss' }]);
+      return this.make('battery', now, t('pet.nudge.battery', { percent: number(battery) }), [{ label: t('pet.nudge.gotIt'), action: 'dismiss' }]);
     }
     if (away) return null;
     if (this.lateRemindAt !== null && now >= this.lateRemindAt) {
       this.lateRemindAt = null;
-      return this.make('late-reminder', now, 'Here’s your reminder to wrap up for the night.', [{ label: 'Thanks', action: 'dismiss' }]);
+      return this.make('late-reminder', now, t('pet.nudge.lateReminder'), [{ label: t('pet.nudge.thanks'), action: 'dismiss' }]);
     }
     if (this.breakDueAt !== null && now >= this.breakDueAt && !this.focusing && this.ready('break', now, 0)) {
       this.breakDueAt = now + this.breakAfter;
       const minutes = Math.round((now - (this.activeSince ?? now)) / MINUTE);
-      return this.make('break', now, `You’ve been at it for ${minutes} minutes. Stretch with me?`, [{ label: 'Done', action: 'dismiss' }, { label: 'In 15 min', action: 'snooze' }]);
+      return this.make('break', now, tn('pet.nudge.break', minutes), [{ label: t('pet.nudge.done'), action: 'dismiss' }, { label: t('pet.nudge.snooze'), action: 'snooze' }]);
     }
     if ((hour >= 23 || hour < 5) && this.ready('late', now, 8 * 60 * MINUTE)) {
-      return this.make('late', now, 'It’s getting late. Want to wrap up soon?', [{ label: 'Remind me in 30 min', action: 'remindLate' }, { label: 'I’m okay', action: 'dismiss' }]);
+      return this.make('late', now, t('pet.nudge.late'), [{ label: t('pet.nudge.remindLate'), action: 'remindLate' }, { label: t('pet.nudge.imOkay'), action: 'dismiss' }]);
     }
     const cpu = world.health?.cpuPercent ?? 0;
     this.hotSince = cpu >= 85 ? this.hotSince ?? now : null;
     if (this.hotSince !== null && now - this.hotSince >= 2 * MINUTE && this.ready('cpu', now, 30 * MINUTE)) {
-      return this.make('cpu', now, `Your Mac is working hard (${Math.round(cpu)}% CPU). Want me to see what’s busy?`, [{ label: 'Check my Mac', action: 'checkMac' }, { label: 'Not now', action: 'dismiss' }]);
+      return this.make('cpu', now, t('pet.nudge.cpu', { percent: number(Math.round(cpu)) }), [{ label: t('pet.nudge.checkMac'), action: 'checkMac' }, { label: t('pet.nudge.notNow'), action: 'dismiss' }]);
     }
     const free = world.health?.diskFreePercent;
     if (free != null && free < 8 && this.ready('disk', now, 24 * 60 * MINUTE)) {
-      return this.make('disk', now, `Your disk is nearly full (${Math.round(free)}% free). Check storage?`, [{ label: 'Check my Mac', action: 'checkMac' }, { label: 'Later', action: 'dismiss' }]);
+      return this.make('disk', now, t('pet.nudge.disk', { percent: number(Math.round(free)) }), [{ label: t('pet.nudge.checkMac'), action: 'checkMac' }, { label: t('pet.nudge.later'), action: 'dismiss' }]);
     }
     const category = world.app?.category;
     if (!category || this.appSince?.category !== category) this.appSince = category ? { category, at: now } : null;
     if (this.appSince && now - this.appSince.at >= 3 * MINUTE && this.ready(`app-${category}`, now, 60 * MINUTE)) {
-      const name = world.app?.name || 'your app';
-      if (category === 'browser') return this.make('app-browser', now, 'Want me to look something up?', [{ label: 'Look it up', action: 'lookUp' }, { label: 'No thanks', action: 'dismiss' }]);
-      if (category === 'files') return this.make('app-files', now, 'Looking for a file?', [{ label: 'Find a file', action: 'findFile' }, { label: 'No thanks', action: 'dismiss' }]);
+      const name = world.app?.name;
+      if (category === 'browser') return this.make('app-browser', now, t('pet.nudge.lookUp'), [{ label: t('pet.nudge.lookUpAction'), action: 'lookUp' }, { label: t('pet.nudge.noThanks'), action: 'dismiss' }]);
+      if (category === 'files') return this.make('app-files', now, t('pet.nudge.findFile'), [{ label: t('pet.nudge.findFileAction'), action: 'findFile' }, { label: t('pet.nudge.noThanks'), action: 'dismiss' }]);
       if ((category === 'code' || category === 'writing' || category === 'design') && !this.focusing) {
-        return this.make(`app-${category}`, now, `Deep in ${name}. Want a 25-minute focus timer?`, [{ label: 'Start timer', action: 'focus' }, { label: 'No thanks', action: 'dismiss' }]);
+        return this.make(`app-${category}`, now, name ? t('pet.nudge.deepIn', { app: name }) : t('pet.nudge.deepInApp'), [{ label: t('pet.nudge.startTimer'), action: 'focus' }, { label: t('pet.nudge.noThanks'), action: 'dismiss' }]);
       }
     }
     return null;

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::rules::Why;
 use super::{Mailbox, Mark, Step, Target};
+use crate::i18n::{t, tf};
 
 /// Entries kept on disk.
 pub const KEEP: usize = 500;
@@ -66,21 +67,20 @@ impl Entry {
     /// One line: what changed, and on which email.
     pub fn label(&self) -> String {
         let what = match &self.change {
-            Change::Mark { what: Mark::Read, now: true, .. } => "Read".to_string(),
-            Change::Mark { what: Mark::Read, now: false, .. } => "Unread".to_string(),
-            Change::Mark { what: Mark::Flagged, now: true, .. } => "Flagged".to_string(),
-            Change::Mark { what: Mark::Flagged, now: false, .. } => "Unflagged".to_string(),
-            Change::Mark { what: Mark::Junk, now: true, .. } => "Junk".to_string(),
-            Change::Mark { what: Mark::Junk, now: false, .. } => "Not junk".to_string(),
-            Change::Move { to, .. } => format!("To {}", leaf(&to.path)),
-            Change::Junk { .. } => "Junk".to_string(),
+            Change::Mark { what: Mark::Read, now: true, .. } => t("mail.log.read"),
+            Change::Mark { what: Mark::Read, now: false, .. } => t("mail.log.unread"),
+            Change::Mark { what: Mark::Flagged, now: true, .. } => t("mail.log.flagged"),
+            Change::Mark { what: Mark::Flagged, now: false, .. } => t("mail.log.unflagged"),
+            Change::Mark { what: Mark::Junk, now: true, .. } | Change::Junk { .. } => t("mail.log.junk"),
+            Change::Mark { what: Mark::Junk, now: false, .. } => t("mail.log.notJunk"),
+            Change::Move { to, .. } => tf("mail.log.movedTo", &[("mailbox", &leaf(&to.path))]),
             Change::Draft { to, attachments, .. } => match (to.first(), attachments.len()) {
-                (Some(to), 0) => format!("Draft to {to}"),
-                (Some(to), n) => format!("Draft to {to} · {n} 📎"),
-                (None, n) if n > 0 => format!("Draft · {n} 📎"),
-                (None, _) => "Draft".to_string(),
+                (Some(to), 0) => tf("mail.log.draftTo", &[("address", to)]),
+                (Some(to), n) => format!("{} · {n} 📎", tf("mail.log.draftTo", &[("address", to)])),
+                (None, n) if n > 0 => format!("{} · {n} 📎", t("mail.log.draft")),
+                (None, _) => t("mail.log.draft"),
             },
-            Change::Reply { to } => format!("Reply to {to}"),
+            Change::Reply { to } => tf("mail.log.replyTo", &[("address", to)]),
         };
         if self.subject.is_empty() {
             what
@@ -102,10 +102,10 @@ impl Entry {
     /// The steps that put this change back.
     pub fn undo(&self) -> Result<Vec<Step>, String> {
         if self.undone {
-            return Err("That’s already undone.".into());
+            return Err(t("mail.error.alreadyUndone"));
         }
         if matches!(self.why, Why::Undo { .. }) {
-            return Err("That was an undo.".into());
+            return Err(t("mail.error.wasUndo"));
         }
         match &self.change {
             Change::Mark { what, was, at, id, .. } => {
@@ -122,7 +122,7 @@ impl Entry {
                 steps.push(Step::Mark { target: self.target(from, number), what: Mark::Junk, value: *was });
                 Ok(steps)
             }
-            Change::Draft { .. } | Change::Reply { .. } => Err("Drafts stay in Mail.".into()),
+            Change::Draft { .. } | Change::Reply { .. } => Err(t("mail.error.draftsStay")),
         }
     }
 }

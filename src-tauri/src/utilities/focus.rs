@@ -4,6 +4,8 @@
 //! Buntini picks the lengths; a request can only say how long focus lasts.
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, tf};
+
 /// Focus rounds before the long rest.
 pub const ROUNDS: u32 = 4;
 /// 25 minutes.
@@ -26,11 +28,11 @@ impl Phase {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Focus => "Focus",
-            Self::Rest => "Rest",
-            Self::LongRest => "Long rest",
+            Self::Focus => t("utilities.focus.focus"),
+            Self::Rest => t("utilities.focus.rest"),
+            Self::LongRest => t("utilities.focus.longRest"),
         }
     }
 }
@@ -174,9 +176,9 @@ impl Session {
 /// "25 min", or "<1 min" in the last minute, for the pill.
 pub fn badge(remaining_ms: i64) -> String {
     if remaining_ms < 60_000 {
-        "<1 min".into()
+        t("utilities.focus.underMinute")
     } else {
-        format!("{} min", (remaining_ms + 59_999) / 60_000)
+        tf("utilities.focus.minutes", &[("minutes", &((remaining_ms + 59_999) / 60_000))])
     }
 }
 

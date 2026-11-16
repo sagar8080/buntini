@@ -38,7 +38,8 @@ import { applyFlowOnSave } from './flow/api';
 import { callUtilities } from './utilities/api';
 import { addFiles, addWindow, removeAttached } from './attachments';
 import AttachedChips from './AttachedChips';
-import { follow, speak, useLanguage } from './locales';
+import { follow, speak as speakLanguage, useLanguage } from './locales';
+import { locale, number, t, tn } from './i18n.ts';
 import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
@@ -47,40 +48,47 @@ type VoicePayload = { session: number; text?: string; level?: number };
 const clockTime = (time: string) => {
   const [hour, minute] = time.split(':').map(Number);
   if (Number.isNaN(hour)) return time;
-  return new Date(2000, 0, 1, hour, minute || 0).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return new Date(2000, 0, 1, hour, minute || 0).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' });
 };
+// Buntini's own rules recognise these requests in English (skills/ and recipes.rs in the
+// Rust app), so a chip or shortcut sends them as written rather than in the person's language.
+const askTomorrow = 'What’s on my calendar tomorrow?';
+const askReplies = 'What needs a reply?';
+const askToday = 'What’s on my calendar today?';
+const askReminders = 'What are my reminders?';
+const askMac = 'How’s my Mac?';
 type Suggestion = { label: string; prompt?: string; shortcut?: Shortcut; mode?: Mode };
 /** A few things to ask now: what fits the time of day, then what this person usually asks. */
 function suggestions(now: Date, usual: string[], apps: string[]): Suggestion[] {
   const hour = now.getHours(), day = now.getDay();
   const timely: Suggestion[] = [];
-  if (hour >= 5 && hour < 12) timely.push({ label: 'Brief me', shortcut: 'day' });
-  if (day === 5 && hour >= 12 || day === 6 || day === 0 && hour < 12) timely.push({ label: 'Plan my weekend', prompt: 'Help me plan my weekend' });
-  if (hour >= 17) timely.push({ label: 'What’s on tomorrow?', prompt: 'What’s on my calendar tomorrow?' });
-  if (apps.includes('mail')) timely.push({ label: 'Who’s waiting on me?', shortcut: 'reply' });
+  if (hour >= 5 && hour < 12) timely.push({ label: t('app.suggestion.briefMe'), shortcut: 'day' });
+  if (day === 5 && hour >= 12 || day === 6 || day === 0 && hour < 12) timely.push({ label: t('app.suggestion.planWeekend'), prompt: t('app.suggestion.planWeekendPrompt') });
+  if (hour >= 17) timely.push({ label: t('app.suggestion.tomorrow'), prompt: askTomorrow });
+  if (apps.includes('mail')) timely.push({ label: t('app.suggestion.waitingOnMe'), shortcut: 'reply' });
   const own: Suggestion[] = usual.map(prompt => ({ label: prompt, prompt }));
   const picked: Suggestion[] = [...timely, ...own].filter((item, index, all) => all.findIndex(other => other.label.toLowerCase() === item.label.toLowerCase()) === index);
-  const fallback: Suggestion[] = [{ label: 'What’s my day like?', shortcut: 'day' }, { label: 'Find a file', mode: 'files' }, { label: 'Look something up', mode: 'web' }];
+  const fallback: Suggestion[] = [{ label: t('app.suggestion.myDay'), shortcut: 'day' }, { label: t('app.suggestion.findFile'), mode: 'files' }, { label: t('app.suggestion.lookUp'), mode: 'web' }];
   return [...picked, ...fallback.filter(item => !picked.some(other => other.shortcut && other.shortcut === item.shortcut))].slice(0, 4);
 }
-const modes: { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] = [
-  { id: 'auto', name: 'Ask anything', icon: Sparkles, placeholder: 'Ask me anything…' },
-  { id: 'files', name: 'My files', icon: Folder, placeholder: 'Lease renewal date' },
-  { id: 'system', name: 'My Mac', icon: Laptop, placeholder: 'How is my Mac doing?' },
-  { id: 'web', name: 'Online', icon: Globe2, placeholder: 'Weather in Porto this weekend' },
+const modes = (): { id: Mode; name: string; icon: typeof Sparkles; placeholder: string }[] => [
+  { id: 'auto', name: t('app.mode.auto.name'), icon: Sparkles, placeholder: t('app.mode.auto.placeholder') },
+  { id: 'files', name: t('app.mode.files.name'), icon: Folder, placeholder: t('app.mode.files.placeholder') },
+  { id: 'system', name: t('app.mode.system.name'), icon: Laptop, placeholder: t('app.mode.system.placeholder') },
+  { id: 'web', name: t('app.mode.web.name'), icon: Globe2, placeholder: t('app.mode.web.placeholder') },
 ];
 // What the activity line says while a skill (skills/ in the Rust app) is working.
-const skillActivity: Record<string, string> = {
-  chatgpt_search: 'Asking ChatGPT', ask_chatgpt: 'Asking ChatGPT',
-  music: 'Getting your music going', browser: 'Working in your browser', mac: 'Adjusting your Mac',
-  read_reminders: 'Checking your reminders', read_calendar: 'Checking your calendar', read_mail: 'Checking your email',
-  find_notes: 'Looking through your notes', search_files: 'Searching your files', search_memory: 'Thinking back',
-  find_contact: 'Looking in Contacts', list_shortcuts: 'Checking your shortcuts', web_search: 'Searching the web',
-  photos: 'Looking through your photos', weather: 'Checking the weather', places: 'Looking at the map', travel_time: 'Checking the route', read_page: 'Reading the page', browser_tabs: 'Looking at your tabs',
-};
+const skillActivity = (): Record<string, string> => ({
+  chatgpt_search: t('app.activity.askingChatGpt'), ask_chatgpt: t('app.activity.askingChatGpt'),
+  music: t('app.activity.music'), browser: t('app.activity.browser'), mac: t('app.activity.adjustingMac'),
+  read_reminders: t('app.activity.checkingReminders'), read_calendar: t('app.activity.checkingCalendar'), read_mail: t('app.activity.checkingMail'),
+  find_notes: t('app.activity.lookingNotes'), search_files: t('app.activity.searchingFiles'), search_memory: t('app.activity.thinkingBack'),
+  find_contact: t('app.activity.lookingContacts'), list_shortcuts: t('app.activity.checkingShortcuts'), web_search: t('app.activity.searchingWeb'),
+  photos: t('app.activity.lookingPhotos'), weather: t('app.activity.checkingWeather'), places: t('app.activity.lookingMap'), travel_time: t('app.activity.checkingRoute'), read_page: t('app.activity.readingPage'), browser_tabs: t('app.activity.lookingTabs'),
+});
 
 export default function App() {
-  useLanguage();
+  const language = useLanguage();
   const [data, setData] = useState<Bootstrap | null>(null);
   const [progress, setProgress] = useState<TaskProgress[]>([]);
   const [background, setBackground] = useState<BackgroundStatus | null>(null);
@@ -163,7 +171,7 @@ export default function App() {
     const finished = listen<AgentFinished>('agent-finished', event => {
       react('happy');
       const { agent, project } = event.payload;
-      if (expandedRef.current) setNotice(`${agent} is done${project ? ` · ${project}` : ''}`);
+      if (expandedRef.current) setNotice(`${t('app.notice.agentDone', { agent })}${project ? ` · ${project}` : ''}`);
       else setAgentDone(event.payload);
     });
     return () => { void requests.then(unlisten => unlisten()); void finished.then(unlisten => unlisten()); };
@@ -188,7 +196,10 @@ export default function App() {
   const [agentBubbleHeight, setAgentBubbleHeight] = useState(0);
   // Petting the cat is announced to screen readers: once when it purrs, once when it kneads.
   useEffect(() => {
-    const said = (event: Event) => setAnnouncement(`${data?.settings.assistantName || 'Buntini'} is ${(event as CustomEvent<PetFeeling>).detail}`);
+    const said = (event: Event) => {
+      const name = data?.settings.assistantName || 'Buntini';
+      setAnnouncement((event as CustomEvent<PetFeeling>).detail === 'kneading' ? t('app.announce.kneading', { name }) : t('app.announce.purring', { name }));
+    };
     window.addEventListener('buntini-pet-feeling', said);
     return () => window.removeEventListener('buntini-pet-feeling', said);
   }, [data?.settings.assistantName]);
@@ -272,13 +283,13 @@ export default function App() {
     await Promise.race([pending.flush(), new Promise(resolve => setTimeout(resolve, 2000))]);
     if (pending.pending() && Date.now() - quitWarned.current > 10_000) {
       quitWarned.current = Date.now();
-      setNotice('A setting is still saving. Quit again to quit anyway.');
+      setNotice(t('app.notice.stillSaving'));
       return;
     }
     await command('quit_app');
   }
   useEffect(() => saver.current!.subscribe((state, problem) => {
-    if (state === 'error' && pageRef.current !== 'settings') setError(`Your settings weren’t saved. ${problem}`);
+    if (state === 'error' && pageRef.current !== 'settings') setError(t('app.notice.settingsNotSaved', { problem: `${problem}` }));
   }), []);
   // Dictation picks up a new key, language or wake word as soon as it is saved.
   const loaded = !!data;
@@ -330,9 +341,9 @@ export default function App() {
       Object.entries(look.attributes).forEach(([key, value]) => { root.dataset[key] = value; });
       Object.entries(look.variables).forEach(([key, value]) => root.style.setProperty(key, value));
     }
-    document.title = `${data?.settings.assistantName || 'Buntini'} — Desktop companion`;
+    document.title = t('app.title', { name: data?.settings.assistantName || 'Buntini' });
     root.classList.toggle('is-desktop', desktop);
-  }, [data?.settings, systemDark]);
+  }, [data?.settings, systemDark, language]);
   const expand = useCallback(async (open: boolean) => {
     // What "this" means in a request: whatever was in front as the chat opened.
     if (open && desktop) void command('capture_focus').catch(() => {});
@@ -439,14 +450,14 @@ export default function App() {
     // Typed in the island: asked here, where the answer shows.
     const asked = listen<string>('island-ask', event => { void expand(true); void submitRef.current(event.payload); });
     // Buntini's language changed, from Settings or on the Mac.
-    const spoken = listen<string>('language', event => { void speak(event.payload); });
+    const spoken = listen<string>('language', event => { void speakLanguage(event.payload); });
     return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); void asked.then(unlisten => unlisten()); void spoken.then(unlisten => unlisten()); };
   }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;
     const subscription = listen<{ searchId: string; task: TaskRecord }>('saved-search-result', event => {
       void refresh().catch(error => setError(errorMessage(error)));
-      setNotice(event.payload.task.state === 'completed' ? `A saved search has an update: ${event.payload.task.prompt}` : 'A saved search couldn’t finish. You’ll find it in History.');
+      setNotice(event.payload.task.state === 'completed' ? t('app.notice.savedSearchUpdate', { prompt: event.payload.task.prompt }) : t('app.notice.savedSearchFailed'));
     });
     return () => { void subscription.then(unlisten => unlisten()); };
   }, [refresh]);
@@ -455,8 +466,8 @@ export default function App() {
     const budget = listen<string>('budget-warning', event => setNotice(event.payload));
     const subscription = listen<{ watch: { label: string }; belowThreshold: boolean; changed: boolean }>('price-watch-result', event => {
       void refresh().catch(error => setError(errorMessage(error)));
-      if (event.payload.belowThreshold) setNotice(`${event.payload.watch.label} reached your target price. Details are in History.`);
-      else if (event.payload.changed) setNotice(`Price watch updated: ${event.payload.watch.label}`);
+      if (event.payload.belowThreshold) setNotice(t('app.notice.priceTarget', { label: event.payload.watch.label }));
+      else if (event.payload.changed) setNotice(t('app.notice.priceUpdated', { label: event.payload.watch.label }));
     });
     return () => { void subscription.then(unlisten => unlisten()); void budget.then(unlisten => unlisten()); };
   }, [refresh]);
@@ -548,7 +559,7 @@ export default function App() {
   }, []);
   // A hand-off keeps the question out of the address, and out of the browser's history.
   const openChatGpt = useCallback(async (question: string) => {
-    await navigator.clipboard?.writeText(question).then(() => setNotice('Question copied.'), () => {});
+    await navigator.clipboard?.writeText(question).then(() => setNotice(t('app.notice.questionCopied')), () => {});
     if (desktop) await command('open_source', { url: CHATGPT_URL }).catch(error => setError(errorMessage(error)));
     else window.open(CHATGPT_URL, '_blank', 'noreferrer');
   }, []);
@@ -573,7 +584,7 @@ export default function App() {
     const useSpeech = !!data?.settings.speakResponses || (spoken && data?.settings.speakVoiceReplies !== false);
     let streamedText = '', answerSoFar = '', liveId = '', goOnline = '', goBrowser = false, askAction = false, streamError = '', answeredAloud = false;
     taskBusy.current = true;
-    setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity('Getting my thoughts together'); activeId.current = '';
+    setError(''); setInput(''); setPage('home'); setBusy(true); setPetState('thinking'); setActivity(t('app.activity.gettingThoughts')); activeId.current = '';
     // A hello, a thank-you or a kind word shows on the cat's face before the reply comes.
     const felt = feelingFor(prompt);
     if (felt) react(felt);
@@ -584,14 +595,14 @@ export default function App() {
         if (event.taskId) { activeId.current = event.taskId; liveId = event.taskId; }
         if (event.type === 'state') {
           if (!speechActive.current) setPetState(event.state === 'working' ? 'working' : 'thinking');
-          setActivity(event.text || ({ thinking: 'Thinking it over', working: 'Taking a look', planning: 'Making a plan' }[event.state || ''] || 'Working on it'));
+          setActivity(event.text || ({ thinking: t('app.activity.thinkingItOver'), working: t('app.activity.takingALook'), planning: t('app.activity.makingAPlan') }[event.state || ''] || t('app.activity.workingOnIt')));
         } else if (event.type === 'delta') {
           answerSoFar += event.text || '';
           setLive(previous => previous && { ...previous, id: event.taskId, answer: previous.answer + (event.text || '') });
           if (useSpeech) { streamedText += event.text || ''; speechQueue.current?.append(event.text || '', speechToken); }
         }
-        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity[event.tool || ''] || 'Working on it'); }
-        else if (event.type === 'error') streamError = event.text || 'The task could not finish.';
+        else if (event.type === 'tool') { if (!speechActive.current) setPetState('working'); setActivity(event.text || skillActivity()[event.tool || ''] || t('app.activity.workingOnIt')); }
+        else if (event.type === 'error') streamError = event.text || t('app.error.taskFailed');
         else if (event.type === 'notice' && event.text) { setNotice(event.text); react('curious'); }
       }, approvalId, sending);
       setLive(null);
@@ -650,7 +661,7 @@ export default function App() {
       if (typeof taskId === 'string') await openThread({ taskId });
       next = await continueTask(name, args, event => {
         if (event.taskId) activeId.current = event.taskId;
-        if (event.type === 'state' || event.type === 'tool') setActivity(event.tool ? stepLabel(event.tool) : 'Continuing your task');
+        if (event.type === 'state' || event.type === 'tool') setActivity(event.tool ? stepLabel(event.tool) : t('app.activity.continuing'));
         if (event.type === 'notice' && event.text) setNotice(event.text);
       });
       setTurns(previous => mergeTurns(previous, [next!]));
@@ -669,7 +680,7 @@ export default function App() {
   async function reviewTask(task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) {
     if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) return;
     // One sheet at a time: a second one would stack on the first and break its focus.
-    if (sheetWaiting.current) { setNotice('Answer the request that’s open first.'); return; }
+    if (sheetWaiting.current) { setNotice(t('app.notice.answerOpenFirst')); return; }
     try {
       await openThread({ taskId: task.id });
       if (task.state === 'waiting_action' && task.action) { setActionError(''); setProposal(task.action); setPetState('approval'); }
@@ -684,8 +695,8 @@ export default function App() {
   // From Waiting for you or a Review notification: reload the saved proposal, then open its sheet. Never approves.
   async function openApproval(approvalId: string) {
     setPage('home'); void expand(true);
-    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish this first.'); return; }
-    if (sheetWaiting.current) { setNotice('Answer the open request first.'); return; }
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice(t('app.notice.finishFirst')); return; }
+    if (sheetWaiting.current) { setNotice(t('app.notice.answerOpenRequest')); return; }
     try { await reviewTask(await command<TaskRecord>('open_approval', { approvalId })); }
     catch (e) { setError(errorMessage(e)); await refresh().catch(() => {}); }
   }
@@ -693,7 +704,7 @@ export default function App() {
   // request in the composer. Sending it goes through the usual approval sheet.
   async function openHeadsUp(id: string) {
     setPage('home'); void expand(true);
-    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice('Finish this first.'); return; }
+    if (switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current) { setNotice(t('app.notice.finishFirst')); return; }
     try {
       const opened = await command<{ taskId: string; suggestion?: string | null }>('open_heads_up', { id });
       await openThread({ taskId: opened.taskId });
@@ -726,7 +737,7 @@ export default function App() {
   const submitRef = useRef(submit);
   submitRef.current = submit;
   nudgeAction.current = action => {
-    if (action === 'checkMac') { void expand(true); void submit('How is my Mac doing?', 'system'); }
+    if (action === 'checkMac') { void expand(true); void submit(t('app.prompt.macDoing'), 'system'); }
     else if (action === 'lookUp') { setMode('web'); void expand(true); }
     else if (action === 'findFile') { setMode('files'); void expand(true); }
     else if (action === 'focus' && desktop) void callUtilities({ op: 'focus' }).catch(error => setError(errorMessage(error)));
@@ -734,7 +745,7 @@ export default function App() {
   async function cancel() {
     const taskId = activeId.current;
     const stopTask = taskId ? command('cancel_task', { taskId }).then(() => {
-      if (activeId.current === taskId) setActivity('Stopping…');
+      if (activeId.current === taskId) setActivity(t('app.activity.stopping'));
     }).catch(error => setError(errorMessage(error))) : Promise.resolve();
     await Promise.all([stopTask, speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))]);
   }
@@ -792,13 +803,13 @@ export default function App() {
       if (outlasted && speechActive.current) void speechQueue.current?.cancel().catch(() => {});
       setPage('home');
       // Saying nothing after an answer just ends the conversation.
-      if (!heard && !followUpTurn.current) setNotice('I didn’t catch that.');
+      if (!heard && !followUpTurn.current) setNotice(t('app.notice.didntCatch'));
     } catch (e) { if (version === voiceVersion.current) setError(errorMessage(e)); }
     finally { if (version === voiceVersion.current) { setTranscribing(false); setHeard(''); if (!heard) setPetState('idle'); recordPromise.current = null; } }
     if (version !== voiceVersion.current) return;
     if (!heard) { conversation.current = false; return; }
     if (conversation.current && isConversationEnd(heard)) {
-      conversation.current = false; setPetState('idle'); setNotice('Okay.');
+      conversation.current = false; setPetState('idle'); setNotice(t('app.notice.okay'));
       return;
     }
     // What was heard is sent right away and answered out loud, as with any voice assistant.
@@ -822,7 +833,7 @@ export default function App() {
     timeout: () => {
       const firstTurn = !followUpTurn.current;
       void cancelVoice();
-      if (firstTurn) setNotice('I didn’t hear anything.');
+      if (firstTurn) setNotice(t('app.notice.didntHear'));
     },
     event: (name, payload) => {
       if (!recordHeld.current || payload.session !== voiceSession.current) return;
@@ -882,7 +893,7 @@ export default function App() {
     briefing.current = true; taskBusy.current = true;
     const id = crypto.randomUUID();
     activeId.current = id;
-    setError(''); setPage('home'); setBusy(true); setPetState('working'); setActivity('Looking over your day'); setFocusId('');
+    setError(''); setPage('home'); setBusy(true); setPetState('working'); setActivity(t('app.activity.lookingOverDay')); setFocusId('');
     setLive({ id: '', prompt: '', answer: '', state: 'running', createdAt: new Date().toISOString(), sources: [], files: [] });
     try {
       const turn = await command<TaskRecord>('morning_brief', { automatic, id });
@@ -914,7 +925,7 @@ export default function App() {
     setTurns(mergeTurns([], page.turns)); setTurnCursor(page.nextCursor); setLive(null); setFocusId(''); setError(''); setPage('home');
   }
   async function openThread(target: { conversationId?: string; taskId?: string }) {
-    if (switchingThreadRef.current) throw new Error('A conversation is still opening.');
+    if (switchingThreadRef.current) throw new Error(t('app.error.conversationOpening'));
     switchingThreadRef.current = true; setSwitchingThread(true); selectionVersion.current++;
     try {
       const page = await command<ConversationPage>('open_conversation', target);
@@ -953,14 +964,14 @@ export default function App() {
   async function addFolder() {
     try {
       const path = await command<string | null>('pick_folder');
-      if (path) { await command('add_root', { path }); await refresh(); setNotice('Folder added.'); }
+      if (path) { await command('add_root', { path }); await refresh(); setNotice(t('app.notice.folderAdded')); }
     } catch (e) { setError(errorMessage(e)); }
   }
   async function safeAction(action: () => Promise<unknown>, message?: string) {
     setError('');
     try { await action(); await refresh(); if (message) setNotice(message); } catch (e) { setError(errorMessage(e)); }
   }
-  const runShortcut = (kind: Shortcut) => { if (kind === 'day') void brief(); else void submit('What needs a reply?', 'auto'); };
+  const runShortcut = (kind: Shortcut) => { if (kind === 'day') void brief(); else void submit(askReplies, 'auto'); };
   function shortcut(kind: Shortcut) {
     if (data && shortcutNeeds(kind, data.settings.apps)) { setNeeds(kind); return; }
     setNeeds(null); runShortcut(kind);
@@ -993,9 +1004,9 @@ export default function App() {
   // Inputs are disabled while Buntini works, which drops focus; give it back to the composer.
   const wasPending = useRef(false);
   // Messages sit above the composer (or setup's buttons) so they never cover Send or the mic.
-  const toast = (error || notice) ? <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="Dismiss message" onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div> : null;
+  const toast = (error || notice) ? <div className={`toast ${error ? 'toast-error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label={t('app.panel.dismiss')} onClick={() => { setError(''); setNotice(''); }}><X size={13} /></button></div> : null;
   const toastAnchored = expanded && page === 'home' && !proposal && !approval;
-  const currentMode = modes.find(item => item.id === mode)!;
+  const currentMode = modes().find(item => item.id === mode)!;
   const modelReady = data?.diagnostics.modelReady;
   const pending = busy || planning || recording || transcribing || voiceStopping || acting || approving || switchingThread;
   useEffect(() => {
@@ -1007,14 +1018,14 @@ export default function App() {
 
   return <main className={`desktop-stage ${expanded ? 'is-expanded' : 'is-collapsed'}${world.quiet ? ' is-quiet' : ''}`}>
     <div className="companion" style={{ '--companion-scale': companionScale, '--dock-height': `${120 * companionScale}px`, ...(!desktop ? { height: expanded ? (page === 'home' ? chatting ? 620 : needs ? 560 : approval ? 540 : 620 : 690) * (panelScale[data?.settings.panelSize || 'standard'] ?? 1) + 120 * (companionScale - 1) : agentBubble ? collapsedHeight(companionScale) : Math.max(136, 136 * companionScale), ...(agentBubble ? { width: 300 } : {}) } : {}) } as CSSProperties}>
-      {expanded && <section className="panel" aria-label="Buntini companion">
+      {expanded && <section className="panel" aria-label={t('app.panel.label')}>
         <header className="panel-header">
-          <button className="brand" onClick={() => setPage('home')} aria-label={`${assistantName} home`}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong>{(busy || recording || speaking) && <span className="header-status is-busy" aria-live="polite">{recording && !speaking ? 'Listening…' : busy ? (live?.answer && (!activity || activity === 'Thinking it over') ? 'Writing…' : activity || 'On it…') : 'Talking'}</span>}</span></button>
+          <button className="brand" onClick={() => setPage('home')} aria-label={t('app.panel.home', { name: assistantName })}><span className="brand-mark">{data ? <Pet state={busy ? 'thinking' : 'idle'} avatar={data.settings.avatar} look={lookFrom(data.settings)} /> : <Sparkles size={15} strokeWidth={1.8} />}</span><span className="brand-name"><strong>{assistantName}</strong>{(busy || recording || speaking) && <span className="header-status is-busy" aria-live="polite">{recording && !speaking ? t('app.status.listening') : busy ? (live?.answer && (!activity || activity === t('app.activity.thinkingItOver')) ? t('app.status.writing') : activity || t('app.status.onIt')) : t('app.status.talking')}</span>}</span></button>
           <div className="header-actions">
-            {page === 'home' && chatting && !onboarding && <button className="icon-button" title="New topic" aria-label="New topic" disabled={pending} onClick={() => void newTopic()}><Plus size={16} /></button>}
-            <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title="Task history" aria-label="Task history" onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
-            <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title="Settings" aria-label="Settings" onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>
-            <button className="icon-button" title="Collapse companion" aria-label="Collapse companion" onClick={() => void expand(false)}><Minus size={17} /></button>
+            {page === 'home' && chatting && !onboarding && <button className="icon-button" title={t('app.panel.newTopic')} aria-label={t('app.panel.newTopic')} disabled={pending} onClick={() => void newTopic()}><Plus size={16} /></button>}
+            <button className={`icon-button ${page === 'history' ? 'selected' : ''}`} title={t('app.panel.history')} aria-label={t('app.panel.history')} onClick={() => setPage(page === 'history' ? 'home' : 'history')}><History size={16} /></button>
+            <button className={`icon-button ${page === 'settings' ? 'selected' : ''}`} title={t('common.settings')} aria-label={t('common.settings')} onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}><Settings2 size={16} /></button>
+            <button className="icon-button" title={t('app.panel.collapse')} aria-label={t('app.panel.collapse')} onClick={() => void expand(false)}><Minus size={17} /></button>
           </div>
         </header>
         {agentAsking && <AgentCard key={agentAsking.id} className="in-panel" request={agentAsking} more={agentRequests.length - 1} onAnswer={answer => answerAgent(agentAsking.id, answer)} />}
@@ -1025,10 +1036,10 @@ export default function App() {
             <HeadsUps items={headsUps} disabled={busy || pending} onOpen={id => void openHeadsUp(id)} onDismiss={id => void safeAction(async () => { await command('dismiss_heads_up', { id }); await refresh(); })} />
             <WaitingForYou items={waiting} disabled={busy || pending} onReview={id => void openApproval(id)} onStop={taskId => void safeAction(async () => { await command('cancel_task', { taskId }); await refresh(); })} />
             {!chatting ? <div className="overlay-welcome"><h1>{greeting(new Date(), data?.settings.userName)}{!glance.length && <span>{invitation(new Date())}</span>}</h1>
-              {glance.length > 0 && <div className="glance">{glance.map(item => <button key={item.kind} onClick={() => void submit(item.kind === 'event' ? 'What’s on my calendar today?' : 'What are my reminders?')}><i>{item.kind === 'event' ? <CalendarDays /> : <Bell />}</i><span><strong>{item.title}</strong><small>{clockTime(item.time)}{item.place ? ` · ${item.place}` : ''}</small></span></button>)}</div>}
+              {glance.length > 0 && <div className="glance">{glance.map(item => <button key={item.kind} onClick={() => void submit(item.kind === 'event' ? askToday : askReminders)}><i>{item.kind === 'event' ? <CalendarDays /> : <Bell />}</i><span><strong>{item.title}</strong><small>{clockTime(item.time)}{item.place ? ` · ${item.place}` : ''}</small></span></button>)}</div>}
               <div className="welcome-chips">{suggestions(new Date(), usual, data?.settings.apps ?? []).map(item => <button key={item.label} onClick={() => item.prompt ? void submit(item.prompt) : item.shortcut ? shortcut(item.shortcut) : (setMode(item.mode!), inputRef.current?.focus())}>{item.label}</button>)}</div>
               {data && <ConnectApps allowed={data.settings.apps} disabled={busy || pending} onAllow={allowApp} onConnected={() => void refresh().catch(e => setError(errorMessage(e)))} onPane={pane => void command('open_apple_settings', { pane }).catch(e => setError(errorMessage(e)))} onError={setError} />}
-              {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>Choose apps</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
+              {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>{t('app.welcome.chooseApps')}</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
                 progress={progress} onFollowUp={text => void submit(text, 'auto')} onOpenPane={pane => void command('open_apple_settings', { pane }).catch(error => setError(errorMessage(error)))} chatgptPlan={data?.diagnostics.chatgptPlan} onAskChatGpt={question => void askChatGpt(question)} onOpenChatGpt={question => void openChatGpt(question)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
@@ -1036,34 +1047,34 @@ export default function App() {
           </div>
           <div className="composer-area">
             {toastAnchored && toast}
-            {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>One moment…</span><button type="button" className="text-button" onClick={() => void cancel()}>Stop</button></div>}
-            {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label="Back to asking anything" onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
+            {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>{t('app.composer.oneMoment')}</span><button type="button" className="text-button" onClick={() => void cancel()}>{t('common.stop')}</button></div>}
+            {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label={t('app.composer.backToAuto')} onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
             <form className={`composer ${recording ? 'is-recording' : ''} ${dropping ? 'is-dropping' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
               {attached.length > 0 && <AttachedChips items={attached} disabled={busy} onRemove={detach} />}
-              <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? 'Listening…' : 'Getting the microphone ready…') : transcribing ? 'Turning your voice into words…' : mode === 'auto' && glance[0]?.kind === 'event' ? `Ask about ${glance[0].title}…` : currentMode.placeholder} aria-label={`Message ${assistantName}`} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
-              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? 'Say “that’s all” to finish' : 'Sends when you pause') : 'Let go to send'}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> Transcribing on your Mac</> : null}</span><div>
-                {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label="Cancel voice input" title="Cancel (Esc)" onClick={() => void cancelVoice()}><X size={15} /></button>}
-                {desktop && !recording && !transcribing && <button type="button" className="attach-button" aria-label="Attach files" title="Attach" disabled={busy} onClick={() => void command<string[]>('pick_files').then(attachFiles).catch(error => setError(errorMessage(error)))}><Paperclip size={16} /></button>}
-                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree && speaking ? 'Interrupt' : 'Send') : 'Talk'} aria-label={recording ? (handsFree && speaking ? 'Interrupt' : handsFree ? 'Send what you said now' : 'Let go to send') : 'Tap or hold to talk'} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
-                {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label="Stop task" onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
+              <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? t('app.status.listening') : t('app.composer.micReady')) : transcribing ? t('app.composer.turningIntoWords') : mode === 'auto' && glance[0]?.kind === 'event' ? t('app.composer.askAbout', { title: glance[0].title }) : currentMode.placeholder} aria-label={t('app.composer.message', { name: assistantName })} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />
+              <div className="composer-bottom"><span>{recording ? <><span className="record-dot" /> {Math.floor(listenSeconds / 60)}:{String(listenSeconds % 60).padStart(2, '0')} · {handsFree ? (conversation.current ? t('app.composer.sayToFinish', { phrase: 'that’s all' }) : t('app.composer.sendsOnPause')) : t('app.composer.letGoToSend')}</> : transcribing ? <><LoaderCircle size={11} className="spin" /> {t('app.composer.transcribing')}</> : null}</span><div>
+                {(recording || transcribing) && <button type="button" className="voice-cancel" aria-label={t('app.composer.cancelVoice')} title={t('app.composer.cancelEsc')} onClick={() => void cancelVoice()}><X size={15} /></button>}
+                {desktop && !recording && !transcribing && <button type="button" className="attach-button" aria-label={t('app.composer.attachFiles')} title={t('app.composer.attach')} disabled={busy} onClick={() => void command<string[]>('pick_files').then(attachFiles).catch(error => setError(errorMessage(error)))}><Paperclip size={16} /></button>}
+                <button type="button" className={`mic-button ${recording ? 'active' : ''}`} title={recording ? (handsFree && speaking ? t('app.composer.interrupt') : t('common.send')) : t('app.composer.talk')} aria-label={recording ? (handsFree && speaking ? t('app.composer.interrupt') : handsFree ? t('app.composer.sendNow') : t('app.composer.letGoToSend')) : t('app.composer.tapOrHold')} disabled={busy || transcribing || voiceStopping} onPointerDown={event => { event.preventDefault(); if (recordHeld.current && handsFreeRef.current) { if (speechActive.current) void speechQueue.current?.cancel().catch(() => {}); else void finishVoice(); return; } event.currentTarget.setPointerCapture(event.pointerId); pressedAt.current = Date.now(); void startVoice(); }} onPointerUp={() => { if (!recordHeld.current) return; if (!handsFreeRef.current && Date.now() - pressedAt.current < 400) { setHandsFreeMode(true); conversation.current = data?.settings.speakVoiceReplies !== false; return; } void finishVoice(); }} onPointerCancel={() => void cancelVoice()} onLostPointerCapture={() => { if (recordHeld.current && !handsFreeRef.current) void cancelVoice(); }} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void startVoice(); } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); void finishVoice(); } }}>{recording ? <AudioLines size={17} /> : <Mic size={17} />}</button>
+                {recording || transcribing ? null : busy ? <button type="button" className="send-button stop-button" aria-label={t('app.composer.stopTask')} onClick={() => void cancel()} disabled={!activeId.current}><Square size={13} fill="currentColor" /></button> : <button type="submit" className="send-button" aria-label={t('app.composer.sendMessage')} disabled={!input.trim() || pending}><ArrowUp size={17} /></button>}
               </div></div>
             </form>
-            {data && !modelReady && <div className="composer-hint"><button onClick={() => setPage('settings', 'brain')}><span className="status-dot amber" /> Choose a brain so I can think <ChevronRight size={11} /></button></div>}
+            {data && !modelReady && <div className="composer-hint"><button onClick={() => setPage('settings', 'brain')}><span className="status-dot amber" /> {t('app.composer.chooseBrain')} <ChevronRight size={11} /></button></div>}
           </div>
         </>}
 
-        {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>History</h2></div>
+        {page === 'history' && <div className="subpage"><div className="subpage-title"><h2>{t('app.history.title')}</h2></div>
           <BackgroundWork status={background} onCancel={id => void safeAction(() => command('cancel_timer', { id }))} />
           <Goals goals={data?.goals || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onOpen={taskId => { void openThread({ taskId }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <Routines routines={data?.routines || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onOpen={taskId => { void openThread({ taskId }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <SavedSearches searches={data?.savedSearches || []} keyReady={data?.settings.searchProvider === 'tavily' ? !!data?.diagnostics.tavilyConfigured : !!data?.diagnostics.braveConfigured} onAddKey={() => setPage('settings', 'connections')} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onResult={result => { void openThread({ taskId: result.id }).catch(e => setError(errorMessage(e))); }} onError={setError} />
           <PriceWatches watches={data?.priceWatches || []} onAction={async (name, args) => { const result = await command(name, args); await refresh(); return result; }} onError={setError} />
-          <div className="section-label history-section-label">Past conversations</div>
-          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {item.turnCount} {item.turnCount === 1 ? 'turn' : 'turns'}{item.legacy ? ' · imported' : ''}{item.id === conversationId ? ' · current' : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>Load older conversations</button>}{confirmClear ? <ConfirmInline label="Clear conversation history" action="Clear history" working={pending} onCancel={() => setConfirmClear(false)} onConfirm={() => void safeAction(async () => { await command('clear_history'); setConfirmClear(false); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, 'Conversation history cleared.')}>Erases every conversation and task on this Mac. Things I remember stay.</ConfirmInline>
-            : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> Clear conversation history…</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>No conversations yet</h3></div>}
+          <div className="section-label history-section-label">{t('app.history.past')}</div>
+          {savedConversations.some(item => item.turnCount > 0) ? <><div className="history-list">{savedConversations.map(item => <button key={item.id} className="history-item" disabled={pending} onClick={() => void chooseConversation(item.id)}><span className="history-icon"><Clock3 size={16} /></span><span><strong>{item.title}</strong><small>{relativeTime(item.updatedAt)} · {tn('app.history.turns', item.turnCount)}{item.legacy ? ` · ${t('app.history.imported')}` : ''}{item.id === conversationId ? ` · ${t('app.history.current')}` : ''}</small></span><ChevronRight size={14} /></button>)}</div>{listCursor && <button className="text-button" onClick={() => void loadConversations()}>{t('app.history.loadOlder')}</button>}{confirmClear ? <ConfirmInline label={t('app.history.clearLabel')} action={t('app.history.clearAction')} working={pending} onCancel={() => setConfirmClear(false)} onConfirm={() => void safeAction(async () => { await command('clear_history'); setConfirmClear(false); selectionVersion.current++; conversationIdRef.current = ''; setTurns([]); setLive(null); setTurnCursor(null); setSavedConversations([]); setProposal(null); setApproval(null); }, t('app.notice.historyCleared'))}>{t('app.history.clearDetail')}</ConfirmInline>
+            : <button className="text-button danger clear-history" disabled={pending} onClick={() => setConfirmClear(true)}><Trash2 size={13} /> {t('app.history.clearButton')}</button>}</> : <div className="empty-state"><History size={28} strokeWidth={1.3} /><h3>{t('app.history.empty')}</h3></div>}
         </div>}
 
-        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? 'Key saved.' : 'API key removed.'); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<>{data.diagnostics.chatgptAlwaysAllow && <section className="settings-section"><Toggle label="Always allow internet questions to ChatGPT" checked onChange={() => void safeAction(async () => { await command('chatgpt_always_allow_off'); await refresh(); })} /></section>}<YourData onNotice={setNotice} onError={setError} onErase={async () => {
+        {page === 'settings' && data && <SettingsView data={data} saver={saver.current!} initialTab={settingsTab} onPreviewVoice={async (voiceId, rate, text) => { const override = { voiceId, rate }; playbackOverride.current = override; try { await speechQueue.current!.speakText(text); } finally { if (playbackOverride.current === override) playbackOverride.current = null; } }} onError={setError} onAddFolder={addFolder} onRemoveFolder={path => safeAction(() => command('remove_root', { path }))} onKey={async (provider, key) => { await command('set_api_key', { provider, key }); await refresh(); setNotice(key ? t('app.notice.keySaved') : t('app.notice.keyRemoved')); }} onAudit={() => setPage('audit')} onRestartSetup={() => void safeAction(async () => { await command('restart_onboarding'); saver.current!.discard(); setPage('home'); })} onRefresh={async () => { await refresh(); }} onNotice={setNotice} onPolicy={() => { const url = 'https://github.com/sagar8080/nexon/blob/main/PRIVACY.md'; if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }} onForget={async id => { await command('forget_memory', { id }); await refresh(); }} privacyExtras={<>{data.diagnostics.chatgptAlwaysAllow && <section className="settings-section"><Toggle label={t('app.privacy.alwaysAllowChatGpt')} checked onChange={() => void safeAction(async () => { await command('chatgpt_always_allow_off'); await refresh(); })} /></section>}<YourData onNotice={setNotice} onError={setError} onErase={async () => {
           // An edit not saved yet must not write the old settings back after the erase.
           const pending = saver.current!.pending();
           saver.current!.discard();
@@ -1071,7 +1082,7 @@ export default function App() {
           catch (error) { if (pending) saver.current!.edit(pending); throw error; }
         }} onErased={async () => { forgetMood(); setTurns([]); setLive(null); setTurnCursor(null); conversationIdRef.current = ''; setSavedConversations([]); setPage('home'); await refresh(); }} /></>} />}
 
-        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> Settings</button><div className="subpage-title"><h2>Activity log</h2></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>Nothing yet</h3></div>}</div>}
+        {page === 'audit' && <div className="subpage"><button className="back-link" onClick={() => setPage('settings')}><ArrowLeft size={13} /> {t('common.settings')}</button><div className="subpage-title"><h2>{t('app.audit.title')}</h2></div>{data?.audit.length ? <div className="audit-list">{data.audit.map((entry, index) => <article key={entry.id || index}><div><ShieldCheck size={13} /><strong>{auditLabel(entry.action)}</strong><small>{relativeTime(entry.timestamp || entry.createdAt || '')}</small></div><p>{entry.detail || entry.outcome}</p></article>)}</div> : <div className="empty-state"><ShieldCheck size={28} strokeWidth={1.3} /><h3>{t('app.audit.empty')}</h3></div>}</div>}
 
         {approval && <ApprovalSheet approval={approval} approving={approving} onCancel={cancelOnlineApproval} onWebInstead={() => { if (approvalBusy.current) return; const prompt = approval.prompt; setApproval(null); void planOnline(prompt, true, onlineTaskId || undefined); }} onOpenChatGpt={data?.diagnostics.chatgptPlan === 'usable' ? undefined : () => { const question = approval.prompt; cancelOnlineApproval(); void openChatGpt(question); }} onAllow={async always => {
           if (approvalBusy.current) return;
@@ -1095,11 +1106,11 @@ export default function App() {
       </section>}
 
       <div className="pet-dock">
-        {!expanded && !nudging && world.ask && <button className="pet-ask" aria-label={`Let ${assistantName} paw at this window`} onClick={world.knock}><svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="12" cy="16" rx="5.2" ry="4.4" /><ellipse cx="5.6" cy="10.6" rx="2.1" ry="2.6" /><ellipse cx="9.4" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="14.6" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="18.4" cy="10.6" rx="2.1" ry="2.6" /></svg></button>}
+        {!expanded && !nudging && world.ask && <button className="pet-ask" aria-label={t('app.pet.pawAt', { name: assistantName })} onClick={world.knock}><svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="12" cy="16" rx="5.2" ry="4.4" /><ellipse cx="5.6" cy="10.6" rx="2.1" ry="2.6" /><ellipse cx="9.4" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="14.6" cy="6.6" rx="2.1" ry="2.7" /><ellipse cx="18.4" cy="10.6" rx="2.1" ry="2.6" /></svg></button>}
         {agentBubble && <div className="agent-bubble" ref={agentBubbleRef}>{agentAsking ? <AgentCard key={agentAsking.id} request={agentAsking} more={agentRequests.length - 1} onAnswer={answer => answerAgent(agentAsking.id, answer)} /> : agentDone && <AgentDone note={agentDone} onClose={() => setAgentDone(null)} />}</div>}
         {nudging && world.nudge && <div className="nudge-bubble" role="status" aria-live="polite"><p>{world.nudge.text}</p><div>{world.nudge.actions.map(item => <button key={item.label} onClick={() => world.act(item.action)}>{item.label}</button>)}</div></div>}
-        {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? 'All ears.' : petState === 'thinking' ? 'A little thinking…' : petState === 'working' ? 'On it, one moment.' : petState === 'speaking' ? 'Something to say.' : 'Here when you need me.'}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
-        <button className="pet-button" aria-label={expanded ? `Drag ${assistantName}; click to collapse` : `Open ${assistantName}`}  onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
+        {expanded && !desktop && <div className="pet-caption"><span>{petState === 'listening' ? t('app.pet.captionListening') : petState === 'thinking' ? t('app.pet.captionThinking') : petState === 'working' ? t('app.pet.captionWorking') : petState === 'speaking' ? t('app.pet.captionSpeaking') : t('app.pet.captionIdle')}</span><svg width="22" height="16" viewBox="0 0 22 16"><path d="M2 2c2 8 8 9 17 10m-5-5 5 5-6 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg></div>}
+        <button className="pet-button" aria-label={expanded ? t('app.pet.drag', { name: assistantName }) : t('app.pet.open', { name: assistantName })}  onClick={() => { if (petDragged.current) { petDragged.current = false; return; } void expand(!expanded); }} onPointerDown={event => {
           if (!desktop || event.button !== 0) return;
           petDragged.current = false;
           const startX = event.clientX, startY = event.clientY;
@@ -1113,9 +1124,9 @@ export default function App() {
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
         }}><Pet state={agentAsking && petState === 'idle' ? 'approval' : petState} avatar={data?.settings.avatar || 'cat'} look={data ? { ...lookFrom(data.settings), motion: petMotion } : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
-        <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>Pet {assistantName}</button>
-        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => { setMenu(false); void submit('How’s my Mac?', 'auto'); }}><Laptop size={13} /> Your Mac</button><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
-        {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}
+        <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>{t('app.pet.pet', { name: assistantName })}</button>
+        {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>{t('app.menu.space')}</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label={t('app.menu.label')} aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => { setMenu(false); void submit(askMac, 'auto'); }}><Laptop size={13} /> {t('app.menu.yourMac')}</button><button onClick={() => void expand(false)}><Minus size={13} /> {t('app.menu.tuckAway')}</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> {t('common.settings')}</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> {t('app.menu.hide')}</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> {t('app.menu.quit')} <kbd>⌘Q</kbd></button>}</div>}</div></div>}
+        {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? t('app.pet.working') : t('app.pet.hereForYou')}</span>}
       </div>
     </div>
   </main>;
@@ -1128,11 +1139,11 @@ function SavedSearches({ searches, keyReady, onAddKey, onAction, onResult, onErr
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const [working, setWorking] = useState('');
   async function act(id: string, action: () => Promise<unknown>) { setWorking(id); try { await action(); } catch (e) { onError(errorMessage(e)); } finally { setWorking(''); } }
-  return <div className="saved-searches"><div className="section-label"><Bell size={12} /> Keep an eye on it <button className="text-button" onClick={() => setAdding(!adding)}><Plus size={12} /> New search</button></div>
+  return <div className="saved-searches"><div className="section-label"><Bell size={12} /> {t('app.savedSearch.heading')} <button className="text-button" onClick={() => setAdding(!adding)}><Plus size={12} /> {t('app.savedSearch.new')}</button></div>
     {/* Saved searches run through the search provider's API, so they need its key first. */}
-    {adding && !keyReady && <div className="saved-search-form"><p>Add a search key first.</p><div><button type="button" className="primary-button" onClick={onAddKey}><Plus size={11} /> Add a search key</button></div></div>}
-    {adding && keyReady && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label="Saved search query" placeholder="What should I keep an eye on?" value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label="Check frequency" value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>Every 15 minutes</option><option value={60}>Every hour</option><option value={360}>Every 6 hours</option><option value={1440}>Every day</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Save</button></div></form>}
-    {searches.length ? searches.map(search => <article className={`saved-search ${search.enabled ? '' : 'paused'}`} key={search.id}><div className="saved-search-heading"><Search size={14} /><strong>{search.query}</strong><button className="icon-button" aria-label={`Delete saved search: ${search.query}`} disabled={!!working} onClick={() => void act(search.id, () => onAction('delete_saved_search', { id: search.id }))}><X size={12} /></button></div><div className="saved-search-info"><span>{search.enabled ? <><span className="status-dot" />{search.intervalMinutes < 60 ? `${search.intervalMinutes} min` : search.intervalMinutes < 1440 ? `${search.intervalMinutes / 60} hr` : 'Daily'} checks</> : 'Paused'}</span><button className="text-button" disabled={!!working} onClick={() => void act(search.id, () => onAction('update_saved_search', { id: search.id, enabled: !search.enabled, intervalMinutes: search.intervalMinutes }))}>{search.enabled ? <Square size={9} /> : <Play size={10} />}{search.enabled ? 'Pause' : 'Resume'}</button><button className="text-button" disabled={!!working} onClick={() => void act(search.id, async () => { const result = await onAction('run_saved_search', { id: search.id }); onResult(result as TaskRecord); })}>{working === search.id ? <LoaderCircle size={10} className="spin" /> : <RefreshCw size={10} />} Check now</button></div>{search.lastError && <p className="saved-search-error">{search.lastError}</p>}</article>) : !adding && null}
+    {adding && !keyReady && <div className="saved-search-form"><p>{t('app.savedSearch.needKey')}</p><div><button type="button" className="primary-button" onClick={onAddKey}><Plus size={11} /> {t('app.savedSearch.addKey')}</button></div></div>}
+    {adding && keyReady && <form className="saved-search-form" onSubmit={event => { event.preventDefault(); void act('new', async () => { await onAction('save_search', { query: query.trim(), intervalMinutes }); setQuery(''); setAdding(false); }); }}><input aria-label={t('app.savedSearch.query')} placeholder={t('app.savedSearch.placeholder')} value={query} onChange={event => setQuery(event.target.value)} required maxLength={500} /><div><select aria-label={t('app.savedSearch.frequency')} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))}><option value={15}>{t('app.savedSearch.every15Minutes')}</option><option value={60}>{t('app.savedSearch.everyHour')}</option><option value={360}>{t('app.savedSearch.every6Hours')}</option><option value={1440}>{t('app.savedSearch.everyDay')}</option></select><button className="primary-button" disabled={!query.trim() || working === 'new'}>{working === 'new' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} {t('common.save')}</button></div></form>}
+    {searches.length ? searches.map(search => <article className={`saved-search ${search.enabled ? '' : 'paused'}`} key={search.id}><div className="saved-search-heading"><Search size={14} /><strong>{search.query}</strong><button className="icon-button" aria-label={t('app.savedSearch.delete', { query: search.query })} disabled={!!working} onClick={() => void act(search.id, () => onAction('delete_saved_search', { id: search.id }))}><X size={12} /></button></div><div className="saved-search-info"><span>{search.enabled ? <><span className="status-dot" />{search.intervalMinutes < 60 ? t('app.savedSearch.minuteChecks', { minutes: number(search.intervalMinutes) }) : search.intervalMinutes < 1440 ? t('app.savedSearch.hourChecks', { hours: number(search.intervalMinutes / 60) }) : t('app.savedSearch.dailyChecks')}</> : t('app.savedSearch.paused')}</span><button className="text-button" disabled={!!working} onClick={() => void act(search.id, () => onAction('update_saved_search', { id: search.id, enabled: !search.enabled, intervalMinutes: search.intervalMinutes }))}>{search.enabled ? <Square size={9} /> : <Play size={10} />}{search.enabled ? t('common.pause') : t('common.resume')}</button><button className="text-button" disabled={!!working} onClick={() => void act(search.id, async () => { const result = await onAction('run_saved_search', { id: search.id }); onResult(result as TaskRecord); })}>{working === search.id ? <LoaderCircle size={10} className="spin" /> : <RefreshCw size={10} />} {t('app.savedSearch.checkNow')}</button></div>{search.lastError && <p className="saved-search-error">{search.lastError}</p>}</article>) : !adding && null}
   </div>;
 }
 

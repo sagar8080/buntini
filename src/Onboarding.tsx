@@ -10,6 +10,7 @@ import { coats, lookFrom } from './petOptions';
 import { applyAnswers, blocker, initialAnswers, message, next, previous, questions, reply, steps, type Answers, type Step } from './setupSteps';
 import { errorMessage } from './bridge';
 import { stillMotion } from './themes.ts';
+import { number, t } from './i18n.ts';
 import ChatGPTAccount from './ChatGPTAccount';
 import { CloudShares, OpenAppleSettings } from './BrainSettings';
 import type { Bootstrap, CatCoat, Settings } from './types';
@@ -61,9 +62,9 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
   return <>
     <div className="conversation" ref={scroller}>
       <div className="thread setup-thread">
-        <div className="setup-progress"><span>{Math.min(index + 1, questions)} of {questions}</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>Skip setup</button></div>
+        <div className="setup-progress"><span>{t('onboarding.progress', { step: number(Math.min(index + 1, questions)), total: number(questions) })}</span><button type="button" className="text-button" onClick={() => void onSkip()} disabled={saving}>{t('onboarding.skip')}</button></div>
         {said.map(item => <div className="turn" key={item.step}>{bubble(item.buntini, `${item.step}-b`)}<div className="bubble-row is-you"><div className="bubble bubble-you">{item.you}</div></div></div>)}
-        {typing ? <div className="bubble-row is-buntini"><span className="bubble-avatar"><Pet state="thinking" avatar="cat" look={look} /></span><div className="bubble bubble-buntini"><div className="typing" role="status" aria-label="Typing"><i /><i /><i /></div></div></div>
+        {typing ? <div className="bubble-row is-buntini"><span className="bubble-avatar"><Pet state="thinking" avatar="cat" look={look} /></span><div className="bubble bubble-buntini"><div className="typing" role="status" aria-label={t('onboarding.typing')}><i /><i /><i /></div></div></div>
           : bubble(message(step, answers, data.diagnostics), step, step !== 'done' && <form className="setup-card" onSubmit={event => { event.preventDefault(); void advance(); }}>
             {step === 'hello' && <Hello answers={answers} set={set} />}
             {step === 'brain' && <Brain answers={answers} set={set} data={data} onRefresh={onRefresh} onError={setError} />}
@@ -76,10 +77,10 @@ export default function Onboarding({ data, onFinish, onSkip, onRefresh, toast }:
       {toast}
       {error && <p className="setup-error" role="alert">{error}</p>}
       <div>
-        <button type="button" className="text-button" onClick={back} disabled={index === 0 || saving}><ArrowLeft size={12} /> Back</button>
+        <button type="button" className="text-button" onClick={back} disabled={index === 0 || saving}><ArrowLeft size={12} /> {t('common.back')}</button>
         <button type="button" className="primary-button" onClick={() => void advance()} disabled={saving || typing}>
           {saving ? <LoaderCircle size={13} className="spin" /> : step === 'done' ? <Check size={13} /> : null}
-          {saving ? 'Saving…' : step === 'done' ? (error ? 'Try again' : 'Start chatting') : 'Continue'}
+          {saving ? t('common.saving') : step === 'done' ? (error ? t('common.tryAgain') : t('onboarding.startChatting')) : t('common.continue')}
           {!saving && step !== 'done' && <ArrowRight size={13} />}
         </button>
       </div>
@@ -95,11 +96,16 @@ function swatch(id: CatCoat): CSSProperties {
   return { background: fill, borderColor: coat.outline };
 }
 
+const coatNames: Record<CatCoat, string> = {
+  ginger: 'surface.coat.ginger', gray: 'surface.coat.gray', black: 'surface.coat.black', white: 'surface.coat.white',
+  tuxedo: 'surface.coat.tuxedo', calico: 'surface.coat.calico', siamese: 'surface.coat.siamese',
+};
+
 function Hello({ answers, set }: StepProps) {
   return <>
-    <label>Your name<input value={answers.userName} onChange={event => set('userName', event.target.value)} placeholder="Sam" maxLength={40} autoFocus /></label>
-    <label>My name<input value={answers.assistantName} onChange={event => set('assistantName', event.target.value)} maxLength={40} required /></label>
-    <div className="coat-picker" role="radiogroup" aria-label="Coat">{coats.map(coat => <button type="button" key={coat.id} role="radio" aria-checked={answers.coat === coat.id} className={answers.coat === coat.id ? 'active' : ''} onClick={() => set('coat', coat.id)}><i style={swatch(coat.id)} />{coat.label}</button>)}</div>
+    <label>{t('onboarding.yourName')}<input value={answers.userName} onChange={event => set('userName', event.target.value)} placeholder={t('onboarding.yourNamePlaceholder')} maxLength={40} autoFocus /></label>
+    <label>{t('onboarding.myName')}<input value={answers.assistantName} onChange={event => set('assistantName', event.target.value)} maxLength={40} required /></label>
+    <div className="coat-picker" role="radiogroup" aria-label={t('onboarding.coat')}>{coats.map(coat => <button type="button" key={coat.id} role="radio" aria-checked={answers.coat === coat.id} className={answers.coat === coat.id ? 'active' : ''} onClick={() => set('coat', coat.id)}><i style={swatch(coat.id)} />{t(coatNames[coat.id])}</button>)}</div>
   </>;
 }
 
@@ -117,7 +123,7 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
     if (plan === 'usable' && answers.backend === 'apple') useChatGPT();
   }, [auto, apple.ready, plan]);
   const row = (icon: ReactNode, title: string, detail: string, ready: boolean) => <div className="brain-status">{icon}<span><strong>{title}</strong><small>{detail}</small></span>{ready && <Check size={14} />}</div>;
-  if (!auto) return row(answers.backend === 'apple' ? <IntelligenceMark size={16} /> : answers.backend === 'mlx' ? <Cpu size={16} /> : <Cloud size={16} />, backendLabel[answers.backend], data.diagnostics.modelReady ? 'Ready' : 'Change it in Settings → Brain', data.diagnostics.modelReady);
+  if (!auto) return row(answers.backend === 'apple' ? <IntelligenceMark size={16} /> : answers.backend === 'mlx' ? <Cpu size={16} /> : <Cloud size={16} />, backendLabel[answers.backend], data.diagnostics.modelReady ? t('onboarding.brain.ready') : t('onboarding.brain.changeInSettings'), data.diagnostics.modelReady);
   if (apple.ready || checking) return row(<IntelligenceMark size={16} />, 'Apple Intelligence', apple.label, apple.ready);
   // The same local setup as Settings → Brain, reading and writing the answers instead.
   const local = { ...data.settings, pythonPath: answers.pythonPath, modelPath: answers.modelPath };
@@ -125,11 +131,11 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
   return <>
     {apple.advice && <div className="field-help">{apple.advice}</div>}
     <OpenAppleSettings reason={reason} onError={onError} />
-    {plan === 'refused' && <div className="field-help">This ChatGPT account can’t use its plan in other apps.</div>}
+    {plan === 'refused' && <div className="field-help">{t('onboarding.brain.planRefused')}</div>}
     {answers.backend === 'mlx'
       ? <>
         <LocalModel draft={local} update={updateLocal} onError={onError} testable={false} onStart={() => set('localStarted', true)} onStop={() => set('localStarted', false)} />
-        {plan !== 'refused' && <button type="button" className="text-button" onClick={useChatGPT}>Sign in with ChatGPT instead</button>}
+        {plan !== 'refused' && <button type="button" className="text-button" onClick={useChatGPT}>{t('onboarding.brain.signInInstead')}</button>}
       </>
       : <>
         <ChatGPTAccount account={account} onChange={onRefresh} onError={onError} />
@@ -142,8 +148,8 @@ function Brain({ answers, set, data, onRefresh, onError }: StepProps & { data: B
 function Roam({ answers, set }: StepProps) {
   const choice = (key: 'roam' | 'awareness' | 'nudges', label: string, detail?: string, disabled = false) => <label className="notification-choice cloud-share"><input type="checkbox" checked={answers[key] && !disabled} disabled={disabled} onChange={event => set(key, event.target.checked)} /><span>{label}{detail && <small>{detail}</small>}</span></label>;
   return <>
-    {choice('roam', 'Wander around')}
-    {choice('awareness', 'Notice what you’re doing', 'App names and times, on this Mac')}
-    {choice('nudges', 'Offer a hand', undefined, !answers.awareness)}
+    {choice('roam', t('onboarding.roam.wander'))}
+    {choice('awareness', t('onboarding.roam.notice'), t('onboarding.roam.noticeDetail'))}
+    {choice('nudges', t('onboarding.roam.offer'), undefined, !answers.awareness)}
   </>;
 }

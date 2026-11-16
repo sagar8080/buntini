@@ -1,4 +1,5 @@
 // Shared shapes for shortcuts and settings search (stream F). No bridge import, so the bridge can use them.
+import { englishWords, t } from '../i18n.ts';
 
 /** Saved under `settings.utilities`; mirrors `utilities::Settings` in Rust. Shortcuts, the
     focus timer and muting are kept apart, since they change outside the settings sheet. */
@@ -57,80 +58,100 @@ export function keycaps(label: string): string[] {
 }
 
 export type SettingsTab = 'buntini' | 'brain' | 'apps' | 'connections' | 'privacy';
-export const tabNames: Record<SettingsTab, string> = { buntini: 'Buntini', brain: 'Brain', apps: 'Apps', connections: 'Connections', privacy: 'Privacy' };
 
-/** A setting to find: its label as Settings shows it, and the words people use for it. */
-export type SettingEntry = { tab: SettingsTab; label: string; words: string[] };
+/** A tab's name as its button shows it. */
+export function tabName(tab: SettingsTab): string {
+  switch (tab) {
+    case 'buntini': return 'Buntini';
+    case 'brain': return t('settings.tabs.brain');
+    case 'apps': return t('settings.tabs.apps');
+    case 'connections': return t('settings.tabs.connections');
+    case 'privacy': return t('settings.tabs.privacy');
+  }
+}
 
-/** Every setting, tab by tab. A label is found on screen by its text. */
+/** A setting to find: the catalog key of its label (empty for a name such as GitHub, which reads
+    the same in every language), its label as Settings shows it now, and the words people use
+    for it. */
+export type SettingEntry = { tab: SettingsTab; key: string; readonly label: string; words: string[] };
+
+const setting = (tab: SettingsTab, key: string, words: string[]): SettingEntry => ({ tab, key, words, get label() { return t(key); } });
+const named = (tab: SettingsTab, name: string, words: string[]): SettingEntry => ({ tab, key: '', label: name, words });
+
+/** Every setting, tab by tab. A label is found on screen by its text, so each uses the key the
+    setting itself is shown with. */
 export const settingsIndex: SettingEntry[] = [
-  { tab: 'buntini', label: 'Name', words: ['rename', 'call', 'assistant name', 'nickname'] },
-  { tab: 'buntini', label: 'Character', words: ['cat', 'orb', 'avatar', 'pet', 'mascot'] },
-  { tab: 'buntini', label: 'Look', words: ['coat', 'fur', 'eyes', 'eye colour', 'eye color', 'accessory', 'bell', 'bow', 'hat', 'outfit', 'wardrobe', 'surprise me'] },
-  { tab: 'buntini', label: 'Theme', words: ['colours', 'colors', 'accent', 'palette', 'skin', 'style'] },
-  { tab: 'buntini', label: 'Appearance', words: ['dark mode', 'light mode', 'auto', 'night'] },
-  { tab: 'buntini', label: 'Text size', words: ['font size', 'bigger', 'smaller', 'zoom', 'readability', 'panel size'] },
-  { tab: 'buntini', label: 'Cat size', words: ['companion size', 'scale', 'bigger cat', 'smaller cat'] },
-  { tab: 'buntini', label: 'Less motion', words: ['reduce motion', 'animation', 'still', 'calm', 'accessibility'] },
-  { tab: 'buntini', label: 'Personality', words: ['tone', 'style', 'behaviour', 'behavior', 'instructions', 'prompt', 'how it talks'] },
-  { tab: 'buntini', label: 'Voice', words: ['speaking voice', 'speech', 'text to speech', 'tts', 'siri voice'] },
-  { tab: 'buntini', label: 'Pace', words: ['speech rate', 'speed', 'talk faster', 'talk slower'] },
-  { tab: 'buntini', label: 'Answer out loud when I talk', words: ['speak replies', 'voice replies', 'talk back'] },
-  { tab: 'buntini', label: 'Read every reply aloud', words: ['speak', 'read aloud', 'tts', 'voice'] },
-  { tab: 'buntini', label: 'Wander around the screen', words: ['roam', 'walk', 'move around', 'wander'] },
-  { tab: 'buntini', label: 'Offer a hand', words: ['nudges', 'suggestions', 'tips', 'stretch break', 'help'] },
-  { tab: 'buntini', label: 'Morning brief', words: ['daily summary', 'briefing', 'morning', 'my day'] },
-  { tab: 'buntini', label: 'Heads-ups', words: ['heads up', 'upcoming', 'reminders', 'alerts'] },
-  { tab: 'buntini', label: 'Desktop notifications', words: ['notifications', 'alerts', 'banners', 'notification centre', 'notification center'] },
-  { tab: 'buntini', label: 'Open at login', words: ['startup', 'launch at login', 'start automatically', 'login items', 'boot'] },
-  { tab: 'buntini', label: 'Language', words: ['app language', 'interface language', 'locale', 'localization', 'right to left'] },
-  { tab: 'buntini', label: 'Run setup again', words: ['onboarding', 'reset', 'start over', 'welcome'] },
-  { tab: 'buntini', label: 'Dictate anywhere', words: ['dictation', 'voice typing', 'speech to text', 'microphone', 'mic'] },
-  { tab: 'buntini', label: 'Hold', words: ['dictation key', 'push to talk', 'right option', 'fn key', 'hotkey'] },
-  { tab: 'buntini', label: 'Languages', words: ['language', 'dictation language', 'english', 'translate'] },
-  { tab: 'buntini', label: 'Mute the Mac while I speak', words: ['mute', 'silence', 'music while dictating'] },
-  { tab: 'buntini', label: 'Hey Buntini', words: ['wake word', 'hey', 'voice activation', 'always listening', 'hands free'] },
-  { tab: 'buntini', label: 'Record calls', words: ['meeting notes', 'call notes', 'transcript', 'recording', 'zoom', 'meetings'] },
-  { tab: 'buntini', label: 'Speech model', words: ['parakeet', 'download', 'offline speech', 'model'] },
-  { tab: 'buntini', label: 'Library', words: ['dictation history', 'notes', 'stats', 'transcripts'] },
-  { tab: 'buntini', label: 'Dictionary', words: ['words', 'spelling', 'names', 'vocabulary', 'your words'] },
-  { tab: 'buntini', label: 'Replacements', words: ['autocorrect', 'text replacement', 'expand', 'your words'] },
-  { tab: 'buntini', label: 'Snippets', words: ['templates', 'canned text', 'text expansion', 'your words'] },
-  { tab: 'buntini', label: 'Shortcuts', words: ['keyboard shortcuts', 'hotkeys', 'hot keys', 'keys', 'key bindings', 'keybindings'] },
-  { tab: 'buntini', label: 'Show or hide Buntini', words: ['open buntini', 'companion', 'summon', 'toggle', 'shortcut'] },
-  { tab: 'buntini', label: 'Open the chat', words: ['chat shortcut', 'ask', 'conversation', 'shortcut'] },
-  { tab: 'buntini', label: 'Go to what’s waiting', words: ['approval', 'request', 'agent waiting', 'permission', 'shortcut'] },
-  { tab: 'buntini', label: 'Next in the island', words: ['next pill', 'next session', 'cycle', 'island', 'shortcut'] },
-  { tab: 'buntini', label: 'Mute the island', words: ['sounds', 'mute', 'quiet', 'silence', 'chime', 'shortcut'] },
-  { tab: 'buntini', label: 'Screenshot', words: ['screen capture', 'screen grab', 'print screen', 'clipboard', 'thumbnail', 'shortcut'] },
-  { tab: 'buntini', label: 'Capture an area', words: ['area capture', 'region', 'selection', 'snip', 'crop', 'mark up', 'annotate', 'shortcut'] },
-  { tab: 'buntini', label: 'Focus timer', words: ['pomodoro', 'timer', 'work session', 'break', 'concentrate', 'shortcut'] },
-  { tab: 'brain', label: 'Brain', words: ['model', 'ai', 'llm', 'apple intelligence', 'local model', 'cloud model', 'qwen', 'gemma'] },
-  { tab: 'brain', label: 'Let Buntini choose', words: ['automatic brain', 'auto model'] },
-  { tab: 'brain', label: 'Cloud provider', words: ['anthropic', 'claude', 'openai', 'gpt', 'gemini', 'chatgpt', 'api key'] },
-  { tab: 'brain', label: 'Monthly cap', words: ['budget', 'spending', 'cost', 'limit', 'money', 'price'] },
-  { tab: 'brain', label: 'Server address', words: ['ollama', 'lm studio', 'own server', 'localhost', 'host'] },
-  { tab: 'apps', label: 'Apps Buntini can use', words: ['permissions', 'mail', 'calendar', 'reminders', 'notes', 'music', 'spotify', 'safari', 'chrome', 'photos', 'messages', 'contacts', 'facetime'] },
-  { tab: 'apps', label: 'Coding agents', words: ['claude code', 'codex', 'copilot', 'gemini cli', 'hooks', 'agents'] },
-  { tab: 'apps', label: 'Accessibility', words: ['permission', 'control', 'screen lock', 'system settings'] },
-  { tab: 'connections', label: 'Web search', words: ['brave', 'tavily', 'search api key', 'internet'] },
-  { tab: 'connections', label: 'eBay', words: ['shopping', 'listings', 'prices', 'marketplace'] },
-  { tab: 'connections', label: 'Flights', words: ['duffel', 'travel', 'airfare', 'planes'] },
-  { tab: 'connections', label: 'GitHub', words: ['pull requests', 'ci', 'developer services', 'git'] },
-  { tab: 'connections', label: 'Vercel', words: ['deployments', 'developer services'] },
-  { tab: 'connections', label: 'Stripe', words: ['payments', 'developer services'] },
-  { tab: 'connections', label: 'Notion', words: ['pages', 'developer services'] },
-  { tab: 'connections', label: 'Tools you added', words: ['mcp', 'mcp server', 'tools', 'plugins', 'extensions'] },
-  { tab: 'privacy', label: 'Notice what I’m doing', words: ['awareness', 'activity', 'tracking', 'app names'] },
-  { tab: 'privacy', label: 'Folders', words: ['files', 'documents', 'file access', 'index', 'add folder'] },
-  { tab: 'privacy', label: 'Memory', words: ['remember', 'forget', 'memories', 'facts'] },
-  { tab: 'privacy', label: 'Cloud models may see', words: ['sharing', 'data', 'privacy', 'what cloud sees', 'external'] },
-  { tab: 'privacy', label: 'macOS updates', words: ['software update', 'update', 'upgrade'] },
-  { tab: 'privacy', label: 'Your data', words: ['export', 'delete everything', 'erase', 'support info', 'backup'] },
-  { tab: 'privacy', label: 'Activity log', words: ['audit', 'history', 'log'] },
+  setting('buntini', 'settings.name.label', ['rename', 'call', 'assistant name', 'nickname']),
+  setting('buntini', 'settings.character', ['cat', 'orb', 'avatar', 'pet', 'mascot']),
+  setting('buntini', 'settings.look.title', ['coat', 'fur', 'eyes', 'eye colour', 'eye color', 'accessory', 'bell', 'bow', 'hat', 'outfit', 'wardrobe', 'surprise me']),
+  setting('buntini', 'settings.theme.title', ['colours', 'colors', 'accent', 'palette', 'skin', 'style']),
+  setting('buntini', 'settings.appearance.title', ['dark mode', 'light mode', 'auto', 'night']),
+  setting('buntini', 'settings.textSize', ['font size', 'bigger', 'smaller', 'zoom', 'readability', 'panel size']),
+  setting('buntini', 'settings.catSize', ['companion size', 'scale', 'bigger cat', 'smaller cat']),
+  setting('buntini', 'settings.lessMotion', ['reduce motion', 'animation', 'still', 'calm', 'accessibility']),
+  setting('buntini', 'settings.personality.title', ['tone', 'style', 'behaviour', 'behavior', 'instructions', 'prompt', 'how it talks']),
+  setting('buntini', 'settings.voice.title', ['speaking voice', 'speech', 'text to speech', 'tts', 'siri voice']),
+  setting('buntini', 'settings.voice.pace', ['speech rate', 'speed', 'talk faster', 'talk slower']),
+  setting('buntini', 'settings.voice.answerAloud', ['speak replies', 'voice replies', 'talk back']),
+  setting('buntini', 'settings.voice.readAloud', ['speak', 'read aloud', 'tts', 'voice']),
+  setting('buntini', 'settings.outAbout.wander', ['roam', 'walk', 'move around', 'wander']),
+  setting('buntini', 'settings.outAbout.offerHand', ['nudges', 'suggestions', 'tips', 'stretch break', 'help']),
+  setting('buntini', 'settings.outAbout.morningBrief', ['daily summary', 'briefing', 'morning', 'my day']),
+  setting('buntini', 'settings.outAbout.headsUps', ['heads up', 'upcoming', 'reminders', 'alerts']),
+  setting('buntini', 'settings.outAbout.notifications', ['notifications', 'alerts', 'banners', 'notification centre', 'notification center']),
+  setting('buntini', 'settings.outAbout.openAtLogin', ['startup', 'launch at login', 'start automatically', 'login items', 'boot']),
+  setting('buntini', 'settings.language.title', ['app language', 'interface language', 'locale', 'localization', 'right to left']),
+  setting('buntini', 'settings.runSetupAgain', ['onboarding', 'reset', 'start over', 'welcome']),
+  setting('buntini', 'settings.flow.dictateAnywhere', ['dictation', 'voice typing', 'speech to text', 'microphone', 'mic']),
+  setting('buntini', 'settings.flow.hold', ['dictation key', 'push to talk', 'right option', 'fn key', 'hotkey']),
+  setting('buntini', 'settings.flow.languages', ['language', 'dictation language', 'english', 'translate']),
+  setting('buntini', 'settings.flow.mute', ['mute', 'silence', 'music while dictating']),
+  named('buntini', 'Hey Buntini', ['wake word', 'hey', 'voice activation', 'always listening', 'hands free']),
+  setting('buntini', 'settings.flow.recordCalls', ['meeting notes', 'call notes', 'transcript', 'recording', 'zoom', 'meetings']),
+  setting('buntini', 'settings.flow.speechModel', ['parakeet', 'download', 'offline speech', 'model']),
+  setting('buntini', 'library.title', ['dictation history', 'notes', 'stats', 'transcripts']),
+  setting('buntini', 'settings.flow.dictionary', ['words', 'spelling', 'names', 'vocabulary', 'your words']),
+  setting('buntini', 'settings.flow.replacements', ['autocorrect', 'text replacement', 'expand', 'your words']),
+  setting('buntini', 'settings.flow.snippets', ['templates', 'canned text', 'text expansion', 'your words']),
+  setting('buntini', 'settings.shortcuts.title', ['keyboard shortcuts', 'hotkeys', 'hot keys', 'keys', 'key bindings', 'keybindings']),
+  // The shortcut rows come from Rust, named with these keys.
+  setting('buntini', 'utilities.shortcuts.companion', ['open buntini', 'companion', 'summon', 'toggle', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.chat', ['chat shortcut', 'ask', 'conversation', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.waiting', ['approval', 'request', 'agent waiting', 'permission', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.nextPill', ['next pill', 'next session', 'cycle', 'island', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.mute', ['sounds', 'mute', 'quiet', 'silence', 'chime', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.screenshot', ['screen capture', 'screen grab', 'print screen', 'clipboard', 'thumbnail', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.area', ['area capture', 'region', 'selection', 'snip', 'crop', 'mark up', 'annotate', 'shortcut']),
+  setting('buntini', 'utilities.shortcuts.focus', ['pomodoro', 'timer', 'work session', 'break', 'concentrate', 'shortcut']),
+  setting('brain', 'settings.brain.title', ['model', 'ai', 'llm', 'apple intelligence', 'local model', 'cloud model', 'qwen', 'gemma']),
+  setting('brain', 'settings.brain.auto', ['automatic brain', 'auto model']),
+  setting('brain', 'settings.brain.provider', ['anthropic', 'claude', 'openai', 'gpt', 'gemini', 'chatgpt', 'api key']),
+  setting('brain', 'settings.brain.cap', ['budget', 'spending', 'cost', 'limit', 'money', 'price']),
+  setting('brain', 'settings.brain.serverAddress', ['ollama', 'lm studio', 'own server', 'localhost', 'host']),
+  setting('apps', 'settings.apps.title', ['permissions', 'mail', 'calendar', 'reminders', 'notes', 'music', 'spotify', 'safari', 'chrome', 'photos', 'messages', 'contacts', 'facetime']),
+  setting('apps', 'settings.agents.title', ['claude code', 'codex', 'copilot', 'gemini cli', 'hooks', 'agents']),
+  setting('apps', 'settings.apps.accessibility', ['permission', 'control', 'screen lock', 'system settings']),
+  setting('connections', 'settings.connections.webSearch', ['brave', 'tavily', 'search api key', 'internet']),
+  named('connections', 'eBay', ['shopping', 'listings', 'prices', 'marketplace']),
+  setting('connections', 'settings.connections.flights', ['duffel', 'travel', 'airfare', 'planes']),
+  named('connections', 'GitHub', ['pull requests', 'ci', 'developer services', 'git']),
+  named('connections', 'Vercel', ['deployments', 'developer services']),
+  named('connections', 'Stripe', ['payments', 'developer services']),
+  named('connections', 'Notion', ['pages', 'developer services']),
+  setting('connections', 'settings.tools.title', ['mcp', 'mcp server', 'tools', 'plugins', 'extensions']),
+  setting('privacy', 'settings.privacy.notice', ['awareness', 'activity', 'tracking', 'app names']),
+  setting('privacy', 'settings.privacy.folders', ['files', 'documents', 'file access', 'index', 'add folder']),
+  setting('privacy', 'settings.privacy.memory', ['remember', 'forget', 'memories', 'facts']),
+  setting('privacy', 'settings.privacy.cloudMaySee', ['sharing', 'data', 'privacy', 'what cloud sees', 'external']),
+  setting('privacy', 'settings.macUpdates.title', ['software update', 'update', 'upgrade']),
+  setting('privacy', 'settings.data.title', ['export', 'delete everything', 'erase', 'support info', 'backup']),
+  setting('privacy', 'settings.privacy.activityLog', ['audit', 'history', 'log']),
 ];
 
-const plain = (text: string) => text.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+// Letters and marks of any script stay, so labels in every language can be searched.
+const plain = (text: string) => text.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[’']/g, '').replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
+/** Scripts written without spaces, where a label is one long word. */
+const unspaced = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
 
 /** How well one word of the query matches some words. */
 function fit(token: string, words: string[], label: boolean): number {
@@ -138,20 +159,21 @@ function fit(token: string, words: string[], label: boolean): number {
   for (const word of words) {
     if (word === token) best = Math.max(best, label ? 10 : 8);
     else if (word.startsWith(token)) best = Math.max(best, label ? 7 : 5);
-    else if (token.length >= 4 && word.includes(token)) best = Math.max(best, label ? 3 : 2);
+    else if ((token.length >= 4 || (token.length >= 2 && unspaced.test(token))) && word.includes(token)) best = Math.max(best, label ? 3 : 2);
   }
   return best;
 }
 
 /** The settings that match `query` best, by label first and then common words. Every word of
-    the query must match. */
+    the query must match. A label matches as shown and in English, so English words still find
+    a setting in any language. */
 export function searchSettings(query: string, limit = 6): SettingEntry[] {
   const wanted = plain(query);
   if (!wanted) return [];
   const tokens = wanted.split(' ');
   const scored = settingsIndex.map((entry, index) => {
-    const label = plain(entry.label);
-    const labelWords = label.split(' ');
+    const labels = [...new Set([entry.label, entry.key ? englishWords[entry.key] ?? '' : ''].map(plain).filter(Boolean))];
+    const labelWords = labels.flatMap(label => label.split(' '));
     const phrases = entry.words.map(plain);
     const otherWords = phrases.flatMap(phrase => phrase.split(' '));
     let score = 0;
@@ -160,8 +182,8 @@ export function searchSettings(query: string, limit = 6): SettingEntry[] {
       if (!best) return { entry, index, score: 0 };
       score += best;
     }
-    if (label === wanted) score += 30;
-    else if (label.startsWith(wanted)) score += 15;
+    if (labels.includes(wanted)) score += 30;
+    else if (labels.some(label => label.startsWith(wanted))) score += 15;
     if (phrases.includes(wanted)) score += 12;
     else if (tokens.length > 1 && phrases.some(phrase => phrase.startsWith(wanted))) score += 6;
     return { entry, index, score };
@@ -173,37 +195,40 @@ const row = (id: string, label: string, keyCode: number, modifiers: Shortcut['mo
   const shortcut = { keyCode, modifiers, label: keys };
   return { id, label, shortcut, default: shortcut, problem: null };
 };
-const defaultShortcuts: ShortcutRow[] = [
-  row('companion', 'Show or hide Buntini', 49, ['shift', 'command'], '⇧⌘Space'),
-  row('chat', 'Open the chat', 49, ['control', 'option'], '⌃⌥Space'),
-  row('waiting', 'Go to what’s waiting', 0, ['control', 'option'], '⌃⌥A'),
-  row('nextPill', 'Next in the island', 30, ['control', 'option'], '⌃⌥]'),
-  row('mute', 'Mute the island', 46, ['control', 'option'], '⌃⌥M'),
-  row('screenshot', 'Screenshot', 19, ['shift', 'command'], '⇧⌘2'),
-  row('area', 'Capture an area', 1, ['shift', 'command'], '⇧⌘S'),
-  row('focus', 'Focus timer', 3, ['control', 'option'], '⌃⌥F'),
+// Named as Rust names them, in the language spoken when the preview answers.
+const defaultShortcuts = (): ShortcutRow[] => [
+  row('companion', t('utilities.shortcuts.companion'), 49, ['shift', 'command'], '⇧⌘Space'),
+  row('chat', t('utilities.shortcuts.chat'), 49, ['control', 'option'], '⌃⌥Space'),
+  row('waiting', t('utilities.shortcuts.waiting'), 0, ['control', 'option'], '⌃⌥A'),
+  row('nextPill', t('utilities.shortcuts.nextPill'), 30, ['control', 'option'], '⌃⌥]'),
+  row('mute', t('utilities.shortcuts.mute'), 46, ['control', 'option'], '⌃⌥M'),
+  row('screenshot', t('utilities.shortcuts.screenshot'), 19, ['shift', 'command'], '⇧⌘2'),
+  row('area', t('utilities.shortcuts.area'), 1, ['shift', 'command'], '⇧⌘S'),
+  row('focus', t('utilities.shortcuts.focus'), 3, ['control', 'option'], '⌃⌥F'),
 ];
-let previewShortcuts = defaultShortcuts.map(row => ({ ...row }));
+/** The preview's changed shortcuts, by id. */
+let previewChosen: Record<string, Shortcut | null> = {};
+const previewShortcuts = () => defaultShortcuts().map(row => row.id in previewChosen ? { ...row, shortcut: previewChosen[row.id] } : row);
 
 /** What the browser preview answers for `utilities_call`: shortcuts kept in memory, with the
     simplest of Buntini's checks. */
 export function preview(op: UtilitiesOp): unknown {
   switch (op.op) {
     case 'ping': return true;
-    case 'shortcuts': return previewShortcuts;
-    case 'resetShortcuts': previewShortcuts = defaultShortcuts.map(row => ({ ...row })); return previewShortcuts;
+    case 'shortcuts': return previewShortcuts();
+    case 'resetShortcuts': previewChosen = {}; return previewShortcuts();
     case 'recording': case 'focus': return null;
     case 'setShortcut': {
       const chosen = op.shortcut;
       if (chosen) {
         const needs = chosen.modifiers.some(name => name !== 'shift') || (chosen.label.startsWith('F') && chosen.label.length > 1);
-        if (!needs) throw new Error('Add ⌘, ⌃ or ⌥');
-        const other = previewShortcuts.find(row => row.id !== op.id && row.shortcut?.keyCode === chosen.keyCode && [...row.shortcut.modifiers].sort().join() === [...chosen.modifiers].sort().join());
-        if (other) throw new Error(`${other.label} uses it`);
+        if (!needs) throw new Error(t('utilities.shortcuts.addModifier'));
+        const other = previewShortcuts().find(row => row.id !== op.id && row.shortcut?.keyCode === chosen.keyCode && [...row.shortcut.modifiers].sort().join() === [...chosen.modifiers].sort().join());
+        if (other) throw new Error(t('utilities.shortcuts.usedBy', { action: other.label }));
       }
-      previewShortcuts = previewShortcuts.map(row => row.id === op.id ? { ...row, shortcut: chosen } : row);
-      return previewShortcuts;
+      previewChosen = { ...previewChosen, [op.id]: chosen };
+      return previewShortcuts();
     }
-    default: throw new Error('Open the desktop app to use this.');
+    default: throw new Error(t('common.desktopOnly'));
   }
 }

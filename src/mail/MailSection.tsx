@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { FileText, LoaderCircle, Plus, Undo2, X } from 'lucide-react';
 import { errorMessage } from '../bridge';
 import { approve, deny, dropPlan, mailboxes as readMailboxes, mailLog, makePlan, pickPdf, planned, proposeSort, proposeUndo, runPlan } from './api';
-import { added, mailboxName, ruleLine, ruleReady, type Mailbox, type MailDone, type MailLogRow, type MailPlan, type MailRule, type MailSettings, type MailWaiting, type RuleAction, type RuleField } from './model';
+import { added, fieldName, mailboxName, ruleLine, ruleReady, type Mailbox, type MailDone, type MailLogRow, type MailPlan, type MailRule, type MailSettings, type MailWaiting, type RuleAction, type RuleField } from './model';
+import { locale, t } from '../i18n.ts';
 import './mail.css';
 
 type Props = { value: MailSettings; onChange: (next: MailSettings) => void; onError: (error: string) => void };
@@ -12,11 +13,11 @@ function Words({ label, placeholder, list, onChange }: { label: string; placehol
   return <div className="mail-words">
     <label>{label}</label>
     <div className="mail-chips">
-      {list.map(item => <span key={item} className="mail-chip">{item}<button type="button" aria-label={`Remove ${item}`} onClick={() => onChange(list.filter(other => other !== item))}><X size={11} /></button></span>)}
+      {list.map(item => <span key={item} className="mail-chip">{item}<button type="button" aria-label={t('common.removeItem', { item })} onClick={() => onChange(list.filter(other => other !== item))}><X size={11} /></button></span>)}
     </div>
     <form className="mail-add" onSubmit={event => { event.preventDefault(); onChange(added(list, entry)); setEntry(''); }}>
       <input aria-label={label} value={entry} onChange={event => setEntry(event.target.value)} placeholder={placeholder} maxLength={200} />
-      <button type="submit" className="secondary-button" disabled={!entry.trim()}><Plus size={12} />Add</button>
+      <button type="submit" className="secondary-button" disabled={!entry.trim()}><Plus size={12} />{t('common.add')}</button>
     </form>
   </div>;
 }
@@ -26,7 +27,7 @@ function Pending({ waiting, working, onAllow, onDeny }: { waiting: MailWaiting; 
   return <div className="inline-approval mail-pending" role="group" aria-label={waiting.title}>
     <strong>{waiting.title}</strong>
     <ul>{waiting.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>
-    <div><button type="button" className="text-button" onClick={onDeny} disabled={working}>Deny</button><button type="button" className="primary-button" onClick={onAllow} disabled={working}>{working && <LoaderCircle size={12} className="spin" />}Allow</button></div>
+    <div><button type="button" className="text-button" onClick={onDeny} disabled={working}>{t('common.deny')}</button><button type="button" className="primary-button" onClick={onAllow} disabled={working}>{working && <LoaderCircle size={12} className="spin" />}{t('common.allow')}</button></div>
   </div>;
 }
 
@@ -79,62 +80,62 @@ export default function MailSection({ value, onChange, onError }: Props) {
 
   return <>
     <section className="settings-section mail-settings">
-      <div className="settings-section-heading"><h3>Mail</h3></div>
-      <Words label="VIPs" placeholder="name@example.com" list={value.vips} onChange={vips => onChange({ ...value, vips })} />
-      <Words label="Banned words" placeholder="lottery" list={value.banned} onChange={banned => onChange({ ...value, banned })} />
-      <label>Rules</label>
+      <div className="settings-section-heading"><h3>{t('surface.mail.mail')}</h3></div>
+      <Words label={t('settings.mail.vips')} placeholder="name@example.com" list={value.vips} onChange={vips => onChange({ ...value, vips })} />
+      <Words label={t('settings.mail.banned')} placeholder={t('settings.mail.bannedExample')} list={value.banned} onChange={banned => onChange({ ...value, banned })} />
+      <label>{t('settings.mail.rules')}</label>
       {value.rules.map(item => <div key={item.id} className="mail-rule">
-        <input type="checkbox" aria-label={`${ruleLine(item)} on`} checked={item.enabled} onChange={event => onChange({ ...value, rules: value.rules.map(other => other.id === item.id ? { ...other, enabled: event.target.checked } : other) })} />
+        <input type="checkbox" aria-label={t('settings.mail.ruleOn', { rule: ruleLine(item) })} checked={item.enabled} onChange={event => onChange({ ...value, rules: value.rules.map(other => other.id === item.id ? { ...other, enabled: event.target.checked } : other) })} />
         <span>{ruleLine(item)}</span>
-        <button type="button" className="text-button" aria-label={`Remove ${ruleLine(item)}`} onClick={() => onChange({ ...value, rules: value.rules.filter(other => other.id !== item.id) })}><X size={12} /></button>
+        <button type="button" className="text-button" aria-label={t('common.removeItem', { item: ruleLine(item) })} onClick={() => onChange({ ...value, rules: value.rules.filter(other => other.id !== item.id) })}><X size={12} /></button>
       </div>)}
       <form className="mail-rule-form" onSubmit={event => { event.preventDefault(); addRule(); }}>
-        <select aria-label="Match" value={rule.field} onChange={event => setRule({ ...rule, field: event.target.value as RuleField })}>
-          <option value="sender">From</option><option value="domain">Domain</option><option value="subject">Subject</option>
+        <select aria-label={t('settings.mail.match')} value={rule.field} onChange={event => setRule({ ...rule, field: event.target.value as RuleField })}>
+          <option value="sender">{fieldName('sender')}</option><option value="domain">{fieldName('domain')}</option><option value="subject">{fieldName('subject')}</option>
         </select>
-        <input aria-label="Contains" value={rule.value} onChange={event => setRule({ ...rule, value: event.target.value })} placeholder={rule.field === 'domain' ? 'example.com' : rule.field === 'sender' ? 'newsletter@' : 'receipt'} maxLength={200} />
-        <select aria-label="Then" value={rule.action} onChange={event => setRule({ ...rule, action: event.target.value as RuleAction, to: event.target.value === 'move' ? rule.to : null })}>
-          <option value="move">Move to</option><option value="flag">Flag</option><option value="read">Mark read</option><option value="junk">Junk</option>
+        <input aria-label={t('settings.mail.contains')} value={rule.value} onChange={event => setRule({ ...rule, value: event.target.value })} placeholder={rule.field === 'domain' ? 'example.com' : rule.field === 'sender' ? 'newsletter@' : t('settings.mail.subjectExample')} maxLength={200} />
+        <select aria-label={t('settings.mail.then')} value={rule.action} onChange={event => setRule({ ...rule, action: event.target.value as RuleAction, to: event.target.value === 'move' ? rule.to : null })}>
+          <option value="move">{t('settings.mail.action.moveTo')}</option><option value="flag">{t('settings.mail.action.flag')}</option><option value="read">{t('settings.mail.action.markRead')}</option><option value="junk">{t('settings.mail.action.junk')}</option>
         </select>
-        {rule.action === 'move' && <select aria-label="Mailbox" value={rule.to ? `${rule.to.account}\t${rule.to.path}` : ''} onChange={event => pickBox(event.target.value)}>
-          <option value="" disabled>Mailbox</option>
+        {rule.action === 'move' && <select aria-label={t('settings.mail.mailbox')} value={rule.to ? `${rule.to.account}\t${rule.to.path}` : ''} onChange={event => pickBox(event.target.value)}>
+          <option value="" disabled>{t('settings.mail.mailbox')}</option>
           {boxes.map(box => <option key={`${box.account}\t${box.path}`} value={`${box.account}\t${box.path}`}>{mailboxName(box)}</option>)}
         </select>}
-        <button type="submit" className="secondary-button" disabled={!ruleReady(rule)}><Plus size={12} />Add</button>
+        <button type="submit" className="secondary-button" disabled={!ruleReady(rule)}><Plus size={12} />{t('common.add')}</button>
       </form>
       <div className="mail-actions">
-        <button type="button" className="secondary-button" disabled={!!working} onClick={() => void run('sort', async () => { const next = await proposeSort(); setDone(next ? null : { changed: ['Nothing to sort'], failed: [] }); setWaiting(next); })}>{working === 'sort' && <LoaderCircle size={12} className="spin" />}Sort</button>
+        <button type="button" className="secondary-button" disabled={!!working} onClick={() => void run('sort', async () => { const next = await proposeSort(); setDone(next ? null : { changed: [t('settings.mail.nothingToSort')], failed: [] }); setWaiting(next); })}>{working === 'sort' && <LoaderCircle size={12} className="spin" />}{t('settings.mail.sort')}</button>
       </div>
       {waiting && <Pending waiting={waiting} working={working === 'allow'} onAllow={() => void settle(() => approve(waiting.id))} onDeny={() => { void deny(waiting.id); setWaiting(null); }} />}
       {done && <Result done={done} />}
     </section>
 
     <section className="settings-section mail-settings">
-      <div className="settings-section-heading"><h3>Mail plan</h3></div>
-      <textarea className="mail-request" aria-label="Mail plan request" value={request} onChange={event => setRequest(event.target.value)} placeholder="Flag my boss’s email and send each person their page of the PDF" maxLength={2000} rows={3} />
+      <div className="settings-section-heading"><h3>{t('settings.mail.plan.title')}</h3></div>
+      <textarea className="mail-request" aria-label={t('settings.mail.plan.request')} value={request} onChange={event => setRequest(event.target.value)} placeholder={t('settings.mail.plan.example')} maxLength={2000} rows={3} />
       <div className="mail-actions">
         <button type="button" className="secondary-button" disabled={!!working} onClick={() => void run('pdf', async () => setPdf(await pickPdf() ?? pdf))}><FileText size={12} />{pdf ? pdf.split('/').pop() : 'PDF'}</button>
-        {pdf && <button type="button" className="text-button" aria-label="Remove PDF" onClick={() => setPdf(null)}><X size={12} /></button>}
-        <button type="button" className="primary-button" disabled={!!working || !request.trim()} onClick={() => void run('plan', async () => { setDone(null); setPlan(await makePlan(request, pdf)); })}>{working === 'plan' && <LoaderCircle size={12} className="spin" />}Plan</button>
+        {pdf && <button type="button" className="text-button" aria-label={t('settings.mail.plan.removePdf')} onClick={() => setPdf(null)}><X size={12} /></button>}
+        <button type="button" className="primary-button" disabled={!!working || !request.trim()} onClick={() => void run('plan', async () => { setDone(null); setPlan(await makePlan(request, pdf)); })}>{working === 'plan' && <LoaderCircle size={12} className="spin" />}{t('settings.mail.plan.make')}</button>
       </div>
-      {plan && <div className="inline-approval mail-pending" role="group" aria-label="Mail plan">
-        <strong>{plan.summary || 'Plan'}</strong>
+      {plan && <div className="inline-approval mail-pending" role="group" aria-label={t('settings.mail.plan.title')}>
+        <strong>{plan.summary || t('settings.mail.plan.untitled')}</strong>
         <ul>{plan.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>
         {plan.problems.length > 0 && <ul className="mail-left-out">{plan.problems.map((line, index) => <li key={index}>{line}</li>)}</ul>}
         <div>
-          <button type="button" className="text-button" disabled={!!working} onClick={() => { void dropPlan(plan.id); setPlan(null); }}>Discard</button>
-          <button type="button" className="primary-button" disabled={!!working} onClick={() => void run('run', async () => { const result = await runPlan(plan.id); setPlan(null); setDone(result); void refreshLog(); })}>{working === 'run' && <LoaderCircle size={12} className="spin" />}Run</button>
+          <button type="button" className="text-button" disabled={!!working} onClick={() => { void dropPlan(plan.id); setPlan(null); }}>{t('settings.mail.plan.discard')}</button>
+          <button type="button" className="primary-button" disabled={!!working} onClick={() => void run('run', async () => { const result = await runPlan(plan.id); setPlan(null); setDone(result); void refreshLog(); })}>{working === 'run' && <LoaderCircle size={12} className="spin" />}{t('settings.mail.plan.run')}</button>
         </div>
       </div>}
     </section>
 
     {log.length > 0 && <section className="settings-section mail-settings">
-      <div className="settings-section-heading"><h3>Mail changes</h3></div>
+      <div className="settings-section-heading"><h3>{t('settings.mail.changes')}</h3></div>
       <ul className="mail-log">
         {log.map(entry => <li key={entry.id} className={entry.undone ? 'undone' : ''}>
           <span>{entry.label}</span>
-          <time dateTime={new Date(entry.at * 1000).toISOString()}>{new Date(entry.at * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
-          {entry.undoable && <button type="button" className="text-button" disabled={!!working} onClick={() => void run('undo', async () => { setDone(null); setWaiting(await proposeUndo(entry.id)); })}><Undo2 size={12} />Undo</button>}
+          <time dateTime={new Date(entry.at * 1000).toISOString()}>{new Date(entry.at * 1000).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
+          {entry.undoable && <button type="button" className="text-button" disabled={!!working} onClick={() => void run('undo', async () => { setDone(null); setWaiting(await proposeUndo(entry.id)); })}><Undo2 size={12} />{t('common.undo')}</button>}
         </li>)}
       </ul>
     </section>}

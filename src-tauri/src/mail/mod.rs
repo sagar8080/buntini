@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
+use crate::i18n::{t, tf};
 use crate::surface::cards::mail as card;
 use crate::surface::{self, Action, Card, CardBody, Contribution, Offer, Pill, PillState, Source, Urgency};
 use rules::Why;
@@ -329,16 +330,18 @@ fn app_settings() -> Settings {
     app.and_then(|app| app.state::<crate::controller::AppState>().store.lock().ok()?.settings().ok()).map(|s| s.mail).unwrap_or_default()
 }
 
-const NOT_ALLOWED: &str = "Allow Mail in Settings → Apps first.";
+fn not_allowed() -> String {
+    t("mail.error.notAllowed")
+}
 
 /// Whether Mail is allowed in Settings → Apps. Nothing here reads or changes Mail otherwise.
 fn allowed() -> Result<(), String> {
     let Some(app) = hub().app.clone() else { return Ok(()) };
-    let settings = app.state::<crate::controller::AppState>().store.lock().map_err(|_| NOT_ALLOWED)?.settings()?;
+    let settings = app.state::<crate::controller::AppState>().store.lock().map_err(|_| not_allowed())?.settings()?;
     if settings.apps.iter().any(|app| app == "mail") {
         Ok(())
     } else {
-        Err(NOT_ALLOWED.into())
+        Err(not_allowed())
     }
 }
 
@@ -464,14 +467,14 @@ pub fn listing() -> Listing {
 }
 
 fn message(id: &str) -> Result<Message, String> {
-    let id: i64 = id.trim().parse().map_err(|_| "Pick an email from the list.")?;
+    let id: i64 = id.trim().parse().map_err(|_| t("mail.error.pickEmail"))?;
     let hub = hub();
     hub.pool
         .iter()
         .find(|m| m.id == id)
         .or_else(|| hub.open.as_ref().map(|(m, _)| m).filter(|m| m.id == id))
         .cloned()
-        .ok_or_else(|| "That email isn’t in the list any more.".to_string())
+        .ok_or_else(|| t("mail.error.notInList"))
 }
 
 pub async fn open(id: &str) -> Result<script::Opened, String> {
@@ -503,31 +506,31 @@ fn about(target: &Target) -> String {
 pub fn propose_mark(id: &str, what: Mark, value: bool) -> Result<Waiting, String> {
     let message = message(id)?;
     let title = match (what, value) {
-        (Mark::Read, true) => "Mark read",
-        (Mark::Read, false) => "Mark unread",
-        (Mark::Flagged, true) => "Flag",
-        (Mark::Flagged, false) => "Unflag",
-        (Mark::Junk, true) => "Junk",
-        (Mark::Junk, false) => "Not junk",
+        (Mark::Read, true) => t("mail.pending.markRead"),
+        (Mark::Read, false) => t("mail.pending.markUnread"),
+        (Mark::Flagged, true) => t("surface.mail.flag"),
+        (Mark::Flagged, false) => t("surface.mail.unflag"),
+        (Mark::Junk, true) => t("surface.mail.junk"),
+        (Mark::Junk, false) => t("mail.pending.notJunk"),
     };
     let target = message.target();
-    Ok(propose(title.into(), vec![about(&target)], vec![(Step::Mark { target, what, value }, Why::Manual)]))
+    Ok(propose(title, vec![about(&target)], vec![(Step::Mark { target, what, value }, Why::Manual)]))
 }
 
 pub fn propose_junk(id: &str) -> Result<Waiting, String> {
     let target = message(id)?.target();
-    Ok(propose("Junk".into(), vec![about(&target)], vec![(Step::Junk { target }, Why::Manual)]))
+    Ok(propose(t("surface.mail.junk"), vec![about(&target)], vec![(Step::Junk { target }, Why::Manual)]))
 }
 
 pub fn propose_move(id: &str, to: Mailbox) -> Result<Waiting, String> {
     let target = message(id)?.target();
     if rules::same_box(&to, &target.mailbox) {
-        return Err("It’s already there.".into());
+        return Err(t("mail.error.alreadyThere"));
     }
     if rules::forbidden_destination(&to) {
-        return Err(format!("Mail isn’t moved to {}.", to.path));
+        return Err(tf("mail.error.notMovedTo", &[("mailbox", &to.path)]));
     }
-    let title = format!("Move to {}", log::leaf(&to.path));
+    let title = tf("mail.pending.moveTo", &[("mailbox", &log::leaf(&to.path))]);
     Ok(propose(title, vec![about(&target)], vec![(Step::Move { target, to }, Why::Manual)]))
 }
 
@@ -544,39 +547,39 @@ pub fn propose_reply(id: &str, body: &str) -> Result<Waiting, String> {
     let target = message(id)?.target();
     let body = body.trim();
     if body.is_empty() || body.chars().count() > 4000 {
-        return Err("A reply needs 1 to 4,000 characters.".into());
+        return Err(t("mail.error.replyLength"));
     }
     let to = rules::address(&target.sender);
     if !plan::plain_address(&to) {
-        return Err("That email has no address to reply to.".into());
+        return Err(t("mail.error.noReplyAddress"));
     }
-    let lines = vec![format!("To {to}"), reply_subject(&target.subject), body.to_string()];
-    Ok(propose("Reply draft".into(), lines, vec![(Step::Reply { target, body: body.into() }, Why::Manual)]))
+    let lines = vec![tf("mail.pending.replyTo", &[("address", &to)]), reply_subject(&target.subject), body.to_string()];
+    Ok(propose(t("mail.step.replyDraft"), lines, vec![(Step::Reply { target, body: body.into() }, Why::Manual)]))
 }
 
 /// Files dropped on the island, as attachments on a new draft.
 pub fn propose_attach(files: &[String]) -> Result<Waiting, String> {
     if files.is_empty() || files.len() > MAX_FILES {
-        return Err(format!("Attach 1 to {MAX_FILES} files."));
+        return Err(tf("mail.error.attachCount", &[("max", &MAX_FILES)]));
     }
     let mut paths = Vec::new();
     let mut total = 0;
     for file in files {
         let path = PathBuf::from(file);
-        let meta = std::fs::metadata(&path).map_err(|_| format!("{} isn’t there.", file))?;
+        let meta = std::fs::metadata(&path).map_err(|_| tf("mail.error.missingFile", &[("file", file)]))?;
         if !path.is_absolute() || !meta.is_file() {
-            return Err("Only files can be attached.".into());
+            return Err(t("mail.error.onlyFiles"));
         }
         total += meta.len();
         paths.push(path);
     }
     if total > MAX_ATTACHED {
-        return Err("Those files are larger than 25 MB together.".into());
+        return Err(t("mail.error.tooLarge"));
     }
     let names: Vec<String> = paths.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
     let subject = paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let step = Step::Draft { to: String::new(), subject, body: String::new(), files: paths, shown: true };
-    Ok(propose("New draft".into(), names, vec![(step, Why::Manual)]))
+    Ok(propose(t("mail.pending.newDraft"), names, vec![(step, Why::Manual)]))
 }
 
 fn sort_steps(settings: &Settings, pool: &[Message]) -> Vec<(Step, Why, String)> {
@@ -586,11 +589,11 @@ fn sort_steps(settings: &Settings, pool: &[Message]) -> Vec<(Step, Why, String)>
             let target = message.target();
             let line = about(&target);
             let (step, line) = match decision.verdict {
-                rules::Verdict::Flag => (Step::Mark { target, what: Mark::Flagged, value: true }, format!("Flag · {line}")),
-                rules::Verdict::Read => (Step::Mark { target, what: Mark::Read, value: true }, format!("Read · {line}")),
-                rules::Verdict::Junk => (Step::Junk { target }, format!("Junk · {line}")),
+                rules::Verdict::Flag => (Step::Mark { target, what: Mark::Flagged, value: true }, format!("{} · {line}", t("surface.mail.flag"))),
+                rules::Verdict::Read => (Step::Mark { target, what: Mark::Read, value: true }, format!("{} · {line}", t("mail.step.read"))),
+                rules::Verdict::Junk => (Step::Junk { target }, format!("{} · {line}", t("surface.mail.junk"))),
                 rules::Verdict::Move(to) => {
-                    let line = format!("To {} · {line}", log::leaf(&to.path));
+                    let line = format!("{} · {line}", tf("mail.step.moveTo", &[("mailbox", &log::leaf(&to.path))]));
                     (Step::Move { target, to }, line)
                 }
             };
@@ -608,18 +611,18 @@ pub fn propose_sort() -> Result<Option<Waiting>, String> {
         return Ok(None);
     }
     let lines = steps.iter().map(|(_, _, line)| line.clone()).collect();
-    let title = format!("Sort {}", steps.len());
+    let title = tf("surface.mail.sort", &[("count", &steps.len())]);
     Ok(Some(propose(title, lines, steps.into_iter().map(|(step, why, _)| (step, why)).collect())))
 }
 
 pub fn propose_undo(entry: &str) -> Result<Waiting, String> {
     let (steps, label) = {
         let hub = hub();
-        let found = hub.log.get(entry).ok_or("That change isn’t in the log.")?;
+        let found = hub.log.get(entry).ok_or_else(|| t("mail.error.notInLog"))?;
         (found.undo()?, found.label())
     };
     let why = Why::Undo { of: entry.to_string() };
-    Ok(propose("Undo".into(), vec![label], steps.into_iter().map(|step| (step, why.clone())).collect()))
+    Ok(propose(t("surface.undo"), vec![label], steps.into_iter().map(|step| (step, why.clone())).collect()))
 }
 
 pub fn deny(id: &str) {
@@ -650,16 +653,16 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
             argv.extend([what.word().to_string(), value.to_string()]);
             let (was, now, id) = script::parse_mark(&script::run(script::MARK, &argv, 40).await?)?;
             if now != *value {
-                return Err("Mail didn’t keep that change.".into());
+                return Err(t("mail.error.notKept"));
             }
             Ok(log::Entry::new(Change::Mark { what: *what, was, now, at: target.mailbox.clone(), id }, Some(target), &target.subject, why))
         }
         Step::Move { target, to } => {
             if rules::same_box(to, &target.mailbox) {
-                return Err("It’s already there.".into());
+                return Err(t("mail.error.alreadyThere"));
             }
             if rules::forbidden_destination(to) {
-                return Err(format!("Mail isn’t moved to {}.", to.path));
+                return Err(tf("mail.error.notMovedTo", &[("mailbox", &to.path)]));
             }
             let mut argv = box_args(target).to_vec();
             argv.extend([to.account.clone(), to.path.clone()]);
@@ -670,7 +673,7 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
         Step::Junk { target } => {
             let (was, now, at, id) = script::parse_junk(&script::run(script::JUNK, &box_args(target), 60).await?)?;
             if !now {
-                return Err("Mail didn’t keep that change.".into());
+                return Err(t("mail.error.notKept"));
             }
             Ok(log::Entry::new(Change::Junk { from: target.mailbox.clone(), to: at, was, id }, Some(target), &target.subject, why))
         }
@@ -697,13 +700,13 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
             argv.extend(files.iter().map(|f| f.to_string_lossy().into_owned()));
             let saved = script::parse_draft(&script::run(script::DRAFT, &argv, 90).await?)?;
             if saved.subject.trim() != subject.trim() {
-                return Err("Mail saved a draft with another subject.".into());
+                return Err(t("mail.error.otherSubject"));
             }
             if !to.is_empty() && saved.to.iter().map(|a| a.to_lowercase()).collect::<Vec<_>>() != [to.to_lowercase()] {
-                return Err("Mail addressed the draft to someone else.".into());
+                return Err(t("mail.error.otherRecipient"));
             }
             if saved.attachments.len() != files.len() {
-                return Err("Mail didn’t keep every attachment.".into());
+                return Err(t("mail.error.attachmentsLost"));
             }
             Ok(log::Entry::new(Change::Draft { id: saved.id, to: saved.to, attachments: saved.attachments }, None, subject, why))
         }
@@ -712,8 +715,8 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
 
 /// Copies files to be attached into Buntini's own folder, so Mail reads them from there.
 fn stage(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
-    let dir = hub().dir.clone().ok_or("Mail isn’t ready yet.")?.join("attachments").join(uuid::Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&dir).map_err(|_| "The files couldn’t be copied for Mail.")?;
+    let dir = hub().dir.clone().ok_or_else(|| t("mail.error.notReady"))?.join("attachments").join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&dir).map_err(|_| t("mail.error.filesNotCopied"))?;
     files
         .iter()
         .map(|file| {
@@ -730,7 +733,7 @@ fn stage(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
                 });
                 n += 1;
             }
-            std::fs::copy(file, &copy).map_err(|_| format!("{} couldn’t be copied for Mail.", file.display()))?;
+            std::fs::copy(file, &copy).map_err(|_| tf("mail.error.fileNotCopied", &[("file", &file.display())]))?;
             Ok(copy)
         })
         .collect()
@@ -802,9 +805,9 @@ pub async fn approve(id: &str) -> Result<Done, String> {
             Some(p) if p.view.id == id && p.made.elapsed() < PENDING_FOR => p,
             Some(p) if p.view.id != id => {
                 hub.pending = Some(p);
-                return Err("That’s no longer waiting.".into());
+                return Err(t("mail.error.noLongerWaiting"));
             }
-            _ => return Err("That’s no longer waiting.".into()),
+            _ => return Err(t("mail.error.noLongerWaiting")),
         }
     };
     let undo_of = pending.steps.iter().find_map(|(_, why)| match why {
@@ -868,7 +871,7 @@ pub async fn make_plan(app: &AppHandle, request: &str, pdf: Option<PathBuf>) -> 
         (hub.pool.clone(), hub.closed)
     };
     if closed {
-        return Err(script::CLOSED_TEXT.into());
+        return Err(script::closed_text());
     }
     let mailboxes = mailboxes().await?;
     let pages = match &pdf {
@@ -923,20 +926,20 @@ pub fn drop_plan(id: &str) {
 fn plan_steps(planned: &Planned, dir: &Path) -> Result<Vec<(Step, Why)>, String> {
     let mut steps = Vec::new();
     for step in &planned.plan.steps {
-        let target = |n: &usize| planned.messages.get(*n).map(Message::target).ok_or("The plan names an email it wasn’t shown.");
+        let target = |n: &usize| planned.messages.get(*n).map(Message::target).ok_or_else(|| t("mail.error.planUnknownEmail"));
         let step = match step {
             plan::PlanStep::Mark { message, what } => Step::Mark { target: target(message)?, what: *what, value: true },
             plan::PlanStep::Junk { message } => Step::Junk { target: target(message)? },
             plan::PlanStep::Move { message, to } => Step::Move { target: target(message)?, to: to.clone() },
             plan::PlanStep::Reply { message, body } => Step::Reply { target: target(message)?, body: body.clone() },
             plan::PlanStep::Merge { subject, body, sends } => {
-                let pdf = planned.plan.pdf.as_ref().ok_or("The plan has no PDF.")?;
+                let pdf = planned.plan.pdf.as_ref().ok_or_else(|| t("mail.error.planNoPdf"))?;
                 let folder = dir.join("merge").join(&planned.plan.id);
-                std::fs::create_dir_all(&folder).map_err(|_| "The PDF’s pages couldn’t be saved.")?;
+                std::fs::create_dir_all(&folder).map_err(|_| t("mail.error.pagesNotSaved"))?;
                 for send in sends {
-                    let page = planned.pages.get(send.page - 1).ok_or("The PDF changed.")?;
+                    let page = planned.pages.get(send.page - 1).ok_or_else(|| t("mail.error.pdfChanged"))?;
                     let file = merge::page_file(&folder, &pdf.name, &send.name);
-                    std::fs::write(&file, &page.pdf).map_err(|_| "The PDF’s pages couldn’t be saved.")?;
+                    std::fs::write(&file, &page.pdf).map_err(|_| t("mail.error.pagesNotSaved"))?;
                     let draft = Step::Draft {
                         to: send.email.clone(),
                         subject: plan::fill(subject, send),
@@ -962,11 +965,11 @@ pub async fn run_plan(id: &str) -> Result<Done, String> {
             Some(p) if p.plan.id == id => p,
             other => {
                 hub.planned = other;
-                return Err("That plan is no longer waiting.".into());
+                return Err(t("mail.error.planNoLongerWaiting"));
             }
         }
     };
-    let dir = hub().dir.clone().ok_or("Mail isn’t ready yet.")?;
+    let dir = hub().dir.clone().ok_or_else(|| t("mail.error.notReady"))?;
     let steps = plan_steps(&planned, &dir)?;
     audit("mail.plan.run", &planned.plan.summary);
     let done = run_all(steps, true).await;
@@ -1039,7 +1042,7 @@ fn contribution(hub: &Hub) -> Contribution {
         out.pills.push(Pill {
             id: "mail".into(),
             source: Source::Mail,
-            label: "Mail".into(),
+            label: t("surface.mail.mail"),
             tint: TINT.into(),
             state: if waiting { PillState::Waiting } else { PillState::Idle },
             badge: (unread > 0).then(|| unread.to_string()),
@@ -1063,7 +1066,7 @@ pub fn publish() {
 }
 
 fn text_value(action: &Action) -> Result<String, String> {
-    action.value.as_ref().and_then(Value::as_str).map(str::to_string).ok_or_else(|| "That needs an email.".into())
+    action.value.as_ref().and_then(Value::as_str).map(str::to_string).ok_or_else(|| t("mail.error.needsEmail"))
 }
 
 /// What the person did on the mail card or pill.
@@ -1081,7 +1084,7 @@ async fn act(action: Action) -> Result<(), String> {
             hub.open = None;
         }
         "filter" => {
-            let filter = Filter::from_word(&text_value(&action)?).ok_or("That isn’t a filter.")?;
+            let filter = Filter::from_word(&text_value(&action)?).ok_or_else(|| t("mail.error.notFilter"))?;
             let mut hub = hub();
             hub.filter = filter;
             hub.shown = PAGE;
@@ -1107,16 +1110,16 @@ async fn act(action: Action) -> Result<(), String> {
         "junk" => drop(propose_junk(&text_value(&action)?)?),
         "reply" => {
             let value = action.value.clone().unwrap_or(Value::Null);
-            let id = value["id"].as_str().ok_or("That needs an email.")?;
+            let id = value["id"].as_str().ok_or_else(|| t("mail.error.needsEmail"))?;
             drop(propose_reply(id, value["body"].as_str().unwrap_or(""))?);
         }
         "attach" => {
-            let files: Vec<String> = serde_json::from_value(action.value.clone().unwrap_or(Value::Null)).map_err(|_| "Drop files to attach them.")?;
+            let files: Vec<String> = serde_json::from_value(action.value.clone().unwrap_or(Value::Null)).map_err(|_| t("mail.error.dropFiles"))?;
             drop(propose_attach(&files)?);
         }
         "sort" => {
             if propose_sort()?.is_none() {
-                hub().status = Some("Nothing to sort.".into());
+                hub().status = Some(t("mail.status.nothingToSort"));
             }
         }
         "undo" => drop(propose_undo(&text_value(&action)?)?),
@@ -1134,7 +1137,7 @@ async fn act(action: Action) -> Result<(), String> {
             tokio::time::sleep(Duration::from_secs(3)).await;
             refresh(false).await?;
         }
-        _ => return Err("The island asked Mail for something it doesn’t do.".into()),
+        _ => return Err(t("mail.error.unknownAction")),
     }
     publish();
     Ok(())
@@ -1245,7 +1248,7 @@ pub async fn mail_call(op: Op, app: AppHandle) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Op::PickPdf => Ok(rfd::AsyncFileDialog::new()
-            .set_title("Choose a PDF")
+            .set_title(t("mail.choosePdf"))
             .add_filter("PDF", &["pdf"])
             .pick_file()
             .await

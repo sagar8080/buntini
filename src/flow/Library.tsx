@@ -4,15 +4,16 @@ import { listen } from '@tauri-apps/api/event';
 import { desktop, errorMessage } from '../bridge';
 import { callFlow } from './api';
 import { speak, useLanguage } from '../locales';
+import { locale, number, t } from '../i18n.ts';
 import { minutes, type Dictation, type FlowStatus, type LiveLine, type Note, type Stats } from './model';
 import './flow.css';
 
 type Tab = 'notes' | 'history' | 'stats';
-const tabs: { id: Tab; label: string }[] = [{ id: 'notes', label: 'Notes' }, { id: 'history', label: 'History' }, { id: 'stats', label: 'Statistics' }];
+const tabs: { id: Tab; labelKey: string }[] = [{ id: 'notes', labelKey: 'library.tab.notes' }, { id: 'history', labelKey: 'library.tab.history' }, { id: 'stats', labelKey: 'library.tab.stats' }];
 
 const when = (iso: string) => {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
 /** The Library window: call notes, dictation history and statistics. */
@@ -36,8 +37,8 @@ export default function Library() {
   }, []);
   return <div className="library">
     <header className="library-header">
-      <h1>Library</h1>
-      <div className="library-tabs" role="tablist">{tabs.map(item => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>
+      <h1>{t('library.title')}</h1>
+      <div className="library-tabs" role="tablist">{tabs.map(item => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{t(item.labelKey)}</button>)}</div>
     </header>
     {error && <div className="library-error" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
     <main className="library-body">
@@ -80,20 +81,20 @@ function Notes({ onError }: { onError: (message: string) => void }) {
   };
   return <div className="library-split">
     <aside className="library-list">
-      <button type="button" className={`library-record ${recording ? 'is-recording' : ''}`} onClick={record}>{recording ? <><CircleStop size={15} /> Stop</> : <><Mic size={15} /> Record a call</>}</button>
+      <button type="button" className={`library-record ${recording ? 'is-recording' : ''}`} onClick={record}>{recording ? <><CircleStop size={15} /> {t('common.stop')}</> : <><Mic size={15} /> {t('surface.pill.recordCall')}</>}</button>
       {notes.map(item => <button type="button" key={item.id} className={`library-item ${item.id === selected ? 'active' : ''}`} onClick={() => setSelected(item.id)}>
         <strong>{item.title}</strong>
-        <span>{when(item.createdAt)}{item.seconds ? ` · ${minutes(item.seconds)}` : ''}{item.state === 'recording' ? ' · Recording' : item.state === 'processing' ? ' · Writing' : item.state === 'failed' ? ' · Not finished' : ''}</span>
+        <span>{when(item.createdAt)}{item.seconds ? ` · ${minutes(item.seconds)}` : ''}{item.state === 'recording' ? ` · ${t('library.note.recording')}` : item.state === 'processing' ? ` · ${t('library.note.writing')}` : item.state === 'failed' ? ` · ${t('library.note.notFinished')}` : ''}</span>
       </button>)}
     </aside>
     <section className="library-detail">
-      {note?.state === 'recording' && <div className="library-live">{live.map((line, index) => <p key={index}><b>{line.side === 'mic' ? 'You' : 'Them'}</b> {line.text}</p>)}</div>}
+      {note?.state === 'recording' && <div className="library-live">{live.map((line, index) => <p key={index}><b>{line.side === 'mic' ? t('flow.note.you') : t('flow.note.them')}</b> {line.text}</p>)}</div>}
       {note && note.state !== 'recording' && <>
-        <div className="library-detail-head"><h2>{note.title}</h2><button type="button" className="icon-button" aria-label="Delete this note" title="Delete" onClick={() => void callFlow({ op: 'deleteNote', id: note.id }).then(() => { setSelected(null); load(); }).catch(error => onError(errorMessage(error)))}><Trash2 size={14} /></button></div>
+        <div className="library-detail-head"><h2>{note.title}</h2><button type="button" className="icon-button" aria-label={t('library.note.delete')} title={t('common.delete')} onClick={() => void callFlow({ op: 'deleteNote', id: note.id }).then(() => { setSelected(null); load(); }).catch(error => onError(errorMessage(error)))}><Trash2 size={14} /></button></div>
         {note.summary && <p className="library-summary">{note.summary}</p>}
-        {note.keyPoints.length > 0 && <><h3>Key points</h3><ul>{note.keyPoints.map((point, index) => <li key={index}>{point}</li>)}</ul></>}
-        {note.todos.length > 0 && <><h3>To-dos</h3><ul className="library-todos">{note.todos.map((todo, index) => <li key={index}>{todo}</li>)}</ul></>}
-        {note.lines.length > 0 && <><h3>Transcript</h3><div className="library-lines">{note.lines.map((line, index) => <p key={index}><b>{line.speaker ?? ''}</b> {line.text}</p>)}</div></>}
+        {note.keyPoints.length > 0 && <><h3>{t('library.note.keyPoints')}</h3><ul>{note.keyPoints.map((point, index) => <li key={index}>{point}</li>)}</ul></>}
+        {note.todos.length > 0 && <><h3>{t('library.note.todos')}</h3><ul className="library-todos">{note.todos.map((todo, index) => <li key={index}>{todo}</li>)}</ul></>}
+        {note.lines.length > 0 && <><h3>{t('library.note.transcript')}</h3><div className="library-lines">{note.lines.map((line, index) => <p key={index}><b>{line.speaker ?? ''}</b> {line.text}</p>)}</div></>}
       </>}
     </section>
   </div>;
@@ -105,9 +106,9 @@ function History({ onError }: { onError: (message: string) => void }) {
   useRefresh('flow-history', load);
   return <div className="library-history">
     {items.map(item => <article key={item.id} className="library-dictation">
-      <header><span>{when(item.at)} · {item.app || 'Unknown app'}{item.pasted ? '' : ' · Copied'}</span>
-        <button type="button" className="icon-button" aria-label="Copy" title="Copy" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => {})}><Copy size={13} /></button>
-        <button type="button" className="icon-button" aria-label="Forget" title="Forget" onClick={() => void callFlow({ op: 'forgetDictation', id: item.id }).then(load).catch(error => onError(errorMessage(error)))}><Trash2 size={13} /></button>
+      <header><span>{when(item.at)} · {item.app || t('library.history.unknownApp')}{item.pasted ? '' : ` · ${t('library.history.copied')}`}</span>
+        <button type="button" className="icon-button" aria-label={t('common.copy')} title={t('common.copy')} onClick={() => void navigator.clipboard.writeText(item.text).catch(() => {})}><Copy size={13} /></button>
+        <button type="button" className="icon-button" aria-label={t('common.forget')} title={t('common.forget')} onClick={() => void callFlow({ op: 'forgetDictation', id: item.id }).then(load).catch(error => onError(errorMessage(error)))}><Trash2 size={13} /></button>
       </header>
       <p>{item.text}</p>
     </article>)}
@@ -121,13 +122,13 @@ function Statistics() {
   if (!stats) return null;
   const most = Math.max(1, ...stats.apps.map(app => app.words));
   const tiles: [string, string][] = [
-    ['Words', stats.words.toLocaleString()],
-    ['Time saved', stats.minutesSaved >= 60 ? `${(stats.minutesSaved / 60).toFixed(1)} h` : `${Math.round(stats.minutesSaved)} min`],
-    ['Words a minute', String(Math.round(stats.wordsPerMinute))],
-    ['Days in a row', String(stats.streak)],
+    [t('library.stats.words'), number(stats.words)],
+    [t('library.stats.timeSaved'), stats.minutesSaved >= 60 ? t('library.stats.hours', { hours: number(stats.minutesSaved / 60, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t('library.stats.minutes', { minutes: number(Math.round(stats.minutesSaved)) })],
+    [t('library.stats.wordsPerMinute'), number(Math.round(stats.wordsPerMinute))],
+    [t('library.stats.streak'), number(stats.streak)],
   ];
   return <div className="library-stats">
     <div className="library-tiles">{tiles.map(([label, value]) => <div className="library-tile" key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>
-    {stats.apps.length > 0 && <><h3>Apps</h3>{stats.apps.map(app => <div className="library-bar" key={app.app}><span>{app.app}</span><i><b style={{ width: `${app.words * 100 / most}%` }} /></i><span>{app.words.toLocaleString()}</span></div>)}</>}
+    {stats.apps.length > 0 && <><h3>{t('library.stats.apps')}</h3>{stats.apps.map(app => <div className="library-bar" key={app.app}><span>{app.app}</span><i><b style={{ width: `${app.words * 100 / most}%` }} /></i><span>{number(app.words)}</span></div>)}</>}
   </div>;
 }

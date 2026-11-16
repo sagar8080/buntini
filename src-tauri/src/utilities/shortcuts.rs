@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, tf};
+
 /// A key combination.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -44,28 +46,38 @@ impl Shortcut {
 /// Something a shortcut can do.
 pub struct Action {
     pub id: &'static str,
-    pub label: &'static str,
     pub default: Option<(u16, &'static [&'static str], &'static str)>,
 }
 
 /// Every action, in the order Settings lists them.
 pub const ACTIONS: [Action; 8] = [
-    Action { id: "companion", label: "Show or hide Buntini", default: Some((49, &["shift", "command"], "⇧⌘Space")) },
-    Action { id: "chat", label: "Open the chat", default: Some((49, &["control", "option"], "⌃⌥Space")) },
-    Action { id: "waiting", label: "Go to what’s waiting", default: Some((0, &["control", "option"], "⌃⌥A")) },
-    Action { id: "nextPill", label: "Next in the island", default: Some((30, &["control", "option"], "⌃⌥]")) },
-    Action { id: "mute", label: "Mute the island", default: Some((46, &["control", "option"], "⌃⌥M")) },
-    Action { id: "screenshot", label: "Screenshot", default: Some((19, &["shift", "command"], "⇧⌘2")) },
-    Action { id: "area", label: "Capture an area", default: Some((1, &["shift", "command"], "⇧⌘S")) },
-    Action { id: "focus", label: "Focus timer", default: Some((3, &["control", "option"], "⌃⌥F")) },
+    Action { id: "companion", default: Some((49, &["shift", "command"], "⇧⌘Space")) },
+    Action { id: "chat", default: Some((49, &["control", "option"], "⌃⌥Space")) },
+    Action { id: "waiting", default: Some((0, &["control", "option"], "⌃⌥A")) },
+    Action { id: "nextPill", default: Some((30, &["control", "option"], "⌃⌥]")) },
+    Action { id: "mute", default: Some((46, &["control", "option"], "⌃⌥M")) },
+    Action { id: "screenshot", default: Some((19, &["shift", "command"], "⇧⌘2")) },
+    Action { id: "area", default: Some((1, &["shift", "command"], "⇧⌘S")) },
+    Action { id: "focus", default: Some((3, &["control", "option"], "⌃⌥F")) },
 ];
 
 pub fn known(id: &str) -> bool {
     ACTIONS.iter().any(|action| action.id == id)
 }
 
-pub fn label(id: &str) -> &'static str {
-    ACTIONS.iter().find(|action| action.id == id).map_or("", |action| action.label)
+/// The action's name in Settings.
+pub fn label(id: &str) -> String {
+    match id {
+        "companion" => t("utilities.shortcuts.companion"),
+        "chat" => t("utilities.shortcuts.chat"),
+        "waiting" => t("utilities.shortcuts.waiting"),
+        "nextPill" => t("utilities.shortcuts.nextPill"),
+        "mute" => t("utilities.shortcuts.mute"),
+        "screenshot" => t("utilities.shortcuts.screenshot"),
+        "area" => t("utilities.shortcuts.area"),
+        "focus" => t("utilities.shortcuts.focus"),
+        _ => String::new(),
+    }
 }
 
 /// What differs from the defaults; `None` turns an action's shortcut off.
@@ -119,25 +131,25 @@ const EVERY_APP: [u16; 16] = [12, 13, 4, 46, 8, 9, 7, 6, 0, 1, 45, 31, 35, 3, 17
 pub fn problem(id: &str, shortcut: &Shortcut, current: &[(&'static str, Option<Shortcut>)], dictation: Option<&Shortcut>) -> Option<String> {
     let known_names = ["command", "option", "control", "shift"];
     if shortcut.key_code > 127 || !shortcut.modifiers.iter().all(|name| known_names.contains(&name.as_str())) || shortcut.label.is_empty() || shortcut.label.chars().count() > 20 {
-        return Some("Can’t be used".into());
+        return Some(t("utilities.shortcuts.cantUse"));
     }
     let mask = shortcut.carbon();
     if mask & 0x1900 == 0 && !FUNCTION_KEYS.contains(&shortcut.key_code) {
-        return Some("Add ⌘, ⌃ or ⌥".into());
+        return Some(t("utilities.shortcuts.addModifier"));
     }
     if SYSTEM.contains(&(shortcut.key_code, mask)) {
-        return Some("macOS uses it".into());
+        return Some(t("utilities.shortcuts.macosUses"));
     }
     if mask == 0x100 && EVERY_APP.contains(&shortcut.key_code) || mask == 0x300 && shortcut.key_code == 6 {
-        return Some("Every app uses it".into());
+        return Some(t("utilities.shortcuts.everyAppUses"));
     }
     if dictation.is_some_and(|chord| chord.same_keys(shortcut)) {
-        return Some("Dictation uses it".into());
+        return Some(t("utilities.shortcuts.dictationUses"));
     }
     current
         .iter()
         .find(|(other, chosen)| *other != id && chosen.as_ref().is_some_and(|chosen| chosen.same_keys(shortcut)))
-        .map(|(other, _)| format!("{} uses it", label(other)))
+        .map(|(other, _)| tf("utilities.shortcuts.usedBy", &[("action", &label(other))]))
 }
 
 /// What's saved: overrides only for actions that exist, so a removed action leaves nothing.

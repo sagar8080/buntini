@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::fetch::{Failure, Net};
 use super::snapshot::{self, short, text, time, when, Row, Snapshot};
 use super::{Kind, Memo};
+use crate::i18n::{t, tf};
 use crate::surface::PillState;
 
 pub const HOST: &str = "api.vercel.com";
@@ -28,14 +29,14 @@ pub async fn poll(net: &Net, memo: &mut Memo, now: DateTime<FixedOffset>) -> Res
     parse(&value, now)
 }
 
-fn state(deployment: &Value) -> (PillState, &'static str) {
+fn state(deployment: &Value) -> (PillState, String) {
     match text(deployment, "/state").or_else(|| text(deployment, "/readyState")).as_deref() {
-        Some("READY") => (PillState::Done, "Ready"),
-        Some("ERROR") => (PillState::Error, "Failed"),
-        Some("BUILDING") => (PillState::Working, "Building"),
-        Some("INITIALIZING" | "QUEUED") => (PillState::Working, "Queued"),
-        Some("CANCELED") => (PillState::Idle, "Canceled"),
-        _ => (PillState::Idle, "Unknown"),
+        Some("READY") => (PillState::Done, t("services.status.ready")),
+        Some("ERROR") => (PillState::Error, t("services.status.failed")),
+        Some("BUILDING") => (PillState::Working, t("services.status.building")),
+        Some("INITIALIZING" | "QUEUED") => (PillState::Working, t("services.status.queued")),
+        Some("CANCELED") => (PillState::Idle, t("services.status.canceled")),
+        _ => (PillState::Idle, t("services.status.unknown")),
     }
 }
 
@@ -49,25 +50,25 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
             building += 1;
         }
         let target = match text(deployment, "/target").as_deref() {
-            Some("production") => "Production",
-            _ => "Preview",
+            Some("production") => t("services.vercel.production"),
+            _ => t("services.vercel.preview"),
         };
         let message = text(deployment, "/meta/githubCommitMessage").or_else(|| text(deployment, "/meta/gitlabCommitMessage")).map(|message| snapshot::clip(message.lines().next().unwrap_or_default(), 60));
         let url = text(deployment, "/inspectorUrl").or_else(|| text(deployment, "/url").map(|host| format!("https://{host}")));
         rows.push(
-            Row::new(text(deployment, "/uid").unwrap_or_default(), text(deployment, "/name").unwrap_or_else(|| "Deployment".into()))
-                .detail([Some(target.into()), Some(label.into()), message, time(deployment, "/created").map(|at| when(at, now))])
+            Row::new(text(deployment, "/uid").unwrap_or_default(), text(deployment, "/name").unwrap_or_else(|| t("services.vercel.deployment")))
+                .detail([Some(target), Some(label), message, time(deployment, "/created").map(|at| when(at, now))])
                 .state(Some(pill))
                 .url(url)
-                .alert("Deploy failed", pill == PillState::Error),
+                .alert(t("services.alert.deployFailed"), pill == PillState::Error),
         );
     }
     let title = match rows.first() {
-        None => "No deployments yet".into(),
+        None => t("services.vercel.noDeployments"),
         Some(latest) => match latest.state {
-            Some(PillState::Working) => format!("Deploying {}", latest.title),
-            Some(PillState::Error) => format!("{} failed to deploy", latest.title),
-            Some(PillState::Done) => format!("{} is live", latest.title),
+            Some(PillState::Working) => tf("services.vercel.deploying", &[("name", &latest.title)]),
+            Some(PillState::Error) => tf("services.vercel.failedToDeploy", &[("name", &latest.title)]),
+            Some(PillState::Done) => tf("services.vercel.live", &[("name", &latest.title)]),
             _ => latest.title.clone(),
         },
     };
@@ -95,7 +96,7 @@ mod tests {
         assert!(snapshot.busy);
         let states: Vec<Option<PillState>> = snapshot.rows.iter().map(|row| row.state).collect();
         assert_eq!(states, [Some(PillState::Working), Some(PillState::Error), Some(PillState::Done)]);
-        assert_eq!(snapshot.rows[1].alert, Some("Deploy failed"));
+        assert_eq!(snapshot.rows[1].alert.as_deref(), Some("Deploy failed"));
         assert_eq!(snapshot.rows[1].detail.as_deref(), Some("Preview · Failed · Try the new hero · 13:50"));
         assert_eq!(snapshot.rows[0].url.as_deref(), Some("https://vercel.com/sagar/buntini-site/9Gq1"));
         assert_eq!(snapshot.rows[2].url.as_deref(), Some("https://buntini-site-a1b2.vercel.app"));

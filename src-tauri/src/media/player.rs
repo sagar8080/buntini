@@ -3,6 +3,8 @@
 //! pause and skipping go through `apps::control_music`, the same path a chat request uses.
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::i18n::tf;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Player {
     Spotify,
@@ -180,13 +182,15 @@ pub fn parse(player: Player, output: &str, at: f64) -> Read {
     };
     let text = |value: &str| Some(value.trim().to_string()).filter(|value| !value.is_empty());
     let millis = |value: &str| value.trim().parse::<f64>().ok().filter(|ms| ms.is_finite() && *ms >= 0.0).map(|ms| ms / 1000.0);
-    let title = text(title).or_else(|| text(album)).unwrap_or_default();
+    // TV's script writes a show's episode in English; it's shown in Buntini's language.
+    let shown = |value: &str| text(value).map(|line| if player == Player::Tv { episode(&line).unwrap_or(line) } else { line });
+    let title = text(title).or_else(|| shown(album)).unwrap_or_default();
     if title.is_empty() {
         return Read::Stopped;
     }
     let artist = text(artist);
-    let album = text(album);
-    let track = text(track).unwrap_or_else(|| format!("{title}\u{1f}{}\u{1f}{}", artist.clone().unwrap_or_default(), album.clone().unwrap_or_default()));
+    let track = text(track).unwrap_or_else(|| format!("{title}\u{1f}{}\u{1f}{}", artist.clone().unwrap_or_default(), text(album).unwrap_or_default()));
+    let album = shown(album);
     Read::Track(Reading {
         player,
         playing: matches!(state.trim(), "playing" | "fast forwarding" | "rewinding"),
@@ -211,6 +215,13 @@ pub fn parse(player: Player, output: &str, at: f64) -> Read {
         track,
         at,
     })
+}
+
+/// "Season 1, Episode 2", as `TV_READ` writes it, in Buntini's language.
+fn episode(line: &str) -> Option<String> {
+    let (season, episode) = line.strip_prefix("Season ")?.split_once(", Episode ")?;
+    let (season, episode): (u32, u32) = (season.parse().ok()?, episode.parse().ok()?);
+    Some(tf("media.tv.episode", &[("season", &season), ("episode", &episode)]))
 }
 
 /// Tabs and line breaks would break the line apart.
@@ -468,6 +479,13 @@ mod tests {
         assert_eq!(parse(Player::Music, "stopped\n", 0.0), Read::Stopped);
         assert_eq!(parse(Player::Music, "playing\tonly\tthree\n", 0.0), Read::Stopped);
         assert_eq!(parse(Player::Spotify, "playing\t\t\t\t0\t0\tfalse\tfalse\t50\t\t\tend\n", 0.0), Read::Stopped);
+    }
+
+    #[test]
+    fn a_show_reads_its_episode_in_buntinis_words() {
+        let line = "playing\tGood News About Hell\tSeverance\tSeason 1, Episode 2\t3000000\t0\t\t\t50\t\tid\tend\n";
+        assert_eq!(track(parse(Player::Tv, line, 0.0)).album.as_deref(), Some("Season 1, Episode 2"));
+        assert_eq!(episode("Season one, Episode two"), None);
     }
 
     #[test]

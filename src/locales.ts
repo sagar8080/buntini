@@ -1,6 +1,6 @@
 // Loads the catalogs into the app: English always, another language when it's spoken.
 import { useSyncExternalStore } from 'react';
-import { englishWords as english, language, resolve, rtl, subscribe, use, type Catalog } from './i18n';
+import { englishWords as english, language, resolve, rtl, subscribe, use, type Catalog } from './i18n.ts';
 
 const others = import.meta.glob<Catalog>(['../locales/*.json', '!../locales/en.json'], { import: 'default' });
 const REMEMBERED = 'buntini-language';

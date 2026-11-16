@@ -7,6 +7,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::diff::{self, Diff};
+use crate::i18n::{t, tf};
 
 /// Steps kept per session.
 pub const MAX_STEPS: usize = 20;
@@ -107,7 +108,7 @@ impl Session {
         self.announce = false;
         let text = first_line(prompt, 60);
         if !text.is_empty() {
-            self.push(Step { label: format!("“{text}”"), detail: None, tool: String::new(), input_key: String::new(), diff: None, file: None, failed: false, done: true });
+            self.push(Step { label: tf("agents.step.prompt", &[("text", &text)]), detail: None, tool: String::new(), input_key: String::new(), diff: None, file: None, failed: false, done: true });
         }
     }
 
@@ -203,43 +204,43 @@ pub fn label(tool: &str, input: &Value, cwd: &str) -> (String, Option<String>) {
             let plain = strip_prefixes(&command);
             let runs = |runner: &&str| plain == *runner || plain.strip_prefix(runner).is_some_and(|rest| rest.starts_with(' '));
             if TEST_RUNNERS.iter().any(runs) {
-                (format!("Tests · {}", first_line(plain, 40)), Some(command))
+                (tf("agents.step.tests", &[("command", &first_line(plain, 40))]), Some(command))
             } else {
-                (format!("Runs · {short}"), Some(command))
+                (tf("agents.step.runs", &[("command", &short)]), Some(command))
             }
         }
         "Read" | "read" | "read_file" | "view" | "view_file" => {
             let (name, path) = file("file_path");
-            (format!("Reads · {}", or(name, "a file")), Some(path))
+            (if name.is_empty() { t("agents.step.readsAFile") } else { tf("agents.step.reads", &[("file", &name)]) }, Some(path))
         }
         "Edit" | "MultiEdit" | "edit" | "replace" | "str_replace_editor" | "edit_file" | "patch" | "replace_file_content" | "multi_replace_file_content" => {
             let (name, path) = file("file_path");
-            (format!("Edits · {}", or(name, "a file")), Some(path))
+            (if name.is_empty() { t("agents.step.editsAFile") } else { tf("agents.step.edits", &[("file", &name)]) }, Some(path))
         }
         "Write" | "write" | "write_file" | "write_to_file" | "create" => {
             let (name, path) = file("file_path");
-            (format!("Writes · {}", or(name, "a file")), Some(path))
+            (if name.is_empty() { t("agents.step.writesAFile") } else { tf("agents.step.writes", &[("file", &name)]) }, Some(path))
         }
         "NotebookEdit" => {
             let (name, path) = file("notebook_path");
-            (format!("Edits · {}", or(name, "a notebook")), Some(path))
+            (if name.is_empty() { t("agents.step.editsANotebook") } else { tf("agents.step.edits", &[("file", &name)]) }, Some(path))
         }
-        "apply_patch" => ("Edits · files".into(), None),
-        "Glob" | "Grep" | "glob" | "grep" | "search_file_content" | "list_directory" | "LS" => ("Searches · files".into(), Some(text("pattern"))),
-        "WebFetch" | "web_fetch" => ("Opens · a page".into(), Some(text("url"))),
-        "WebSearch" | "google_web_search" | "web_search" => (format!("Searches · {}", first_line(&text("query"), 40)), None),
-        "Task" | "Agent" => ("Hands off · a task".into(), Some(first_line(&text("description"), 80))),
-        "TodoWrite" | "update_plan" => ("Plans · its steps".into(), None),
-        "AskUserQuestion" => ("Asks · you".into(), None),
-        "ExitPlanMode" => ("Plans · ready".into(), None),
+        "apply_patch" => (t("agents.step.editsFiles"), None),
+        "Glob" | "Grep" | "glob" | "grep" | "search_file_content" | "list_directory" | "LS" => (t("agents.step.searchesFiles"), Some(text("pattern"))),
+        "WebFetch" | "web_fetch" => (t("agents.step.opensAPage"), Some(text("url"))),
+        "WebSearch" | "google_web_search" | "web_search" => (tf("agents.step.searches", &[("query", &first_line(&text("query"), 40))]), None),
+        "Task" | "Agent" => (t("agents.step.handsOffATask"), Some(first_line(&text("description"), 80))),
+        "TodoWrite" | "update_plan" => (t("agents.step.plansItsSteps"), None),
+        "AskUserQuestion" => (t("agents.step.asksYou"), None),
+        "ExitPlanMode" => (t("agents.step.planReady"), None),
         tool if tool.starts_with("mcp__") => {
             let mut parts = tool.splitn(3, "__").skip(1);
             let server = parts.next().unwrap_or_default();
             let name = parts.next().unwrap_or_default().replace(['_', '-'], " ");
-            (format!("Uses · {name}"), Some(server.to_string()))
+            (tf("agents.step.uses", &[("tool", &name)]), Some(server.to_string()))
         }
-        "" => ("Works".into(), None),
-        tool => (format!("Uses · {}", tool.replace(['_', '-'], " ")), None),
+        "" => (t("agents.step.works"), None),
+        tool => (tf("agents.step.uses", &[("tool", &tool.replace(['_', '-'], " "))]), None),
     }
 }
 
@@ -327,10 +328,6 @@ fn relative(path: &str, cwd: &str) -> String {
         Ok(rest) if !rest.as_os_str().is_empty() => rest.to_string_lossy().into_owned(),
         _ => path.to_string(),
     }
-}
-
-fn or(text: String, fallback: &str) -> String {
-    if text.is_empty() { fallback.into() } else { text }
 }
 
 pub fn first_line(text: &str, max: usize) -> String {

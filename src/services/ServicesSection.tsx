@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { CalendarDays, Check, ChevronDown, CreditCard, FileText, GitMerge, GitPullRequest, Globe2, KeyRound, LoaderCircle, Send, Triangle, Workflow } from 'lucide-react';
 import { errorMessage } from '../bridge';
+import { t } from '../i18n.ts';
 import type { Settings } from '../types';
 import { saveServiceKey, serviceStatuses, showService } from './api';
 import { normalizeHost, services, statusLine, type ServiceId, type ServiceInfo, type ServiceStatus } from './model';
@@ -52,7 +53,7 @@ function ServiceRow({ info, status, draft, update, onError, onStatuses }: { info
     try {
       if (info.host && hostChanged) {
         const normalized = normalizeHost(host);
-        if (normalized === null) throw new Error('Enter an https address, like git.example.com.');
+        if (normalized === null) throw new Error(t('settings.services.httpsAddress'));
         update('services', { ...draft.services, [info.host]: normalized });
         setHost(normalized);
       }
@@ -74,17 +75,17 @@ function ServiceRow({ info, status, draft, update, onError, onStatuses }: { info
     <button type="button" className="service-summary" aria-expanded={open} onClick={() => setOpen(!open)}>
       {icons[info.id]}
       <span><strong>{info.name}</strong><small>{statusLine(info, status)}</small></span>
-      <em className={connected && status?.health !== 'rejected' ? 'ready' : ''}>{connected ? <><Check size={11} />Connected</> : 'Connect'}</em>
+      <em className={connected && status?.health !== 'rejected' ? 'ready' : ''}>{connected ? <><Check size={11} />{t('settings.connected')}</> : t('settings.connect')}</em>
       <ChevronDown size={14} />
     </button>
     {open && <div className="service-body">
-      {info.host && <div className="key-input"><Globe2 size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label={`${info.name} address`} placeholder={info.hostPlaceholder} value={host} onChange={event => setHost(event.target.value)} /></div>}
-      <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" spellCheck={false} aria-label={`${info.name} key`} placeholder={connected ? 'Key saved' : info.placeholder} value={key} onChange={event => setKey(event.target.value)} /></div>
+      {info.host && <div className="key-input"><Globe2 size={14} /><input type="text" autoComplete="off" spellCheck={false} aria-label={t('settings.services.address', { service: info.name })} placeholder={info.hostPlaceholder} value={host} onChange={event => setHost(event.target.value)} /></div>}
+      <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" spellCheck={false} aria-label={t('settings.services.key', { service: info.name })} placeholder={connected ? t('settings.keySaved') : info.placeholder} value={key} onChange={event => setKey(event.target.value)} /></div>
       {problem && <p className="saved-search-error" role="status">{problem}</p>}
       <div className="service-actions">
-        <button type="button" className="secondary-button" disabled={!ready || saving} onClick={() => void save(key.trim())}>{saving ? <LoaderCircle size={13} className="spin" /> : 'Save'}</button>
-        {connected && status?.hidden && <button type="button" className="text-button" onClick={() => void show()}>Show on the island</button>}
-        {connected && <button type="button" className="text-button danger" onClick={() => void save('')}>Disconnect</button>}
+        <button type="button" className="secondary-button" disabled={!ready || saving} onClick={() => void save(key.trim())}>{saving ? <LoaderCircle size={13} className="spin" /> : t('common.save')}</button>
+        {connected && status?.hidden && <button type="button" className="text-button" onClick={() => void show()}>{t('settings.services.showOnIsland')}</button>}
+        {connected && <button type="button" className="text-button danger" onClick={() => void save('')}>{t('settings.disconnect')}</button>}
       </div>
     </div>}
   </div>;

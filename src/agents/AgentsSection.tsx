@@ -4,13 +4,11 @@ import Toggle from '../Toggle';
 import { command, errorMessage } from '../bridge';
 import type { CodingAgent } from '../types';
 import { callAgents } from './api';
+import { t } from '../i18n.ts';
 import type { RecapWeek } from './model';
 
 /** What each agent can do from the cat, by what its hooks allow. */
-const can: Record<string, string> = {
-  claude: 'Approve, deny and answer from the cat · Know when it’s done',
-  codex: 'Approve and deny from the cat · Know when it’s done',
-};
+const can = (id: string) => id === 'claude' ? t('settings.agents.can.claude') : id === 'codex' ? t('settings.agents.can.codex') : t('settings.agents.can.anyAgent');
 const startable = ['claude', 'codex'];
 
 /** Settings → Apps → Coding agents: hooks on and off, plan usage, a new session, the week. */
@@ -47,26 +45,26 @@ export default function AgentsSection({ onError }: { onError: (error: string) =>
   if (!available.length) return null;
   const connectedStartable = available.filter(agent => agent.connected && startable.includes(agent.id));
   return <section className="settings-section">
-    <div className="settings-section-heading"><h3>Coding agents</h3></div>
+    <div className="settings-section-heading"><h3>{t('settings.agents.title')}</h3></div>
     {available.map(agent => <div key={agent.id} className="app-permission">
-      <Toggle label={agent.name} detail={can[agent.id] ?? 'Know what it’s doing · Know when it’s done'} checked={agent.connected} disabled={busy === agent.id} onChange={on => void connect(agent.id, on)} />
+      <Toggle label={agent.name} detail={can(agent.id)} checked={agent.connected} disabled={busy === agent.id} onChange={on => void connect(agent.id, on)} />
       {agent.problem && <p className="field-help">{agent.problem}</p>}
-      {agent.id === 'codex' && agent.connected && !agent.heard && <p className="field-help app-note">In Codex, type /hooks and trust Buntini’s hooks.</p>}
-      {agent.usage !== undefined && agent.usage !== null && agent.connected && <Toggle label="Plan usage" detail="5 hours · Week" checked={agent.usage} disabled={busy === `${agent.id}-usage`} onChange={on => void usage(agent, on)} />}
+      {agent.id === 'codex' && agent.connected && !agent.heard && <p className="field-help app-note">{t('settings.agents.codexTrust')}</p>}
+      {agent.usage !== undefined && agent.usage !== null && agent.connected && <Toggle label={t('settings.agents.planUsage')} detail={t('settings.agents.planUsageDetail')} checked={agent.usage} disabled={busy === `${agent.id}-usage`} onChange={on => void usage(agent, on)} />}
     </div>)}
     {connectedStartable.length > 0 && <form className="saved-search-form agent-start" onSubmit={event => { event.preventDefault(); void start(); }}>
-      <input aria-label="First message" placeholder="New session" value={starting.prompt} maxLength={8000} onChange={event => setStarting({ ...starting, prompt: event.target.value })} />
+      <input aria-label={t('settings.agents.firstMessage')} placeholder={t('settings.agents.newSession')} value={starting.prompt} maxLength={8000} onChange={event => setStarting({ ...starting, prompt: event.target.value })} />
       <div>
-        {connectedStartable.length > 1 && <select aria-label="Agent" value={starting.agent} onChange={event => setStarting({ ...starting, agent: event.target.value })}>{connectedStartable.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select>}
-        <select aria-label="Project" value={starting.project} onChange={event => event.target.value === '…' ? void chooseFolder() : setStarting({ ...starting, project: event.target.value })}>
+        {connectedStartable.length > 1 && <select aria-label={t('settings.agents.agent')} value={starting.agent} onChange={event => setStarting({ ...starting, agent: event.target.value })}>{connectedStartable.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select>}
+        <select aria-label={t('settings.agents.project')} value={starting.project} onChange={event => event.target.value === '…' ? void chooseFolder() : setStarting({ ...starting, project: event.target.value })}>
           {projects.map(path => <option key={path} value={path}>{path.split('/').pop() || path}</option>)}
-          <option value="…">Choose folder…</option>
+          <option value="…">{t('settings.agents.chooseFolder')}</option>
         </select>
-        <button className="primary-button" disabled={!starting.project || busy === 'start'}>{busy === 'start' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} Start</button>
+        <button className="primary-button" disabled={!starting.project || busy === 'start'}>{busy === 'start' ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />} {t('settings.agents.start')}</button>
       </div>
     </form>}
     {week && week.stats.length > 0 && <div className="agent-week">
-      <div className="agent-week-heading"><strong>{week.week}</strong><button type="button" className="secondary-button" disabled={busy === 'share'} onClick={() => void act('share', async () => { await callAgents({ op: 'shareRecap' }); })}><Share size={11} /> Share</button></div>
+      <div className="agent-week-heading"><strong>{week.week}</strong><button type="button" className="secondary-button" disabled={busy === 'share'} onClick={() => void act('share', async () => { await callAgents({ op: 'shareRecap' }); })}><Share size={11} /> {t('common.share')}</button></div>
       <dl>{week.stats.map(stat => <div key={stat.label}><dt>{stat.label}</dt><dd>{stat.value}</dd></div>)}</dl>
     </div>}
   </section>;

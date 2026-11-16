@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::fetch::{Failure, Net};
 use super::snapshot::{self, flag, money, number, start_of_today, text, time, when, Row, Snapshot};
 use super::Kind;
+use crate::i18n::{t, tf};
 use crate::surface::PillState;
 
 pub const HOST: &str = "api.stripe.com";
@@ -19,15 +20,15 @@ pub async fn poll(net: &Net, now: DateTime<FixedOffset>) -> Result<Snapshot, Fai
     parse(&value, now)
 }
 
-fn state(charge: &Value) -> (PillState, &'static str) {
+fn state(charge: &Value) -> (PillState, String) {
     if flag(charge, "/refunded") {
-        return (PillState::Idle, "Refunded");
+        return (PillState::Idle, t("services.status.refunded"));
     }
     match text(charge, "/status").as_deref() {
-        Some("succeeded") => (PillState::Done, "Paid"),
-        Some("pending") => (PillState::Working, "Pending"),
-        Some("failed") => (PillState::Error, "Failed"),
-        _ => (PillState::Idle, "Unknown"),
+        Some("succeeded") => (PillState::Done, t("services.status.paid")),
+        Some("pending") => (PillState::Working, t("services.status.pending")),
+        Some("failed") => (PillState::Error, t("services.status.failed")),
+        _ => (PillState::Idle, t("services.status.unknown")),
     }
 }
 
@@ -54,7 +55,7 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
         let who = text(charge, "/billing_details/name").or_else(|| text(charge, "/description"));
         rows.push(
             Row::new(text(charge, "/id").unwrap_or_default(), money(amount, &currency))
-                .detail([who, Some(label.into()), created.map(|at| when(at, now))])
+                .detail([who, Some(label), created.map(|at| when(at, now))])
                 .state(Some(pill))
                 .url(Some(format!("https://dashboard.stripe.com/{mode}payments/{id}"))),
         );
@@ -63,10 +64,10 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
     let mut ranked: Vec<(String, i64)> = totals.into_iter().collect();
     ranked.sort_by_key(|(_, total)| -total);
     let title = if ranked.is_empty() {
-        "No payments today".to_string()
+        t("services.stripe.noPayments")
     } else {
         let sums: Vec<String> = ranked.iter().map(|(currency, total)| money(*total, currency)).collect();
-        format!("{}{more} today", sums.join(" · "))
+        tf("services.stripe.today", &[("amounts", &format!("{}{more}", sums.join(" · ")))])
     };
     let badge = ranked.first().map(|(currency, total)| format!("{}{more}", money(*total, currency)));
     let busy = rows.iter().any(|row| row.state == Some(PillState::Working));

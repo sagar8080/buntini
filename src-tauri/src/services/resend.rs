@@ -3,8 +3,9 @@ use chrono::{DateTime, FixedOffset};
 use serde_json::Value;
 
 use super::fetch::{Failure, Net};
-use super::snapshot::{self, is_today, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, is_today, short, text, time, when, Row, Snapshot};
 use super::Kind;
+use crate::i18n::{t, tn};
 use crate::surface::PillState;
 
 pub const HOST: &str = "api.resend.com";
@@ -15,20 +16,20 @@ pub async fn poll(net: &Net, now: DateTime<FixedOffset>) -> Result<Snapshot, Fai
     parse(&value, now)
 }
 
-fn state(event: Option<&str>) -> (PillState, &'static str) {
+fn state(event: Option<&str>) -> (PillState, String) {
     match event {
-        Some("delivered") => (PillState::Done, "Delivered"),
-        Some("opened") => (PillState::Done, "Opened"),
-        Some("clicked") => (PillState::Done, "Clicked"),
-        Some("bounced") => (PillState::Error, "Bounced"),
-        Some("complained") => (PillState::Error, "Marked as spam"),
-        Some("failed") => (PillState::Error, "Failed"),
-        Some("delivery_delayed") => (PillState::Working, "Delayed"),
-        Some("sent") => (PillState::Working, "Sent"),
-        Some("queued") => (PillState::Working, "Queued"),
-        Some("scheduled") => (PillState::Idle, "Scheduled"),
-        Some("canceled") => (PillState::Idle, "Canceled"),
-        _ => (PillState::Idle, "Sent"),
+        Some("delivered") => (PillState::Done, t("services.status.delivered")),
+        Some("opened") => (PillState::Done, t("services.status.opened")),
+        Some("clicked") => (PillState::Done, t("services.status.clicked")),
+        Some("bounced") => (PillState::Error, t("services.status.bounced")),
+        Some("complained") => (PillState::Error, t("services.status.markedAsSpam")),
+        Some("failed") => (PillState::Error, t("services.status.failed")),
+        Some("delivery_delayed") => (PillState::Working, t("services.status.delayed")),
+        Some("sent") => (PillState::Working, t("services.status.sent")),
+        Some("queued") => (PillState::Working, t("services.status.queued")),
+        Some("scheduled") => (PillState::Idle, t("services.status.scheduled")),
+        Some("canceled") => (PillState::Idle, t("services.status.canceled")),
+        _ => (PillState::Idle, t("services.status.sent")),
     }
 }
 
@@ -47,18 +48,18 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
         }
         let to = text(mail, "/to/0").or_else(|| text(mail, "/to"));
         rows.push(
-            Row::new(text(mail, "/id").unwrap_or_default(), text(mail, "/subject").unwrap_or_else(|| "(no subject)".into()))
-                .detail([to, Some(label.into()), created.map(|at| when(at, now))])
+            Row::new(text(mail, "/id").unwrap_or_default(), text(mail, "/subject").unwrap_or_else(|| t("services.resend.noSubject")))
+                .detail([to, Some(label), created.map(|at| when(at, now))])
                 .state(Some(pill))
                 .url(text(mail, "/id").map(|id| format!("https://resend.com/emails/{id}"))),
         );
     }
     let title = if bounced_today > 0 {
-        format!("{} today", plural(bounced_today, "mail bounced", "mails bounced"))
+        tn("services.resend.bouncedToday", bounced_today as u64, &[])
     } else if sent_today > 0 {
-        format!("{} today", plural(sent_today, "mail sent", "mails sent"))
+        tn("services.resend.sentToday", sent_today as u64, &[])
     } else {
-        "No mail sent today".into()
+        t("services.resend.noneSent")
     };
     let badge = if bounced_today > 0 { Some(short(bounced_today)) } else { (sent_today > 0).then(|| short(sent_today)) };
     rows.truncate(snapshot::MAX_ROWS);

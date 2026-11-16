@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::i18n::{t, tf, tn};
 use crate::surface::cards::utilities::{TimerCard, Vitals};
 use crate::surface::{self, Action, Card, CardBody, Contribution, Offer, Pill, PillState, Source, Urgency};
 use focus::{Phase, Plan, Session, Step};
@@ -171,15 +172,29 @@ fn clock() -> i64 {
 #[derive(Default)]
 struct Keys {
     overrides: Overrides,
-    /// Shortcuts that couldn't be registered, and why: macOS uses the combination, or another
-    /// app holds it.
-    refused: Vec<(String, &'static str)>,
+    /// Shortcuts that couldn't be registered, and why.
+    refused: Vec<(String, Refusal)>,
     /// The native hot keys are in.
     native: bool,
 }
 
-const SYSTEM_USES: &str = "macOS uses it";
-const ANOTHER_APP: &str = "Another app uses it";
+/// Why a shortcut couldn't be registered.
+#[derive(Debug, Clone, Copy)]
+enum Refusal {
+    /// macOS uses the combination.
+    System,
+    /// Another app holds it.
+    AnotherApp,
+}
+
+impl Refusal {
+    fn text(self) -> String {
+        match self {
+            Refusal::System => t("utilities.shortcuts.macosUses"),
+            Refusal::AnotherApp => t("utilities.shortcuts.anotherAppUses"),
+        }
+    }
+}
 
 static KEYS: Mutex<Keys> = Mutex::new(Keys { overrides: Overrides::new(), refused: Vec::new(), native: false });
 static RECORDING: AtomicU64 = AtomicU64::new(0);
@@ -204,7 +219,7 @@ fn apply(keys: &mut Keys) {
         .filter(|(id, shortcut)| {
             let system = native::system_uses(shortcut.key_code, shortcut.carbon());
             if system {
-                refused.push((id.to_string(), SYSTEM_USES));
+                refused.push((id.to_string(), Refusal::System));
             }
             !system
         })
@@ -213,15 +228,15 @@ fn apply(keys: &mut Keys) {
     match native::set_hot_keys(&hot_keys) {
         Some(taken) => {
             keys.native = true;
-            refused.extend(taken.into_iter().map(|id| (id, ANOTHER_APP)));
+            refused.extend(taken.into_iter().map(|id| (id, Refusal::AnotherApp)));
             keys.refused = refused;
         }
         None => keys.native = false,
     }
 }
 
-fn refused(keys: &Keys, id: &str) -> Option<&'static str> {
-    keys.refused.iter().find(|(other, _)| other == id).map(|(_, why)| *why)
+fn refused(keys: &Keys, id: &str) -> Option<String> {
+    keys.refused.iter().find(|(other, _)| other == id).map(|(_, why)| why.text())
 }
 
 fn save_overrides(overrides: &Overrides) {
@@ -237,7 +252,7 @@ fn dictation_chord() -> Option<Shortcut> {
 
 fn set_shortcut(id: &str, shortcut: Option<Shortcut>) -> Result<(), String> {
     if !shortcuts::known(id) {
-        return Err("There’s no such shortcut.".into());
+        return Err(t("utilities.shortcuts.unknown"));
     }
     let mut keys = keys();
     if let Some(chosen) = &shortcut {
@@ -246,7 +261,7 @@ fn set_shortcut(id: &str, shortcut: Option<Shortcut>) -> Result<(), String> {
             return Err(problem);
         }
         if native::system_uses(chosen.key_code, chosen.carbon()) {
-            return Err(SYSTEM_USES.into());
+            return Err(Refusal::System.text());
         }
     }
     let before = keys.overrides.clone();
@@ -257,7 +272,7 @@ fn set_shortcut(id: &str, shortcut: Option<Shortcut>) -> Result<(), String> {
     if let Some(why) = refused(&keys, id) {
         keys.overrides = before;
         apply(&mut keys);
-        return Err(why.into());
+        return Err(why);
     }
     save_overrides(&keys.overrides);
     Ok(())
@@ -354,7 +369,8 @@ fn pressed(app: &AppHandle, id: &str) {
         "chat" => crate::show_companion(app),
         "waiting" => match surface::pills().into_iter().find(|pill| pill.state == PillState::Waiting) {
             Some(pill) => open_pill(pill),
-            None => notice("Nothing waiting"),
+            // The island picks the notice's icon by these same words.
+            None => notice(&t("surface.vitals.nothingWaiting")),
         },
         "nextPill" => next_pill(),
         "mute" => toggle_mute(),
@@ -402,7 +418,7 @@ fn toggle_mute() {
     let muted = !surface::muted();
     surface::set_muted(muted);
     set_preference(MUTED, if muted { "true" } else { "false" });
-    notice(if muted { "Sounds off" } else { "Sounds on" });
+    notice(&if muted { t("surface.vitals.soundsOff") } else { t("surface.vitals.soundsOn") });
 }
 
 /// A word on the island for a moment.
@@ -460,7 +476,7 @@ pub fn start_focus(minutes: Option<u64>) -> Session {
 fn focus_change(change: impl FnOnce(&mut Session, i64)) -> Result<(), String> {
     {
         let mut shown = shown();
-        let session = shown.focus.as_mut().ok_or("There’s no focus timer running.")?;
+        let session = shown.focus.as_mut().ok_or_else(|| t("utilities.focus.noTimer"))?;
         change(session, clock());
     }
     changed_focus();
@@ -470,7 +486,7 @@ fn focus_change(change: impl FnOnce(&mut Session, i64)) -> Result<(), String> {
 fn skip_focus() -> Result<(), String> {
     let step = {
         let mut shown = shown();
-        let session = shown.focus.as_mut().ok_or("There’s no focus timer running.")?;
+        let session = shown.focus.as_mut().ok_or_else(|| t("utilities.focus.noTimer"))?;
         session.skip(clock())
     };
     if step == Step::Over {
@@ -529,10 +545,10 @@ fn minutes(ms: i64) -> i64 {
 fn turn_words(session: &Session) -> String {
     let plan = session.plan;
     match session.phase {
-        Phase::Focus if session.round >= focus::ROUNDS => format!("{} rounds done. Rest for {} minutes.", focus::ROUNDS, minutes(plan.long_rest)),
-        Phase::Focus => format!("Time for a {}-minute rest.", minutes(plan.rest)),
-        Phase::Rest => format!("Back to focus, round {} of {}.", session.round + 1, focus::ROUNDS),
-        Phase::LongRest => "Your focus set is done.".into(),
+        Phase::Focus if session.round >= focus::ROUNDS => tn("utilities.focus.alert.longRest", minutes(plan.long_rest) as u64, &[("rounds", &focus::ROUNDS)]),
+        Phase::Focus => tf("utilities.focus.alert.rest", &[("minutes", &minutes(plan.rest))]),
+        Phase::Rest => tf("utilities.focus.alert.backToFocus", &[("round", &(session.round + 1)), ("rounds", &focus::ROUNDS)]),
+        Phase::LongRest => t("utilities.focus.alert.setDone"),
     }
 }
 
@@ -545,14 +561,14 @@ fn alert_at_turn(session: Option<&Session>) {
     if let Some(session) = session.filter(|session| enabled && !session.paused()) {
         let seconds = (session.remaining(clock()) + 999) / 1000;
         if seconds > 0 {
-            os.schedule(FOCUS_ALERT, seconds as u64, session.phase.label(), &turn_words(session));
+            os.schedule(FOCUS_ALERT, seconds as u64, &session.phase.label(), &turn_words(session));
         }
     }
 }
 
 fn timer_card(session: &Session, now: i64) -> TimerCard {
     TimerCard {
-        label: session.phase.label().into(),
+        label: session.phase.label(),
         phase: Some(session.phase.id().into()),
         ends_at: session.ends_at.map(|ms| (ms + 500) / 1000),
         remaining: session.remaining(now) as f64 / 1000.0,
@@ -622,10 +638,10 @@ fn publish() {
             pills.push(Pill {
                 id: FOCUS_ID.into(),
                 source: Source::Utilities,
-                label: session.phase.label().into(),
+                label: session.phase.label(),
                 tint: tint(session.phase).into(),
                 state: if session.paused() { PillState::Idle } else if session.phase == Phase::Focus { PillState::Working } else { PillState::Done },
-                badge: Some(if session.paused() { "Paused".into() } else { focus::badge(left) }),
+                badge: Some(if session.paused() { t("utilities.focus.paused") } else { focus::badge(left) }),
                 progress: Some(1.0 - left as f64 / session.length().max(1) as f64),
             });
             offers.push(Offer { card: Card { id: FOCUS_ID.into(), source: Source::Utilities, body: CardBody::Timer(card.clone()) }, urgency: Urgency::Info, at_ms: shown.focus_since, ttl_ms: None });
@@ -634,7 +650,7 @@ fn publish() {
             }
         }
         if let Some((session, at)) = &shown.focus_done {
-            let card = TimerCard { label: "Focus".into(), phase: Some("done".into()), ends_at: None, remaining: 0.0, total: session.length() as f64 / 1000.0, paused: false, round: Some(focus::ROUNDS), rounds: Some(focus::ROUNDS) };
+            let card = TimerCard { label: Phase::Focus.label(), phase: Some("done".into()), ends_at: None, remaining: 0.0, total: session.length() as f64 / 1000.0, paused: false, round: Some(focus::ROUNDS), rounds: Some(focus::ROUNDS) };
             offers.push(Offer { card: Card { id: format!("{FOCUS_ID}.done"), source: Source::Utilities, body: CardBody::Timer(card) }, urgency: Urgency::Alert, at_ms: *at, ttl_ms: Some(TURN_MS) });
         }
         if let Some((line, at)) = &shown.notice {
@@ -659,23 +675,24 @@ pub fn run_focus(command: focus::Command) -> Result<crate::skills::Outcome, Stri
         focus::Command::Start { minutes: asked } => {
             let session = start_focus(asked);
             let until = chrono::Local::now() + chrono::Duration::milliseconds(session.plan.focus);
-            format!("Focusing for {} minutes, until {}. A {}-minute rest comes next.", minutes(session.plan.focus), until.format("%-H:%M"), minutes(session.plan.rest))
+            let until = until.format("%-H:%M").to_string();
+            tn("utilities.focus.chat.started", minutes(session.plan.focus) as u64, &[("time", &until), ("rest", &minutes(session.plan.rest))])
         }
         focus::Command::Pause => {
             focus_change(|session, now| session.pause(now))?;
             let left = shown().focus.as_ref().map_or(0, |session| session.remaining(clock()));
-            format!("Paused, with {} left.", crate::skills::mac::spoken(((left + 999) / 1000) as u64))
+            tf("utilities.focus.chat.paused", &[("left", &crate::skills::mac::spoken(((left + 999) / 1000) as u64))])
         }
         focus::Command::Resume => {
             focus_change(|session, now| session.resume(now))?;
             let (phase, left) = shown().focus.as_ref().map_or((Phase::Focus, 0), |session| (session.phase, session.remaining(clock())));
-            format!("{} again, {} left.", phase.label(), crate::skills::mac::spoken(((left + 999) / 1000) as u64))
+            tf("utilities.focus.chat.resumed", &[("phase", &phase.label()), ("left", &crate::skills::mac::spoken(((left + 999) / 1000) as u64))])
         }
         focus::Command::Stop => {
             if stop_focus() {
-                "Stopped the focus timer.".to_string()
+                t("utilities.focus.chat.stopped")
             } else {
-                return Err("There’s no focus timer running.".into());
+                return Err(t("utilities.focus.noTimer"));
             }
         }
     };

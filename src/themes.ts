@@ -1,18 +1,19 @@
 // Buntini's look: theme presets (each with a light and a dark version) plus a few
 // adjustments. `appearance` turns settings into the attributes and CSS variables the
 // stylesheet reads, so the rules live in one place and can be tested.
+import { t } from './i18n.ts';
 import type { Settings } from './types';
 
 export interface Palette { panel: string; accent: string }
 // Each preset's colours are also in styles.css; themes.test.ts checks the two agree and that
 // text and accents there are readable (4.5:1, WCAG AA for small text).
-export const presets: { id: Settings['themePreset']; label: string; light: Palette; dark: Palette }[] = [
-  { id: 'classic', label: 'Classic', light: { panel: '#fbf7f2', accent: '#a9491a' }, dark: { panel: '#1a1512', accent: '#ff9e62' } },
-  { id: 'midnight', label: 'Midnight', light: { panel: '#f4f5fb', accent: '#4d5dcd' }, dark: { panel: '#171a2b', accent: '#8c9bff' } },
-  { id: 'paper', label: 'Paper', light: { panel: '#f7f4ec', accent: '#3d5a80' }, dark: { panel: '#22201c', accent: '#9db4d6' } },
-  { id: 'sakura', label: 'Sakura', light: { panel: '#fdf5f7', accent: '#aa4662' }, dark: { panel: '#2a2226', accent: '#f08aa7' } },
-  { id: 'forest', label: 'Forest', light: { panel: '#f3f6f1', accent: '#487243' }, dark: { panel: '#1d231e', accent: '#8fc286' } },
-  { id: 'ocean', label: 'Ocean', light: { panel: '#f2f7f9', accent: '#2a728b' }, dark: { panel: '#182326', accent: '#6cc3dc' } },
+export const presets: { id: Settings['themePreset']; readonly label: string; light: Palette; dark: Palette }[] = [
+  { id: 'classic', get label() { return t('theme.preset.classic'); }, light: { panel: '#fbf7f2', accent: '#a9491a' }, dark: { panel: '#1a1512', accent: '#ff9e62' } },
+  { id: 'midnight', get label() { return t('theme.preset.midnight'); }, light: { panel: '#f4f5fb', accent: '#4d5dcd' }, dark: { panel: '#171a2b', accent: '#8c9bff' } },
+  { id: 'paper', get label() { return t('theme.preset.paper'); }, light: { panel: '#f7f4ec', accent: '#3d5a80' }, dark: { panel: '#22201c', accent: '#9db4d6' } },
+  { id: 'sakura', get label() { return t('theme.preset.sakura'); }, light: { panel: '#fdf5f7', accent: '#aa4662' }, dark: { panel: '#2a2226', accent: '#f08aa7' } },
+  { id: 'forest', get label() { return t('theme.preset.forest'); }, light: { panel: '#f3f6f1', accent: '#487243' }, dark: { panel: '#1d231e', accent: '#8fc286' } },
+  { id: 'ocean', get label() { return t('theme.preset.ocean'); }, light: { panel: '#f2f7f9', accent: '#2a728b' }, dark: { panel: '#182326', accent: '#6cc3dc' } },
 ];
 
 // Fixed accents; "preset" follows the theme and "custom" uses accentColor.
@@ -95,7 +96,9 @@ export const stillMotion = (reduced?: boolean) => !!reduced || (typeof window !=
 /** The idle status line: the user's own words, or one in Buntini's voice. */
 export function idleStatus(settings: Pick<Settings, 'statusText' | 'petMotion'>, asleep: boolean, hour: number): string {
   if (settings.statusText.trim()) return settings.statusText.trim();
-  if (asleep) return 'Napping';
-  if (hour >= 23 || hour < 5) return 'Up late with you';
-  return { calm: 'Right here', playful: 'Purring nearby', sleepy: 'Half awake' }[settings.petMotion] ?? 'Right here';
+  if (asleep) return t('pet.status.napping');
+  if (hour >= 23 || hour < 5) return t('pet.status.upLate');
+  if (settings.petMotion === 'playful') return t('pet.status.purring');
+  if (settings.petMotion === 'sleepy') return t('pet.status.halfAwake');
+  return t('pet.status.rightHere');
 }

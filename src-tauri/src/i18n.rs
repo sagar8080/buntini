@@ -307,6 +307,10 @@ mod tests {
                 if !extensions.iter().any(|extension| path.extension().is_some_and(|found| found == *extension)) {
                     continue;
                 }
+                // Tests make up keys of their own.
+                if path.to_string_lossy().ends_with(".test.ts") {
+                    continue;
+                }
                 let text = std::fs::read_to_string(path).unwrap_or_default();
                 for (pattern, kept) in patterns {
                     for (at, _) in text.match_indices(pattern) {

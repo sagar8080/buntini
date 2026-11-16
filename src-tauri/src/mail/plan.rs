@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 
 use super::rules::{fold, has_phrase, same_box};
 use super::{Mailbox, Mark, Message};
+use crate::i18n::{t, tf, tn};
 
 pub const MAX_STEPS: usize = 40;
 pub const MAX_RECIPIENTS: usize = 100;
@@ -117,7 +118,7 @@ pub fn parse(reply: &str, cx: &Context) -> Result<Plan, String> {
     match json_in(reply) {
         Some(raw) => validate(&raw, cx),
         None if cx.pdf.is_some() => validate(&json!({"steps": []}), cx),
-        None => Err("The brain didn’t answer with a plan.".into()),
+        None => Err(t("mail.plan.noPlan")),
     }
 }
 
@@ -157,13 +158,14 @@ pub fn plain_text(text: &str) -> String {
     joined.trim().to_string()
 }
 
-fn text(step: &Value, key: &str, limit: usize) -> Result<String, String> {
-    let value = plain_text(step[key].as_str().unwrap_or(""));
+/// A reply's text.
+fn body(step: &Value) -> Result<String, String> {
+    let value = plain_text(step["body"].as_str().unwrap_or(""));
     if value.is_empty() {
-        return Err(format!("no {key}"));
+        return Err(t("mail.plan.noBody"));
     }
-    if value.chars().count() > limit {
-        return Err(format!("{key} too long"));
+    if value.chars().count() > MAX_BODY {
+        return Err(t("mail.plan.bodyTooLong"));
     }
     Ok(value)
 }
@@ -207,7 +209,7 @@ fn same_word(a: &str, b: &str) -> bool {
 pub fn pick(about: &str, messages: &[Message]) -> Result<usize, String> {
     let wanted = content_words(about);
     if wanted.is_empty() {
-        return Err("no email named".into());
+        return Err(t("mail.plan.noEmailNamed"));
     }
     let scores: Vec<usize> = messages
         .iter()
@@ -220,12 +222,12 @@ pub fn pick(about: &str, messages: &[Message]) -> Result<usize, String> {
     let best = scores.iter().copied().max().unwrap_or(0);
     let short: String = about.chars().take(60).collect();
     if best == 0 {
-        return Err(format!("no email matches “{short}”"));
+        return Err(tf("mail.plan.noEmailMatches", &[("words", &short)]));
     }
     let mut top = scores.iter().enumerate().filter(|(_, s)| **s == best).map(|(i, _)| i);
     let first = top.next().unwrap_or(0);
     if top.next().is_some() {
-        return Err(format!("more than one email matches “{short}”"));
+        return Err(tf("mail.plan.emailsMatch", &[("words", &short)]));
     }
     Ok(first)
 }
@@ -240,15 +242,15 @@ fn target(step: &Value, cx: &Context) -> Result<usize, String> {
     match (cx.by_words, numbered, about.or(words_in_number)) {
         (false, Some(n), words) => {
             if !(1..=listed).contains(&n) {
-                return Err(format!("no email {n}"));
+                return Err(tf("mail.plan.noEmailNumber", &[("number", &n)]));
             }
             match words.map(|w| pick(w, cx.messages)) {
-                Some(Ok(other)) if other != n - 1 => Err(format!("email {n} isn’t “{}”", words.unwrap_or(""))),
+                Some(Ok(other)) if other != n - 1 => Err(tf("mail.plan.emailIsnt", &[("number", &n), ("words", &words.unwrap_or(""))])),
                 _ => Ok(n - 1),
             }
         }
         (_, _, Some(words)) => pick(words, cx.messages),
-        _ => Err("no email named".into()),
+        _ => Err(t("mail.plan.noEmailNamed")),
     }
 }
 
@@ -265,10 +267,10 @@ fn targets(step: &Value, cx: &Context) -> Vec<Result<usize, String>> {
 fn mailbox(name: &str, from: &Mailbox, mailboxes: &[Mailbox]) -> Result<Mailbox, String> {
     let name = name.trim().trim_matches('/');
     if name.is_empty() {
-        return Err("no mailbox".into());
+        return Err(t("mail.plan.noMailbox"));
     }
     if super::rules::forbidden_destination(&Mailbox { account: String::new(), path: name.into() }) {
-        return Err(format!("mail isn’t moved to {name}"));
+        return Err(tf("mail.plan.notMovedTo", &[("mailbox", &name)]));
     }
     let wanted = fold(name);
     for account in [from.account.as_str(), ""] {
@@ -281,10 +283,10 @@ fn mailbox(name: &str, from: &Mailbox, mailboxes: &[Mailbox]) -> Result<Mailbox,
         match leaf.len() {
             1 => return Ok((*leaf[0]).clone()),
             0 => {}
-            _ => return Err(format!("more than one mailbox called {name}")),
+            _ => return Err(tf("mail.plan.mailboxesCalled", &[("mailbox", &name)])),
         }
     }
-    Err(format!("no mailbox called {name}"))
+    Err(tf("mail.plan.noMailboxCalled", &[("mailbox", &name)]))
 }
 
 // ----- The merge -----
@@ -386,7 +388,7 @@ fn page_for(pdf: &Pdf, name: Option<&str>, email: &str) -> Result<(usize, String
         match pages.as_slice() {
             [one] => return Ok((one + 1, candidate)),
             [] => continue,
-            _ => return Err("more than one page names them".into()),
+            _ => return Err(t("mail.plan.pagesNameThem")),
         }
     }
     let printed: Vec<usize> = (0..pdf.pages.len()).filter(|i| fold(&pdf.pages[*i]).contains(email)).collect();
@@ -398,8 +400,8 @@ fn page_for(pdf: &Pdf, name: Option<&str>, email: &str) -> Result<(usize, String
                 .unwrap_or_else(|| email.split('@').next().unwrap_or(email).to_string());
             Ok((one + 1, name))
         }
-        [] => Err("no page names them".into()),
-        _ => Err("more than one page names them".into()),
+        [] => Err(t("mail.plan.noPageNamesThem")),
+        _ => Err(t("mail.plan.pagesNameThem")),
     }
 }
 
@@ -418,14 +420,24 @@ fn add(sends: &mut Vec<Send>, send: Send, problems: &mut Vec<String>) {
         return;
     }
     if let Some(other) = sends.iter().find(|s| s.page == send.page) {
-        problems.push(format!("Merge, {}: page {} already goes to {}", send.email, send.page, other.name));
+        problems.push(merge_for(&send.email, tf("mail.plan.pageTaken", &[("page", &send.page), ("person", &other.name)])));
         return;
     }
     if sends.len() == MAX_RECIPIENTS {
-        problems.push(format!("Merge: more than {MAX_RECIPIENTS} people"));
+        problems.push(merge_problem(tf("mail.plan.tooManyPeople", &[("max", &MAX_RECIPIENTS)])));
         return;
     }
     sends.push(send);
+}
+
+/// A problem with the merge.
+fn merge_problem(why: String) -> String {
+    tf("mail.plan.merge", &[("problem", &why)])
+}
+
+/// A problem with one person in the merge.
+fn merge_for(who: &str, why: String) -> String {
+    tf("mail.plan.mergeFor", &[("person", &who), ("problem", &why)])
 }
 
 /// The merge: everyone written in the request or printed alone on one page, plus any
@@ -436,7 +448,7 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
     for email in addresses_in(cx.request) {
         match page_for(pdf, name_before(cx.request, &email).as_deref(), &email) {
             Ok((page, name)) => add(&mut sends, Send { name, email, page }, problems),
-            Err(why) => problems.push(format!("Merge, {email}: {why}")),
+            Err(why) => problems.push(merge_for(&email, why)),
         }
     }
     let written = addresses_in(cx.request);
@@ -464,11 +476,11 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
         }
         let who = if name.is_empty() { email.clone() } else { name.clone() };
         if !plain_address(&email) {
-            problems.push(format!("Merge, {who}: no valid address"));
+            problems.push(merge_for(&who, t("mail.plan.noValidAddress")));
             continue;
         }
         if !known.contains(&email) {
-            problems.push(format!("Merge, {who}: {email} isn’t in the request, the PDF or the emails"));
+            problems.push(merge_for(&who, tf("mail.plan.unknownAddress", &[("email", &email)])));
             continue;
         }
         let asked_page = number(&recipient["page"]).filter(|p| (1..=pdf.pages.len()).contains(p));
@@ -477,12 +489,12 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
             Some(send) => add(&mut sends, send, problems),
             None => match page_for(pdf, (!name.is_empty()).then_some(name.as_str()), &email) {
                 Ok((page, name)) => add(&mut sends, Send { name, email, page }, problems),
-                Err(why) => problems.push(format!("Merge, {who}: {why}")),
+                Err(why) => problems.push(merge_for(&who, why)),
             },
         }
     }
     if sends.is_empty() {
-        problems.push("Merge: nobody to send a page to".into());
+        problems.push(merge_problem(t("mail.plan.nobody")));
         return None;
     }
     let stem = std::path::Path::new(&pdf.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -492,7 +504,9 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
             return None;
         }
         if value.chars().count() > limit || !placeholders_ok(&value) {
-            problems.push(format!("Merge: the {key} can only fill in {{name}} and {{email}}"));
+            // `{name}` and `{email}` are written as they are.
+            let why = if key == "subject" { t("mail.plan.subjectFills") } else { t("mail.plan.bodyFills") };
+            problems.push(merge_problem(why));
             return None;
         }
         Some(value)
@@ -505,9 +519,9 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
 /// Checks what the brain wrote. Steps that fail are left out and listed in `problems`;
 /// a plan with no step left is an error.
 pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
-    let steps = raw["steps"].as_array().or_else(|| raw["actions"].as_array()).ok_or("The brain’s plan has no steps.")?;
+    let steps = raw["steps"].as_array().or_else(|| raw["actions"].as_array()).ok_or_else(|| t("mail.plan.noSteps"))?;
     if steps.len() > MAX_STEPS {
-        return Err(format!("A plan has at most {MAX_STEPS} steps."));
+        return Err(tf("mail.plan.tooManySteps", &[("max", &MAX_STEPS)]));
     }
     let mut problems = Vec::new();
     let mut out = Vec::new();
@@ -517,7 +531,7 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
     let mut marked: HashMap<usize, HashSet<Mark>> = HashMap::new();
     let mut asked_merge: Option<&Value> = None;
     for (index, step) in steps.iter().enumerate() {
-        let label = format!("Step {}", index + 1);
+        let problem = |why: String| tf("mail.plan.step", &[("number", &(index + 1)), ("problem", &why)]);
         let kind = step["do"].as_str().or_else(|| step["type"].as_str()).unwrap_or("").trim().to_lowercase();
         let kind = match kind.as_str() {
             "important" => "flag",
@@ -527,7 +541,7 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
         };
         if kind == "merge" {
             if cx.pdf.is_none() {
-                problems.push(format!("{label}: no PDF to split"));
+                problems.push(problem(t("mail.plan.noPdf")));
             } else if asked_merge.is_none() {
                 asked_merge = Some(step);
             }
@@ -536,19 +550,19 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
         if !["flag", "read", "junk", "move", "reply"].contains(&kind) {
             let why = match kind {
                 "send" | "forward" if cx.pdf.is_some() => continue,
-                "send" | "forward" => "plans don’t send mail".to_string(),
-                "delete" | "trash" => "plans don’t delete mail".to_string(),
-                "" => "no kind".to_string(),
-                other => format!("“{other}” isn’t a step"),
+                "send" | "forward" => t("mail.plan.noSending"),
+                "delete" | "trash" => t("mail.plan.noDeleting"),
+                "" => t("mail.plan.noKind"),
+                other => tf("mail.plan.notAStep", &[("kind", &other)]),
             };
-            problems.push(format!("{label}: {why}"));
+            problems.push(problem(why));
             continue;
         }
         for picked in targets(step, cx) {
             let at = match picked {
                 Ok(at) => at,
                 Err(why) => {
-                    problems.push(format!("{label}: {why}"));
+                    problems.push(problem(why));
                     continue;
                 }
             };
@@ -562,15 +576,15 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
                     }
                     Ok(PlanStep::Mark { message: at, what })
                 }
-                "junk" | "move" if moved.contains(&at) => Err(format!("{} is already going somewhere", short(email))),
+                "junk" | "move" if moved.contains(&at) => Err(tf("mail.plan.alreadyGoing", &[("subject", &short(email))])),
                 "junk" => Ok(PlanStep::Junk { message: at }),
                 "move" => match mailbox(step["to"].as_str().or_else(|| step["mailbox"].as_str()).unwrap_or(""), &email.mailbox, cx.mailboxes) {
                     Ok(to) if same_box(&to, &email.mailbox) => continue,
                     Ok(to) => Ok(PlanStep::Move { message: at, to }),
                     Err(why) => Err(why),
                 },
-                _ if replied.contains(&at) => Err(format!("{} already has a reply", short(email))),
-                _ => text(step, "body", MAX_BODY).map(|body| PlanStep::Reply { message: at, body }),
+                _ if replied.contains(&at) => Err(tf("mail.plan.alreadyReplied", &[("subject", &short(email))])),
+                _ => body(step).map(|body| PlanStep::Reply { message: at, body }),
             };
             match made {
                 Ok(step) => {
@@ -585,7 +599,7 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
                     }
                     out.push(step);
                 }
-                Err(why) => problems.push(format!("{label}: {why}")),
+                Err(why) => problems.push(problem(why)),
             }
         }
     }
@@ -594,8 +608,8 @@ pub fn validate(raw: &Value, cx: &Context) -> Result<Plan, String> {
     }
     if out.is_empty() {
         return Err(match problems.first() {
-            Some(first) => format!("Nothing in the plan could run. {first}."),
-            None => "The plan has nothing to do.".into(),
+            Some(first) => tf("mail.plan.nothingRan", &[("problem", first)]),
+            None => t("mail.plan.nothingToDo"),
         });
     }
     // Replies first: Mail renumbers an email when it moves, and a reply checks its number.
@@ -613,8 +627,9 @@ fn who(message: &Message) -> String {
     super::who(&message.sender)
 }
 
+/// The start of an email's subject, for a problem to quote.
 fn short(message: &Message) -> String {
-    format!("“{}”", message.subject.chars().take(40).collect::<String>())
+    message.subject.chars().take(40).collect()
 }
 
 /// One line per step, as the card and the app show it.
@@ -624,16 +639,16 @@ pub fn lines(plan: &Plan, messages: &[Message]) -> Vec<String> {
         .map(|step| {
             let about = |n: &usize| messages.get(*n).map(|m| format!("{} · {}", who(m), m.subject)).unwrap_or_default();
             match step {
-                PlanStep::Mark { message, what: Mark::Flagged } => format!("Flag · {}", about(message)),
-                PlanStep::Mark { message, .. } => format!("Read · {}", about(message)),
-                PlanStep::Junk { message } => format!("Junk · {}", about(message)),
-                PlanStep::Move { message, to } => format!("To {} · {}", super::log::leaf(&to.path), about(message)),
-                PlanStep::Reply { message, .. } => format!("Reply draft · {}", about(message)),
+                PlanStep::Mark { message, what: Mark::Flagged } => format!("{} · {}", t("surface.mail.flag"), about(message)),
+                PlanStep::Mark { message, .. } => format!("{} · {}", t("mail.step.read"), about(message)),
+                PlanStep::Junk { message } => format!("{} · {}", t("surface.mail.junk"), about(message)),
+                PlanStep::Move { message, to } => format!("{} · {}", tf("mail.step.moveTo", &[("mailbox", &super::log::leaf(&to.path))]), about(message)),
+                PlanStep::Reply { message, .. } => format!("{} · {}", t("mail.step.replyDraft"), about(message)),
                 PlanStep::Merge { subject, sends, .. } => {
-                    let names: Vec<String> = sends.iter().take(3).map(|s| format!("{} p{}", s.name, s.page)).collect();
+                    let names: Vec<String> = sends.iter().take(3).map(|s| tf("mail.step.page", &[("person", &s.name), ("page", &s.page)])).collect();
                     let more = sends.len().saturating_sub(3);
                     let tail = if more > 0 { format!(" +{more}") } else { String::new() };
-                    format!("{} drafts · {subject} · {}{tail}", sends.len(), names.join(", "))
+                    format!("{} · {subject} · {}{tail}", tn("mail.step.drafts", sends.len() as u64, &[]), names.join(", "))
                 }
             }
         })

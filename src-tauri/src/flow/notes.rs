@@ -1,5 +1,6 @@
 //! Call notes: from what the helper heard on each side to lines speaker by speaker, and the
 //! brain's summary of them. Pure.
+use crate::i18n::{t, tf};
 use crate::surface::cards::flow::NoteLine;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -70,31 +71,44 @@ pub fn drop_echo(segments: Vec<Segment>) -> Vec<Segment> {
 pub fn lines(segments: Vec<Segment>) -> Vec<NoteLine> {
     let mut segments: Vec<Segment> = drop_echo(segments).into_iter().filter(|segment| !segment.text.trim().is_empty()).collect();
     segments.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.end.total_cmp(&b.end)));
-    let mut names: HashMap<u32, String> = HashMap::new();
-    let mut out: Vec<(String, f64, String)> = Vec::new();
+    // Each speaker on the other side by the order they first spoke, from 1; you are none.
+    let mut numbers: HashMap<u32, usize> = HashMap::new();
+    let mut out: Vec<(Option<usize>, f64, String)> = Vec::new();
     for segment in segments {
-        let name = match segment.side {
-            Side::Mic => "You".to_string(),
+        let who = match segment.side {
+            Side::Mic => None,
             Side::System => {
-                let next = names.len() + 1;
-                names.entry(segment.speaker).or_insert_with(|| format!("Speaker {next}")).clone()
+                let next = numbers.len() + 1;
+                Some(*numbers.entry(segment.speaker).or_insert(next))
             }
         };
         let text = segment.text.trim().to_string();
         match out.last_mut() {
-            Some((last, end, joined)) if *last == name && segment.start - *end <= JOIN_GAP => {
+            Some((last, end, joined)) if *last == who && segment.start - *end <= JOIN_GAP => {
                 joined.push(' ');
                 joined.push_str(&text);
                 *end = end.max(segment.end);
             }
-            _ => out.push((name, segment.end, text)),
+            _ => out.push((who, segment.end, text)),
         }
     }
     // A call with just one person on the other side doesn't need numbers.
-    let others = names.len();
+    let others = numbers.len();
     out.into_iter()
-        .map(|(name, _, text)| NoteLine { speaker: Some(if others == 1 && name == "Speaker 1" { "Them".into() } else { name }), text })
+        .map(|(who, _, text)| {
+            let speaker = match who {
+                None => you(),
+                Some(_) if others == 1 => t("flow.note.them"),
+                Some(number) => tf("flow.note.speaker", &[("number", &number)]),
+            };
+            NoteLine { speaker: Some(speaker), text }
+        })
         .collect()
+}
+
+/// How the person who recorded the call is named in its lines.
+fn you() -> String {
+    t("flow.note.you")
 }
 
 /// The note as text for the brain, one line per turn.
@@ -102,9 +116,12 @@ pub fn transcript(lines: &[NoteLine]) -> String {
     lines.iter().map(|line| format!("{}: {}", line.speaker.as_deref().unwrap_or("Someone"), line.text)).collect::<Vec<_>>().join("\n")
 }
 
-/// What the brain is asked to make of a call.
-pub fn summary_prompt() -> &'static str {
-    "You write notes of a recorded call for the person who was on it (\"You\"). Reply with JSON only: {\"title\": a few words, \"summary\": two or three sentences, \"keyPoints\": [short strings], \"todos\": [short strings, each an action someone agreed to, naming who when known]}. Use the call's language. Leave a list empty rather than inventing."
+/// What the brain is asked to make of a call. The person is named as the lines name them.
+pub fn summary_prompt() -> String {
+    format!(
+        "You write notes of a recorded call for the person who was on it (\"{}\"). Reply with JSON only: {{\"title\": a few words, \"summary\": two or three sentences, \"keyPoints\": [short strings], \"todos\": [short strings, each an action someone agreed to, naming who when known]}}. Use the call's language. Leave a list empty rather than inventing.",
+        you()
+    )
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

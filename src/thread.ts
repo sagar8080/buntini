@@ -1,4 +1,5 @@
 // Pure helpers for the conversation thread: ordering, the "New topic" divider and the greeting.
+import { t } from './i18n.ts';
 import type { ConversationPage, TaskRecord } from './types';
 
 export type ThreadItem = { kind: 'turn'; turn: TaskRecord } | { kind: 'topic'; at: string };
@@ -29,16 +30,17 @@ export function threadItems(turns: TaskRecord[], boundary?: string | null): Thre
 
 export function greeting(now: Date, name?: string): string {
   const hour = now.getHours();
-  const part = hour < 5 ? 'Up late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 22 ? 'Good evening' : 'Up late';
+  const part = hour < 5 ? 'late' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 22 ? 'evening' : 'late';
   const who = name?.trim();
-  return who ? `${part}, ${who}.` : `${part}.`;
+  if (who) return t(({ late: 'chat.greeting.lateNamed', morning: 'chat.greeting.morningNamed', afternoon: 'chat.greeting.afternoonNamed', evening: 'chat.greeting.eveningNamed' } as const)[part], { name: who });
+  return t(({ late: 'chat.greeting.late', morning: 'chat.greeting.morning', afternoon: 'chat.greeting.afternoon', evening: 'chat.greeting.evening' } as const)[part]);
 }
 
 /** The line under the greeting, in Buntini's voice for the time of day. */
 export function invitation(now: Date): string {
   const hour = now.getHours();
-  if (hour < 5 || hour >= 22) return 'I’m here if you need me.';
-  if (hour < 12) return 'Ready when you are.';
-  if (hour < 17) return 'What can I fetch for you?';
-  return 'Winding down? I’m all ears.';
+  if (hour < 5 || hour >= 22) return t('chat.invitation.late');
+  if (hour < 12) return t('chat.invitation.morning');
+  if (hour < 17) return t('chat.invitation.afternoon');
+  return t('chat.invitation.evening');
 }

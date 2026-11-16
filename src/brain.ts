@@ -1,18 +1,19 @@
+import { t } from './i18n.ts';
 import type { CloudProvider, ModelBackend } from './types';
 
 /** Plain-language Apple Intelligence status from the helper's availability report. */
 export function appleStatus(reason?: string): { ready: boolean; label: string; advice?: string } {
   switch (reason) {
-    case 'available': return { ready: true, label: 'Ready on this Mac' };
-    case 'appleIntelligenceNotEnabled': return { ready: false, label: 'Turned off', advice: 'Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri.' };
-    case 'modelNotReady': return { ready: false, label: 'Downloading' };
-    case 'modelStuck': return { ready: false, label: 'Not getting ready', advice: 'Apple Intelligence hasn’t got ready on this Mac. If System Settings shows only Siri, set Siri’s language to match the Mac’s (both English (India), say) and turn on Apple Intelligence & Siri. Until then, choose a local or cloud model.' };
-    case 'languageNotSupported': return { ready: false, label: 'Language not supported', advice: 'Apple Intelligence doesn’t speak this Mac’s language yet. In System Settings → General → Language & Region, put a supported language such as English (India) first, then turn on Apple Intelligence.' };
-    case 'deviceNotEligible': return { ready: false, label: 'Not supported', advice: 'This Mac doesn’t support Apple Intelligence.' };
-    case 'unsupported': return { ready: false, label: 'Needs macOS 26', advice: 'Apple Intelligence needs macOS 26 on an Apple silicon Mac.' };
-    case 'missing': return { ready: false, label: 'Missing', advice: 'The Apple Intelligence helper is missing from this installation.' };
-    case 'checking': case undefined: return { ready: false, label: 'Checking…' };
-    default: return { ready: false, label: 'Unavailable', advice: 'Apple Intelligence isn’t available right now.' };
+    case 'available': return { ready: true, label: t('brain.apple.ready') };
+    case 'appleIntelligenceNotEnabled': return { ready: false, label: t('brain.apple.off'), advice: t('brain.apple.offAdvice') };
+    case 'modelNotReady': return { ready: false, label: t('brain.apple.downloading') };
+    case 'modelStuck': return { ready: false, label: t('brain.apple.stuck'), advice: t('brain.apple.stuckAdvice') };
+    case 'languageNotSupported': return { ready: false, label: t('brain.apple.language'), advice: t('brain.apple.languageAdvice') };
+    case 'deviceNotEligible': return { ready: false, label: t('brain.apple.notSupported'), advice: t('brain.apple.notSupportedAdvice') };
+    case 'unsupported': return { ready: false, label: t('brain.apple.needsMacos'), advice: t('brain.apple.needsMacosAdvice') };
+    case 'missing': return { ready: false, label: t('brain.apple.missing'), advice: t('brain.apple.missingAdvice') };
+    case 'checking': case undefined: return { ready: false, label: t('brain.apple.checking') };
+    default: return { ready: false, label: t('brain.apple.unavailable'), advice: t('brain.apple.unavailableAdvice') };
   }
 }
 
@@ -51,7 +52,7 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
   // LM Studio's server on this Mac, ready-made.
   { id: 'lmstudio', name: 'LM Studio', model: '', input: 0, output: 0, keys: '', kind: 'server' },
   // The user's own server at an address they give: Ollama and the like.
-  { id: 'custom', name: 'Your server', model: '', input: 0, output: 0, keys: '', kind: 'server' },
+  { id: 'custom', get name() { return t('brain.provider.yourServer'); }, model: '', input: 0, output: 0, keys: '', kind: 'server' },
 ];
 
 /** The providers to offer: every one, except command-line tools that aren't installed
@@ -63,7 +64,8 @@ export function offeredProviders(installed: string[] | undefined, chosen: CloudP
 /** LM Studio's usual address on this Mac. */
 export const lmStudioAddress = 'localhost:1234';
 
-export const backendLabel: Record<ModelBackend, string> = { apple: 'Apple Intelligence', mlx: 'Local MLX model', cloud: 'Cloud model' };
+// Read in the language spoken when shown.
+export const backendLabel: Readonly<Record<ModelBackend, string>> = { apple: 'Apple Intelligence', get mlx() { return t('brain.backend.mlx'); }, get cloud() { return t('brain.backend.cloud'); } };
 
 /** A readable name for a chosen folder: the environment for a Python path, else the folder. */
 export function folderName(path: string): string {
@@ -76,10 +78,10 @@ export function folderName(path: string): string {
 /** The model worker's status in plain words. */
 export function friendlyStatus(status: string, ready: boolean, backend: ModelBackend): string {
   if (backend === 'mlx') {
-    if (!ready) return 'Not set up';
-    if (status.startsWith('Not started')) return 'Ready';
-    if (status.startsWith('Stopped')) return 'Paused';
-    if (status.startsWith('Ready')) return 'Loaded';
+    if (!ready) return t('brain.status.notSetUp');
+    if (status.startsWith('Not started')) return t('brain.status.ready');
+    if (status.startsWith('Stopped')) return t('brain.status.paused');
+    if (status.startsWith('Ready')) return t('brain.status.loaded');
   }
   return status;
 }
@@ -90,10 +92,10 @@ export type SetupReport = { dependencies: Record<string, { installed: boolean; v
 export function setupLines(report: SetupReport): { label: string; ok: boolean; detail: string }[] {
   const mlx = report.dependencies.mlx_lm, model = report.models.qwen;
   const lines = [
-    { label: 'MLX', ok: !!mlx?.installed, detail: mlx?.installed ? `Installed${mlx.version ? ` (${mlx.version})` : ''}` : 'Not installed in this environment. Run the Install MLX step.' },
-    { label: 'Model', ok: !!model?.ready_for_load, detail: model?.ready_for_load ? 'Files are all there' : model?.configured ? model.error || 'Some files are missing. Download it again.' : 'Choose a model folder.' },
+    { label: 'MLX', ok: !!mlx?.installed, detail: mlx?.installed ? (mlx.version ? t('brain.setup.installedVersion', { version: mlx.version }) : t('brain.setup.installed')) : t('brain.setup.mlxMissing') },
+    { label: t('settings.brain.model'), ok: !!model?.ready_for_load, detail: model?.ready_for_load ? t('brain.setup.filesThere') : model?.configured ? model.error || t('brain.setup.filesMissing') : t('brain.setup.chooseFolder') },
   ];
   const whisper = report.models.whisper;
-  if (whisper?.configured) lines.push({ label: 'Whisper (voice)', ok: whisper.ready_for_load, detail: whisper.ready_for_load ? 'Files are all there' : whisper.error || 'Incomplete' });
+  if (whisper?.configured) lines.push({ label: t('brain.setup.whisper'), ok: whisper.ready_for_load, detail: whisper.ready_for_load ? t('brain.setup.filesThere') : whisper.error || t('brain.setup.incomplete') });
   return lines;
 }

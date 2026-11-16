@@ -2,6 +2,7 @@
 //! ask, into <app data>/speech-models. Every file is pinned to a revision and checked against
 //! its SHA-256 before it gets its name, as for the local brain. The audio helper only ever
 //! loads from that folder; nothing it runs downloads anything.
+use crate::i18n::{t, tf};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -126,9 +127,10 @@ pub fn remove(base: &Path) -> Result<(), String> {
 async fn fetch_all(base: &Path, free_bytes: u64, cancel: &AtomicBool, tell: &(dyn Fn(Status) + Send + Sync)) -> Result<(), String> {
     let total = total_bytes();
     if free_bytes < total + MARGIN_BYTES {
-        return Err(format!("This needs {:.1} GB free.", (total + MARGIN_BYTES) as f64 / 1e9));
+        let size = format!("{:.1}", (total + MARGIN_BYTES) as f64 / 1e9);
+        return Err(tf("flow.models.needsSpace", &[("size", &size)]));
     }
-    tokio::fs::create_dir_all(base).await.map_err(|_| "Buntini couldn’t make its folder.".to_string())?;
+    tokio::fs::create_dir_all(base).await.map_err(|_| t("flow.models.noFolder"))?;
     // Gigabytes that can be fetched again have no place in a backup.
     let _ = tokio::process::Command::new("/usr/bin/tmutil").arg("addexclusion").arg(base).output().await;
     let client = crate::local_setup::download_client()?;
@@ -138,7 +140,7 @@ async fn fetch_all(base: &Path, free_bytes: u64, cancel: &AtomicBool, tell: &(dy
     for (name, pin) in pins() {
         for file in &pin.files {
             if !crate::local_setup::safe_relative(&file.path) {
-                return Err("The speech model has an unexpected file.".into());
+                return Err(t("flow.models.unexpectedFile"));
             }
             let url = format!("https://huggingface.co/{}/resolve/{}/{}", pin.repo, pin.revision, file.path);
             let so_far = finished;
