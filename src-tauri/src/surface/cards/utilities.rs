@@ -41,6 +41,13 @@ pub struct Vitals {
 pub struct Update {
     pub version: String,
     pub notes: Vec<String>,
+    /// `ask`, `current`, `available`, `downloading`, `checking`, `ready` or `failed` (the
+    /// note says why). None reads as `available`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// While downloading, 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

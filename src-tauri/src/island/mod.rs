@@ -11,6 +11,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod demo;
+pub mod updates;
 
 use crate::surface::cards::island as cards;
 use crate::surface::{self, Action, Card, CardBody, Cat, Contribution, Home, IslandState, Mood, Offer, Placement, Source, Urgency};
@@ -31,11 +32,13 @@ pub struct Settings {
     /// Where the island sits: `auto` (the notch, or the top of the screen) or the corner the
     /// cat was dragged to. Set by dragging, never in a settings page.
     pub placement: String,
+    /// Look once a day for a newer Buntini (updates.rs). Off until you agree.
+    pub updates: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { placement: "auto".into() }
+        Settings { placement: "auto".into(), updates: false }
     }
 }
 
@@ -200,6 +203,7 @@ pub fn start(app: AppHandle) {
     let name = settings(&app).map(|settings| settings.user_name.trim().to_string()).unwrap_or_default();
     surface::set_island(shown.clone());
     watch_health();
+    updates::start(app.clone());
     publish(vec![Offer {
         card: Card { id: "greeting".into(), source: Source::Island, body: CardBody::Greeting(cards::Greeting { name: (!name.is_empty()).then(|| first_word(&name)) }) },
         urgency: Urgency::Alert,
@@ -221,6 +225,12 @@ pub fn start(app: AppHandle) {
 }
 
 static OFFERS: Mutex<Vec<Offer>> = Mutex::new(Vec::new());
+
+/// Takes one of the island's own cards away.
+fn withdraw(id: &str) {
+    OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).retain(|offer| offer.card.id != id);
+    publish(Vec::new());
+}
 
 /// Replaces the island's own cards, keeping those still showing.
 fn publish(mut offers: Vec<Offer>) {
@@ -300,6 +310,9 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     if action.card.as_deref().is_some_and(|card| card.starts_with("demo:")) {
         demo::advance();
         return Ok(());
+    }
+    if action.card.as_deref() == Some("update") {
+        return updates::act(app, &action.name);
     }
     match action.name.as_str() {
         "openChat" => {
@@ -442,8 +455,8 @@ mod tests {
     #[test]
     fn the_island_sits_only_where_it_can() {
         assert!(Settings::default().validate().is_ok());
-        assert!(Settings { placement: "bottomLeft".into() }.validate().is_ok());
-        assert!(Settings { placement: "middle".into() }.validate().is_err());
+        assert!(Settings { placement: "bottomLeft".into(), ..Settings::default() }.validate().is_ok());
+        assert!(Settings { placement: "middle".into(), ..Settings::default() }.validate().is_err());
         assert_eq!(placement("topRight"), Placement::TopRight);
         assert_eq!(placement("anything"), Placement::Auto);
     }

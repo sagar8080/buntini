@@ -32,6 +32,10 @@ public struct Vitals: Codable, Equatable, Sendable {
 public struct Update: Codable, Equatable, Sendable {
     public let version: String
     public let notes: [String]
+    /// `ask`, `current`, `available`, `downloading`, `checking`, `ready` or `failed`.
+    public let stage: String?
+    /// While downloading, 0 to 1.
+    public let progress: Double?
 }
 
 public struct WhatsNew: Codable, Equatable, Sendable {

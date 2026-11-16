@@ -4,8 +4,10 @@
 export interface IslandSettings {
   /** Where the island sits: set by dragging the cat, never in a settings page. */
   placement: 'auto' | 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+  /** Look once a day for a newer Buntini. */
+  updates: boolean;
 }
-export const defaults: IslandSettings = { placement: 'auto' };
+export const defaults: IslandSettings = { placement: 'auto', updates: false };
 
 /** What `island_call` accepts; mirrors `island::Op`. */
 export type IslandOp = { op: 'ping' };

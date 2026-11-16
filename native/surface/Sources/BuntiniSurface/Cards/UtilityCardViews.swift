@@ -179,21 +179,144 @@ struct VitalsCardView: View {
     }
 }
 
+/// Buntini's own update: asked once, then found, downloaded, checked and ready to restart.
 struct UpdateCardView: View {
     let card: Card
     let update: Update
     let send: (Action) -> Void
 
+    private var stage: String { update.stage ?? "available" }
+
+    private func act(_ name: String) {
+        send(Action(source: card.source, card: card.id, name: name))
+    }
+
+    private var title: String {
+        switch stage {
+        case "ask": return "Keep Buntini up to date?"
+        case "current": return "Buntini is up to date"
+        case "downloading": return "Downloading"
+        case "checking": return "Checking"
+        case "ready": return "Ready to restart"
+        case "failed": return "Couldn't update"
+        default: return "New version"
+        }
+    }
+
     var body: some View {
-        CardHeading(from: "Buntini \(update.version)", title: update.notes.first ?? "")
+        HStack(spacing: 14) {
+            UpdateBadge(stage: stage, progress: update.progress ?? 0)
+                .frame(width: 58, height: 58)
+            VStack(alignment: .leading, spacing: 7) {
+                CardHeading(from: stage == "ask" ? "Buntini" : "Buntini \(update.version)", title: title)
+                if stage == "downloading" {
+                    Text("\(Int(((update.progress ?? 0) * 100).rounded()))%")
+                        .font(.caption.weight(.medium)).monospacedDigit().opacity(0.6)
+                } else if !update.notes.isEmpty, stage != "ask" {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(update.notes.prefix(stage == "failed" ? 1 : 2).enumerated()), id: \.offset) { _, note in
+                            Text(stage == "failed" ? note : "· \(note)").font(.caption).opacity(0.7).lineLimit(1)
+                        }
+                    }
+                }
+                HStack(spacing: 6) {
+                    switch stage {
+                    case "ask":
+                        IslandButton(label: "Check daily", prominent: true) { act("allow") }
+                        IslandButton(label: "Not now") { act("notNow") }
+                    case "available":
+                        IslandButton(label: "Install", prominent: true) { act("install") }
+                        IslandButton(label: "Notes") { act("open") }
+                        IslandButton(label: "Later") { act("later") }
+                    case "ready":
+                        IslandButton(label: "Restart", prominent: true) { act("restart") }
+                        IslandButton(label: "Later") { act("later") }
+                    case "failed":
+                        IslandButton(label: "Try again", prominent: true) { act("install") }
+                        IslandButton(label: "Download") { act("open") }
+                        IslandButton(label: "Close") { act("later") }
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
+/// A ring that fills as the download runs, around a sign for the stage.
+private struct UpdateBadge: View {
+    let stage: String
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.inPicture) private var inPicture
+
+    private var tint: [Color] {
+        switch stage {
+        case "failed": return [Color(red: 1, green: 0.45, blue: 0.4), Color(red: 1, green: 0.62, blue: 0.3)]
+        case "current", "ready": return [Color(red: 0.36, green: 0.86, blue: 0.6), Color(red: 0.3, green: 0.75, blue: 0.95)]
+        default: return [Color(red: 0.46, green: 0.62, blue: 1), Color(red: 0.72, green: 0.5, blue: 1)]
+        }
+    }
+
+    private var symbol: String {
+        switch stage {
+        case "ask": return "arrow.triangle.2.circlepath"
+        case "current", "ready": return "checkmark"
+        case "failed": return "exclamationmark"
+        case "checking": return "checkmark.shield"
+        default: return "arrow.down"
+        }
+    }
+
+    private var filled: Double {
+        switch stage {
+        case "downloading": return max(0.02, min(1, progress))
+        case "checking", "current", "ready": return 1
+        default: return 0
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.12), lineWidth: 5)
+            Circle()
+                .trim(from: 0, to: filled)
+                .stroke(AngularGradient(colors: tint + [tint[0]], center: .center), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: tint[0].opacity(0.55), radius: 5)
+                .animation(reduceMotion || inPicture ? nil : .easeOut(duration: 0.35), value: filled)
+            Circle()
+                .fill(RadialGradient(colors: [tint[0].opacity(0.35), .clear], center: .center, startRadius: 2, endRadius: 26))
+                .padding(6)
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(LinearGradient(colors: tint, startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// After an update: the new version and what changed.
 struct WhatsNewCardView: View {
     let whatsNew: WhatsNew
 
     var body: some View {
-        CardHeading(from: "Buntini \(whatsNew.version)", title: whatsNew.lines.first ?? "")
+        VStack(alignment: .leading, spacing: 8) {
+            CardHeading(from: "Buntini \(whatsNew.version)", title: "What's new")
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(whatsNew.lines.prefix(4).enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "sparkle").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(red: 0.72, green: 0.5, blue: 1))
+                        Text(line).font(.caption).lineLimit(1).opacity(0.85)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -34,6 +34,7 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
   return <>
     <section className="settings-section">
       <Toggle label="Notice what I’m doing" detail="App names and times, on this Mac only" checked={draft.petAwareness} onChange={value => update('petAwareness', value)} />
+      <Toggle label="Check for updates" detail="Once a day, from GitHub" checked={draft.island.updates} onChange={value => update('island', { ...draft.island, updates: value })} />
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><h3>Folders</h3></div>
