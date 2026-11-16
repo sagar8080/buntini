@@ -228,6 +228,7 @@ struct Home: View {
     let send: (Action) -> Void
     @State private var question = ""
     @FocusState private var focused: Bool
+    @Environment(\.inPicture) private var inPicture
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -247,23 +248,32 @@ struct Home: View {
                 .buttonStyle(.plain)
             }
             HStack(spacing: 8) {
-                TextField("Ask Buntini", text: $question)
-                    .textFieldStyle(.plain)
+                field
                     .font(.callout)
-                    .focused($focused)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
-                    .onSubmit(ask)
-                    .onExitCommand {
-                        focused = false
-                        model.expanded = false
-                    }
                 IslandButton(label: "Chat", prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
         }
         .onChange(of: focused) { now in model.typing = now }
         .onDisappear { model.typing = false }
+    }
+
+    /// A picture can't hold a live text field, so it gets the field's look.
+    @ViewBuilder private var field: some View {
+        if inPicture {
+            Text("Ask Buntini").foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            TextField("Ask Buntini", text: $question)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit(ask)
+                .onExitCommand {
+                    focused = false
+                    model.expanded = false
+                }
+        }
     }
 
     private func ask() {
