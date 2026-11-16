@@ -42,6 +42,8 @@ pub struct Settings {
     pub panel_size: String,
     /// Shown in the header while Buntini is idle; empty means Buntini picks one.
     pub status_text: String,
+    /// The language Buntini speaks (`i18n::LANGUAGES`); empty follows the Mac.
+    pub language: String,
     pub companion_scale: f64,
     pub cat_coat: String,
     pub cat_eyes: String,
@@ -127,6 +129,7 @@ impl Default for Settings {
             corners: "round".into(),
             panel_size: "standard".into(),
             status_text: String::new(),
+            language: String::new(),
             companion_scale: 1.0,
             cat_coat: "ginger".into(),
             cat_eyes: "green".into(),
@@ -237,6 +240,9 @@ impl Settings {
         }
         if self.status_text.chars().count() > 40 || self.status_text.chars().any(char::is_control) {
             return Err("The status line can be up to 40 characters.".into());
+        }
+        if !self.language.is_empty() && !crate::i18n::LANGUAGES.contains(&self.language.as_str()) {
+            return Err("Choose a language from the list.".into());
         }
         crate::privacy::validate_shares(&self.external_shares)?;
         for (index, id) in self.apps.iter().enumerate() {
@@ -677,6 +683,8 @@ pub struct Bootstrap {
     pub memories: Vec<Memory>,
     /// The morning brief is on and hasn't been shown today.
     pub brief_due: bool,
+    /// The language Buntini speaks when Settings leaves it to the Mac.
+    pub system_language: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

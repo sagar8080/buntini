@@ -3,6 +3,7 @@ import { CircleStop, Copy, Mic, Trash2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { desktop, errorMessage } from '../bridge';
 import { callFlow } from './api';
+import { speak, useLanguage } from '../locales';
 import { minutes, type Dictation, type FlowStatus, type LiveLine, type Note, type Stats } from './model';
 import './flow.css';
 
@@ -16,8 +17,16 @@ const when = (iso: string) => {
 
 /** The Library window: call notes, dictation history and statistics. */
 export default function Library() {
+  useLanguage();
   const [tab, setTab] = useState<Tab>('notes');
   const [error, setError] = useState('');
+  // The language Buntini speaks, and its changes from Settings.
+  useEffect(() => {
+    if (!desktop) return;
+    void callFlow<string>({ op: 'language' }).then(code => speak(code)).catch(() => {});
+    const spoken = listen<string>('language', event => { void speak(event.payload); });
+    return () => { void spoken.then(stop => stop()); };
+  }, []);
   useEffect(() => {
     const dark = matchMedia('(prefers-color-scheme: dark)');
     const follow = () => { document.documentElement.dataset.mode = dark.matches ? 'dark' : 'light'; };

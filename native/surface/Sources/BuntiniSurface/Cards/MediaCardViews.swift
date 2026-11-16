@@ -72,7 +72,7 @@ struct NowPlayingCardView: View {
         .onDisappear { act("shown", .bool(false)) }
         .onChange(of: playing.artwork) { _ in load() }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Now playing")
+        .accessibilityLabel(L(.nowPlaying))
     }
 
     private var subtitle: String? {
@@ -83,13 +83,13 @@ struct NowPlayingCardView: View {
     private func controls(tint: RGB) -> some View {
         HStack(spacing: 6) {
             if let shuffle = playing.shuffle {
-                GlyphButton(symbol: "shuffle", size: 12, on: shuffle, tint: tint, label: "Shuffle") { act("shuffle", .bool(!shuffle)) }
+                GlyphButton(symbol: "shuffle", size: 12, on: shuffle, tint: tint, label: L(.shuffle)) { act("shuffle", .bool(!shuffle)) }
             }
-            GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: "Previous") { act("previous") }
+            GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: L(.previous)) { act("previous") }
             PlayButton(playing: playing.playing, tint: tint) { act(playing.playing ? "pause" : "play") }
-            GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: "Next") { act("next") }
+            GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: L(.nextTrack)) { act("next") }
             if let mode = playing.repeatMode {
-                GlyphButton(symbol: mode == "one" ? "repeat.1" : "repeat", size: 12, on: mode != "off", tint: tint, label: "Repeat") {
+                GlyphButton(symbol: mode == "one" ? "repeat.1" : "repeat", size: 12, on: mode != "off", tint: tint, label: L(.repeatMode)) {
                     act("repeat", .string(Self.nextRepeat(mode, player: playing.player)))
                 }
             }

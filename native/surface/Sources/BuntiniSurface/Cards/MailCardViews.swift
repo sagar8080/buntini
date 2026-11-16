@@ -24,30 +24,44 @@ struct MailCardView: View {
             }
             if mail.closed {
                 HStack {
-                    Text("Mail is closed").font(.caption).opacity(0.7)
+                    Text(L(.mailClosed)).font(.caption).opacity(0.7)
                     Spacer()
-                    IslandButton(label: "Open Mail") { act("openMail") }
+                    IslandButton(label: L(.openMail)) { act("openMail") }
                 }
             } else if let status = mail.status {
                 Text(status).font(.caption).foregroundStyle(Color.orange).lineLimit(2)
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Mail")
+        .accessibilityLabel(L(.mail))
     }
 }
 
 private enum MailTime {
     static let hour: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
-    static let weekday: DateFormatter = { let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEE"); return f }()
-    static let day: DateFormatter = { let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("d MMM"); return f }()
+    /// Weekday and day names in the words' language, made again when it changes.
+    private static var named: (language: String, weekday: DateFormatter, day: DateFormatter)?
+
+    private static func formatters() -> (weekday: DateFormatter, day: DateFormatter) {
+        let locale = Lexicon.locale
+        if let named, named.language == locale.identifier { return (named.weekday, named.day) }
+        let make = { (template: String) -> DateFormatter in
+            let f = DateFormatter()
+            f.locale = locale
+            f.setLocalizedDateFormatFromTemplate(template)
+            return f
+        }
+        let made = (language: locale.identifier, weekday: make("EEE"), day: make("d MMM"))
+        named = made
+        return (made.weekday, made.day)
+    }
 
     static func short(_ seconds: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(seconds))
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return hour.string(from: date) }
-        if let days = calendar.dateComponents([.day], from: date, to: Date()).day, days < 7 { return weekday.string(from: date) }
-        return day.string(from: date)
+        if let days = calendar.dateComponents([.day], from: date, to: Date()).day, days < 7 { return formatters().weekday.string(from: date) }
+        return formatters().day.string(from: date)
     }
 }
 
@@ -97,7 +111,7 @@ private struct MailListView: View {
     let act: (String, JSONValue?) -> Void
     @State private var query = ""
 
-    private static let filters = [("all", "All"), ("unread", "Unread"), ("important", "Important"), ("today", "Today")]
+    private static var filters: [(String, String)] { [("all", L(.mailAll)), ("unread", L(.mailUnread)), ("important", L(.mailImportant)), ("today", L(.mailToday))] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -107,12 +121,12 @@ private struct MailListView: View {
                 }
                 Spacer(minLength: 4)
                 if mail.sortable > 0 {
-                    IslandButton(label: "Sort \(mail.sortable)") { act("sort", nil) }
+                    IslandButton(label: L(.mailSort, ["count": String(mail.sortable)])) { act("sort", nil) }
                 }
             }
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.caption).opacity(0.6)
-                TextField("Search", text: $query)
+                TextField(L(.mailSearch), text: $query)
                     .textFieldStyle(.plain)
                     .font(.caption)
                     .onSubmit { act("search", .string(query)) }
@@ -120,7 +134,7 @@ private struct MailListView: View {
                     Button { query = ""; act("search", .string("")) } label: { Image(systemName: "xmark.circle.fill").font(.caption) }
                         .buttonStyle(.plain)
                         .opacity(0.6)
-                        .accessibilityLabel("Clear")
+                        .accessibilityLabel(L(.clear))
                 }
             }
             .padding(.horizontal, 8)
@@ -129,7 +143,7 @@ private struct MailListView: View {
             .onAppear { query = mail.query }
 
             if mail.messages.isEmpty {
-                Text(mail.query.isEmpty ? "No mail" : "No match").font(.caption).opacity(0.5).padding(.vertical, 6)
+                Text(mail.query.isEmpty ? L(.noMail) : L(.noMatch)).font(.caption).opacity(0.5).padding(.vertical, 6)
             } else {
                 MailFit(maxHeight: 210) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -137,7 +151,7 @@ private struct MailListView: View {
                             MailRowView(row: row, act: act)
                         }
                         if mail.more {
-                            Button { act("more", nil) } label: { Text("More").font(.caption).opacity(0.7) }
+                            Button { act("more", nil) } label: { Text(L(.more)).font(.caption).opacity(0.7) }
                                 .buttonStyle(.plain)
                                 .padding(.vertical, 4)
                         }
@@ -153,7 +167,7 @@ private struct MailListView: View {
                             Spacer(minLength: 4)
                             if entry.undoable {
                                 Button { act("undo", .string(entry.id)) } label: {
-                                    Label("Undo", systemImage: "arrow.uturn.backward").font(.caption2.weight(.semibold))
+                                    Label(L(.undo), systemImage: "arrow.uturn.backward").font(.caption2.weight(.semibold))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -192,11 +206,11 @@ private struct MailRowView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .contextMenu {
-            Button(row.unread ? "Mark Read" : "Mark Unread") { act(row.unread ? "markRead" : "markUnread", .string(row.id)) }
-            Button(row.flagged ? "Unflag" : "Flag") { act(row.flagged ? "unflag" : "flag", .string(row.id)) }
-            Button("Junk") { act("junk", .string(row.id)) }
+            Button(row.unread ? L(.markRead) : L(.markUnread)) { act(row.unread ? "markRead" : "markUnread", .string(row.id)) }
+            Button(row.flagged ? L(.unflag) : L(.flag)) { act(row.flagged ? "unflag" : "flag", .string(row.id)) }
+            Button(L(.junk)) { act("junk", .string(row.id)) }
         }
-        .accessibilityLabel("\(row.from), \(row.subject)\(row.unread ? ", unread" : "")\(row.flagged ? ", flagged" : "")")
+        .accessibilityLabel([row.from, row.subject, row.unread ? L(.isUnread) : nil, row.flagged ? L(.isFlagged) : nil].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -211,7 +225,7 @@ private struct MailOpenView: View {
             HStack(spacing: 6) {
                 Button { act("close", nil) } label: { Image(systemName: "chevron.left").font(.caption.weight(.semibold)) }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Back")
+                    .accessibilityLabel(L(.back))
                 Text(open.from).font(.caption.weight(.semibold)).lineLimit(1)
                 Spacer()
                 Text(MailTime.short(open.at)).font(.caption2).opacity(0.5)
@@ -228,7 +242,7 @@ private struct MailOpenView: View {
                 Label(open.attachments.joined(separator: ", "), systemImage: "paperclip").font(.caption2).opacity(0.7).lineLimit(1)
             }
             if replying {
-                TextField("Reply", text: $reply, axis: .vertical)
+                TextField(L(.reply), text: $reply, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.caption)
                     .lineLimit(3...6)
@@ -236,18 +250,18 @@ private struct MailOpenView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
                 HStack(spacing: 6) {
                     Spacer()
-                    IslandButton(label: "Cancel") { replying = false }
-                    IslandButton(label: "Save draft", prominent: true) {
+                    IslandButton(label: L(.cancel)) { replying = false }
+                    IslandButton(label: L(.saveDraft), prominent: true) {
                         act("reply", .object(["id": .string(open.id), "body": .string(reply)]))
                     }
                     .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } else {
                 HStack(spacing: 6) {
-                    IslandButton(label: "Reply", prominent: true) { replying = true }
-                    IslandButton(label: open.unread ? "Mark Read" : "Mark Unread") { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
-                    IslandButton(label: open.flagged ? "Unflag" : "Flag") { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
-                    IslandButton(label: "Junk") { act("junk", .string(open.id)) }
+                    IslandButton(label: L(.reply), prominent: true) { replying = true }
+                    IslandButton(label: open.unread ? L(.markRead) : L(.markUnread)) { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
+                    IslandButton(label: open.flagged ? L(.unflag) : L(.flag)) { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
+                    IslandButton(label: L(.junk)) { act("junk", .string(open.id)) }
                 }
             }
         }
@@ -260,7 +274,7 @@ private struct MailPendingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CardHeading(from: "Mail", title: pending.title)
+            CardHeading(from: L(.mail), title: pending.title)
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(Array(pending.lines.prefix(8).enumerated()), id: \.offset) { _, line in
                     Text(line).font(.caption).opacity(0.85).lineLimit(3)
@@ -271,8 +285,8 @@ private struct MailPendingView: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "Deny") { act("deny", .string(pending.id)) }
-                IslandButton(label: "Allow", prominent: true) { act("allow", .string(pending.id)) }
+                IslandButton(label: L(.deny)) { act("deny", .string(pending.id)) }
+                IslandButton(label: L(.allow), prominent: true) { act("allow", .string(pending.id)) }
             }
         }
     }
@@ -284,7 +298,7 @@ private struct MailPlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CardHeading(from: "Mail plan", title: plan.summary.isEmpty ? "Plan" : plan.summary)
+            CardHeading(from: L(.mailPlan), title: plan.summary.isEmpty ? L(.plan) : plan.summary)
             MailFit(maxHeight: 200) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(plan.lines.enumerated()), id: \.offset) { _, line in
@@ -298,8 +312,8 @@ private struct MailPlanView: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "Discard") { act("discard", .string(plan.id)) }
-                IslandButton(label: "Run", prominent: true) { act("run", .string(plan.id)) }
+                IslandButton(label: L(.discard)) { act("discard", .string(plan.id)) }
+                IslandButton(label: L(.run), prominent: true) { act("run", .string(plan.id)) }
             }
         }
     }

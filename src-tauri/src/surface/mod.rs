@@ -215,7 +215,13 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         overlay: hub.overlay.clone(),
         sound: hub.sound.clone(),
         line: hub.island.line.clone(),
+        words: None,
     }
+}
+
+/// Wakes the scenes, so a change made elsewhere (the language) is sent.
+pub fn refresh() {
+    change(|_| {});
 }
 
 /// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus;
@@ -235,7 +241,11 @@ fn sounds_allowed() -> bool {
 fn send_scenes() {
     const FRAME: Duration = Duration::from_millis(16);
     let mut last: Option<Vec<u8>> = None;
+    // The language the surfaces were last given words in.
+    let mut told: Option<&'static str> = None;
     while STARTED.load(Ordering::SeqCst) {
+        let language = crate::i18n::language();
+        let words = (told != Some(language)).then(|| crate::i18n::surface_words(language));
         let json = {
             let (lock, wake) = &*HUB;
             let mut hub = lock.lock().unwrap();
@@ -252,11 +262,15 @@ fn send_scenes() {
                 hub = wake.wait_timeout(hub, wait).unwrap().0;
             }
             hub.dirty = false;
-            serde_json::to_vec(&scene(&mut hub, now_ms())).ok()
+            let mut scene = scene(&mut hub, now_ms());
+            scene.words = words;
+            serde_json::to_vec(&scene).ok()
         };
         if let Some(json) = json {
             if last.as_ref() != Some(&json) {
-                if !ffi::update(&json) {
+                if ffi::update(&json) {
+                    told = Some(language);
+                } else {
                     eprintln!("The native surfaces refused a scene");
                 }
                 last = Some(json);

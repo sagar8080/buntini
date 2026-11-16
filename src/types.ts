@@ -43,6 +43,8 @@ export interface Settings {
   corners: 'round' | 'soft' | 'square';
   panelSize: 'compact' | 'standard' | 'large';
   statusText: string;
+  /** The language Buntini speaks (src/i18n.ts `languages`); empty follows the Mac. */
+  language: string;
   companionScale: number;
   catCoat: CatCoat;
   catEyes: CatEyes;
@@ -158,7 +160,7 @@ export interface WebApproval { id: string; prompt: string; provider: string; exp
 export interface ConversationSummary { id: string; title: string; createdAt: string; updatedAt: string; legacy: boolean; turnCount: number }
 export interface ConversationPage { conversation: ConversationSummary; turns: TaskRecord[]; nextCursor: string | null }
 export interface ConversationList { items: ConversationSummary[]; nextCursor: string | null }
-export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
+export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean; /** The language Buntini speaks when Settings leaves it to the Mac. */ systemLanguage?: string }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
 export type AppConnection = 'ready' | 'noAccount' | 'denied';

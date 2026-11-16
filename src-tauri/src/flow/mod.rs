@@ -200,6 +200,8 @@ pub enum Op {
     CancelDownload,
     RemoveModels,
     OpenLibrary,
+    /// The language Buntini speaks now, for the Library window.
+    Language,
 }
 
 #[tauri::command]

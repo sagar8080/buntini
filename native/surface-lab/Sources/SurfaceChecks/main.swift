@@ -36,6 +36,12 @@ do {
 
 guard fixture.scenes.allSatisfy({ $0.contract == surfaceContract }) else { fail("a scene speaks another contract") }
 
+// The fixture's words are locales/en.json's (the Rust tests check that), so a word the views
+// draw that isn't among them is missing from the catalogs.
+guard let words = fixture.scenes.first?.words else { fail("the first scene brings no words") }
+let unknown = Lexicon.missing(in: words)
+guard unknown.isEmpty else { fail("no words for \(unknown.sorted())") }
+
 let kinds = Set(fixture.scenes.compactMap { $0.card?.body.kind })
 let missing = Set(CardBody.Kind.allCases).subtracting(kinds)
 guard missing.isEmpty else { fail("no scene shows \(missing.map(\.rawValue).sorted())") }
@@ -66,4 +72,4 @@ if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(pr
 if let problem = SurfaceSounds.problem() { fail(problem) }
 if let problem = MarkupCheck.problem() { fail(problem) }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions; shaders compile; sounds play; mark-up draws")
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws")

@@ -18,12 +18,12 @@ struct ApprovalCardView: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "In terminal") { send(Action(source: .agents, card: card.id, name: "terminal")) }
-                IslandButton(label: approval.plan ? "Keep planning" : "Deny") { send(Action(source: .agents, card: card.id, name: "deny")) }
+                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
+                IslandButton(label: approval.plan ? L(.keepPlanning) : L(.deny)) { send(Action(source: .agents, card: card.id, name: "deny")) }
                 if approval.always {
-                    IslandButton(label: approval.plan ? "Accept edits" : "Always") { send(Action(source: .agents, card: card.id, name: "always")) }
+                    IslandButton(label: approval.plan ? L(.acceptEdits) : L(.always)) { send(Action(source: .agents, card: card.id, name: "always")) }
                 }
-                IslandButton(label: approval.plan ? "Start" : "Allow", prominent: true) { send(Action(source: .agents, card: card.id, name: "allow")) }
+                IslandButton(label: approval.plan ? L(.start) : L(.allow), prominent: true) { send(Action(source: .agents, card: card.id, name: "allow")) }
             }
         }
     }
@@ -55,9 +55,9 @@ struct QuestionCardView: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "In terminal") { send(Action(source: .agents, card: card.id, name: "terminal")) }
+                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
                 if current.multi {
-                    IslandButton(label: step + 1 < question.questions.count ? "Next" : "Send", prominent: true) {
+                    IslandButton(label: step + 1 < question.questions.count ? L(.next) : L(.send), prominent: true) {
                         if !picked.isEmpty { choose(current, .array(picked.map(JSONValue.string))) }
                     }
                 }
@@ -181,7 +181,7 @@ struct FinishedCardView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(Color(hex: "#7EE787"))
-            CardHeading(from: from(finished.agent, finished.project), title: finished.message ?? "Done")
+            CardHeading(from: from(finished.agent, finished.project), title: finished.message ?? L(.done))
         }
     }
 }
@@ -204,7 +204,7 @@ struct RecapCardView: View {
             }
             HStack {
                 Spacer()
-                IslandButton(label: "Share") { send(Action(source: .agents, card: card.id, name: "shareRecap")) }
+                IslandButton(label: L(.share)) { send(Action(source: .agents, card: card.id, name: "shareRecap")) }
             }
         }
     }

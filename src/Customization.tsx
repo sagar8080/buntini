@@ -5,6 +5,8 @@ import Toggle from './Toggle';
 import { command, desktop, errorMessage } from './bridge';
 import { accessories, characters, coats, eyeColors, eyes, lookFrom } from './petOptions';
 import { presets } from './themes.ts';
+import { languages, t } from './i18n';
+import { follow } from './locales';
 import type { BackgroundStatus, LoginStatus, Settings, Voice } from './types';
 
 const pick = <T,>(items: { id: T }[]) => items[Math.floor(Math.random() * items.length)].id;
@@ -108,6 +110,13 @@ export default function Customization({ draft, update, onError, onPreviewVoice, 
       <Toggle label="Heads-ups" checked={draft.headsUps} onChange={value => { update('headsUps', value); if (value && !draft.notificationsEnabled) void notifications(true); }} />
       <Toggle label="Desktop notifications" detail={notificationStatus === 'denied' ? 'Turned off in System Settings' : notificationStatus === 'unavailable' ? 'Works in the installed app' : undefined} checked={draft.notificationsEnabled} onChange={value => void notifications(value)} />
       <Toggle label="Open at login" detail={loginStatus === 'unavailable' ? 'Works in the installed app' : loginStatus === 'requiresApproval' ? 'Allow in System Settings → Login Items' : draft.openAtLogin && loginStatus && loginStatus !== 'enabled' ? 'Turned off in System Settings' : undefined} disabled={loginStatus === 'unavailable' && !draft.openAtLogin} checked={draft.openAtLogin} onChange={value => update('openAtLogin', value)} />
+    </section>
+    <section className="settings-section">
+      <div className="settings-section-heading"><h3>{t('settings.language.title')}</h3></div>
+      <select aria-label={t('settings.language.title')} value={draft.language} onChange={event => { update('language', event.target.value); void follow(event.target.value); }}>
+        <option value="">{t('settings.language.system')}</option>
+        {languages.map(item => <option key={item.code} value={item.code} lang={item.code}>{item.name}</option>)}
+      </select>
     </section>
     <button type="button" className="audit-button" onClick={onRestartSetup}><Sparkles size={14} /><span>Run setup again</span><ChevronRight size={14} /></button>
   </>;

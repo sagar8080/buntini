@@ -57,7 +57,7 @@ export type FlowOp =
   | { op: 'history'; limit?: number } | { op: 'forgetDictation'; id: number }
   | { op: 'notes' } | { op: 'deleteNote'; id: string } | { op: 'startNotes' } | { op: 'stopNotes' }
   | { op: 'choices' } | { op: 'choose'; mode: Mode; translateTo?: string } | { op: 'setStyle'; bundle: string; style: Style | null }
-  | { op: 'downloadModels' } | { op: 'cancelDownload' } | { op: 'removeModels' } | { op: 'openLibrary' };
+  | { op: 'downloadModels' } | { op: 'cancelDownload' } | { op: 'removeModels' } | { op: 'openLibrary' } | { op: 'language' };
 
 export const keyLabels: Record<Exclude<DictationKey, 'chord'>, string> = { rightOption: 'Right ⌥', rightCommand: 'Right ⌘', rightControl: 'Right ⌃', fn: 'fn' };
 

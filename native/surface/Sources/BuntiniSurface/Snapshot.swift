@@ -8,6 +8,7 @@ public enum SurfaceSnapshot {
     /// A PNG of the island showing `scene` on a screen shaped like `screen`.
     @MainActor
     public static func png(scene: SurfaceScene, screen: ScreenShape, hover: Bool = false, expanded: Bool = false, scale: CGFloat = 2) -> Data? {
+        Lexicon.learn(scene)
         let model = IslandModel(screen: screen)
         model.scene = scene
         model.hover = hover

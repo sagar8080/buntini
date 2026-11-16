@@ -114,7 +114,7 @@ struct ScrubBar: View {
         }
         .onChange(of: clock) { _ in held = nil }
         .accessibilityElement()
-        .accessibilityLabel("Position")
+        .accessibilityLabel(L(.position))
         .accessibilityValue(playbackTime(clock.position(at: Date())))
     }
 
@@ -430,7 +430,7 @@ struct PlayButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel(playing ? "Pause" : "Play")
+        .accessibilityLabel(playing ? L(.pauseMedia) : L(.play))
     }
 }
 
@@ -528,7 +528,7 @@ struct VolumeBar: View {
         }
         .onChange(of: volume) { _ in if !dragging { dragged = nil } }
         .accessibilityElement()
-        .accessibilityLabel("Volume")
+        .accessibilityLabel(L(.volume))
         .accessibilityValue("\(Int((level * 100).rounded()))%")
     }
 

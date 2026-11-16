@@ -33,6 +33,8 @@ guard scenes.count == raw.count else {
     FileHandle.standardError.write("\(raw.count - scenes.count) scenes did not decode\n".data(using: .utf8)!)
     exit(65)
 }
+// The words come with the first scene, as from Rust; a scene shown on its own needs them too.
+if let worded = scenes.first(where: { $0.words != nil }) { Lexicon.learn(worded) }
 
 // --render <dir>: write a picture of every scene, in each state, and stop.
 if let flag = arguments.firstIndex(of: "--render"), arguments.indices.contains(flag + 1) {

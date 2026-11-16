@@ -1,10 +1,11 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { streamDefaults, streamPreviews } from './streams';
+import { resolve } from './i18n';
 import type { AgentRequest, Attached, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
-  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', companionScale: 1,
+  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', language: '', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
@@ -18,7 +19,7 @@ export async function bootstrap(): Promise<Bootstrap> {
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
   const threads = previewThreads();
   return {
-    settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
+    settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [], systemLanguage: resolve('', navigator.languages),
     diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30, chatgptPlan: previewChatGptPlan(), chatgptAlwaysAllow: localStorage.getItem('buntini-preview-chatgpt-always') === '1' },
   };
 }

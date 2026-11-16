@@ -83,6 +83,7 @@ export const settingsIndex: SettingEntry[] = [
   { tab: 'buntini', label: 'Heads-ups', words: ['heads up', 'upcoming', 'reminders', 'alerts'] },
   { tab: 'buntini', label: 'Desktop notifications', words: ['notifications', 'alerts', 'banners', 'notification centre', 'notification center'] },
   { tab: 'buntini', label: 'Open at login', words: ['startup', 'launch at login', 'start automatically', 'login items', 'boot'] },
+  { tab: 'buntini', label: 'Language', words: ['app language', 'interface language', 'locale', 'localization', 'right to left'] },
   { tab: 'buntini', label: 'Run setup again', words: ['onboarding', 'reset', 'start over', 'welcome'] },
   { tab: 'buntini', label: 'Dictate anywhere', words: ['dictation', 'voice typing', 'speech to text', 'microphone', 'mic'] },
   { tab: 'buntini', label: 'Hold', words: ['dictation key', 'push to talk', 'right option', 'fn key', 'hotkey'] },

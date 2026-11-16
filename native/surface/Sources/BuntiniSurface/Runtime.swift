@@ -49,6 +49,8 @@ public final class SurfaceRuntime {
     }
 
     public func show(_ scene: SurfaceScene) {
+        // Before the views read them.
+        Lexicon.learn(scene)
         island?.apply(scene)
         flowPill?.apply(scene.flow)
         overlay?.apply(scene.overlay)

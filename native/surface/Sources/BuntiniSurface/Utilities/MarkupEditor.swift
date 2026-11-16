@@ -21,9 +21,9 @@ struct Mark: Equatable {
 
         var name: String {
             switch self {
-            case .pen: return "Pen"
-            case .arrow: return "Arrow"
-            case .box: return "Box"
+            case .pen: return L(.pen)
+            case .arrow: return L(.arrow)
+            case .box: return L(.box)
             }
         }
     }
@@ -145,6 +145,10 @@ struct MarkupView: View {
     }
 
     private var tools: some View {
+        toolRow.inLanguage()
+    }
+
+    private var toolRow: some View {
         HStack(spacing: 4) {
             ForEach(Mark.Tool.allCases, id: \.self) { tool in
                 ToolButton(symbol: tool.symbol, name: tool.name, on: model.tool == tool) { model.tool = tool }
@@ -160,13 +164,13 @@ struct MarkupView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(["Red", "Yellow", "Blue"][index])
+                .accessibilityLabel([L(.red), L(.yellow), L(.blue)][index])
             }
             Divider().frame(height: 18).padding(.horizontal, 4)
-            ToolButton(symbol: "arrow.uturn.backward", name: "Undo", on: false) { _ = model.marks.popLast() }
+            ToolButton(symbol: "arrow.uturn.backward", name: L(.undo), on: false) { _ = model.marks.popLast() }
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(model.marks.isEmpty)
-            Button("Done", action: done)
+            Button(L(.done), action: done)
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.plain)
                 .font(.callout.weight(.semibold))

@@ -1,13 +1,15 @@
 //! What Rust sends to the native surfaces and what comes back. Mirrors
 //! native/surface/Sources/SurfaceKit/Scene.swift and Card.swift; both sides check
 //! native/surface/Fixtures/contract.json.
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::cards::{agents, flow, island, mail, media, services, utilities};
 
 /// Bumped whenever a change on one side would break the other.
-pub const CONTRACT: u32 = 1;
+pub const CONTRACT: u32 = 2;
 
 /// Which part of Buntini a pill, card or action belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -143,6 +145,21 @@ pub struct Scene {
     /// needs a look: busy, hot or low on battery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<String>,
+    /// The surfaces' own words in the person's language. Sent with the first scene and when
+    /// the language changes; the surfaces keep the last they were given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<Words>,
+}
+
+/// The words the surfaces draw: every `surface.*` key of `locales/<language>.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Words {
+    /// A language from `i18n::LANGUAGES`, such as `de` or `zh-Hant`.
+    pub language: String,
+    /// Written right to left.
+    pub rtl: bool,
+    pub labels: BTreeMap<String, String>,
 }
 
 /// The card in front of the island.

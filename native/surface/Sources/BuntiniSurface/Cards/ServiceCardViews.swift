@@ -76,7 +76,7 @@ struct ServiceActivityGraph: View {
         }
         .frame(width: CGFloat(weeks) * (Self.cell + Self.gap) - Self.gap, height: 7 * (Self.cell + Self.gap) - Self.gap)
         .accessibilityElement()
-        .accessibilityLabel(Text("Activity"))
+        .accessibilityLabel(Text(L(.activity)))
         .accessibilityValue(Text("\(days.reduce(0) { $0 + Int($1) })"))
     }
 

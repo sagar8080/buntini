@@ -38,6 +38,7 @@ import { applyFlowOnSave } from './flow/api';
 import { callUtilities } from './utilities/api';
 import { addFiles, addWindow, removeAttached } from './attachments';
 import AttachedChips from './AttachedChips';
+import { follow, speak, useLanguage } from './locales';
 import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
@@ -79,6 +80,7 @@ const skillActivity: Record<string, string> = {
 };
 
 export default function App() {
+  useLanguage();
   const [data, setData] = useState<Bootstrap | null>(null);
   const [progress, setProgress] = useState<TaskProgress[]>([]);
   const [background, setBackground] = useState<BackgroundStatus | null>(null);
@@ -230,6 +232,8 @@ export default function App() {
     const next = await bootstrap();
     if (mounted.current && version === selectionVersion.current) {
       setData(next); setSavedConversations(next.conversations.items); setListCursor(next.conversations.nextCursor);
+      // A language picked but not yet saved stays.
+      void follow((saver.current?.pending() ?? next.settings).language, next.systemLanguage);
       if (threadLoaded.current) {
         const previousId = conversationIdRef.current;
         conversationIdRef.current = next.conversation.conversation.id;
@@ -434,7 +438,9 @@ export default function App() {
     const look = listen('settings-changed', () => { void refresh().catch(() => {}); });
     // Typed in the island: asked here, where the answer shows.
     const asked = listen<string>('island-ask', event => { void expand(true); void submitRef.current(event.payload); });
-    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); void asked.then(unlisten => unlisten()); };
+    // Buntini's language changed, from Settings or on the Mac.
+    const spoken = listen<string>('language', event => { void speak(event.payload); });
+    return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); void asked.then(unlisten => unlisten()); void spoken.then(unlisten => unlisten()); };
   }, [expand, refresh]);
   useEffect(() => {
     if (!desktop) return;

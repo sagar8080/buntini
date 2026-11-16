@@ -252,7 +252,7 @@ struct CatView: View {
             }
         }
         .accessibilityElement()
-        .accessibilityLabel(cat.character == "orb" ? "Orbit" : "Cat")
+        .accessibilityLabel(cat.character == "orb" ? L(.orb) : L(.cat))
     }
 
     /// Sways side to side about 1.6 times a second while dancing; settles when it stops.

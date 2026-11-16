@@ -42,7 +42,7 @@ struct TimerCardView: View {
             }
             .frame(width: 66, height: 66)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(done ? "\(timer.label) done" : "\(timer.label), \(clockText(left)) left")
+            .accessibilityLabel(done ? L(.timerDone, ["label": timer.label]) : L(.timerLeft, ["label": timer.label, "time": clockText(left)]))
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
                     Text(timer.label).font(.callout.weight(.semibold))
@@ -52,11 +52,11 @@ struct TimerCardView: View {
                 }
                 HStack(spacing: 6) {
                     if done {
-                        IslandButton(label: "Again", prominent: true) { act("focus") }
+                        IslandButton(label: L(.timerAgain), prominent: true) { act("focus") }
                     } else {
-                        IslandButton(label: timer.paused ? "Resume" : "Pause", prominent: true) { act(timer.paused ? "resume" : "pause") }
-                        IslandButton(label: "Skip") { act("skip") }
-                        IslandButton(label: "Stop") { act("stop") }
+                        IslandButton(label: timer.paused ? L(.resume) : L(.pause), prominent: true) { act(timer.paused ? "resume" : "pause") }
+                        IslandButton(label: L(.skip)) { act("skip") }
+                        IslandButton(label: L(.stop)) { act("stop") }
                     }
                 }
             }
@@ -82,7 +82,7 @@ private struct Rounds: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Round \(round) of \(rounds)")
+        .accessibilityLabel(L(.timerRound, ["round": String(round), "rounds": String(rounds)]))
     }
 }
 
@@ -100,9 +100,9 @@ struct CaptureCardView: View {
         if capture.path.isEmpty {
             HStack(spacing: 10) {
                 Image(systemName: "rectangle.dashed.badge.record").font(.title2).opacity(0.9)
-                Text("Screen Recording").font(.callout.weight(.semibold))
+                Text(L(.screenRecording)).font(.callout.weight(.semibold))
                 Spacer(minLength: 0)
-                IslandButton(label: "Allow", prominent: true) { act("allowRecording") }
+                IslandButton(label: L(.allow), prominent: true) { act("allowRecording") }
             }
             .frame(maxHeight: .infinity)
         } else {
@@ -117,13 +117,13 @@ struct CaptureCardView: View {
                             Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).frame(width: 20, height: 20).background(Circle().fill(Color.white.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Dismiss")
+                        .accessibilityLabel(L(.dismiss))
                     }
                     FlowRow(spacing: 6) {
-                        IslandButton(label: "Paste", prominent: true) { act("paste") }
-                        IslandButton(label: "Copy") { act("copy") }
-                        IslandButton(label: "Mark up") { act("annotate") }
-                        IslandButton(label: "Ask") { act("ask") }
+                        IslandButton(label: L(.paste), prominent: true) { act("paste") }
+                        IslandButton(label: L(.copy)) { act("copy") }
+                        IslandButton(label: L(.markUp)) { act("annotate") }
+                        IslandButton(label: L(.ask)) { act("ask") }
                     }
                 }
             }
@@ -153,19 +153,20 @@ struct CaptureThumb: View {
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
-        .accessibilityLabel("Capture")
+        .accessibilityLabel(L(.capture))
     }
 }
 
-/// One line: how the Mac is doing, or a word such as "Sounds off".
+/// One line: how the Mac is doing, or a word such as "Sounds off" (Rust writes it from the
+/// same words).
 struct VitalsCardView: View {
     let vitals: Vitals
 
     private var symbol: String {
         switch vitals.line {
-        case "Sounds off": return "speaker.slash.fill"
-        case "Sounds on": return "speaker.wave.2.fill"
-        case "Nothing waiting": return "checkmark.circle"
+        case L(.soundsOff): return "speaker.slash.fill"
+        case L(.soundsOn): return "speaker.wave.2.fill"
+        case L(.nothingWaiting): return "checkmark.circle"
         default: return "gauge.with.dots.needle.67percent"
         }
     }
@@ -193,13 +194,13 @@ struct UpdateCardView: View {
 
     private var title: String {
         switch stage {
-        case "ask": return "Keep Buntini up to date?"
-        case "current": return "Buntini is up to date"
-        case "downloading": return "Downloading"
-        case "checking": return "Checking"
-        case "ready": return "Ready to restart"
-        case "failed": return "Couldn't update"
-        default: return "New version"
+        case "ask": return L(.updateAsk)
+        case "current": return L(.updateCurrent)
+        case "downloading": return L(.updateDownloading)
+        case "checking": return L(.updateChecking)
+        case "ready": return L(.updateReady)
+        case "failed": return L(.updateFailed)
+        default: return L(.updateAvailable)
         }
     }
 
@@ -222,19 +223,19 @@ struct UpdateCardView: View {
                 HStack(spacing: 6) {
                     switch stage {
                     case "ask":
-                        IslandButton(label: "Check daily", prominent: true) { act("allow") }
-                        IslandButton(label: "Not now") { act("notNow") }
+                        IslandButton(label: L(.checkDaily), prominent: true) { act("allow") }
+                        IslandButton(label: L(.notNow)) { act("notNow") }
                     case "available":
-                        IslandButton(label: "Install", prominent: true) { act("install") }
-                        IslandButton(label: "Notes") { act("open") }
-                        IslandButton(label: "Later") { act("later") }
+                        IslandButton(label: L(.install), prominent: true) { act("install") }
+                        IslandButton(label: L(.releaseNotes)) { act("open") }
+                        IslandButton(label: L(.later)) { act("later") }
                     case "ready":
-                        IslandButton(label: "Restart", prominent: true) { act("restart") }
-                        IslandButton(label: "Later") { act("later") }
+                        IslandButton(label: L(.restart), prominent: true) { act("restart") }
+                        IslandButton(label: L(.later)) { act("later") }
                     case "failed":
-                        IslandButton(label: "Try again", prominent: true) { act("install") }
-                        IslandButton(label: "Download") { act("open") }
-                        IslandButton(label: "Close") { act("later") }
+                        IslandButton(label: L(.tryAgain), prominent: true) { act("install") }
+                        IslandButton(label: L(.download)) { act("open") }
+                        IslandButton(label: L(.close)) { act("later") }
                     default:
                         EmptyView()
                     }
@@ -305,7 +306,7 @@ struct WhatsNewCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CardHeading(from: "Buntini \(whatsNew.version)", title: "What's new")
+            CardHeading(from: "Buntini \(whatsNew.version)", title: L(.whatsNew))
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(whatsNew.lines.prefix(4).enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -327,7 +328,7 @@ struct UtilityHomeButtons: View {
 
     var body: some View {
         if !pills.contains(where: { $0.source == .utilities && $0.id == "utilities.focus" }) {
-            IslandButton(label: "Focus") { send(Action(source: .utilities, card: nil, name: "focus")) }
+            IslandButton(label: L(.focus)) { send(Action(source: .utilities, card: nil, name: "focus")) }
         }
     }
 }

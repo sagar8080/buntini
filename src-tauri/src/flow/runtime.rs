@@ -101,6 +101,7 @@ pub async fn call(app: AppHandle, op: Op) -> Result<Value, String> {
     let base = models::folder(&state.data_dir);
     match op {
         Op::Ping => Ok(Value::Bool(true)),
+        Op::Language => Ok(Value::String(crate::i18n::language().into())),
         Op::Stats => {
             let today = chrono::Local::now().date_naive();
             let stats = history::stats(&state.store.lock().unwrap().db, today)?;

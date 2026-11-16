@@ -264,6 +264,7 @@ fn bootstrap_in(state: &AppState) -> Result<Bootstrap, String> {
         onboarded,
         memories,
         brief_due,
+        system_language: crate::i18n::system().into(),
         diagnostics: Diagnostics {
             model_ready,
             apple_intelligence: state
@@ -359,6 +360,7 @@ pub(crate) async fn save_settings_in(
             }
         }
         crate::overlay::set_scale(settings.companion_scale);
+        crate::i18n::follow(&settings.language);
         Ok::<_, String>(())
     }
     .await;

@@ -129,8 +129,10 @@ struct IslandRoot: View {
                     if let cat = scene?.cat {
                         self.cat(cat).frame(width: 64, height: 68)
                     }
+                    // The cat keeps its place; what the card says reads in its own direction.
                     content(scene)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .inLanguage()
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, corner ? 0 : 8)
@@ -176,9 +178,9 @@ struct Wardrobe: View {
     let cat: SurfaceKit.Cat
     let send: (Action) -> Void
 
-    private static let coats = [("ginger", "Ginger tabby"), ("gray", "Silver tabby"), ("black", "Midnight"), ("white", "Snowball"), ("tuxedo", "Tuxedo"), ("calico", "Calico"), ("siamese", "Siamese")]
-    private static let eyes = [("amber", "Amber"), ("green", "Green"), ("blue", "Blue"), ("copper", "Copper"), ("odd", "Odd-eyed")]
-    private static let accessories = [("none", "None"), ("bell", "Bell collar"), ("bow", "Bow"), ("bandana", "Bandana"), ("hat", "Top hat"), ("flowers", "Flowers")]
+    private static var coats: [(String, String)] { [("ginger", L(.coatGinger)), ("gray", L(.coatGray)), ("black", L(.coatBlack)), ("white", L(.coatWhite)), ("tuxedo", L(.coatTuxedo)), ("calico", L(.coatCalico)), ("siamese", L(.coatSiamese))] }
+    private static var eyes: [(String, String)] { [("amber", L(.eyesAmber)), ("green", L(.eyesGreen)), ("blue", L(.eyesBlue)), ("copper", L(.eyesCopper)), ("odd", L(.eyesOdd))] }
+    private static var accessories: [(String, String)] { [("none", L(.accessoryNone)), ("bell", L(.accessoryBell)), ("bow", L(.accessoryBow)), ("bandana", L(.accessoryBandana)), ("hat", L(.accessoryHat)), ("flowers", L(.accessoryFlowers))] }
 
     private func choose(_ key: String, _ value: String) {
         send(Action(source: .island, card: nil, name: "look", value: .object(["key": .string(key), "value": .string(value)])))
@@ -195,9 +197,9 @@ struct Wardrobe: View {
     }
 
     var body: some View {
-        menu("Coat", "catCoat", Self.coats, cat.coat)
-        menu("Eyes", "catEyes", Self.eyes, cat.eyes)
-        menu("Accessory", "catAccessory", Self.accessories, cat.accessory)
+        menu(L(.coat), "catCoat", Self.coats, cat.coat)
+        menu(L(.eyes), "catEyes", Self.eyes, cat.eyes)
+        menu(L(.accessory), "catAccessory", Self.accessories, cat.accessory)
     }
 }
 
@@ -254,7 +256,7 @@ struct Home: View {
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
                 UtilityHomeButtons(pills: pills, send: send)
-                IslandButton(label: "Chat", prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
+                IslandButton(label: L(.chat), prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
         }
         .onChange(of: focused) { now in model.typing = now }
@@ -264,9 +266,9 @@ struct Home: View {
     /// A picture can't hold a live text field, so it gets the field's look.
     @ViewBuilder private var field: some View {
         if inPicture {
-            Text("Ask Buntini").foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L(.askBuntini)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            TextField("Ask Buntini", text: $question)
+            TextField(L(.askBuntini), text: $question)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit(ask)
@@ -293,7 +295,7 @@ struct DropTarget: View {
             .strokeBorder(.white.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
             .overlay(Image(systemName: "tray.and.arrow.down").font(.title2).opacity(0.8))
             .frame(height: 70)
-            .accessibilityLabel("Drop files")
+            .accessibilityLabel(L(.dropFiles))
     }
 }
 
