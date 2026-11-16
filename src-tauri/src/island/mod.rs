@@ -200,11 +200,8 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             if paths.is_empty() {
                 return Ok(());
             }
+            // The chat always takes them (the card's Chat button), and so does an agent session.
             let targets: Vec<cards::DropTarget> = crate::agents::drop_targets().into_iter().take(3).map(|(pill, label)| cards::DropTarget { pill, label }).collect();
-            // Somewhere to put them: an agent session for now; the chat and Mail take them later.
-            if targets.is_empty() {
-                return Ok(());
-            }
             surface::play("drop");
             publish(vec![Offer {
                 card: Card { id: "drop".into(), source: Source::Island, body: CardBody::Drop(cards::DropCard { files: paths, targets }) },
@@ -224,7 +221,7 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
         }
         // To the chat, which takes them from here.
         "dropChat" => {
-            let paths = action.value.as_ref().and_then(|value| value.get("paths")).cloned().unwrap_or(Value::Array(vec![]));
+            let paths: Vec<String> = action.value.as_ref().and_then(|value| value.get("paths")).and_then(Value::as_array).map(|paths| paths.iter().filter_map(Value::as_str).filter(|path| path.starts_with('/')).take(crate::attach::MAX_ATTACHMENTS).map(str::to_string).collect()).unwrap_or_default();
             forget("drop");
             show_chat(app);
             let _ = app.emit("island-files", paths);

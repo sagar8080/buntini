@@ -338,20 +338,47 @@ mod mac {
     use objc2::{rc::Retained, runtime::AnyObject};
     use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 
+    #[repr(C)]
+    struct Point {
+        x: f64,
+        y: f64,
+    }
+
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> *mut AnyObject;
         fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+        fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
+        fn CGEventCreate(source: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn CGEventGetLocation(event: *mut std::ffi::c_void) -> Point;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(object: *const std::ffi::c_void);
     }
     const ON_SCREEN_ONLY: u32 = 1;
     const EXCLUDE_DESKTOP: u32 = 1 << 4;
     const COMBINED_SESSION: i32 = 0;
     const ANY_INPUT: u32 = u32::MAX;
+    const LEFT_BUTTON: u32 = 0;
 
     /// Seconds since any keyboard, mouse or trackpad input. Needs no permission and
     /// reveals no content.
     pub fn idle_seconds() -> f64 {
         unsafe { CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION, ANY_INPUT) }
+    }
+
+    /// Whether the left mouse button is down, and where the pointer is (top-left origin,
+    /// as window frames are reported). Needs no permission.
+    pub fn pointer() -> Option<(bool, f64, f64)> {
+        let down = unsafe { CGEventSourceButtonState(COMBINED_SESSION, LEFT_BUTTON) };
+        let event = unsafe { CGEventCreate(std::ptr::null()) };
+        if event.is_null() {
+            return None;
+        }
+        let at = unsafe { CGEventGetLocation(event) };
+        unsafe { CFRelease(event) };
+        Some((down, at.x, at.y))
     }
 
     pub struct Window {
@@ -693,6 +720,66 @@ pub async fn pet_knock(number: u32) -> Result<(), String> {
 #[tauri::command]
 pub fn pet_stop() {
     stop();
+}
+
+/// Another app's window the cat was let go over.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropTarget {
+    pub number: u32,
+    pub pid: i32,
+    pub rect: Rect,
+}
+
+/// Room kept free at a window's top (its title bar, where the cat sits on it) and along the
+/// floor: letting go there moves the cat rather than attaching the window.
+const TOP_BAND: f64 = 48.0;
+
+/// Which window, if any, a drop at `point` lands in: the front-most ordinary window of
+/// another app under the pointer, away from its title bar and above the floor the cat walks.
+pub fn drop_target(windows: &[(u32, i32, i64, Rect)], own: i32, point: (f64, f64), floor: f64) -> Option<DropTarget> {
+    if point.1 >= floor {
+        return None;
+    }
+    let inside = |rect: &Rect| point.0 >= rect.x && point.0 < rect.x + rect.width && point.1 >= rect.y && point.1 < rect.y + rect.height;
+    let (number, pid, _, rect) = windows.iter().find(|(_, pid, layer, rect)| *pid != own && *layer == 0 && rect.width >= 160.0 && rect.height >= 100.0 && inside(rect))?;
+    (point.1 >= rect.y + TOP_BAND).then_some(DropTarget { number: *number, pid: *pid, rect: *rect })
+}
+
+/// Waits for the person to let go of the cat they're dragging, then says which window it
+/// was let go over. Blocks: run it on a blocking thread.
+pub fn wait_for_drop(app: &tauri::AppHandle) -> Option<DropTarget> {
+    #[cfg(target_os = "macos")]
+    {
+        let started = std::time::Instant::now();
+        let (x, y) = loop {
+            let (down, x, y) = mac::pointer()?;
+            if !down {
+                break (x, y);
+            }
+            if started.elapsed() > std::time::Duration::from_secs(120) {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        };
+        let window = app.get_webview_window("main")?;
+        let pet = window_rect(&window)?;
+        let (area, _) = work_area(&window)?;
+        let floor = area.y + area.height - pet.height;
+        drop_target(&on_screen_windows(), std::process::id() as i32, (x, y), floor)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// On-screen windows front to back, as (number, owner pid, layer, frame).
+pub fn on_screen_windows() -> Vec<(u32, i32, i64, Rect)> {
+    #[cfg(target_os = "macos")]
+    return mac::windows().into_iter().map(|w| (w.number, w.pid, w.layer, w.rect)).collect();
+    #[cfg(not(target_os = "macos"))]
+    Vec::new()
 }
 
 /// Position along a motion at progress `t` (0–1) or elapsed `seconds` for falls.
@@ -1038,5 +1125,24 @@ mod tests {
         };
         assert!(same(a, Rect { x: 1.0, ..a }));
         assert!(!same(a, Rect { height: 950.0, ..a }));
+    }
+
+    #[test]
+    fn letting_go_over_a_window_picks_the_one_in_front() {
+        let rect = |x: f64, y: f64, width: f64, height: f64| Rect { x, y, width, height };
+        // Front to back: Buntini's own cat, a small palette, a menu bar item, then two windows.
+        let windows = [
+            (1, 99, 0, rect(500.0, 300.0, 128.0, 136.0)),
+            (2, 7, 0, rect(500.0, 300.0, 100.0, 60.0)),
+            (3, 8, 25, rect(0.0, 0.0, 2000.0, 30.0)),
+            (4, 10, 0, rect(400.0, 200.0, 800.0, 600.0)),
+            (5, 11, 0, rect(0.0, 0.0, 1512.0, 950.0)),
+        ];
+        let floor = 830.0;
+        assert_eq!(drop_target(&windows, 99, (550.0, 340.0), floor).map(|t| (t.number, t.pid)), Some((4, 10)), "past its own cat, too-small and non-window layers");
+        assert_eq!(drop_target(&windows, 99, (100.0, 400.0), floor).map(|t| t.number), Some(5), "the window behind, where the front one doesn't reach");
+        assert_eq!(drop_target(&windows, 99, (550.0, 220.0), floor), None, "on the title bar the cat just sits on the window");
+        assert_eq!(drop_target(&windows, 99, (550.0, 900.0), floor), None, "along the floor it's just moving the cat");
+        assert_eq!(drop_target(&windows, 99, (1700.0, 400.0), floor), None, "the desktop");
     }
 }

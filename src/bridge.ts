@@ -1,6 +1,6 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { streamDefaults, streamPreviews } from './streams';
-import type { AgentRequest, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
+import type { AgentRequest, Attached, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
@@ -173,11 +173,12 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
   }
   return invoke<T>(name, args);
 }
-export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskEvent) => void, approvalId?: string): Promise<TaskRecord> {
+export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskEvent) => void, approvalId?: string, attachments: Attached[] = []): Promise<TaskRecord> {
   if (!desktop) throw new Error('This is the browser preview. Open Buntini with npm run desktop to run local tools and chat with Qwen.');
   const channel = new Channel<TaskEvent>();
   channel.onmessage = onEvent;
-  return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null });
+  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path } : { kind: 'window', id: item.id });
+  return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null, attachments: sent.length ? sent : null });
 }
 export async function continueTask(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, onEvent: (event: TaskEvent) => void): Promise<TaskRecord> {
   if (!desktop) throw new Error('Open the desktop app to continue a saved task.');

@@ -1,12 +1,12 @@
-import { useState, type ReactNode } from 'react';
-import { Check, Cloud, Cpu, KeyRound, LoaderCircle, Server } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Check, Cloud, Cpu, KeyRound, LoaderCircle, Server, Terminal } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
 import ChatGPTAccount from './ChatGPTAccount';
 import Toggle from './Toggle';
 import { groupShared, setGroup, shareGroups } from './cloudShares.ts';
 import { command, errorMessage } from './bridge';
-import { appleSettingsPane, appleStatus, cloudProviders, friendlyStatus, offersChatGPT } from './brain.ts';
+import { appleSettingsPane, appleStatus, cloudProviders, friendlyStatus, lmStudioAddress, offeredProviders, offersChatGPT } from './brain.ts';
 import type { CloudProvider, Diagnostics, KeyProvider, ModelBackend, Settings } from './types';
 
 export { appleStatus, backendLabel, cloudProviders } from './brain.ts';
@@ -49,17 +49,24 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
   const pick = (id: CloudProvider) => {
     const next = cloudProviders.find(item => item.id === id)!;
     update('cloudProvider', id); update('cloudModel', ''); update('cloudInputPrice', next.input); update('cloudOutputPrice', next.output); setKey('');
+    // "Only runs on this Mac" was said of one server, not of whatever is picked next.
+    if (id !== provider.id) update('cloudOnThisMac', false);
   };
   async function save(value: string) {
     setSaving(true);
     try { await onKey(provider.id, value); setKey(''); } catch (error) { onError(errorMessage(error)); } finally { setSaving(false); }
   }
-  const providers = <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{cloudProviders.map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.name}</button>)}</div>;
+  const providers = <div className="chip-row" role="radiogroup" aria-label="Cloud provider">{offeredProviders(diagnostics.cliTools, provider.id).map(item => <button type="button" key={item.id} role="radio" aria-checked={item.id === provider.id} className={item.id === provider.id ? 'active' : ''} onClick={() => pick(item.id)}>{item.kind === 'tool' && <Terminal size={11} />}{item.name}</button>)}</div>;
   const shares = <CloudShares name={provider.name} shared={draft.externalShares} onChange={value => update('externalShares', value)} />;
-  if (provider.id === 'custom') return <div className="cloud-settings">
+  if (provider.kind === 'server') return <div className="cloud-settings">
     {providers}
-    <ServerSettings draft={draft} update={update} saved={saved} onError={onError} onKey={onKey} />
+    <ServerSettings key={provider.id} draft={draft} update={update} saved={saved} onError={onError} onKey={onKey} />
     {!draft.cloudOnThisMac && shares}
+  </div>;
+  if (provider.kind === 'tool') return <div className="cloud-settings">
+    {providers}
+    <ToolStatus id={provider.id} signIn={provider.signIn || ''} installed={!!diagnostics.cliTools?.includes(provider.id)} />
+    {shares}
   </div>;
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
     {providers}
@@ -83,27 +90,48 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
 
 /** The user's own server: its address, which of its models, and whether it stays on this Mac. */
 function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'draft' | 'update' | 'onError' | 'onKey'> & { saved: boolean }) {
-  const [address, setAddress] = useState(draft.cloudUrl);
+  // LM Studio is always at its own address on this Mac; any other server is the one given.
+  const lmStudio = draft.cloudProvider === 'lmstudio';
+  const [address, setAddress] = useState(lmStudio ? lmStudioAddress : draft.cloudUrl);
   const [found, setFound] = useState<{ base: string; models: string[]; onThisMac: boolean } | null>(null);
   const [checking, setChecking] = useState(false);
   const [key, setKey] = useState('');
   async function connect() {
     setChecking(true);
     try {
-      if (key) { await onKey('custom', key); setKey(''); }
-      const server = await command<{ base: string; models: string[]; onThisMac: boolean }>('check_server', { address });
-      setFound(server); setAddress(server.base); update('cloudUrl', server.base);
+      if (key) { await onKey(lmStudio ? 'lmstudio' : 'custom', key); setKey(''); }
+      const server = await command<{ base: string; models: string[]; onThisMac: boolean }>('check_server', { address, provider: draft.cloudProvider });
+      setFound(server);
+      if (!lmStudio) { setAddress(server.base); update('cloudUrl', server.base); }
       if (!server.onThisMac) update('cloudOnThisMac', false);
       if (!server.models.includes(draft.cloudModel.trim())) update('cloudModel', server.models[0]);
     } catch (error) { setFound(null); onError(errorMessage(error)); } finally { setChecking(false); }
   }
   return <>
-    <div className="key-input"><Server size={14} /><input autoComplete="off" spellCheck={false} value={address} onChange={event => setAddress(event.target.value)} placeholder="localhost:11434" aria-label="Server address" /><button type="button" disabled={checking || !address.trim()} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : 'Connect'}</button></div>
+    {lmStudio
+      ? <div className="row-actions"><button type="button" className="secondary-button" disabled={checking} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : <Server size={13} />} Connect</button></div>
+      : <div className="key-input"><Server size={14} /><input autoComplete="off" spellCheck={false} value={address} onChange={event => setAddress(event.target.value)} placeholder="localhost:11434" aria-label="Server address" /><button type="button" disabled={checking || !address.trim()} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : 'Connect'}</button></div>}
     <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? 'Key saved' : 'API key (optional)'} aria-label="Server API key" /></div>
     {found && <div className="chip-row" role="radiogroup" aria-label="Model">{found.models.map(model => <button type="button" key={model} role="radio" aria-checked={model === draft.cloudModel.trim()} className={model === draft.cloudModel.trim() ? 'active' : ''} onClick={() => update('cloudModel', model)}>{model}</button>)}</div>}
     {!found && draft.cloudModel.trim() && <span className="field-help">Using {draft.cloudModel.trim()}</span>}
     {(found?.onThisMac || (!found && draft.cloudOnThisMac)) && <Toggle label="Only runs on this Mac" checked={draft.cloudOnThisMac} onChange={value => update('cloudOnThisMac', value)} />}
   </>;
+}
+
+/** A command-line tool's sign-in, where the tool can say: a word only when there's
+    something to do. */
+function ToolStatus({ id, signIn, installed }: { id: string; signIn: string; installed: boolean }) {
+  const [signedIn, setSignedIn] = useState<boolean | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    setSignedIn(undefined);
+    if (installed) void command<boolean | null>('cli_status', { id }).then(value => { if (live) setSignedIn(value); }).catch(() => { if (live) setSignedIn(null); });
+    return () => { live = false; };
+  }, [id, installed]);
+  if (!installed) return <p className="field-help">Not installed</p>;
+  if (signedIn === undefined) return <p className="field-help"><LoaderCircle size={11} className="spin" /></p>;
+  if (signedIn === false) return <p className="field-help">Not signed in · <code>{signIn}</code></p>;
+  return signedIn ? <p className="field-help"><Check size={11} /> Signed in</p> : null;
 }
 
 /** What this cloud brain may see, asked where it is picked. */

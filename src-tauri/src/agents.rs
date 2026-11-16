@@ -336,6 +336,10 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
     let socket_agent = agent;
     let Some((agent, payload)) = dialect::normalize(agent, &hint, &payload) else { return };
     let Some(mut event) = HookEvent::from_payload(&payload) else { return };
+    // Buntini's own brain runs (`cli.rs`) aren't the person's sessions.
+    if crate::cli::is_brain_folder(&event.cwd) {
+        return;
+    }
     event.host = host;
     match event.name.as_str() {
         "SessionStart" => track(agent, &event, |_, _| {}),

@@ -598,6 +598,8 @@ pub struct Diagnostics {
     /// Cloud providers with a saved key, and this month's estimated spend on the chosen one.
     pub cloud_keys: Vec<String>,
     pub cloud_spend_usd: f64,
+    /// Command-line tools installed on this Mac that can answer as the brain (`cli.rs`).
+    pub cli_tools: Vec<String>,
     /// The ChatGPT account Buntini is signed in to, if any.
     pub chatgpt_account: Option<String>,
     /// "none", "usable" or "refused": what this Mac's ChatGPT sign-in allows.

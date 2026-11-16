@@ -6,6 +6,8 @@ import type { MailSettings } from './mail/model';
 import type { MediaSettings } from './media/model';
 import type { UtilitiesSettings } from './utilities/model';
 export type Mode = 'auto' | 'files' | 'system' | 'web';
+/** Something handed over with a message: a file, or a window the cat was let go over. */
+export type Attached = { kind: 'file'; path: string } | { kind: 'window'; id: string; app: string; title: string };
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
 export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';
@@ -22,7 +24,7 @@ export type PetMotion = 'calm' | 'playful' | 'sleepy';
 /** accent is the resolved accessory colour (#RRGGBB). */
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: string }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
-export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt' | 'custom';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'qwen' | 'moonshot' | 'chatgpt' | 'lmstudio' | 'custom' | 'claude-code' | 'codex' | 'gemini-cli' | 'cursor' | 'copilot';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
@@ -137,6 +139,8 @@ export interface Diagnostics {
   remainingBudgetUsd?: number;
   cloudKeys?: string[];
   cloudSpendUsd?: number;
+  /** Command-line tools installed here that can answer as the brain. */
+  cliTools?: string[];
   chatgptAccount?: string | null;
   chatgptPlan?: 'none' | 'usable' | 'refused';
   chatgptAlwaysAllow?: boolean;

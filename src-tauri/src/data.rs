@@ -420,7 +420,11 @@ mod tests {
                 "anthropic",
                 "openai",
                 "gemini",
+                "deepseek",
+                "qwen",
+                "moonshot",
                 "chatgpt",
+                "lmstudio",
                 "custom"
             ]
         );
@@ -530,7 +534,7 @@ mod tests {
         }
         assert_eq!(
             calls.borrow().len(),
-            18,
+            22,
             "a failed credential never skips the remaining services"
         );
         assert!(state.store.lock().unwrap().memories().unwrap().is_empty());
