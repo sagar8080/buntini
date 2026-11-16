@@ -517,7 +517,8 @@
      "duration": 337.0,
      "shuffle": false,
      "repeatMode": "off",
-     "volume": 0.6
+     "volume": 0.6,
+     "positionAt": null
     }
    },
    "held": false,

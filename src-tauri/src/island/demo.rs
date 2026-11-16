@@ -79,7 +79,8 @@ pub fn start() {
             }
         }
         *MOOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-        surface::publish(Source::Island, Contribution::default());
+        // Back to the island's own cards.
+        super::publish(Vec::new());
         RUNNING.store(false, Ordering::SeqCst);
     });
 }

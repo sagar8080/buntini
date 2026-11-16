@@ -18,4 +18,6 @@ public struct NowPlaying: Codable, Equatable, Sendable {
     public let repeatMode: String?
     /// 0…1.
     public let volume: Double?
+    /// When `position` was read, in Unix seconds: the island runs the clock on from there.
+    public let positionAt: Double?
 }

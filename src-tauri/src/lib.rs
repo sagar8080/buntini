@@ -212,6 +212,7 @@ pub fn run() {
             // The island and the dictation pill: drawn natively, empty until something shows.
             if surface::start() {
                 island::start(app.handle().clone());
+                media::start(app.handle().clone());
             } else {
                 eprintln!("Native surfaces unavailable");
             }
