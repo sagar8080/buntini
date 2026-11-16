@@ -29,9 +29,10 @@ const STEPS: &[(&str, u64, Option<Mood>)] = &[
     ("recap", 6, Some(Mood::Happy)),
 ];
 
-/// Every card in the samples, by kind.
+/// Every card in the samples, by kind, in the language Buntini speaks.
 fn samples() -> Vec<(String, Card, Vec<Pill>)> {
-    let Ok(root) = serde_json::from_str::<Value>(SAMPLES) else { return Vec::new() };
+    let Ok(mut root) = serde_json::from_str::<Value>(SAMPLES) else { return Vec::new() };
+    crate::i18n::samples(&mut root["scenes"]);
     root["scenes"]
         .as_array()
         .into_iter()
@@ -95,5 +96,31 @@ mod tests {
         for (kind, _, _) in STEPS {
             assert!(samples.iter().any(|(name, _, _)| name == kind), "no sample {kind}");
         }
+    }
+
+    /// Each `sample.*` text is one the shared scenes say, so the tour can say it in any language.
+    #[test]
+    fn every_sample_text_is_in_the_scenes() {
+        let english: std::collections::HashMap<String, String> = serde_json::from_str(include_str!("../../../locales/en.json")).unwrap();
+        let mut said = Vec::new();
+        fn strings(value: &Value, out: &mut Vec<String>) {
+            match value {
+                Value::String(text) => out.push(text.clone()),
+                Value::Array(items) => items.iter().for_each(|item| strings(item, out)),
+                Value::Object(fields) => fields.values().for_each(|item| strings(item, out)),
+                _ => {}
+            }
+        }
+        strings(&serde_json::from_str::<Value>(SAMPLES).unwrap()["scenes"], &mut said);
+        let samples: Vec<&String> = english.iter().filter(|(key, _)| key.starts_with("sample.")).map(|(_, text)| text).collect();
+        assert!(samples.len() > 20);
+        for text in samples {
+            assert!(said.contains(text), "no scene says {text:?}");
+        }
+        // In English the tour reads as written.
+        let mut value = serde_json::json!({ "title": "Run a command", "rows": ["Add the island", "main"] });
+        crate::i18n::samples(&mut value);
+        assert_eq!(value["title"], "Run a command");
+        assert_eq!(value["rows"][1], "main");
     }
 }

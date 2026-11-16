@@ -203,6 +203,27 @@ pub fn tn(key: &str, count: u64, args: &[(&str, &dyn Display)]) -> String {
     counted(language(), key, count, args)
 }
 
+/// The island tour's made-up text (the shared sample scenes are written in English) in the
+/// language now: `text` is the English of a `sample.*` key.
+pub fn sample(text: &str) -> Option<String> {
+    let key = catalog("en").iter().find(|(key, english)| key.starts_with("sample.") && english.as_str() == text)?.0;
+    raw(language(), key).map(str::to_string)
+}
+
+/// Puts every made-up text in a sample (JSON) into the language now.
+pub fn samples(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(said) = sample(text) {
+                *text = said;
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(samples),
+        serde_json::Value::Object(fields) => fields.values_mut().for_each(samples),
+        _ => {}
+    }
+}
+
 /// The words the native surfaces draw, every `surface.*` key in `language`.
 pub fn surface_words(language: &'static str) -> crate::surface::scene::Words {
     let labels: BTreeMap<String, String> = catalog("en").keys().filter(|key| key.starts_with("surface.")).map(|key| (key.clone(), raw(language, key).unwrap_or(key).to_string())).collect();
