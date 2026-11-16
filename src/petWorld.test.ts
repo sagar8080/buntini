@@ -117,6 +117,8 @@ test('focus timers end with a nudge and pause break reminders', () => {
   assert.equal(rules.update(coding, 24 * MINUTE, 10), null);
   assert.equal(rules.update(coding, 25 * MINUTE, 10)?.kind, 'focus-done');
   assert.equal(rules.update(coding, 26 * MINUTE, 10), null, 'the break clock restarts after focus');
+  rules.startFocus(30 * MINUTE, 25, true);
+  assert.equal(rules.update(coding, 55 * MINUTE, 10), null, "the island's timer says when it ends");
 });
 
 test('only a playful cat gets the zoomies, and they cover real ground', () => {

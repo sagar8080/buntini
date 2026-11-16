@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
-import { command } from './bridge';
+import { command, desktop } from './bridge';
 import { chooseMove, landing, nextRoamDelay, NudgeRules, speeds, type Move, type Nudge, type NudgeAction, type World } from './petWorld';
 import type { PetAction } from './petLife';
 import type { PetMotion, PetState } from './types';
@@ -197,7 +197,8 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
     setNudge(null);
     if (action === 'snooze') rules.current.snoozeBreak(now);
     else if (action === 'remindLate') rules.current.remindLate(now);
-    else if (action === 'focus') { rules.current.startFocus(now); live.current.react('happy'); }
+    // On the Mac the island's timer runs it (App.tsx); here it only holds other nudges back.
+    else if (action === 'focus') { rules.current.startFocus(now, 25, desktop); live.current.react('happy'); live.current.onAction(action); }
     else if (action !== 'dismiss') live.current.onAction(action);
   }, []);
   const beforeDrag = useCallback(() => {

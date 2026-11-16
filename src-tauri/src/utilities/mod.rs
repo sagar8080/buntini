@@ -66,6 +66,8 @@ pub enum Op {
     ResetShortcuts,
     /// While a shortcut is being recorded, Buntini's own don't fire.
     Recording { on: bool },
+    /// Starts a focus set, from the desktop cat's offer.
+    Focus { minutes: Option<u64> },
 }
 
 #[tauri::command]
@@ -74,6 +76,10 @@ pub async fn utilities_call(op: Op) -> Result<Value, String> {
         Op::Ping => Ok(Value::Bool(true)),
         Op::Shortcuts => Ok(listed()),
         Op::SetShortcut { id, shortcut } => set_shortcut(&id, shortcut).map(|_| listed()),
+        Op::Focus { minutes } => {
+            start_focus(minutes.filter(|minutes| (1..=180).contains(minutes)));
+            Ok(Value::Null)
+        }
         Op::ResetShortcuts => {
             let mut keys = keys();
             keys.overrides = Overrides::new();

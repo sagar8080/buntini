@@ -123,6 +123,7 @@ export class NudgeRules {
   private awaySince: number | null = null;
   private breakDueAt: number | null = null;
   private focusEndsAt: number | null = null;
+  private focusQuiet = false;
   private lateRemindAt: number | null = null;
   private appSince: { category: string; at: number } | null = null;
   private hotSince: number | null = null;
@@ -136,7 +137,8 @@ export class NudgeRules {
     this.gap = gap;
   }
 
-  startFocus(now: number, minutes = 25) { this.focusEndsAt = now + minutes * MINUTE; }
+  /** `quiet`: the island's focus timer runs it and says when it ends. */
+  startFocus(now: number, minutes = 25, quiet = false) { this.focusEndsAt = now + minutes * MINUTE; this.focusQuiet = quiet; }
   snoozeBreak(now: number, minutes = 15) { this.breakDueAt = now + minutes * MINUTE; }
   remindLate(now: number, minutes = 30) { this.lateRemindAt = now + minutes * MINUTE; }
   get focusing() { return this.focusEndsAt !== null; }
@@ -174,7 +176,7 @@ export class NudgeRules {
     if (this.focusEndsAt !== null && now >= this.focusEndsAt) {
       this.focusEndsAt = null;
       this.breakDueAt = now + this.breakAfter;
-      return this.make('focus-done', now, 'Focus session done. Nice work! Take five?', [{ label: 'Okay', action: 'dismiss' }, { label: 'Another 25 min', action: 'focus' }]);
+      if (!this.focusQuiet) return this.make('focus-done', now, 'Focus session done. Nice work! Take five?', [{ label: 'Okay', action: 'dismiss' }, { label: 'Another 25 min', action: 'focus' }]);
     }
     const battery = world.health?.batteryPercent;
     if (world.health?.charging || battery == null || battery > 20) this.batteryWarned = false;

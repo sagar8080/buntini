@@ -34,6 +34,7 @@ import { AgentCard, AgentDone } from './AgentRequests';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import { applyFlowOnSave } from './flow/api';
+import { callUtilities } from './utilities/api';
 import type { AgentAnswer, AgentFinished, AgentRequest, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
@@ -678,6 +679,7 @@ export default function App() {
     if (action === 'checkMac') { void expand(true); void submit('How is my Mac doing?', 'system'); }
     else if (action === 'lookUp') { setMode('web'); void expand(true); }
     else if (action === 'findFile') { setMode('files'); void expand(true); }
+    else if (action === 'focus' && desktop) void callUtilities({ op: 'focus' }).catch(error => setError(errorMessage(error)));
   };
   async function cancel() {
     const taskId = activeId.current;

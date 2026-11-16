@@ -239,7 +239,7 @@ pub fn run() {
                     "../icons/tray.png"
                 ))?)
                 .icon_as_template(true)
-                .tooltip("Buntini · ⌘⇧Space")
+                .tooltip("Buntini")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

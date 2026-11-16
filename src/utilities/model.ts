@@ -14,7 +14,8 @@ export type ShortcutRow = { id: string; label: string; shortcut: Shortcut | null
 export type UtilitiesOp =
   | { op: 'ping' } | { op: 'shortcuts' } | { op: 'resetShortcuts' }
   | { op: 'setShortcut'; id: string; shortcut: Shortcut | null }
-  | { op: 'recording'; on: boolean };
+  | { op: 'recording'; on: boolean }
+  | { op: 'focus'; minutes?: number };
 
 /** macOS virtual key codes and how each key reads, by DOM `code` (the key's position, as Carbon reads it). */
 const keys: Record<string, [number, string]> = {
@@ -190,7 +191,7 @@ export function preview(op: UtilitiesOp): unknown {
     case 'ping': return true;
     case 'shortcuts': return previewShortcuts;
     case 'resetShortcuts': previewShortcuts = defaultShortcuts.map(row => ({ ...row })); return previewShortcuts;
-    case 'recording': return null;
+    case 'recording': case 'focus': return null;
     case 'setShortcut': {
       const chosen = op.shortcut;
       if (chosen) {
