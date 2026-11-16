@@ -329,13 +329,15 @@ export default function App() {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
   const nudgeAction = useRef<(action: NudgeAction) => void>(() => {});
-  const stillPreferred = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Less motion calms the cat; it never stops it walking. Wander decides that.
+  const lessMotion = stillMotion(data?.settings.reducedMotion);
+  const petMotion = lessMotion && data?.settings.petMotion !== 'sleepy' ? 'calm' : data?.settings.petMotion || 'playful';
   const world = usePetWorld({
     enabled: desktop && !!data,
-    roam: !!data?.settings.petRoam && !data.settings.reducedMotion && !stillPreferred,
+    roam: !!data?.settings.petRoam,
     aware: !!data?.settings.petAwareness,
     nudges: !!data?.settings.petNudges && !!data?.settings.petAwareness,
-    motion: data?.settings.petMotion || 'playful',
+    motion: petMotion,
     scale: data?.settings.companionScale || 1,
     expanded, petState: agentAsking && petState === 'idle' ? 'approval' : petState, react,
     onAction: action => nudgeAction.current(action),
@@ -1056,7 +1058,7 @@ export default function App() {
           };
           button.addEventListener('pointermove', move);
           button.addEventListener('pointerup', () => button.removeEventListener('pointermove', move), { once: true });
-        }}><Pet state={agentAsking && petState === 'idle' ? 'approval' : petState} avatar={data?.settings.avatar || 'cat'} look={data ? lookFrom(data.settings) : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
+        }}><Pet state={agentAsking && petState === 'idle' ? 'approval' : petState} avatar={data?.settings.avatar || 'cat'} look={data ? { ...lookFrom(data.settings), motion: petMotion } : undefined} alive remember reaction={petReaction} moving={world.moving} facing={world.facing} landing={world.landing} asleep={world.asleep} held={world.held} speed={world.speed} /></button>
         <button className="pet-pet" onClick={petFromKeyboard} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); petFromKeyboard(); } }} onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>Pet {assistantName}</button>
         {expanded && <div className="dock-tools"><span className="shortcut"><Command size={10} /><span>⇧</span><span>space</span></span><div className="dock-menu-wrap"><button className="dock-menu-button" aria-label="Companion menu" aria-expanded={menu} aria-controls="companion-menu" onClick={() => setMenu(!menu)}><MoreHorizontal size={19} /></button>{menu && <div className="dock-menu" id="companion-menu"><button onClick={() => { setMenu(false); void submit('How’s my Mac?', 'auto'); }}><Laptop size={13} /> Your Mac</button><button onClick={() => void expand(false)}><Minus size={13} /> Tuck away</button><button onClick={() => { setMenu(false); setPage('settings'); }}><Settings2 size={13} /> Settings</button><button onClick={() => { setMenu(false); if (desktop) void getCurrentWindow().hide(); else void expand(false); }}><X size={13} /> Hide companion</button>{desktop && <button className="dock-menu-quit" onClick={() => { setMenu(false); void quit().catch(error => setError(errorMessage(error))); }}><Power size={13} /> Quit Buntini <kbd>⌘Q</kbd></button>}</div>}</div></div>}
         {!expanded && <span className="collapsed-label">buntini<span>·</span>{busy ? 'working' : 'here for you'}</span>}

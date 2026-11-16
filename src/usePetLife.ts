@@ -33,7 +33,9 @@ export function forgetMood() {
 export const petFromKeyboard = () => window.dispatchEvent(new Event('buntini-pet'));
 /** What the desktop cat says about being petted, for the screen-reader announcement. */
 export type PetFeeling = 'purring' | 'kneading';
-const stillPreferred = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** Less motion (Buntini's or the Mac's): the cat stays alive and calm, and makes no sudden
+    moves: no hunting, no jump when clicked, no poses when petted. */
+const lessMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* Gives a pet its small signs of life: randomized blinks, idle habits picked by its
    motion personality and its mood, eyes that follow the cursor, petting, clicks and task
@@ -82,10 +84,10 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     if (!element) return;
     // While you type in the panel (up and to its left), the cat watches the words appear.
     const now = performance.now();
-    const gaze = stillPreferred() ? { x: 0, y: 0 } : now - lastTyping.current < 1500 ? { x: -.9, y: -.75 } : now - lastMove.current < 3500 ? pointerGaze.current : glance.current ?? { x: 0, y: 0 };
+    const gaze = now - lastTyping.current < 1500 ? { x: -.9, y: -.75 } : now - lastMove.current < 3500 ? pointerGaze.current : glance.current ?? { x: 0, y: 0 };
     element.style.setProperty('--gx', gaze.x.toFixed(3));
     element.style.setProperty('--gy', gaze.y.toFixed(3));
-    element.style.setProperty('--near', !stillPreferred() && now - lastMove.current < 3500 ? near.current.toFixed(2) : '0');
+    element.style.setProperty('--near', now - lastMove.current < 3500 ? near.current.toFixed(2) : '0');
   }, [ref]);
 
   const stop = useCallback(() => {
@@ -155,7 +157,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     void (async () => {
       while (!cancelled) {
         await wait(nextBlinkDelay(motion));
-        if (cancelled || document.hidden || stillPreferred()) continue;
+        if (cancelled || document.hidden) continue;
         for (let blinks = Math.random() < .18 ? 2 : 1; blinks > 0 && !cancelled; blinks--) {
           setBlinking(true);
           await wait(130);
@@ -221,7 +223,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   useEffect(() => {
     if (!alive) return;
     let eyes = 0, ears = 0, back = 0;
-    const resting = () => !document.hidden && !stillPreferred() && !current.current && live.current.state === 'idle' && !live.current.paused;
+    const resting = () => !document.hidden && !current.current && live.current.state === 'idle' && !live.current.paused;
     const wander = () => {
       const { delay, gaze } = nextSaccade();
       eyes = window.setTimeout(() => {
@@ -252,7 +254,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     let timer = 0;
     const doze = () => {
       timer = window.setTimeout(() => {
-        if (!document.hidden && !stillPreferred() && !current.current) play('dream');
+        if (!document.hidden && !current.current) play('dream');
         doze();
       }, nextDreamDelay());
     };
@@ -275,7 +277,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       timer = window.setTimeout(() => {
         if (cancelled) return;
         played = null;
-        if (!document.hidden && !stillPreferred() && !current.current) {
+        if (!document.hidden && !current.current) {
           const now = performance.now();
           played = nextHabit(motion, cat, { stretch: now - lastStretch.current, ask: (now - lastAsk.current) * askPace[bandFor(mood.current.bond)], userAround: now - lastMove.current < 60_000 }, Math.random, faceFor(mood.current));
           play(played);
@@ -314,7 +316,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     void appWindow.outerPosition().then(position => { origin = position; }).catch(() => {});
     const unlisten = appWindow.onMoved(({ payload }) => { origin = payload; });
     const timer = window.setInterval(async () => {
-      if (document.hidden || stillPreferred()) return applyGaze();
+      if (document.hidden) return applyGaze();
       try {
         const cursor = await cursorPosition();
         const key = `${cursor.x},${cursor.y},${origin.x},${origin.y}`;
@@ -333,7 +335,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     if (!alive) return;
     const timer = window.setInterval(() => {
       const { state: now, paused: away, motion: personality, cat: isCat } = live.current;
-      if (!isCat || now !== 'idle' || away || current.current || document.hidden || stillPreferred()) return;
+      if (!isCat || now !== 'idle' || away || current.current || document.hidden || lessMotion()) return;
       const at = performance.now();
       const side = hunter.current.ready(at, personality);
       if (!side) {
@@ -352,7 +354,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   useEffect(() => {
     if (!alive) return;
     const typed = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.key.length > 1 || stillPreferred()) return;
+      if (event.metaKey || event.ctrlKey || event.key.length > 1) return;
       const now = performance.now();
       const burst = now - lastTyping.current < 1500;
       lastTyping.current = now;
@@ -381,7 +383,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const hearing = { allowed: false, asked: -Infinity };
     let lastBunt = -Infinity;
     let last: { x: number; y: number } | null = null;
-    const context = () => ({ cat: live.current.cat, motion: live.current.motion, annoyance: mood.current.annoyance, favourite: known.current?.favourite ?? null, band: bandFor(mood.current.bond), still: stillPreferred() });
+    const context = () => ({ cat: live.current.cat, motion: live.current.motion, annoyance: mood.current.annoyance, favourite: known.current?.favourite ?? null, band: bandFor(mood.current.bond), still: lessMotion() });
     // Said once each petting, when the purr starts and when kneading starts.
     const said = new Set<PetFeeling>();
     const say = (feeling: PetFeeling) => {
@@ -446,7 +448,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       lastStroke = now;
       if (!ticker) { lastTick = now; ticker = window.setInterval(tick, 100); }
       showPurr(touch.purr, now);
-      const still = stillPreferred();
+      const still = lessMotion();
       // Where it's touched shapes the pose (an arched back, a lifted chin), so not with
       // Reduce motion. Its favourite spot makes it blush.
       if (still) delete element.dataset.touch; else element.dataset.touch = zone;
@@ -470,7 +472,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       window.clearTimeout(still);
       const { side } = where(event.clientX, event.clientY);
       still = window.setTimeout(() => {
-        if (!inside || current.current || !live.current.cat || live.current.state !== 'idle' || live.current.paused || stillPreferred() || performance.now() - lastBunt < 20_000) return;
+        if (!inside || current.current || !live.current.cat || live.current.state !== 'idle' || live.current.paused || performance.now() - lastBunt < 20_000) return;
         lastBunt = performance.now();
         element.style.setProperty('--bunt-dir', String(side));
         play('bunt');
@@ -504,7 +506,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       window.clearTimeout(still);
       // Mid-purr, it leans after the hand for a moment as it goes.
       const exit = last && where(last.x, last.y);
-      if (petting.leave(performance.now()) && exit && live.current.cat && !live.current.paused && !stillPreferred()) {
+      if (petting.leave(performance.now()) && exit && live.current.cat && !live.current.paused) {
         element.style.setProperty('--lean-side', String(exit.side));
         element.dataset.lean = '';
         window.clearTimeout(lean);
@@ -513,7 +515,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       last = null;
     };
     const click = () => {
-      if (stillPreferred()) return;
+      if (lessMotion()) return;
       const poked = pokes.click(performance.now()) === 'poke';
       // Woken by a click: a jump, and a grumble if it was cross already.
       if (live.current.asleep || current.current === 'loaf') { moodTo('woken'); play('startle'); return; }
@@ -563,7 +565,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   useEffect(() => {
     let timer = 0;
     if (asleep && !wasAsleep.current) asleepSince.current = performance.now();
-    if (alive && wasAsleep.current && !asleep && current.current !== 'startle' && !stillPreferred()) {
+    if (alive && wasAsleep.current && !asleep && current.current !== 'startle') {
       const missed = bandFor(mood.current.bond) === 'close' && performance.now() - asleepSince.current >= 3_600_000;
       moodTo('userBack');
       play('stretch');
@@ -579,7 +581,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   useEffect(() => {
     let timer = 0;
     if (alive && held && !wasHeld.current) { stop(); moodTo('held'); }
-    if (alive && !held && wasHeld.current && !stillPreferred()) {
+    if (alive && !held && wasHeld.current) {
       const feeling = live.current.motion === 'playful' ? 'excited' : mood.current.annoyance > .45 ? 'grumpy' : 'curious';
       timer = window.setTimeout(() => show(feeling), 250);
     }
@@ -592,7 +594,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const reactionId = reaction?.id;
   const reactionKind = reaction?.kind;
   useEffect(() => {
-    if (!alive || !reactionKind || stillPreferred()) return;
+    if (!alive || !reactionKind) return;
     const feeling = reactionFeeling[reactionKind];
     if (feeling) moodTo(feeling);
     show(reactionKind === 'happy' ? proudOrHappy(mood.current) : reactionKind);

@@ -447,8 +447,9 @@ html.is-desktop, .is-desktop body, .is-desktop #root { width: 100%; height: 100%
 @keyframes pet-listen { 50% { transform: rotate(-6deg); } }
 @keyframes aura-pulse { 50% { opacity: .3; transform: scale(1.15); } }
 @keyframes pet-speak { 50% { transform: scaleY(.4); } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
-:root[data-motion=reduced] *, :root[data-motion=reduced] *::before, :root[data-motion=reduced] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+/* The cat keeps moving with Less motion, only calmer (usePetLife). */
+@media (prefers-reduced-motion: reduce) { :not(.pet, .pet *), :not(.pet, .pet *)::before, :not(.pet, .pet *)::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+:root[data-motion=reduced] :not(.pet, .pet *), :root[data-motion=reduced] :not(.pet, .pet *)::before, :root[data-motion=reduced] :not(.pet, .pet *)::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 @media (max-width: 380px) { .mode-picker button { font-size: 11px; padding: 5px 4px; }.overlay-welcome { padding-left: 14px; padding-right: 14px; }.overlay-welcome button { font-size: 11px; padding: 5px; }.composer-hint { font-size: 11px; } }
 /* Personal profiles keep all controls inside the attached bubble. */
 .is-expanded .companion { grid-template-rows: minmax(0, 1fr) var(--dock-height,120px); }
