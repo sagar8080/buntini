@@ -219,3 +219,15 @@ test('settled waits for queued speech to finish, and for a cancelled reply to st
   await tick();
   assert.equal(quiet, true);
 });
+
+test('formatting is cleaned from a reply before it reaches the voice', async () => {
+  const played: string[] = [];
+  const speech = new SpeechQueue({ play: async text => { played.push(text); }, stop: async () => {}, onActive: () => {}, spoken: text => text.replace(/\*\*/g, '') });
+  await speech.speakText('**Rates** rose.');
+  assert.deepEqual(played, ['Rates rose.']);
+  const token = speech.begin();
+  speech.append('**Costs** fell. And **more**', token);
+  speech.finish(token);
+  await speech.settled();
+  assert.deepEqual(played, ['Rates rose.', 'Costs fell.', 'And more']);
+});

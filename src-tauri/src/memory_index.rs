@@ -635,7 +635,7 @@ impl SourceRead {
             Ok((records, None)) => Self::Records(records),
             Ok((records, Some(error))) => Self::Partial(records, error),
             // Left closed rather than opened for a background job.
-            Err(error) if crate::apps::is_not_running(&error) => Self::Skipped,
+            Err(error) if crate::apps::left_alone(&error) => Self::Skipped,
             Err(error) => Self::Failed(error),
         }
     }

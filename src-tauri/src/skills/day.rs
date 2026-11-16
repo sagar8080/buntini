@@ -1,7 +1,7 @@
 //! "What needs a reply?" and "My day": read-only summaries of Mail, Calendar and Reminders
 //! written by fixed rules on this Mac, without the model. Each part needs its app allowed
 //! in Settings → Apps; a part that couldn't be read says so.
-use super::{from_verb, without_politeness, Context, Outcome};
+use super::{from_verb, one_of, without_politeness, Context, Outcome};
 use crate::privacy::Share;
 
 #[derive(Debug, PartialEq)]
@@ -14,7 +14,7 @@ pub enum Command {
 pub fn recognise(text: &str) -> Option<Command> {
     let text = without_politeness(text);
     let text = text.strip_prefix("buntini ").unwrap_or(text);
-    if [
+    if one_of(text, &[
         "what needs a reply",
         "what needs replying to",
         "what do i need to reply to",
@@ -33,8 +33,7 @@ pub fn recognise(text: &str) -> Option<Command> {
         "any emails that need a reply",
         "do i need to reply to anything",
         "do any emails need a reply",
-    ]
-    .contains(&text)
+    ])
         || from_verb(text, &["triage"]).is_some_and(|(_, rest)| {
             ["my email", "my emails", "my mail", "my inbox", "email", "the inbox"]
                 .contains(&without_politeness(rest))
@@ -42,7 +41,7 @@ pub fn recognise(text: &str) -> Option<Command> {
     {
         return Some(Command::NeedsReply);
     }
-    if [
+    if one_of(text, &[
         "my day",
         "what's my day like",
         "what is my day like",
@@ -55,9 +54,7 @@ pub fn recognise(text: &str) -> Option<Command> {
         "morning brief",
         "give me my brief",
         "give me my morning brief",
-    ]
-    .contains(&text)
-    {
+    ]) {
         return Some(Command::MyDay);
     }
     None

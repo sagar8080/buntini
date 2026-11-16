@@ -284,6 +284,7 @@ fn words(text: &str) -> Vec<String> {
 /// talking. The transcript is the reply's echo followed by whatever the user said, so it
 /// is cut where the fewest words disagree: non-echo words before the cut plus echo words
 /// after it. Ties keep more of the user's words.
+#[cfg(test)]
 fn strip_echo(heard: &str, spoken: &HashSet<String>) -> String {
     strip_echo_within(heard, spoken, usize::MAX)
 }
@@ -750,6 +751,14 @@ fn remove_recordings(cache: &std::path::Path) -> Result<(), String> {
     }
 }
 impl Voice {
+    /// The audio helper, which dictation also runs as a long-lived service.
+    pub fn helper(&self) -> &std::path::Path {
+        &self.helper
+    }
+    /// Whether a voice turn has the microphone (or is about to).
+    pub fn busy(&self) -> bool {
+        self.recording.try_lock().map_or(true, |slot| slot.is_some())
+    }
     pub fn clear_cache(&self) -> Result<(), String> {
         self.spoken.lock().unwrap().entries.clear();
         remove_recordings(&self.cache)

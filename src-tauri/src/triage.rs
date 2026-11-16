@@ -140,7 +140,7 @@ fn day(received: &str) -> String {
 
 fn line(number: usize, item: &Item) -> String {
     let subject = if item.header.subject.is_empty() { "(no subject)" } else { &item.header.subject };
-    format!("{number}. {} — “{}” ({}): {}", sender(&item.header), subject, day(&item.header.received), item.reason)
+    crate::personal_answer::no_links(&format!("{number}. {} — “{}” ({}): {}", sender(&item.header), subject, day(&item.header.received), item.reason))
 }
 
 /// The emails an answer names, in the order it numbers them: those that need a reply,

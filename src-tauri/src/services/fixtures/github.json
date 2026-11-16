@@ -1,0 +1,312 @@
+{
+ "source": "Shaped after GitHub's GraphQL reference (docs.github.com/graphql) for the query in github.rs; rate-limit headers as GitHub sends them. Not recorded from a live account.",
+ "ok": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8",
+   "x-ratelimit-limit": "5000",
+   "x-ratelimit-remaining": "4987",
+   "x-ratelimit-reset": "1794823920",
+   "x-ratelimit-resource": "graphql"
+  },
+  "body": {
+   "data": {
+    "viewer": {
+     "login": "sagar",
+     "contributionsCollection": {
+      "contributionCalendar": {
+       "weeks": [
+        {
+         "contributionDays": [
+          {
+           "date": "2026-11-01",
+           "contributionCount": 1
+          },
+          {
+           "date": "2026-11-02",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-03",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-04",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-05",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-06",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-07",
+           "contributionCount": 0
+          }
+         ]
+        },
+        {
+         "contributionDays": [
+          {
+           "date": "2026-11-08",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-09",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-10",
+           "contributionCount": 5
+          },
+          {
+           "date": "2026-11-11",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-12",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-13",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-14",
+           "contributionCount": 0
+          }
+         ]
+        },
+        {
+         "contributionDays": [
+          {
+           "date": "2026-11-15",
+           "contributionCount": 0
+          },
+          {
+           "date": "2026-11-16",
+           "contributionCount": 3
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "pullRequests": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "number": 12,
+        "title": "Add the island",
+        "url": "https://github.com/sagar/buntini/pull/12",
+        "isDraft": true,
+        "updatedAt": "2026-11-15T17:05:00Z",
+        "repository": {
+         "nameWithOwner": "sagar/buntini"
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "statusCheckRollup": {
+             "state": "PENDING"
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 14,
+        "title": "Poll developer services",
+        "url": "https://github.com/sagar/buntini/pull/14",
+        "isDraft": false,
+        "updatedAt": "2026-11-14T09:00:00Z",
+        "repository": {
+         "nameWithOwner": "sagar/buntini"
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "statusCheckRollup": {
+             "state": "FAILURE"
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 7,
+        "title": "Fix the footer",
+        "url": "https://github.com/acme/web/pull/7",
+        "isDraft": false,
+        "updatedAt": "2026-11-02T10:00:00Z",
+        "repository": {
+         "nameWithOwner": "acme/web"
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "statusCheckRollup": {
+             "state": "SUCCESS"
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "reviews": {
+     "issueCount": 1,
+     "nodes": [
+      {
+       "number": 88,
+       "title": "Rate-limit the webhooks",
+       "url": "https://github.com/acme/api/pull/88",
+       "updatedAt": "2026-11-16T12:40:00Z",
+       "repository": {
+        "nameWithOwner": "acme/api"
+       },
+       "author": {
+        "login": "ana"
+       }
+      },
+      {}
+     ]
+    }
+   }
+  }
+ },
+ "quiet": {
+  "status": 200,
+  "headers": {
+   "x-ratelimit-remaining": "4900"
+  },
+  "body": {
+   "data": {
+    "viewer": {
+     "login": "sagar",
+     "pullRequests": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "number": 3,
+        "title": "Speed up the index",
+        "url": "https://github.com/sagar/buntini/pull/3",
+        "isDraft": false,
+        "updatedAt": "2026-11-16T08:00:00Z",
+        "repository": {
+         "nameWithOwner": "sagar/buntini"
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "statusCheckRollup": {
+             "state": "ERROR"
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "reviews": {
+     "issueCount": 0,
+     "nodes": []
+    }
+   }
+  }
+ },
+ "empty": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "data": {
+    "viewer": {
+     "login": "sagar",
+     "pullRequests": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    "reviews": {
+     "issueCount": 0,
+     "nodes": []
+    }
+   }
+  }
+ },
+ "rate_limited": {
+  "status": 200,
+  "headers": {
+   "x-ratelimit-remaining": "0",
+   "x-ratelimit-reset": "1794823920"
+  },
+  "body": {
+   "data": null,
+   "errors": [
+    {
+     "type": "RATE_LIMITED",
+     "message": "API rate limit already exceeded for user ID 1."
+    }
+   ]
+  }
+ },
+ "forbidden": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "data": {
+    "viewer": null
+   },
+   "errors": [
+    {
+     "type": "FORBIDDEN",
+     "path": [
+      "viewer"
+     ],
+     "message": "Resource not accessible by personal access token"
+    }
+   ]
+  }
+ },
+ "broken": {
+  "status": 200,
+  "headers": {},
+  "body": {
+   "errors": [
+    {
+     "message": "Parse error on \"}\" (RCURLY) at [1, 2]",
+     "locations": [
+      {
+       "line": 1,
+       "column": 2
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "secondary_limit": {
+  "status": 403,
+  "headers": {
+   "retry-after": "60",
+   "x-ratelimit-remaining": "4800"
+  },
+  "body": {
+   "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+   "documentation_url": "https://docs.github.com/rest/overview/rate-limits-for-the-rest-api"
+  }
+ }
+}

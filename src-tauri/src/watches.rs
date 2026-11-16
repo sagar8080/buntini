@@ -111,7 +111,7 @@ pub fn exact_offer(offers: &[PriceOffer], currency: &str) -> Result<PriceOffer, 
         .filter(|offer| offer.currency == currency)
         .collect::<Vec<_>>();
     let Some(first) = matching.first() else {
-        return Err("No supported structured price was published in the selected currency. JavaScript-only prices and free-text estimates are not tracked.".into());
+        return Err("This shop doesn’t publish a price in that currency in a form I can read reliably.".into());
     };
     if matching.iter().any(|offer| offer.is_aggregate) {
         return Err(
@@ -119,23 +119,18 @@ pub fn exact_offer(offers: &[PriceOffer], currency: &str) -> Result<PriceOffer, 
                 .into(),
         );
     }
-    if matching.iter().any(|offer| {
-        offer.product.to_lowercase() != first.product.to_lowercase()
-            || offer.price != first.price
-            || offer
-                .availability
-                .as_ref()
-                .map(|value| value.to_lowercase())
-                != first
-                    .availability
-                    .as_ref()
-                    .map(|value| value.to_lowercase())
-            || offer.seller.as_ref().map(|value| value.to_lowercase())
-                != first.seller.as_ref().map(|value| value.to_lowercase())
-    }) {
-        return Err("This page publishes conflicting products or prices. Choose a dedicated product variant page.".into());
+    let lower = |value: &Option<String>| value.as_ref().map(|value| value.to_lowercase());
+    // Colours and sizes of one thing at one price have one price to watch. Different prices
+    // on a page never do: which one is yours can't be told, and a cheaper one could alert.
+    if matching.iter().any(|offer| offer.price != first.price || lower(&offer.seller) != lower(&first.seller)) {
+        return Err("This page lists different prices for its options. Choose a page for just the one you want.".into());
     }
-    Ok((*first).clone())
+    let mut chosen = (*first).clone();
+    if matching.iter().any(|offer| lower(&offer.availability) != lower(&first.availability)) {
+        // Only some options are in stock, and whether yours is can't be told from here.
+        chosen.availability = Some("LimitedAvailability".into());
+    }
+    Ok(chosen)
 }
 fn below(watch: &PriceWatch) -> bool {
     watch.last_error.is_none()
@@ -189,6 +184,84 @@ fn record_observation(
     Ok(())
 }
 
+/// The price a page is selling at now. The plain read is quick and takes a shop's own record;
+/// a shop that turns it away, or only shows its price once scripts have run, gets loaded in
+/// Buntini's private browser with no window on screen.
+pub(crate) async fn read_price(url: &str, currency: &str, cancel: Arc<AtomicBool>) -> Result<PriceOffer, String> {
+    let fetch = crate::research::fetch_watched_html(url);
+    tokio::pin!(fetch);
+    let direct = loop {
+        // Check before the first poll as well as after every timer wakeup, so
+        // a revoked queued check cannot start its initial DNS/HTTP work.
+        if cancel.load(Ordering::SeqCst) {
+            break Err("Price check cancelled.".to_string());
+        }
+        tokio::select! {
+            result = &mut fetch => break result,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(40)) => {}
+        }
+    }
+    .and_then(|page| crate::pricing::extract_offers(&page.html, &page.url))
+    .and_then(|offers| exact_offer(&offers, currency));
+    if direct.is_ok() || cancel.load(Ordering::SeqCst) {
+        return direct;
+    }
+    let page = crate::browser_workspace::read_rendered_price(url, cancel).await?;
+    crate::pricing::offer_from_rendered(&page, currency)
+}
+
+pub(crate) fn money(amount: &str, currency: &str) -> String {
+    let (whole, fraction) = amount.split_once('.').unwrap_or((amount, ""));
+    let digits: Vec<char> = whole.chars().collect();
+    let grouped: String = digits.iter().enumerate().flat_map(|(at, digit)| {
+        let comma = at > 0 && (digits.len() - at) % 3 == 0;
+        comma.then_some(',').into_iter().chain(std::iter::once(*digit))
+    }).collect();
+    let number = if fraction.is_empty() { grouped } else { format!("{grouped}.{fraction:0<2}") };
+    match currency {
+        "USD" => format!("${number}"),
+        "EUR" => format!("€{number}"),
+        "GBP" => format!("£{number}"),
+        other => format!("{other} {number}"),
+    }
+}
+
+/// What the first look at a new watch found, for its confirmation.
+fn first_look(watch: &PriceWatch, result: &Result<PriceOffer, String>) -> String {
+    match result {
+        Ok(offer) => {
+            let stock = match offer.availability.as_deref() {
+                Some("InStock") => ", in stock",
+                Some("OutOfStock") => ", sold out",
+                Some("LimitedAvailability") => ", some options in stock",
+                _ => "",
+            };
+            let now = format!("It’s {}{stock} now.", money(&offer.price, &offer.currency));
+            if below(watch) {
+                format!("{now} That’s already at or below your {} target.", money(&watch.threshold, &watch.currency))
+            } else {
+                now
+            }
+        }
+        Err(error) => format!("I couldn’t read its price: {error}"),
+    }
+}
+
+/// Reads a watch just made, keeps what it found, and says so. A watch stands either way.
+pub(crate) async fn first_check(state: &AppState, id: &str, cancel: Arc<AtomicBool>) -> Option<String> {
+    let (url, currency) = {
+        let store = state.store.lock().unwrap();
+        let watch = store.price_watch(id).ok()??;
+        (watch.url, watch.currency)
+    };
+    let result = read_price(&url, &currency, cancel.clone()).await;
+    let store = state.store.lock().unwrap();
+    let mut watch = store.price_watch(id).ok()??;
+    record_observation(&mut watch, result.clone(), cancel.load(Ordering::SeqCst)).ok()?;
+    store.save_price_watch(&watch).ok()?;
+    Some(first_look(&watch, &result))
+}
+
 pub(crate) async fn run(
     app: &tauri::AppHandle,
     id: &str,
@@ -231,21 +304,7 @@ pub(crate) async fn run(
     };
     let _claim = crate::notifications::ActiveMonitor::new(&state, active_id, token.clone());
     state.audit("price_watch.fetch", id);
-    let fetch = crate::research::fetch_public_html(&before.url);
-    tokio::pin!(fetch);
-    let result = loop {
-        // Check before the first poll as well as after every timer wakeup, so
-        // a revoked queued check cannot start its initial DNS/HTTP work.
-        if token.load(Ordering::SeqCst) {
-            break Err("Price check cancelled.".into());
-        }
-        tokio::select! {
-            result = &mut fetch => break result,
-            _ = tokio::time::sleep(std::time::Duration::from_millis(40)) => {}
-        }
-    }
-    .and_then(|page| crate::pricing::extract_offers(&page.html, &page.url))
-    .and_then(|offers| exact_offer(&offers, &before.currency));
+    let result = read_price(&before.url, &before.currency, token.clone()).await;
     let persisted = (|| -> Result<PriceWatch, String> {
         let store = state.store.lock().unwrap();
         let transaction = store
@@ -329,9 +388,39 @@ mod tests {
         aggregate.is_aggregate = true;
         assert!(exact_offer(&[aggregate], "USD").is_err());
         assert_eq!(exact_offer(&[offer("10")], "USD").unwrap().price, "10");
+        // Sizes often share one name, so stock that differs is some options, not a conflict.
         let mut unavailable = offer("10");
         unavailable.availability = Some("OutOfStock".into());
-        assert!(exact_offer(&[offer("10"), unavailable], "USD").is_err());
+        assert_eq!(exact_offer(&[offer("10"), unavailable], "USD").unwrap().availability.as_deref(), Some("LimitedAvailability"));
+    }
+    #[test]
+    fn a_new_watch_says_what_it_found() {
+        assert_eq!(money("3199.95", "USD"), "$3,199.95");
+        assert_eq!(money("129", "USD"), "$129");
+        assert_eq!(money("24.5", "GBP"), "£24.50");
+        assert_eq!(money("1000000", "JPY"), "JPY 1,000,000");
+        let mut watch = PriceWatch { id: "w".into(), url: "https://shop.example.com/p".into(), label: "Z 8".into(), currency: "USD".into(), threshold: "3000".into(), interval_minutes: 60, enabled: true, created_at: now(), next_run_at: now(), last_checked_at: None, last_price: Some("3199.95".into()), last_error: None, last_availability: Some("InStock".into()), history: vec![] };
+        let mut found = offer("3199.95");
+        found.availability = Some("InStock".into());
+        assert_eq!(first_look(&watch, &Ok(found.clone())), "It’s $3,199.95, in stock now.");
+        watch.last_price = Some("2899".into());
+        found.price = "2899".into();
+        assert_eq!(first_look(&watch, &Ok(found)), "It’s $2,899, in stock now. That’s already at or below your $3,000 target.");
+        assert_eq!(first_look(&watch, &Err("Nope.".into())), "I couldn’t read its price: Nope.");
+    }
+    #[test]
+    fn options_at_one_price_have_one_price_to_watch() {
+        let named = |product: &str, price: &str, availability: &str| {
+            let mut one = offer(price);
+            one.product = product.into();
+            one.availability = Some(availability.into());
+            one
+        };
+        let same = exact_offer(&[named("Era 100 - Black", "219", "InStock"), named("Era 100 - White", "219", "InStock")], "USD").unwrap();
+        assert_eq!((same.price.as_str(), same.availability.as_deref()), ("219", Some("InStock")));
+        let mixed = exact_offer(&[named("Runner - Size 8", "110", "OutOfStock"), named("Runner - Size 9", "110", "InStock")], "USD").unwrap();
+        assert_eq!((mixed.price.as_str(), mixed.availability.as_deref()), ("110", Some("LimitedAvailability")));
+        assert!(exact_offer(&[named("Board - Red", "199", "InStock"), named("Board - Blue", "219", "InStock")], "USD").is_err());
     }
     #[test]
     fn unchanged_watch_checks_are_quiet_and_stock_blocks_threshold() {

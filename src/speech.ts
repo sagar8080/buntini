@@ -6,6 +6,8 @@ export interface SpeechQueueDependencies {
   onActive(active: boolean): void;
   onError?(error: unknown): void;
   maxChunkLength?: number;
+  /** The words to say for a piece of a reply, without its formatting. */
+  spoken?(text: string): string;
 }
 
 interface Completion {
@@ -101,7 +103,8 @@ export class SpeechQueue {
     const completion = new Promise<void>((resolve, reject) => {
       this.completions.set(token, { resolve, reject });
     });
-    this.append(text, token);
+    // Whole, so a table or a code block isn't split into sentences before it's read.
+    this.append(this.dependencies.spoken?.(text) ?? text, token);
     this.finish(token);
     return completion;
   }
@@ -139,7 +142,7 @@ export class SpeechQueue {
   }
 
   private enqueue(value: string): void {
-    let text = value.trim().replace(/\s+/g, ' ');
+    let text = (this.dependencies.spoken?.(value) ?? value).trim().replace(/\s+/g, ' ');
     while (text.length > this.limit) {
       const space = text.lastIndexOf(' ', this.limit);
       let split = space > this.limit / 2 ? space : this.limit;

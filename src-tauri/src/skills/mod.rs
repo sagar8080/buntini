@@ -10,6 +10,8 @@ pub mod browser;
 pub mod day;
 pub mod mac;
 pub mod music;
+pub mod system;
+pub mod photos;
 pub mod this;
 
 use crate::{privacy::Share, types::Settings};
@@ -21,6 +23,8 @@ pub enum Skill {
     Mac(mac::Command),
     This(this::Command),
     Day(day::Command),
+    System(system::Command),
+    Photos(photos::Command),
 }
 
 pub enum Outcome {
@@ -38,6 +42,12 @@ pub enum Outcome {
         text: String,
         share: Share,
     },
+    /// Done, with result cards to show (photos), which no model sees.
+    Shown {
+        answer: String,
+        shares: Vec<Share>,
+        cards: Vec<crate::types::ResultCard>,
+    },
     /// Done, naming emails by number. The controller saves them with the turn, so a
     /// follow-up ("reply to the second one") answers exactly that email.
     Listed {
@@ -45,6 +55,10 @@ pub enum Outcome {
         shares: Vec<Share>,
         emails: Vec<crate::triage::Listed>,
     },
+    /// The Mac at a glance card; the controller reads it, since it needs the history.
+    Look(crate::glance::Focus),
+    /// Ask to quit this open app. The controller proposes it, so it waits for approval.
+    Quit { app: String },
 }
 
 pub struct Context<'a> {
@@ -164,6 +178,15 @@ pub(crate) fn without_politeness(mut text: &str) -> &str {
     }
 }
 
+/// Whether `text` is exactly one of `phrases`, however its apostrophes were typed: people
+/// write "whats" as often as "what's". For fixed phrases only; a song or page name keeps
+/// its own spelling.
+pub(crate) fn one_of(text: &str, phrases: &[&str]) -> bool {
+    let bare = |words: &str| words.chars().filter(|c| *c != '\'').collect::<String>();
+    let text = bare(text);
+    phrases.iter().any(|phrase| bare(phrase) == text)
+}
+
 /// A fast skill must account for the whole request. Compound actions belong to
 /// the durable controller, even when the first clause happens to be recognisable.
 /// Conjunctions inside a duration or title ("one minute and thirty seconds",
@@ -221,6 +244,7 @@ fn compound_request(prompt: &str) -> bool {
         "watch",
         "download",
         "upload",
+        "quit",
     ];
     let command = |tail: &str| {
         let normalized = words(tail);
@@ -294,7 +318,9 @@ pub fn recognise(prompt: &str, recent: &[String]) -> Option<Skill> {
         .map(Skill::Music)
         .or_else(|| mac::recognise(&text).map(Skill::Mac))
         .or_else(|| this::recognise(&text, &recent).map(Skill::This))
+        .or_else(|| photos::recognise(&text).map(Skill::Photos))
         .or_else(|| day::recognise(&text).map(Skill::Day))
+        .or_else(|| system::recognise(&text).map(Skill::System))
         .or_else(|| browser::recognise_prompt(prompt).map(Skill::Browser))
 }
 
@@ -306,6 +332,8 @@ pub fn label(skill: &Skill) -> &'static str {
         Skill::Mac(_) => "mac",
         Skill::This(_) => "this",
         Skill::Day(_) => "day",
+        Skill::System(_) => "system",
+        Skill::Photos(_) => "photos",
     }
 }
 
@@ -316,6 +344,8 @@ pub async fn run(skill: Skill, context: &Context<'_>) -> Result<Outcome, String>
         Skill::Mac(command) => mac::run(command).await,
         Skill::This(command) => this::run(command, context).await,
         Skill::Day(command) => day::run(command, context).await,
+        Skill::System(command) => system::run(command).await,
+        Skill::Photos(command) => photos::run(command, context).await,
     }
 }
 
@@ -331,6 +361,31 @@ pub(crate) async fn osascript(source: &str, argv: &[&str], seconds: u64) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fixed_phrase_needs_no_apostrophe() {
+        for (typed, proper) in [
+            ("whats playing", "what's playing"),
+            ("whats this song", "what's this song"),
+            ("whats this", "what's this"),
+            ("whats this page about", "what's this page about"),
+            ("whats my day like", "what's my day like"),
+            ("hows my day looking", "how's my day looking"),
+            ("whos waiting for a reply", "who's waiting for a reply"),
+            ("summarise what ive selected", "summarise what i've selected"),
+            ("whats using my battery", "what's using my battery"),
+        ] {
+            let (typed_skill, proper_skill) = (recognise(typed, &[]), recognise(proper, &[]));
+            assert!(proper_skill.is_some(), "{proper}");
+            assert_eq!(format!("{typed_skill:?}"), format!("{proper_skill:?}"), "{typed}");
+        }
+    }
+
+    #[test]
+    fn one_of_matches_whole_phrases_only() {
+        assert!(one_of("whats up", &["what's up"]));
+        assert!(!one_of("whats using my battery in figma", &["what's using my battery"]));
+    }
 
     #[test]
     fn mentions_negations_and_other_targets_do_not_execute_controls() {

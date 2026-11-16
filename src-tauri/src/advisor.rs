@@ -1,7 +1,6 @@
 //! "Recommended for this Mac": picks the Qwen3.5 or Gemma 4 MLX model that suits this
-//! Mac's chip and memory, gives the commands to set it up, and notices when the user
-//! has finished.
-//! Buntini never installs packages or downloads models itself.
+//! Mac's chip and memory, gives the commands to set it up by hand, and notices when the
+//! user has finished. `local_setup` fetches the pick itself for anyone who'd rather not.
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -193,7 +192,7 @@ pub fn model_ready(folder: &Path) -> bool {
     }
 }
 
-fn sysctl(name: &str) -> String {
+pub(crate) fn sysctl(name: &str) -> String {
     std::process::Command::new("/usr/sbin/sysctl")
         .arg("-n")
         .arg(name)

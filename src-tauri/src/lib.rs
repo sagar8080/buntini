@@ -1,10 +1,13 @@
 mod actions;
+mod agent_setup;
+mod agents;
 #[cfg(debug_assertions)]
 pub mod acceptance_apps;
 mod advisor;
 mod approvals;
 mod apps;
 mod ax;
+mod brain;
 mod brief;
 mod browser_workspace;
 mod browser_session;
@@ -18,8 +21,11 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod helper;
+mod glance;
 mod cloud;
 mod completion;
+mod cart;
 mod control_actions;
 mod controller;
 mod conversation;
@@ -27,14 +33,20 @@ mod data;
 mod delivery;
 mod embedding;
 mod explicit_fields;
+mod flow;
 mod focus;
 mod goals;
 mod indexer;
+mod intent;
+mod island;
 mod integrations;
 mod local;
+mod local_setup;
 mod login;
 mod mac_settings;
+mod mail;
 mod mcp;
+mod media;
 mod memory_index;
 mod migration;
 mod model;
@@ -42,11 +54,13 @@ mod monitor_actions;
 mod notifications;
 mod nudges;
 mod overlay;
+mod personal_answer;
 mod pet;
 mod planning;
 mod pricing;
 mod privacy;
 mod recipes;
+mod request_fields;
 mod research;
 mod routines;
 mod search_intent;
@@ -59,13 +73,16 @@ mod search_pipeline_tests;
 mod scenario_evals;
 mod scheduler;
 mod security;
+mod services;
 mod skills;
 mod store;
+pub mod surface;
 mod support;
 mod task_contract;
 mod tools;
 mod triage;
 mod types;
+mod utilities;
 mod voice;
 mod watches;
 mod web;
@@ -82,16 +99,15 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
-pub fn run_public_browser_smoke() {
-    browser_workspace::run_public_smoke(app_context());
-}
-
-#[cfg(debug_assertions)]
 pub fn run_public_desktop_browser_smoke() {
     browser_session::run_public_smoke();
 }
 
-fn show_companion(app: &tauri::AppHandle) {
+/// Dictation on this Mac with a recorded file for a voice (`examples/flow_host.rs`).
+#[cfg(debug_assertions)]
+pub use flow::smoke::run as run_flow_smoke;
+
+pub(crate) fn show_companion(app: &tauri::AppHandle) {
     // Before Buntini takes focus: what "this" means is whatever the user was just in.
     focus::capture();
     if let Some(window) = app.get_webview_window("main") {
@@ -150,15 +166,13 @@ pub fn run() {
                 .on_notice(move |text| {
                     let _ = tauri::Emitter::emit(&notices, "budget-warning", text);
                 });
-            // Learn whether Apple Intelligence can run here before the first chat.
-            let probe = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                probe
-                    .state::<controller::AppState>()
-                    .models
-                    .probe_apple()
-                    .await;
-            });
+            // Learn whether Apple Intelligence can run here before the first chat, and
+            // keep checking while it may still become usable.
+            tauri::async_runtime::spawn(controller::watch_apple(app.handle().clone()));
+            // A local model setup left unfinished carries on where it stopped.
+            tauri::async_runtime::spawn(local_setup::resume(app.handle().clone()));
+            // One point a minute for the Mac at a glance card's trend.
+            glance::start(app.handle().clone());
             // Finished timers are announced through the app.
             skills::mac::set_app(app.handle().clone());
             browser_workspace::set_app(app.handle().clone());
@@ -193,6 +207,17 @@ pub fn run() {
             focus::start();
             memory_index::start(app.handle().clone());
             // Before any timer or approval alert can be answered.
+            // Claude Code and Codex hand their requests over once their hooks are on.
+            agents::start(app.handle().clone(), app.path().app_data_dir()?);
+            // The island and the dictation pill: drawn natively, empty until something shows.
+            if surface::start() {
+                island::start(app.handle().clone());
+            } else {
+                eprintln!("Native surfaces unavailable");
+            }
+            mail::start(app.handle().clone());
+            // Dictation anywhere, call notes and the wake word; idle until switched on.
+            flow::start(app.handle().clone());
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
@@ -277,10 +302,19 @@ pub fn run() {
             apps::check_app,
             apps::accessibility,
             advisor::mac_profile,
+            local_setup::local_setup_plan,
+            local_setup::local_setup_status,
+            local_setup::local_setup_start,
+            local_setup::local_setup_cancel,
+            local_setup::local_setup_remove,
             controller::choose_local_folder,
             chatgpt::chatgpt_sign_in,
+            controller::check_server,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
+            helper::chatgpt_always_allow_off,
+            glance::mac_glance_now,
+            approvals::plan_ask_chatgpt,
             brief::morning_brief,
             brief::day_glance,
             brief::usual_requests,
@@ -306,6 +340,12 @@ pub fn run() {
             pet::save_pet_memory,
             pet::pet_purr_tap,
             pet::pet_sound_allowed,
+            controller::open_apple_settings,
+            integrations::maps::map_picture,
+            skills::photos::photo_thumbnail,
+            skills::photos::show_photo,
+            apps::new_shortcut,
+            apps::connect_app,
             world::pet_world,
             world::pet_move,
             world::pet_stop,
@@ -342,7 +382,18 @@ pub fn run() {
             nudges::dismiss_heads_up,
             notifications::take_heads_up_request,
             goals::update_goal,
-            goals::delete_goal
+            goals::delete_goal,
+            agents::agent_requests,
+            agents::answer_agent,
+            agent_setup::coding_agents,
+            agent_setup::connect_coding_agent,
+            agents::agents_call,
+            island::island_call,
+            flow::flow_call,
+            services::services_call,
+            mail::mail_call,
+            media::media_call,
+            utilities::utilities_call
         ])
         .build(app_context())
         .expect("Buntini could not start")
@@ -378,6 +429,8 @@ pub fn run() {
                         state.models.shutdown().await;
                         mcp::stop_all();
                         app.exit(0);
+                        agents::stop();
+                        surface::stop();
                     });
                 }
             }

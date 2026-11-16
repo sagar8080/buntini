@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { folderName, friendlyStatus, setupLines } from './brain.ts';
+import { appleSettingsPane, appleStatus, folderName, friendlyStatus, offersChatGPT, setupLines } from './brain.ts';
 
 test('chosen folders read as names, not paths', () => {
   assert.equal(folderName('/Users/sam/buntini-mlx/bin/python'), 'buntini-mlx');
@@ -25,4 +25,28 @@ test('the setup check becomes a few plain lines', () => {
   const missing = setupLines({ dependencies: {}, models: {} });
   assert.match(missing[0].detail, /Install MLX/);
   assert.equal(missing[1].detail, 'Choose a model folder.');
+});
+
+test('a Mac language Apple Intelligence lacks says how to get it working', () => {
+  const status = appleStatus('languageNotSupported');
+  assert.equal(status.ready, false);
+  assert.equal(status.label, 'Language not supported');
+  assert.match(status.advice ?? '', /Language & Region.*English \(India\).*turn on Apple Intelligence/);
+});
+
+test('a download that never finishes says what to check, with the pane that fixes it', () => {
+  assert.equal(appleStatus('modelNotReady').label, 'Downloading');
+  const stuck = appleStatus('modelStuck');
+  assert.equal(stuck.ready, false);
+  assert.match(stuck.advice ?? '', /only Siri.*Siri’s language.*choose a local or cloud model/);
+  assert.equal(appleSettingsPane('modelStuck'), 'siri');
+  assert.equal(appleSettingsPane('appleIntelligenceNotEnabled'), 'siri');
+  assert.equal(appleSettingsPane('languageNotSupported'), 'language');
+  assert.equal(appleSettingsPane('modelNotReady'), null);
+  assert.equal(appleSettingsPane('deviceNotEligible'), null);
+});
+
+test('ChatGPT is offered once Apple Intelligence is known not to answer here', () => {
+  for (const reason of ['modelNotReady', 'modelStuck', 'appleIntelligenceNotEnabled', 'languageNotSupported', 'deviceNotEligible', 'unsupported', 'missing']) assert.equal(offersChatGPT(reason), true, reason);
+  for (const reason of ['available', 'checking', undefined]) assert.equal(offersChatGPT(reason), false, String(reason));
 });

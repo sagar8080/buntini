@@ -1,0 +1,352 @@
+[
+ {
+  "asked": "remind me to pick up the dry cleaning tomorrow at 5pm",
+  "group": "add",
+  "should": "Creates a reminder 'Pick up the dry cleaning' due Sunday 8 Nov 2026 at 17:00."
+ },
+ {
+  "asked": "add a reminder to pay rent on the 1st",
+  "group": "add",
+  "should": "Creates a reminder 'Pay rent' due Tuesday 1 December 2026."
+ },
+ {
+  "asked": "remind me to call the plumber monday morning",
+  "group": "add",
+  "should": "Creates a reminder 'Call the plumber' due Monday 9 Nov 2026 in the morning (e.g. 09:00)."
+ },
+ {
+  "asked": "put lunch with Ana on the calendar for Wednesday at 1pm",
+  "group": "add",
+  "should": "Creates a calendar event 'Lunch with Ana' on Wednesday 11 Nov 2026 at 13:00."
+ },
+ {
+  "asked": "add a calendar event: team offsite next Thursday all day",
+  "group": "add",
+  "should": "Creates an all-day event 'Team offsite' on Thursday 19 Nov 2026."
+ },
+ {
+  "asked": "schedule a haircut tomorrow at 9:30am",
+  "group": "add",
+  "should": "Creates a calendar event 'Haircut' on Sunday 8 Nov 2026 at 09:30."
+ },
+ {
+  "asked": "make a note called Packing list: passport, charger, sunglasses",
+  "group": "add",
+  "should": "Creates a note titled 'Packing list' containing passport, charger, sunglasses."
+ },
+ {
+  "asked": "note: wifi password at the flat is blue-harbor-42",
+  "group": "add",
+  "should": "Creates a note containing the Wi-Fi password blue-harbor-42 for the flat."
+ },
+ {
+  "asked": "remind me to water the plants this evening",
+  "group": "add",
+  "should": "Creates a reminder 'Water the plants' due today, 7 Nov 2026, in the evening."
+ },
+ {
+  "asked": "add eggs and bread to my reminders",
+  "group": "add",
+  "should": "Creates reminders (or one reminder) for eggs and bread with no date."
+ },
+ {
+  "asked": "book a dinner with mum friday at 7pm",
+  "group": "add",
+  "should": "Creates a calendar event 'Dinner with mum' on Friday 13 Nov 2026 at 19:00."
+ },
+ {
+  "asked": "jot down a note: ideas for sam's birthday - climbing gym pass, book, whisky",
+  "group": "add",
+  "should": "Creates a note about Sam's birthday ideas listing climbing gym pass, book, whisky."
+ },
+ {
+  "asked": "mark renew car insurance as done",
+  "group": "change",
+  "should": "Marks the reminder 'Renew car insurance' complete."
+ },
+ {
+  "asked": "i bought milk, tick it off",
+  "group": "change",
+  "should": "Marks the reminder 'Buy milk' complete."
+ },
+ {
+  "asked": "move call mum to monday evening",
+  "group": "change",
+  "should": "Reschedules 'Call mum' to Monday 9 Nov 2026 in the evening (e.g. 18:00)."
+ },
+ {
+  "asked": "push the dentist to 4pm tomorrow",
+  "group": "change",
+  "should": "Moves the Dentist event on Sunday 8 Nov 2026 from 15:00 to 16:00."
+ },
+ {
+  "asked": "move my 1:1 with Priya to 2pm",
+  "group": "change",
+  "should": "Moves the 1:1 with Priya tomorrow (Sun 8 Nov) from 11:00 to 14:00."
+ },
+ {
+  "asked": "reschedule renew car insurance to next friday",
+  "group": "change",
+  "should": "Changes the due date of 'Renew car insurance' to Friday 13 Nov 2026."
+ },
+ {
+  "asked": "draft an email to Priya saying I'll sign the contract this afternoon",
+  "group": "communicate",
+  "should": "Drafts an email to Priya Shah saying the contract will be signed this afternoon; not sent."
+ },
+ {
+  "asked": "email Sam that ramen on friday sounds great",
+  "group": "communicate",
+  "should": "Drafts an email to Sam Lee accepting ramen on Friday."
+ },
+ {
+  "asked": "text mum happy birthday",
+  "group": "communicate",
+  "should": "Prepares a text message to mum saying happy birthday."
+ },
+ {
+  "asked": "text Sam I'm running 10 mins late",
+  "group": "communicate",
+  "should": "Prepares a text to Sam saying running 10 minutes late."
+ },
+ {
+  "asked": "call mum",
+  "group": "communicate",
+  "should": "Starts a call to mum."
+ },
+ {
+  "asked": "ring Priya",
+  "group": "communicate",
+  "should": "Starts a call to Priya."
+ },
+ {
+  "asked": "write an email to my landlord asking when the boiler will be fixed",
+  "group": "communicate",
+  "should": "Drafts an email to the landlord asking when the boiler will be fixed."
+ },
+ {
+  "asked": "send Ana a message saying the 14th works for me",
+  "group": "communicate",
+  "should": "Prepares a message to Ana Ruiz saying the 14th works."
+ },
+ {
+  "asked": "open Safari",
+  "group": "mac",
+  "should": "Opens Safari."
+ },
+ {
+  "asked": "quit Spotify",
+  "group": "mac",
+  "should": "Quits Spotify."
+ },
+ {
+  "asked": "set a timer for 10 minutes",
+  "group": "mac",
+  "should": "Starts a 10-minute timer."
+ },
+ {
+  "asked": "timer 25 min",
+  "group": "mac",
+  "should": "Starts a 25-minute timer."
+ },
+ {
+  "asked": "pause the music",
+  "group": "mac",
+  "should": "Pauses music playback."
+ },
+ {
+  "asked": "skip this song",
+  "group": "mac",
+  "should": "Skips to the next track."
+ },
+ {
+  "asked": "turn the volume down a bit",
+  "group": "mac",
+  "should": "Lowers system volume somewhat."
+ },
+ {
+  "asked": "turn on dark mode",
+  "group": "mac",
+  "should": "Switches macOS to dark mode."
+ },
+ {
+  "asked": "brightness to 50%",
+  "group": "mac",
+  "should": "Sets display brightness to 50%."
+ },
+ {
+  "asked": "turn off wifi",
+  "group": "mac",
+  "should": "Turns Wi-Fi off."
+ },
+ {
+  "asked": "what's 18% of 64?",
+  "group": "answer",
+  "should": "11.52"
+ },
+ {
+  "asked": "what's 15% tip on a $47 bill",
+  "group": "answer",
+  "should": "$7.05 tip, total $54.05."
+ },
+ {
+  "asked": "split $186 between 4 people",
+  "group": "answer",
+  "should": "$46.50 each."
+ },
+ {
+  "asked": "how many cups in a litre",
+  "group": "answer",
+  "should": "About 4.23 US cups."
+ },
+ {
+  "asked": "convert 5 miles to km",
+  "group": "answer",
+  "should": "About 8.05 km."
+ },
+ {
+  "asked": "what's 72 fahrenheit in celsius",
+  "group": "answer",
+  "should": "About 22.2 C."
+ },
+ {
+  "asked": "how many ounces in 2 pounds",
+  "group": "answer",
+  "should": "32 ounces."
+ },
+ {
+  "asked": "who wrote Pride and Prejudice",
+  "group": "answer",
+  "should": "Jane Austen."
+ },
+ {
+  "asked": "what's the capital of Australia",
+  "group": "answer",
+  "should": "Canberra."
+ },
+ {
+  "asked": "how do i take a screenshot on a mac",
+  "group": "answer",
+  "should": "Cmd+Shift+3 for full screen, Cmd+Shift+4 for a selection, Cmd+Shift+5 for options."
+ },
+ {
+  "asked": "how many days until christmas",
+  "group": "answer",
+  "should": "48 days from 7 Nov 2026 to 25 Dec 2026."
+ },
+ {
+  "asked": "make this sound more polite: send me the report now",
+  "group": "answer",
+  "should": "A politer rewrite, e.g. asking if they could please send the report when possible."
+ },
+ {
+  "asked": "summarise this: The meeting has been moved from Tuesday to Thursday because the venue is unavailable, and everyone should bring their laptops.",
+  "group": "answer",
+  "should": "One short sentence: meeting moved to Thursday due to venue, bring laptops."
+ },
+ {
+  "asked": "fix the grammar: me and him goes to the shop yesterday",
+  "group": "answer",
+  "should": "He and I went to the shop yesterday."
+ },
+ {
+  "asked": "what's on my calendar today",
+  "group": "read",
+  "should": "Design review at 23:00 in Room 4, plus Climbing with Sam at 10:00 at The Arch."
+ },
+ {
+  "asked": "what do i have tomorrow",
+  "group": "read",
+  "should": "1:1 with Priya at 11:00 and Dentist at 15:00 at Harley Street."
+ },
+ {
+  "asked": "when is my dentist appointment",
+  "group": "read",
+  "should": "Tomorrow, Sunday 8 Nov, at 15:00 at Harley Street."
+ },
+ {
+  "asked": "what reminders do i have",
+  "group": "read",
+  "should": "Renew car insurance (due today), Call mum (due tomorrow), Buy milk (no date)."
+ },
+ {
+  "asked": "what's due today",
+  "group": "read",
+  "should": "Renew car insurance is due today."
+ },
+ {
+  "asked": "any emails from Priya",
+  "group": "read",
+  "should": "Yes: 'Contract needs your signature by 5pm today'."
+ },
+ {
+  "asked": "did Ana reply about the flights",
+  "group": "read",
+  "should": "Yes, 'Re: Lisbon flights': she says the 14th works."
+ },
+ {
+  "asked": "how much is the Acme invoice",
+  "group": "read",
+  "should": "Invoice 4821 is $1,240, due 20 November."
+ },
+ {
+  "asked": "what did Sam email me about",
+  "group": "read",
+  "should": "'Lunch on Friday?' suggesting the new ramen place."
+ },
+ {
+  "asked": "how much was my uber",
+  "group": "read",
+  "should": "$18.40."
+ },
+ {
+  "asked": "where is climbing today",
+  "group": "read",
+  "should": "The Arch, at 10:00 with Sam."
+ },
+ {
+  "asked": "anything urgent in my inbox",
+  "group": "read",
+  "should": "Priya's contract needing a signature by 5pm today; maybe GitHub sign-in from London."
+ },
+ {
+  "asked": "what's the weather today",
+  "group": "online",
+  "should": "Current weather and forecast for the user's location."
+ },
+ {
+  "asked": "will it rain tomorrow",
+  "group": "online",
+  "should": "Tomorrow's rain forecast for the user's location."
+ },
+ {
+  "asked": "weather in Lisbon this weekend",
+  "group": "online",
+  "should": "Weekend forecast for Lisbon."
+ },
+ {
+  "asked": "how much is 100 dollars in euros",
+  "group": "online",
+  "should": "Converted amount using the current USD to EUR rate."
+ },
+ {
+  "asked": "convert 250 pounds to dollars",
+  "group": "online",
+  "should": "Converted amount using the current GBP to USD rate."
+ },
+ {
+  "asked": "what time does the Apple Store close today",
+  "group": "online",
+  "should": "Looked-up store hours, or asks which store."
+ },
+ {
+  "asked": "who won the world series this year",
+  "group": "online",
+  "should": "Looked-up winner of the 2026 World Series."
+ },
+ {
+  "asked": "look up how long to boil an egg",
+  "group": "online",
+  "should": "About 6-7 minutes soft, 10-12 hard."
+ }
+]

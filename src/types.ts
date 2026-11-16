@@ -1,3 +1,10 @@
+import type { IslandSettings } from './island/model';
+import type { AgentsSettings } from './agents/model';
+import type { FlowSettings } from './flow/model';
+import type { ServicesSettings } from './services/model';
+import type { MailSettings } from './mail/model';
+import type { MediaSettings } from './media/model';
+import type { UtilitiesSettings } from './utilities/model';
 export type Mode = 'auto' | 'files' | 'system' | 'web';
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
@@ -15,10 +22,12 @@ export type PetMotion = 'calm' | 'playful' | 'sleepy';
 /** accent is the resolved accessory colour (#RRGGBB). */
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: string }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
-export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt' | 'custom';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
+  /** Buntini chooses the brain until the user picks one. */
+  brainAuto: boolean;
   assistantName: string;
   userName: string;
   personality: string;
@@ -67,15 +76,28 @@ export interface Settings {
   apps: string[];
   cloudProvider: CloudProvider;
   cloudModel: string;
+  cloudUrl: string;
+  cloudOnThisMac: boolean;
   cloudBudgetUsd: number;
   cloudInputPrice: number;
   cloudOutputPrice: number;
+  island: IslandSettings;
+  agents: AgentsSettings;
+  flow: FlowSettings;
+  services: ServicesSettings;
+  mail: MailSettings;
+  media: MediaSettings;
+  utilities: UtilitiesSettings;
 }
 export interface Source { title: string; url: string; snippet: string; retrievedAt: string }
 export interface ResearchContent { url: string; title: string; text: string; retrievedAt: string; truncated: boolean }
 export interface PriceOffer { product: string; url: string; price: string; currency: string; availability?: string; seller?: string; isAggregate: boolean; highPrice?: string }
 export interface CardField { label: string; value: string }
-export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'listing' | 'flight'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string }
+export interface ResultCard { kind: 'weather' | 'currency' | 'article' | 'place' | 'route' | 'listing' | 'flight' | 'photos' | 'shortcut'; title: string; subtitle: string; fields: CardField[]; url?: string; attribution: string; retrievedAt: string; map?: CardMap; photos?: CardPhoto[] }
+/** A photo from the user's library: its id in Photos and its thumbnail in the cache. */
+export interface CardPhoto { id: string; thumb: string; taken: string; video: boolean }
+/** A map of the results, drawn on the Mac, and the Maps view it opens. */
+export interface CardMap { id: string; url: string }
 export interface FileHit { name: string; path: string; size: number; modifiedAt: string; excerpt?: string }
 export interface TaskRecord {
   id: string;
@@ -86,9 +108,13 @@ export interface TaskRecord {
   sources: Source[];
   files: FileHit[];
   research?: ResearchContent[];
+  researchReport?: { attempts: { route: string; status: string; detail: string }[] };
   prices?: PriceOffer[];
   cards?: ResultCard[];
+  /** Answers to pick when Buntini asked something. Each sends its prompt. */
+  choices?: { label: string; prompt: string }[];
   system?: Record<string, unknown>;
+  glance?: MacGlance;
   backend?: string;
   touched?: string[];
   /** 'online' when the model asked to look something up; the app then asks for approval. */
@@ -112,6 +138,8 @@ export interface Diagnostics {
   cloudKeys?: string[];
   cloudSpendUsd?: number;
   chatgptAccount?: string | null;
+  chatgptPlan?: 'none' | 'usable' | 'refused';
+  chatgptAlwaysAllow?: boolean;
 }
 export interface AuditEntry { id?: number; timestamp?: string; createdAt?: string; action: string; detail?: string; outcome?: string }
 /** Something done on its own at a set time; the morning brief is the built-in one. */
@@ -129,6 +157,7 @@ export interface ConversationList { items: ConversationSummary[]; nextCursor: st
 export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
+export type AppConnection = 'ready' | 'noAccount' | 'denied';
 export interface Memory { id: number; fact: string; createdAt: string }
 export interface TaskEvent { type: 'state' | 'delta' | 'tool' | 'done' | 'error' | 'notice'; taskId: string; state?: string; text?: string; tool?: string; task?: TaskRecord }
 export interface TaskOutcome { id: string; kind: string; description: string; tool?: string | null; acceptedTools: string[]; resources: string[]; dependencies: string[]; status: string; requiredArguments: Record<string, unknown>; requiredFields: string[]; completedBy: string[]; sourceRevision: number }
@@ -141,5 +170,33 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 /** A saved proposal waiting for the person; `description` never holds field values. */
 /** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
+/** A coding agent's request, shown on the cat (agents.rs). `questions` is set when it asks rather than acts. */
+export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; createdAt: string }
+export interface AgentQuestion { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
+export interface AgentFinished { agent: string; project: string; message: string }
+export type AgentAnswer = { kind: 'allow' } | { kind: 'always' } | { kind: 'deny' } | { kind: 'terminal' } | { kind: 'answers'; answers: Record<string, string | string[]> };
+/** Claude Code or Codex, and whether Buntini's hooks are in its settings (agent_setup.rs). */
+export interface CodingAgent { id: string; name: string; available: boolean; connected: boolean; heard: boolean; problem: string; usage?: boolean | null }
 export interface PendingApprovalSummary { taskId: string; approvalId: string; tool: string; description: string; goal: string; createdAt: string }
 export interface BackgroundStatus { executionMode: string; limitation: string; openAtLogin?: LoginStatus; timers: { id: string; seconds: number; dueAt: string; state: string; lateSeconds: number; error?: string }[]; monitors: { id: string; kind: string; label: string; enabled: boolean; nextRunAt: string; lastSuccessAt?: string; overdueSeconds: number; lastDeliveryError?: string; lastRun?: { state: string; lateSeconds: number; error?: string } }[] }
+
+export type MemoryState = 'easy' | 'tight' | 'struggling';
+export type GlanceMetric = 'cpu' | 'memory' | 'energy';
+export interface MacBattery { percent: number; charging: boolean; minutesLeft?: number; healthPercent?: number; cycles?: number }
+export interface GlanceApp { name: string; cpuPercent: number; memoryBytes: number; energy?: number; quittable: boolean }
+export interface GlanceSample { at: number; cpu: number; pressure: number; battery?: number }
+export interface MacGlance {
+  focus: 'overview' | 'slow' | 'storage' | 'battery';
+  summary: string;
+  verdict: { kind: string; title: string; actions: { kind: 'quit' | 'settings'; target: string; label: string }[] };
+  storage: { totalBytes: number; freeBytes: number; parts: { key: string; label: string; bytes: number }[] };
+  memory: { state: MemoryState; totalBytes: number; swapBytes: number };
+  battery?: MacBattery;
+  cpuPercent: number;
+  hot: boolean;
+  history: GlanceSample[];
+  day?: GlanceSample[];
+  metric: GlanceMetric;
+  apps: GlanceApp[];
+  capturedAt: string;
+}

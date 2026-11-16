@@ -104,6 +104,7 @@ mod tests {
             sources: vec![],
             files: vec![],
             system: None,
+            glance: None,
             research: vec![],
         research_report: None,
             prices: vec![],
@@ -112,6 +113,7 @@ mod tests {
             touched: touched.iter().map(|id| id.to_string()).collect(),
             handoff: None,
             action: None,
+            choices: vec![],
         }
     }
 
