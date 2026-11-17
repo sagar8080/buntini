@@ -115,7 +115,8 @@ export const memory = (mood: Mood, now: number) => JSON.stringify({ mood, at: no
 export function faceFor(mood: Mood): Face {
   if (mood.annoyance > .5) return 'grumpy';
   if (mood.excitement > .55) return 'excited';
-  if (mood.energy < .3) return 'drowsy';
+  // Only a cat that's truly worn out: a sleepy one late at night, not a calm one keeping you company.
+  if (mood.energy < .25) return 'drowsy';
   if (mood.boredom > .6) return 'bored';
   if (mood.affection > .7) return 'content';
   return 'neutral';

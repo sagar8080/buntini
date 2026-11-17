@@ -41,11 +41,17 @@ test('left alone with you around, it gets bored; company and petting fix that', 
   assert.ok(after('calm') < after('playful'));
 });
 
-test('late at night the cat gets drowsy, and a nap brings its energy back', () => {
-  let mood = calm();
-  for (let minute = 0; minute < 30; minute++) mood = drift(mood, 60, { motion: 'calm', hour: 2, userAround: false, asleep: false });
+test('late at night a sleepy cat gets drowsy, a calm or playful one stays bright, and a nap brings its energy back', () => {
+  const night = (motion: 'calm' | 'playful' | 'sleepy') => {
+    let mood = calm();
+    for (let minute = 0; minute < 30; minute++) mood = drift(mood, 60, { motion, hour: 2, userAround: false, asleep: false });
+    return mood;
+  };
+  assert.equal(faceFor(night('calm')), 'neutral');
+  assert.equal(faceFor(night('playful')), 'neutral');
+  let mood = night('sleepy');
   assert.equal(faceFor(mood), 'drowsy');
-  for (let minute = 0; minute < 20; minute++) mood = drift(mood, 60, { motion: 'calm', hour: 2, userAround: false, asleep: true });
+  for (let minute = 0; minute < 20; minute++) mood = drift(mood, 60, { motion: 'sleepy', hour: 2, userAround: false, asleep: true });
   assert.ok(mood.energy > .9);
 });
 
