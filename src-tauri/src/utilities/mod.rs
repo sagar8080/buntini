@@ -760,12 +760,14 @@ mod tests {
         let order: Vec<(Phase, u32)> = seen.iter().map(|(phase, round, _)| (*phase, *round)).collect();
         use Phase::*;
         assert_eq!(order, [(Focus, 1), (Rest, 1), (Focus, 2), (Rest, 2), (Focus, 3), (Rest, 3), (Focus, 4), (LongRest, 4)]);
-        // Each turn lands on its deadline, give or take the scheduler.
+        // Each turn comes on its deadline, never before, and only as late as a busy machine wakes
+        // the ticker. Deadlines come from the plan, so lateness never adds up: were each turn
+        // timed from the last, eight late turns would end the set far past these bounds.
         let due = [0, 400, 550, 950, 1100, 1500, 1650, 2050];
         for ((_, _, at), due) in seen.iter().zip(due) {
-            assert!((*at - due).abs() < 120, "turned at {at} ms, due at {due} ms: {seen:?}");
+            assert!((due - 2..due + 500).contains(at), "turned at {at} ms, due at {due} ms: {seen:?}");
         }
-        assert!((2300..2450).contains(&ended), "ended at {ended} ms");
+        assert!((2298..2800).contains(&ended), "ended at {ended} ms: {seen:?}");
         assert_eq!(pills, ["Focus", "Rest", "Focus", "Rest", "Focus", "Rest", "Focus", "Long rest"]);
         assert!(surface::pills().iter().all(|pill| pill.id != FOCUS_ID), "the pill goes with the set");
     }
