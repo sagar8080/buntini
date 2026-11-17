@@ -7,9 +7,10 @@
 //                                            partial {id, text}, then final or cancelled or error
 //   stop {id} / cancel {id}
 //   mute                                   → muted {devices}
-//   unmute {devices?}                      → unmuted
+//   unmute {devices?}                      → unmuted {devices}
 //   notes {id, folder}                     → notes.recording {id}, notes.live {…}, then on
 //   notesStop {id}                            notes.done {id, seconds, segments} or notes.error
+//                                            (code "stopped" when stopped before it started)
 //   notesFile {id, mic?, system}           → notes.done (a recorded call, for checks)
 //   wake {on, languages}                   → wake.heard {text}
 //   transcribe {id, path, engine?, languages} → transcribed {id, text, confidence, engine, ms}
@@ -17,8 +18,8 @@
 //
 // `input` plays a recorded file instead of the microphone, for checks without a voice.
 //
-// When stdin closes (Buntini quit or crashed), anything muted is unmuted and an unfinished
-// call's audio is deleted before the helper exits.
+// When stdin closes (Buntini quit or crashed), anything muted is unmuted (and said, so Rust
+// forgets it) and an unfinished call's audio is deleted before the helper exits.
 import FluidAudio
 import Foundation
 
@@ -32,6 +33,8 @@ final class Service: @unchecked Sendable {
     private var dictations: [Int: Dictation] = [:]
     private var call: AnyObject?
     private var callID: String?
+    /// A call waiting on macOS's microphone prompt. A stop meanwhile cancels it.
+    private var pendingCallID: String?
     private var wake: WakeListener?
     private var signals: [DispatchSourceSignal] = []
 
@@ -99,8 +102,7 @@ final class Service: @unchecked Sendable {
         case "mute":
             emit("muted", ["devices": mute.mute()])
         case "unmute":
-            mute.unmute(command["devices"] as? [String])
-            emit("unmuted")
+            emit("unmuted", ["devices": mute.unmute(command["devices"] as? [String])])
         case "notes":
             startCall(id: command["id"] as? String, folder: command["folder"] as? String, languages: languages)
         case "notesStop":
@@ -128,13 +130,17 @@ final class Service: @unchecked Sendable {
 
     private func startCall(id: String?, folder: String?, languages: [String]) {
         guard let id, let folder, folder.hasPrefix("/"), id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
-        guard call == nil else {
+        guard call == nil, pendingCallID == nil else {
             return emit("notes.error", ["id": id, "code": "busy", "message": "A call is already recording."])
         }
         guard #available(macOS 14.2, *) else {
             return emit("notes.error", ["id": id, "code": "unsupported", "message": "Recording calls needs macOS 14.2 or later."])
         }
+        pendingCallID = id
         Microphone.authorize(on: queue) { [self] problem in
+            // Stopped while macOS asked: nothing starts (the stop already said so).
+            guard pendingCallID == id else { return }
+            pendingCallID = nil
             if let problem { return emit("notes.error", ["id": id, "code": problem.code, "message": problem.message]) }
             if models.parakeetPresent { models.load() }
             let recorder = CallRecorder(id: id, folder: URL(fileURLWithPath: folder, isDirectory: true), languages: languages, models: models)
@@ -152,6 +158,10 @@ final class Service: @unchecked Sendable {
     }
 
     private func stopCall(id: String?, languages: [String]) {
+        if let id, pendingCallID == id {
+            pendingCallID = nil
+            return emit("notes.error", ["id": id, "code": "stopped", "message": "Stopped before the call started recording."])
+        }
         guard #available(macOS 14.2, *), let recorder = call as? CallRecorder, recorder.id == id else { return }
         call = nil
         callID = nil
@@ -208,7 +218,9 @@ final class Service: @unchecked Sendable {
         for dictation in dictations.values { dictation.cancel() }
         wake?.stop()
         if #available(macOS 14.2, *), let recorder = call as? CallRecorder { recorder.discard() }
-        mute.unmute()
+        pendingCallID = nil
+        let unmuted = mute.unmute()
+        if !unmuted.isEmpty { emit("unmuted", ["devices": unmuted]) }
         // Let the last events out.
         Thread.sleep(forTimeInterval: 0.05)
         exit(EXIT_SUCCESS)

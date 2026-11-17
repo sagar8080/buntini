@@ -89,6 +89,11 @@ def until(*names):
             return event, seen
 ready, _ = until("ready")
 assert ready["protocolVersion"] == 3 and ready["parakeet"] is False, ready
+# Unmuting names every device it was asked about, so Rust forgets exactly those; an output
+# that isn't there is left alone. Nothing real is muted here.
+send({"op": "unmute", "devices": ["buntini-check-no-such-output"]})
+unmuted, _ = until("unmuted")
+assert unmuted["devices"] == ["buntini-check-no-such-output"], unmuted
 send({"op": "dictate", "id": 7, "languages": ["en-US"], "input": root + "/speech.aiff"})
 listening, _ = until("listening", "error")
 assert listening["event"] == "listening", listening
