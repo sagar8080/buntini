@@ -393,6 +393,53 @@ pub fn assignments(goal: &str, steps: &[Step]) -> Option<String> {
     )
 }
 
+/// Compare two quotes whose excerpts give one explicit euro price and say
+/// whether assembly is included. Leave other quote formats to the answer phase.
+pub(crate) fn compare_vendor_quotes(goal: &str, files: &[crate::types::FileHit]) -> Option<String> {
+    let ask = crate::completion::unquoted(goal);
+    if !ask.starts_with("compare ") || !ask.contains("quotes") || !ask.contains("by how many euros")
+        || !ask.contains("assembly") || crate::completion::requested_actions(goal) != (vec![], false)
+    {
+        return None;
+    }
+    let [first, second] = files else { return None; };
+    let read = |file: &crate::types::FileHit| {
+        let excerpt = file.excerpt.as_deref()?;
+        let (label, values) = excerpt.split_once(':')?;
+        if !label.to_ascii_lowercase().contains("vendor quote") {
+            return None;
+        }
+        let (name, values) = values.trim().split_once(" costs ")?;
+        if name.is_empty() || !name.chars().all(|ch| ch.is_alphanumeric() || ch == ' ' || ch == '-') {
+            return None;
+        }
+        let (price, terms) = values.split_once(" euros")?;
+        let price = price.trim().parse::<u64>().ok()?;
+        let included = match terms.trim_matches([' ', ',', '.']).to_ascii_lowercase().as_str() {
+            "including assembly" | "with assembly included" => true,
+            "excluding assembly" | "with assembly not included" => false,
+            _ => return None,
+        };
+        Some((name.to_string(), price, included))
+    };
+    let a = read(first)?;
+    let b = read(second)?;
+    if a.0.eq_ignore_ascii_case(&b.0) {
+        return None;
+    }
+    let describe = |quote: &(String, u64, bool)| {
+        let key = if quote.2 { "chat.answer.quoteAssemblyIncluded" } else { "chat.answer.quoteAssemblyExcluded" };
+        crate::i18n::tf(key, &[("vendor", &quote.0), ("price", &quote.1)])
+    };
+    let comparison = if a.1 == b.1 {
+        crate::i18n::t("chat.answer.quotePriceTie")
+    } else {
+        let cheaper = if a.1 < b.1 { &a.0 } else { &b.0 };
+        crate::i18n::tf("chat.answer.quoteCheaper", &[("vendor", cheaper), ("difference", &a.1.abs_diff(b.1))])
+    };
+    Some(format!("{comparison} {} {}", describe(&a), describe(&b)))
+}
+
 /// The first worked answer that applies to this request and journal.
 pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
     itinerary(goal)

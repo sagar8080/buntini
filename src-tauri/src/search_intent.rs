@@ -194,7 +194,22 @@ fn asks_what_shops_charge(prompt: &str) -> bool {
 }
 
 fn parsed_search(prompt: &str) -> Option<(&'static str, &str)> {
+    if asks_for_current_weather(prompt) {
+        return Some(("the web", prompt.trim()));
+    }
     asked_to_search(prompt).or_else(|| asks_what_shops_charge(prompt).then(|| ("search", prompt.trim())))
+}
+
+pub(crate) fn asks_for_current_weather(prompt: &str) -> bool {
+    let plain = crate::completion::unquoted(prompt);
+    plain.split(['.', '!', '?', '\n']).any(|sentence| {
+        let request = crate::completion::request_clause(sentence);
+        let rest = ["look up ", "check ", "get ", "find ", "search online for ", "what is ", "what's ", "whats "]
+            .iter().find_map(|prefix| request.strip_prefix(prefix)).unwrap_or(request);
+        let rest = rest.strip_prefix("the ").unwrap_or(rest);
+        rest == "current weather" || rest.starts_with("current weather ")
+            || (rest.starts_with("weather ") && (rest.contains(" right now") || rest.ends_with(" now")))
+    })
 }
 
 fn asked_to_search(prompt: &str) -> Option<(&'static str, &str)> {

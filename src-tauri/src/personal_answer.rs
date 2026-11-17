@@ -857,7 +857,7 @@ pub(crate) fn no_links(text: &str) -> String {
     text.replace("](", "] (")
 }
 
-fn plain(text: &str) -> String {
+pub(crate) fn plain(text: &str) -> String {
     let mut out = String::new();
     for c in one_line(text).chars() {
         if "\\`*_{}[]()#+-.!|$~>".contains(c) {

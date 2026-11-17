@@ -369,7 +369,15 @@ fn clauses(goal: &str) -> Vec<String> {
     result
         .iter()
         .map(|clause| match completion::requested_actions(clause).0.contains(&"append_to_note") {
-            true => completion::unjoined(clause, goal),
+            true => {
+                // Recover quoted payloads and titles that the intent scan blanked out.
+                let intent = |text: &str| completion::unquoted(text).split_whitespace().collect::<Vec<_>>().join(" ");
+                crate::explicit_fields::literal_sentences(goal)
+                    .into_iter().flatten()
+                    .find(|sentence| intent(sentence) == intent(clause))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| completion::unjoined(clause, goal))
+            },
             false => clause.clone(),
         })
         .collect()
@@ -421,6 +429,14 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     // Online topic words such as "calendar apps" do not authorize local reads.
     if crate::search_intent::explicit_request(clause).is_some() {
         return vec!["look_up_online"];
+    }
+    if crate::explicit_fields::read_query(clause).is_some()
+        && tokens(clause).windows(3).any(|words| {
+            words[0] == "my" && ["note", "notes"].contains(&words[1])
+                && ["called", "named", "titled", "containing"].contains(&words[2])
+        })
+    {
+        return vec!["find_notes"];
     }
     if recalls(clause) {
         return vec!["search_memory"];
@@ -825,6 +841,25 @@ impl TaskContract {
             self.intent_status = "connector_request".into();
             return;
         }
+        if let Some(arguments) = crate::browser_workspace::requested_page(goal) {
+            self.push_outcome("read", goal, vec!["browse_page".into()], arguments, vec!["url".into()]);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "explicit_browser_workspace".into();
+            return;
+        }
+        if let Some(arguments) = crate::calculation::simple_request(goal) {
+            self.push_outcome("read", goal, vec!["calculate".into()], arguments, vec!["expressions".into()]);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "literal_calculation".into();
+            return;
+        }
+        if let Some(arguments) = crate::structured_math::supplied_offers(goal) {
+            let fields = ["minimum", "attribute_label", "unit", "options"].map(str::to_string).to_vec();
+            self.push_outcome("read", goal, vec!["compare_options".into()], arguments, fields);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "supplied_offer_comparison".into();
+            return;
+        }
         // A goal is one write too: its aim, check-ins, last day and end are the user's own
         // words, and each check-in is its own task later.
         if let Some(request) = crate::goals::parse_request(goal) {
@@ -1031,7 +1066,8 @@ impl TaskContract {
                     self.push_outcome("unsupported", goal, vec![], json!({}), vec![]);
                     unparsed = false;
                 }
-                Some(crate::intent::Intent::LookUp) if !self.outcomes.iter().any(|o| o.kind == "read") => {
+                Some(crate::intent::Intent::LookUp) if !self.outcomes.iter().any(|o| o.kind == "read")
+                    && !completion::unquoted(goal).contains("only these supplied ") => {
                     self.outcomes.clear();
                     self.push_outcome("read", goal, vec!["look_up_online".into()], json!({"query":goal.trim()}), vec!["query".into()]);
                     self.outcomes.last_mut().unwrap().resources = vec!["web".into()];
@@ -2366,6 +2402,9 @@ impl TaskContract {
             return None;
         }
         let plain=completion::unquoted(&self.current_request);
+        let calendar_write = self.outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("add_calendar_event"));
+        let arrival_reminder = steps.iter().any(|step| step.tool == "add_reminder" && verified_write(step)
+            && step.evidence.as_ref().is_some_and(|evidence| evidence["planningSource"]["kind"] == "note_arrival_reminder"));
         let mut remaining=Vec::new();
         for sentence in plain.split(['.',';','\n']) {
             let sentence=sentence.trim();
@@ -2377,7 +2416,20 @@ impl TaskContract {
             let duration_field=(sentence.starts_with("derive its duration ") || sentence.starts_with("derive the duration "))
                 && !sentence.contains(" then ")
                 && sentence.split(" and ").skip(1).all(completion::non_action);
-            if temporal_fact || duration_field { continue; }
+            if temporal_fact || duration_field || (calendar_write && sentence == "do not invite anyone") {
+                continue;
+            }
+            if arrival_reminder {
+                if sentence.starts_with("use exactly the reminder title ") {
+                    continue;
+                }
+                if let Some((_, rest)) = sentence.rsplit_once(", ") {
+                    if rest.starts_with("remind me to ") {
+                        remaining.push(rest.to_string());
+                        continue;
+                    }
+                }
+            }
             // Only discard this known field modifier. Any further requested
             // operation remains for the conservative completion parser below.
             remaining.push(sentence.replace(", using exactly the title","").replace(" with exactly the title"," titled"));

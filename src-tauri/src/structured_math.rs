@@ -281,7 +281,35 @@ fn scale(args: &Value) -> Result<(Value, String), String> {
     ))
 }
 
-fn compare(args: &Value) -> Result<(Value, String), String> {
+/// Copy an explicit, self-contained RAM and price comparison into the fixed
+/// operation. Every option must supply both fields in the same units.
+pub(crate) fn supplied_offers(request: &str) -> Option<Value> {
+    let (instruction, details) = request.split_once(':')?;
+    let plain = crate::completion::unquoted(instruction);
+    if !plain.starts_with("compare only these supplied ") {
+        return None;
+    }
+    let (_, requirement) = plain.rsplit_once(" at least ")?;
+    let minimum = requirement.strip_suffix("gb ram")?.trim().parse::<u64>().ok()?;
+    let (offers, follow_up) = details.split_once(". ").unwrap_or((details, ""));
+    if !follow_up.is_empty() && !follow_up.to_ascii_lowercase().starts_with("which qualifying option ") {
+        return None;
+    }
+    let options = offers.trim_end_matches('.').split([',', ';']).map(|row| {
+        let (spec, price) = row.trim().rsplit_once(' ')?;
+        let (name, memory) = spec.strip_suffix(" RAM")?.rsplit_once(' ')?;
+        let memory = memory.strip_suffix("GB")?.parse::<u64>().ok()?;
+        if !price.starts_with('$') || name.contains('|') {
+            return None;
+        }
+        Some(format!("{name}|{price}|{memory}"))
+    }).collect::<Option<Vec<_>>>()?;
+    let arguments = json!({"minimum":minimum,"attribute_label":"RAM","unit":"GB","options":options});
+    compare(&arguments, false).ok()?;
+    Some(arguments)
+}
+
+fn compare(args: &Value, source_currency: bool) -> Result<(Value, String), String> {
     let fields = object(args, &["minimum", "options"], &["attribute_label", "unit"])?;
     let minimum = number(fields, "minimum", false, true)?;
     let attribute = fields
@@ -296,12 +324,15 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
         .unwrap_or_default();
     let mut seen = BTreeSet::new();
     let mut options = Vec::new();
+    let mut dollar_prices = true;
     for row in rows(fields, "options", MAX_ROWS)? {
         let [name, price, value] = cells(&row)?;
         let name = label(name)?;
         unique(&mut seen, &name)?;
+        dollar_prices &= price.trim_start().starts_with('$');
         options.push((name, numeric(price, false)?, numeric(value, true)?));
     }
+    let show_price = |amount| format!("{}{}", if source_currency && dollar_prices { "$" } else { "" }, display(amount));
     let cheapest = options
         .iter()
         .filter(|(_, _, value)| *value >= minimum)
@@ -322,7 +353,7 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
         answer.push(format!(
             "{} is the cheapest qualifying option at {}.",
             winners.join(" and "),
-            display(price)
+            show_price(price)
         ));
     } else {
         answer.push("No supplied option meets the minimum requirement.".into());
@@ -348,8 +379,8 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
             answer.push(format!(
                 "{} is {} less than {name} ({}).",
                 winners.join(" and "),
-                display(difference),
-                display(price)
+                show_price(difference),
+                show_price(price)
             ));
         }
         result.push(json!({"label":name,"price":price,"attributeValue":value,"qualifies":qualifies,"differenceFromCheapest":difference}));
@@ -418,7 +449,7 @@ pub fn run(tool: &str, arguments: &Value) -> Result<Value, String> {
     let (results, answer) = match tool {
         "split_costs" => split(arguments),
         "scale_quantities" => scale(arguments),
-        "compare_options" => compare(arguments),
+        "compare_options" => compare(arguments, false),
         "sum_by_status" => sum_status(arguments),
         _ => Err("Unknown structured math tool.".into()),
     }?;
@@ -444,6 +475,10 @@ pub fn render(evidence: &Value) -> String {
 /// A status sum asked about as cancelling says what to cancel, what to keep and what
 /// that saves, in the request's own terms.
 pub fn render_for(evidence: &Value, request: &str) -> String {
+    if evidence["tool"] == "compare_options" {
+        return compare(&evidence["inputs"], true)
+            .map_or_else(|_| render(evidence), |(_, answer)| answer);
+    }
     let results = &evidence["results"];
     let cancelling = request
         .split(|c: char| !c.is_alphanumeric())

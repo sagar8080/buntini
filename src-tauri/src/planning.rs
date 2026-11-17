@@ -332,6 +332,77 @@ fn calendar_answer_in<Tz: TimeZone>(
     )))
 }
 
+/// A dated reminder before a named arrival time in a note.
+fn note_arrival_request(goal: &str) -> Option<(NaiveDate, i64, String, String, String)> {
+    let query = crate::explicit_fields::read_query(goal)?;
+    let title = crate::explicit_fields::action_title(goal, "add_reminder")?;
+    let plain = crate::completion::unquoted(goal);
+    let (before, marker) = plain.split_once(" before my stated ")?;
+    let subject = marker.split_once("-arrival time")?.0;
+    if subject.is_empty() || subject.split_whitespace().count() > 3
+        || !subject.chars().all(|ch| ch.is_alphabetic() || ch == ' ')
+        || crate::completion::requested_actions(goal) != (vec!["add_reminder"], false)
+    {
+        return None;
+    }
+    let mut end = before.split_whitespace().rev();
+    let unit = match end.next()? {
+        "minute" | "minutes" => 1,
+        "hour" | "hours" => 60,
+        _ => return None,
+    };
+    let minutes = amount(end.next()?)?.checked_mul(unit).filter(|m| (1..=1440).contains(m))?;
+    let words: Vec<_> = before.split_whitespace().map(|word| word.trim_matches([',', '.'])).collect();
+    let dates = crate::source_fields::explicit_dates(&words);
+    let mut days = dates.into_iter();
+    let date = days.next().filter(|_| days.next().is_none())?;
+    Some((date, minutes, subject.to_string(), query, title))
+}
+
+pub(crate) fn note_arrival_reminder(goal: &str, steps: &[Step]) -> Result<Option<BoundAction>, String> {
+    let Some((day, minutes, subject, query, title)) = note_arrival_request(goal) else {
+        return Ok(None);
+    };
+    let Some(step) = steps.iter().rev().find(|step| step.tool == "find_notes"
+        && !step.effect && step.state == "succeeded" && step.arguments["query"] == query)
+    else { return Ok(None); };
+    let unable = || crate::i18n::t("chat.answer.noteTimeUnclear");
+    let evidence = step.evidence.as_ref().ok_or_else(unable)?;
+    crate::apps::validate_evidence("find_notes", &step.arguments, evidence, false)?;
+    let [record] = evidence["records"].as_array().map(Vec::as_slice).unwrap_or_default() else {
+        return Err(unable());
+    };
+    if evidence["complete"] != true || record["contentComplete"] != true {
+        return Err(unable());
+    }
+    let note = record["excerpt"].as_str().ok_or_else(unable)?.to_lowercase();
+    let note_title = record["title"].as_str().unwrap_or_default().to_lowercase();
+    let body = note.strip_prefix(&note_title).unwrap_or(&note);
+    let patterns = [format!("arrive at the {subject} "), format!("arrive at {subject} ")];
+    let times = crate::completion::sentences(body).into_iter().filter_map(|sentence| {
+        let tail = patterns.iter().find_map(|pattern| sentence.trim().strip_prefix(pattern))?;
+        let words: Vec<_> = tail.trim_end_matches('.').split_whitespace().collect();
+        if !matches!(words.first(), Some(&("by" | "at"))) {
+            return None;
+        }
+        let (time, end) = crate::source_fields::clock(&words, 1)?;
+        (end == words.len()).then_some(time)
+    }).collect::<Vec<_>>();
+    let [arrival] = times.as_slice() else { return Err(unable()); };
+    let start = day.and_time(*arrival);
+    let local = chrono::Local.from_local_datetime(&start).single().ok_or_else(unable)?;
+    let due = local.checked_sub_signed(Duration::minutes(minutes)).ok_or_else(unable)?.naive_local();
+    if chrono::Local.from_local_datetime(&due).single().is_none() {
+        return Err(unable());
+    }
+    Ok(Some(BoundAction {
+        tool: "add_reminder",
+        arguments: json!({"title":title,"due":due.format("%Y-%m-%d %H:%M").to_string()}),
+        source: json!({"kind":"note_arrival_reminder","sourceStepId":step.id,"recordId":record["id"],
+            "arrival":start.format("%Y-%m-%d %H:%M").to_string(),"minutesBefore":minutes}),
+    }))
+}
+
 /// Bind the supported preparation reminder to the complete typed Calendar read.
 /// None means either a different request, a read still needed, or an already
 /// attempted reminder; it never authorizes execution or retries a write.

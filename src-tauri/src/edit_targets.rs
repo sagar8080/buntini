@@ -345,28 +345,14 @@ fn target(text: &str, today: NaiveDate) -> Target {
 /// The part of the request that asks for `tool`, in the user's own case.
 pub(crate) fn clause(goal: &str, tool: &str) -> Option<String> {
     let goal = goal.replace("Additional details: ", "\n");
-    let mut sentences = Vec::new();
-    let mut start = 0;
-    let chars: Vec<(usize, char)> = goal.char_indices().collect();
-    for (position, (index, ch)) in chars.iter().copied().enumerate() {
-        let ends = matches!(ch, ';' | '\n' | '!' | '?')
-            || (ch == '.'
-                && chars
-                    .get(position + 1)
-                    .is_none_or(|(_, next)| next.is_whitespace()));
-        if ends {
-            sentences.push(&goal[start..index]);
-            start = index + ch.len_utf8();
-        }
-    }
-    sentences.push(&goal[start..]);
+    let sentences = crate::explicit_fields::literal_sentences(&goal)?;
     let asks = |text: &str| crate::completion::requested_actions(text).0.contains(&tool);
     for sentence in sentences {
         if !asks(sentence) {
             continue;
         }
         // A list being added to a note keeps its "and"s and commas.
-        if tool == "append_to_note" {
+        if tool == "append_to_note" || (tool == "update_calendar_event" && event_date_opening(instruction(sentence)).is_some()) {
             return Some(sentence.trim().to_string());
         }
         let lower = sentence.to_ascii_lowercase();
@@ -503,9 +489,24 @@ fn complete_target(text: &str, today: NaiveDate) -> Target {
     found
 }
 
+pub(crate) fn event_date_opening(text: &str) -> Option<(NaiveDate, &str)> {
+    let (opening, rest) = text.split_once(',')?;
+    let date = opening.get(3..).filter(|_| opening[..3].eq_ignore_ascii_case("on "))?;
+    Some((NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").ok()?, rest.trim_start()))
+}
+
 /// "move my 3pm to 4", "push the dentist to Friday", "rename my 10:30 to Planning",
 /// "change the location of lunch to Café Rio".
 fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
+    let (opening_day, text) = event_date_opening(text)
+        .map_or((None, text), |(day, rest)| (Some(day), rest));
+    let set_day = |mut target: Target| -> Result<Target, String> {
+        if target.day.zip(opening_day).is_some_and(|(named, opening)| named != opening) {
+            return Err("Say which event to change and how.".into());
+        }
+        target.day = target.day.or(opening_day);
+        Ok(without_pointers(target))
+    };
     let lower = text.to_ascii_lowercase();
     let verb_end = lower
         .find(' ')
@@ -515,7 +516,7 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
     let all: Vec<&str> = all.iter().map(String::as_str).collect();
     if let Some(found) = shift(&all) {
         let minutes = found.minutes.ok_or(WHICH_WAY)?;
-        let target = without_pointers(target(&all[1..found.start].join(" "), today));
+        let target = set_day(target(&all[1..found.start].join(" "), today))?;
         let change = EventChange {
             shift: Some(minutes),
             ..EventChange::default()
@@ -608,8 +609,17 @@ fn event_request(text: &str, today: NaiveDate) -> Result<Request, String> {
             return Err("Say when to move it to, like “Friday at 4”.".into());
         }
     }
-    let target = without_pointers(target(&named, today));
-    Ok(Request::Event { target, change })
+    let mut found = target(&named, today);
+    if change.title.is_none() && change.location.is_none() {
+        if let Some((name, old_time)) = named.rsplit_once(" from ") {
+            let tokens = words(old_time);
+            if let Some((source, _)) = clock(&tokens, 0).filter(|(_, used)| *used == tokens.len()) {
+                found = target(name, today);
+                found.clock = Some(source);
+            }
+        }
+    }
+    Ok(Request::Event { target: set_day(found)?, change })
 }
 
 /// "move the dentist reminder to Friday", "push my call Ana reminder back a day", "change
@@ -700,8 +710,42 @@ fn new_due(was: &str, due: &DueChange, today: NaiveDate) -> Result<String, Strin
 
 /// "add milk and eggs to my shopping note": the text and the note's name. The text is
 /// the user's own; "add that to my note" points elsewhere and needs their words instead.
+fn append_payload(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let lower = raw.to_ascii_lowercase();
+    let raw = ["down ", "the exact text ", "exact text "]
+        .iter()
+        .find(|prefix| lower.starts_with(**prefix)
+            && (**prefix == "down " || unquote(&raw[prefix.len()..]).1))
+        .map_or(raw, |prefix| &raw[prefix.len()..]);
+    let (added, quoted) = unquote(raw);
+    let pointer = words(added)
+        .first()
+        .is_some_and(|word| POINTERS.contains(&word.as_str()));
+    (!added.is_empty() && (quoted || !pointer)).then(|| added.to_string())
+}
+
 fn append_request(text: &str) -> Option<Request> {
     let lower = text.to_ascii_lowercase();
+    let separators = [
+        " to my note called ", " to my note named ", " to my note titled ",
+        " to the note called ", " to the note named ", " to the note titled ",
+        " to our note called ", " to our note named ", " to our note titled ",
+    ];
+    if let Some((at, marker_len)) = crate::explicit_fields::outside(text).ok()?
+        .into_iter().rev().find_map(|at| {
+            separators.iter().find(|separator| lower[at..].starts_with(**separator))
+                .map(|separator| (at, separator.len()))
+        })
+    {
+        let verb_end = lower.find(' ')?;
+        if ["add", "append", "put", "jot"].contains(&&lower[..verb_end]) && verb_end <= at {
+            let (note, _) = unquote(&text[at + marker_len..]);
+            if !note.is_empty() && note.len() <= 100 {
+                return Some(Request::Append { note: note.to_string(), text: append_payload(&text[verb_end..at]) });
+            }
+        }
+    }
     let spans: Vec<(usize, usize)> = lower
         .split_whitespace()
         .map(|word| {
@@ -732,13 +776,7 @@ fn append_request(text: &str) -> Option<Request> {
         else {
             continue;
         };
-        let raw = text[spans[verb].1..spans[to].0].trim();
-        let raw = raw.strip_prefix("down ").unwrap_or(raw);
-        let (added, quoted) = unquote(raw);
-        let pointer = words(added)
-            .first()
-            .is_some_and(|word| POINTERS.contains(&word.as_str()));
-        let text = (!added.is_empty() && (quoted || !pointer)).then(|| added.to_string());
+        let text = append_payload(&text[spans[verb].1..spans[to].0]);
         return Some(Request::Append {
             note: name.join(" "),
             text,

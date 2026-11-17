@@ -213,6 +213,9 @@ impl Recipe for LiteralReminder {
         if next.tool.as_deref() != Some("add_reminder") || !plan.offers("add_reminder") {
             return Ok(None);
         }
+        if let Some(bound) = crate::planning::note_arrival_reminder(plan.goal, plan.steps)? {
+            return Ok(Some(bound));
+        }
         crate::explicit_fields::explicit_reminder(plan.goal, plan.steps)
     }
 }

@@ -67,6 +67,28 @@ pub fn render_card_summary(raw: &str, card_count: usize) -> Result<String, Strin
     Ok(lines.join("\n\n"))
 }
 
+/// An exact address copy preserves the provider's order and binds each line
+/// to the card the name and address came from.
+pub fn exact_place_addresses(request: &str, cards: &[crate::types::ResultCard]) -> Option<String> {
+    let plain = crate::completion::unquoted(request);
+    if !plain.contains("exact names and street addresses") || !plain.contains("first two") {
+        return None;
+    }
+    let mut lines = Vec::new();
+    for (index, card) in cards.iter().take(2).enumerate() {
+        let unavailable = crate::i18n::t("chat.answer.addressUnavailable");
+        let address = card.fields.iter().find(|field| field.label == "Address")
+            .map(|field| field.value.trim()).filter(|address| !address.is_empty())
+            .unwrap_or(&unavailable);
+        lines.push(format!("{} — {} [{}]", crate::personal_answer::plain(&card.title),
+            crate::personal_answer::plain(address), index + 1));
+    }
+    if lines.len() < 2 {
+        lines.push(crate::i18n::t("chat.answer.fewerPlaces"));
+    }
+    Some(lines.join("\n\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

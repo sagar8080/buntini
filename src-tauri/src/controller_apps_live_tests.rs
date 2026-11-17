@@ -305,6 +305,15 @@ fn cases(namespace: &str) -> Vec<Value> {
     result.push(json!({"id":"create-library-return-reminder","seeds":[],"readRequired":false,"prompt":format!("My library books must be returned by 18:00 on May 21, 2031. Set a reminder fifteen minutes beforehand, using exactly the title \"{title}\"."),"writeTool":"add_reminder","writeTitle":title,"expectedWrite":{"due":"2031-05-21 17:45"}}));
     let title = format!("{namespace} Training session");
     result.push(json!({"id":"create-training-calendar-event","seeds":[],"readRequired":false,"prompt":format!("My training session runs from 14:15 to 14:50 on May 21, 2031 in Training Room. Add it to my calendar with exactly the title \"{title}\". Derive its duration from those times, and do not invite anyone."),"writeTool":"add_calendar_event","writeTitle":title,"expectedWrite":{"start":"2031-05-21 14:15","minutes":35,"location":"Training Room"}}));
+    let title = format!("{namespace} Note Edited");
+    let reference = format!("{namespace}-cobalt-plover");
+    let seed = json!({"tool":"create_note","arguments":{"title":title,"body":format!("The warranty reference is {reference}.")}});
+    result.push(json!({"id":"notes-find-exact-title","seeds":[seed.clone()],
+        "prompt":format!("Find my note called {title} and tell me its exact reference."),
+        "answerMustContain":[reference]}));
+    result.push(json!({"id":"notes-find-exact-body","seeds":[seed],
+        "prompt":format!("Find my note containing {reference}."),
+        "answerMustContain":[title]}));
     result
 }
 
@@ -466,4 +475,71 @@ pub(super) async fn app_workflows() -> Vec<Value> {
         state.models.shutdown().await;
     }
     results
+}
+
+#[tokio::test]
+#[ignore = "appends to one disposable, exact-ID Notes record on this Mac"]
+async fn live_release_notes_append_uses_the_approved_text() {
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let namespace = format!("BuntiniQA-{}", &nonce[..16]);
+    let title = format!("{namespace} Note Edited");
+    let added = "Verification step two passed.";
+    let original = "Verification step one passed.";
+    let seed_args = json!({"title":title,"body":original});
+    let seed = crate::acceptance_apps::execute_exact(&namespace, "create_note", &seed_args, &seed_args).await;
+    assert_eq!(seed["outcome"], "succeeded", "{seed}");
+    let id = seed["objectId"].as_str().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let state = live_state(dir.path());
+    let mut settings = state.store.lock().unwrap().settings().unwrap();
+    settings.apps = vec!["notes".into()];
+    state.store.lock().unwrap().save_settings(&settings).unwrap();
+    let goal = format!("Append the exact text \"{added}\" to my note named {title}.");
+    let initial = initial_turn(&state, &goal, &namespace).await;
+    let expected = json!({"id":id,"title":title,"text":added});
+    let mut saved = None;
+    if let Some(step) = initial.workflow.as_ref().and_then(|flow| flow.steps.last())
+        .filter(|step| step.state == "waiting" && step.tool == "append_to_note" && step.arguments == expected)
+    {
+        let events = Channel::new(|_| Ok(()));
+        let expected_args = expected.as_object().unwrap();
+        saved = Some(run_workflow_action_with_reads(
+            &state, &step.id, expected.clone(), &events,
+            |tool, args, _| async move {
+                assert_eq!(tool, "append_to_note");
+                assert_eq!(&args, expected_args);
+                crate::actions::execute(&tool, &args).await
+            },
+            |tool, args, settings| {
+                let namespace = &namespace;
+                let state = &state;
+                async move { read_owned_notes(state, namespace, tool, args, &settings).await }
+            },
+        ).await);
+    }
+    let readback = crate::acceptance_apps::read_notes_exact(&namespace, &title).await;
+    let text_was_appended = readback["records"].as_array().is_some_and(|records| {
+        records.iter().any(|record| record["id"] == id && record["title"] == title
+            && record["excerpt"].as_str().is_some_and(|text| {
+                text.split_once(original).is_some_and(|(_, tail)| tail.trim() == added)
+            }))
+    });
+    // Cleanup independently revalidates the ID, title, folder and full plaintext.
+    // Offer only the original test payload and exact known post-append forms.
+    let initial_text = seed["evidence"]["plaintext"].as_str().unwrap();
+    let appended = format!("{}\n{added}", initial_text.trim_end_matches(['\r', '\n']));
+    let mut cleanup = Value::Null;
+    for text in [initial_text.to_string(), appended.clone(), format!("{appended}\n"), format!("{appended}\n\n")] {
+        let mut receipt = seed.clone();
+        receipt["evidence"]["plaintext"] = json!(text);
+        cleanup = crate::acceptance_apps::cleanup_receipt(&namespace, &receipt, &seed_args).await;
+        if cleanup["passed"] == true {
+            break;
+        }
+    }
+    state.models.shutdown().await;
+    assert_eq!(cleanup["passed"], true, "Disposable note {namespace} needs cleanup: {cleanup}");
+    let task = saved.expect("No exact append proposal").expect("Approval dispatch failed");
+    assert_eq!(task.state, "completed", "{}", task.answer);
+    assert!(text_was_appended, "The exact approved sentence did not read back after the original text");
 }

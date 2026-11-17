@@ -349,6 +349,18 @@ pub(crate) fn parse_at(text: &str, today: NaiveDate) -> Option<Request> {
         return None;
     }
     let body = body.trim().trim_end_matches(['.', '!', '?']).trim().replace(['’', '‘'], "'");
+    let sentences = crate::explicit_fields::literal_sentences(&body)?;
+    let check_in_schedule = if let [goal, reminder] = sentences.as_slice() {
+        let opening = "remind me to ";
+        reminder.to_ascii_lowercase().starts_with(opening)
+            .then(|| routines::split_schedule(&reminder[opening.len()..]))
+            .flatten()
+            .filter(|(check_in, ..)| !check_in.is_empty())
+            .map(|(check_in, days, time)| (*goal, capitalized(&check_in), days, time))
+    } else {
+        None
+    };
+    let body = check_in_schedule.as_ref().map_or(body.as_str(), |(goal, ..)| *goal);
     let lower = body.to_lowercase();
     // Offsets below are shared between the two, which needs case changes that keep length.
     if lower.len() != body.len() {
@@ -403,6 +415,13 @@ pub(crate) fn parse_at(text: &str, today: NaiveDate) -> Option<Request> {
             (today + chrono::Duration::days(REPLY_DAYS), "reply", Some(person))
         }
         _ => return None,
+    };
+    let (style, check_in, schedule) = match check_in_schedule {
+        Some((_, check_in, days, time)) if helped && done_when == "date" && schedule.is_none() => {
+            ("remind", check_in, Some((days, time)))
+        }
+        Some(_) => return None,
+        None => (style, check_in, schedule),
     };
     let (days, time) = schedule.unwrap_or(match (style, done_when) {
         ("remind", _) => ("every_day", "18:00".into()),

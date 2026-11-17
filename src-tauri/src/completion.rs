@@ -267,6 +267,13 @@ fn changes_mac_setting(tokens: &[&str]) -> bool {
 }
 
 fn appends_to_note(tokens: &[&str]) -> bool {
+    if tokens.get(1..).is_some_and(|rest| rest.windows(4).any(|words| {
+        words[0] == "to" && ["my", "the", "our"].contains(&words[1])
+            && ["note", "notes"].contains(&words[2])
+            && ["called", "named", "titled"].contains(&words[3])
+    })) {
+        return true;
+    }
     let Some(to) = tokens.iter().rposition(|word| *word == "to") else {
         return false;
     };
@@ -276,8 +283,8 @@ fn appends_to_note(tokens: &[&str]) -> bool {
         .collect();
     // What is added may be quoted, and so already removed from these words.
     to >= 1
-        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
         && (2..=5).contains(&name.len())
+        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
         && !(["a", "an", "new"].contains(&tokens[1]) && tokens.get(2) == Some(&"note"))
 }
 
@@ -784,7 +791,17 @@ pub(crate) fn receipt_only_goal(goal: &str) -> bool {
     let mut previous_action = false;
     let mut previous_calendar_read = false;
     let mut previous_read = false;
+    let mut calendar_edit = false;
     for sentence in plain.split([';', '\n', '.', '!', '?']) {
+        let sentence = sentence.trim();
+        if calendar_edit && ["keep its duration and location", "keep its location and duration",
+            "keep its duration", "keep its location"].contains(&sentence)
+        {
+            continue;
+        }
+        let sentence = crate::edit_targets::event_date_opening(sentence)
+            .filter(|(_, action)| requested_actions(action).0 == ["update_calendar_event"])
+            .map_or(sentence, |(_, action)| action);
         for segment in sentence.split(',') {
             let segment = request_clause(segment);
             if segment.is_empty() {
@@ -807,6 +824,7 @@ pub(crate) fn receipt_only_goal(goal: &str) -> bool {
                 let (actions, unsupported) = requested_actions(clause);
                 if !actions.is_empty() && !unsupported {
                     saw_action = true;
+                    calendar_edit = actions == ["update_calendar_event"];
                     previous_action = true;
                     previous_calendar_read = false;
                     previous_read = false;

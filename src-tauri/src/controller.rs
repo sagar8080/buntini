@@ -1872,7 +1872,8 @@ fn files_off(prompt: &str, has_folders: bool) -> bool {
         && !crate::task_contract::TaskContract::from_request(prompt)
             .outcomes
             .iter()
-            .any(|outcome| outcome.accepted_tools.iter().any(|tool| tool == "search_memory"))
+            .any(|outcome| outcome.accepted_tools.iter().any(|tool| tool == "search_memory")
+                || outcome.accepted_tools == ["find_notes"])
 }
 
 /// Whether a message is about the user's own files ("find my lease pdf", "what's on my
@@ -2772,6 +2773,14 @@ async fn integration_task(
     task.cards = outcome?.cards;
     let evidence = integrations::cards_text(&task.cards);
     task.answer = evidence.clone();
+    if call.tool == "places" {
+        if let Some(answer) = integrations::exact_place_addresses(&task.prompt, &task.cards) {
+            task.answer = answer;
+            state.audit("integration.answer_checked", &task.id);
+            emit(channel, "delta", &task.id, Some(task.answer.clone()));
+            return Ok(());
+        }
+    }
     if state.models.ready(settings).is_err() {
         return Ok(());
     }
@@ -2938,7 +2947,24 @@ async fn execute_with_settings(
     // straight to the model with them, past the shortcuts below.
     let attached = crate::attach::staged(&task.id);
     let plain = attached.is_empty();
+    if mode == "auto" && !plain && crate::search_intent::asks_for_current_weather(&task.prompt) {
+        return Err(crate::i18n::t("chat.answer.liveWeatherAttachment"));
+    }
+    let workspace = mode == "auto" && approved.is_none() && plain
+        && crate::browser_workspace::requested_page(&task.prompt).is_some();
+    if mode == "auto" && approved.is_none() && plain
+        && conversation::asks_about_another_topic(&task.prompt)
+        && crate::completion::requested_actions(&task.prompt) == (vec![], false)
+    {
+        task.answer = crate::i18n::t("chat.answer.previousTopic");
+        emit(channel, "delta", &task.id, Some(task.answer.clone()));
+        return Ok(());
+    }
+    if workspace && !privacy::allows(state.models.locality(&settings), &settings, privacy::Share::Browser) {
+        return Err("This brain isn’t allowed to see your browser. You can allow Browser tabs in Settings → Privacy.".into());
+    }
     if mode == "auto"
+        && !workspace
         && approved.is_none()
         && plain
         && crate::search_intent::explicit_request(&task.prompt).is_some()
@@ -3034,7 +3060,7 @@ async fn execute_with_settings(
     // actually happened. Everything else goes to the model. With nobody at the window
     // only the read-only day summaries run this way; anything that changes something is
     // proposed and waits for approval.
-    if mode == "auto" && approved.is_none() && plain {
+    if mode == "auto" && approved.is_none() && plain && !workspace {
         // Follow-ups ("summarise that", "yes, play it") mean the last answer only while it
         // is recent; a conversation left yesterday doesn't turn "that" away from the screen.
         let boundary = (chrono::Utc::now() - chrono::Duration::seconds(FOLLOW_UP_SECONDS)).to_rfc3339();
@@ -3539,6 +3565,30 @@ fn worked_answer(flow: &Workflow) -> Option<String> {
         return None;
     }
     let today = chrono::NaiveDate::parse_from_str(&flow.contract.interpretation_date, "%Y-%m-%d").ok()?;
+    let request = &flow.contract.current_request;
+    for step in flow.steps.iter().rev().filter(|step| step.state == "succeeded" && !step.effect) {
+        let Some(evidence) = step.evidence.as_ref() else { continue; };
+        if step.tool == "calculate"
+            && crate::calculation::simple_request(request).as_ref() == Some(&step.arguments)
+            && crate::calculation::verify(&step.arguments, evidence)
+        {
+            return evidence["results"][0]["formattedValue"].as_str().map(str::to_string);
+        }
+        if step.tool == "browse_page" && flow.contract.intent_status == "explicit_browser_workspace"
+            && crate::completion::unquoted(request).contains("heading")
+        {
+            let snapshot = &evidence["receipt"]["evidence"];
+            if snapshot["verification"] != "native_url_and_bounded_page_snapshot" {
+                continue;
+            }
+            let heading = snapshot["heading"].as_str()?;
+            return Some(if heading.is_empty() {
+                crate::i18n::t("chat.answer.noPageHeading")
+            } else {
+                crate::i18n::tf("chat.answer.pageHeading", &[("heading", &crate::personal_answer::plain(heading))])
+            });
+        }
+    }
     crate::worked::answer(&flow.goal, &flow.steps, today)
 }
 
@@ -3687,9 +3737,17 @@ where
         if crate::recipes::reply_from_search(&asked, &flow.steps, &mut flow.contract)? {
             state.audit("recipe.reply_from_search", &task.id);
         }
+        // Verified quote arithmetic is derived from the scoped files. The model
+        // answer guard requires each number verbatim in its sources, so pass this
+        // already checked calculation through the receipt check directly.
+        let vendor_answer = flow.contract.next_outcome()
+            .filter(|outcome| outcome.kind == "answer")
+            .and_then(|_| crate::worked::compare_vendor_quotes(&flow.goal, &task.files));
         let finished_answer = match flow.contract.completed_action_answer(&flow.steps) {
             Some(answer) => Some(answer),
-            None => match flow.contract.terminal_receipt_answer(&flow.steps).or_else(||structured_math_answer(flow)).or_else(||worked_answer(flow)) {
+            None => match flow.contract.terminal_receipt_answer(&flow.steps)
+                .or_else(|| structured_math_answer(flow))
+                .or_else(|| worked_answer(flow)) {
                 Some(answer) => Some(answer),
                 None => crate::recipes::answer(&crate::recipes::Plan {
                     goal: &flow.goal,
@@ -3698,8 +3756,15 @@ where
                 })?,
             },
         };
-        if let Some(answer) = finished_answer {
-            task.answer = if small { flow.contract.validate_answer(&answer, &flow.steps)? } else { flow.contract.validate_large_brain_answer(&answer, &flow.steps)? };
+        let verified_comparison = vendor_answer.is_some();
+        if let Some(answer) = vendor_answer.or(finished_answer) {
+            task.answer = if verified_comparison {
+                crate::completion::validate_answer(&flow.goal, &answer, &flow.steps)?
+            } else if small {
+                flow.contract.validate_answer(&answer, &flow.steps)?
+            } else {
+                flow.contract.validate_large_brain_answer(&answer, &flow.steps)?
+            };
             flow.contract.mark_answer_complete();
             flow.state = "completed".into();
             task.state = "completed".into();
@@ -3879,6 +3944,24 @@ where
                 tool: "look_up_online",
                 arguments: json!({"query":query}),
                 source: json!({"kind":"user_fields","source":"user_request","query":query}),
+            })
+        } else if let Some((tool, arguments)) = flow.contract.next_outcome().and_then(|next| {
+            let tool = match next.tool.as_deref()? {
+                "browse_page" if flow.contract.intent_status == "explicit_browser_workspace" => "browse_page",
+                "calculate" if flow.contract.intent_status == "literal_calculation" => "calculate",
+                "compare_options" if flow.contract.intent_status == "supplied_offer_comparison" => "compare_options",
+                "find_notes" if next.kind == "read" && next.accepted_tools == ["find_notes"]
+                    && next.required_arguments["query"].is_string()
+                    && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "read" || outcome.kind == "answer")
+                    && !next.description.starts_with(crate::task_contract::EDIT_READ) => "find_notes",
+                _ => return None,
+            };
+            Some((tool, next.required_arguments.clone()))
+        }) {
+            Some(crate::planning::BoundAction {
+                tool,
+                arguments,
+                source: json!({"kind":"user_fields","source":"user_request"}),
             })
         } else if let Some(arguments) = flow.contract.reply_lookup(&flow.steps) {
             // "Reply to Ana" with her email neither open nor listed: search the inbox for
@@ -4164,7 +4247,9 @@ where
         if let Some(bound) = bound {
             flow.contract
                 .record_proposal(&id, &args, Some(&bound.source));
-            flow.steps.last_mut().unwrap().evidence = Some(json!({"planningSource":bound.source}));
+            if name != "calculate" && !crate::structured_math::TOOLS.contains(&name.as_str()) {
+                flow.steps.last_mut().unwrap().evidence = Some(json!({"planningSource":bound.source}));
+            }
         }
         // The server and tool the sheet names, so approving runs exactly that one.
         if connector_write {
