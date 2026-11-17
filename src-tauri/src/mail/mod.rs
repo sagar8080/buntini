@@ -1282,7 +1282,13 @@ pub async fn mail_call(op: Op, app: AppHandle) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Op::Log => value(log_rows(100)),
-        Op::Mailboxes => value(mailboxes().await?),
+        // Settings asks for these on its own when it opens: never an Automation prompt for that.
+        Op::Mailboxes => {
+            if !crate::apps::may_script_silently("Mail").await {
+                return value(Vec::<Mailbox>::new());
+            }
+            value(mailboxes().await?)
+        }
         Op::Plan { request, pdf } => {
             let pdf = pdf.filter(|p| !p.trim().is_empty()).map(PathBuf::from);
             if pdf.as_ref().is_some_and(|p| !p.is_absolute() || p.extension().is_none_or(|e| !e.eq_ignore_ascii_case("pdf"))) {

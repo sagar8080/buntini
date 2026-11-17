@@ -409,20 +409,6 @@ fn page_for(pdf: &Pdf, name: Option<&str>, email: &str) -> Result<(usize, String
     }
 }
 
-/// The one page an email sender's own name is printed on, written out whole. A name of one
-/// word ("Accounts", a first name) is too common to tie an address to a page.
-fn sender_page(pdf: &Pdf, display: &str) -> Result<(usize, String), String> {
-    if display.split_whitespace().count() < 2 {
-        return Err(t("mail.plan.noPageNamesThem"));
-    }
-    let pages: Vec<usize> = (0..pdf.pages.len()).filter(|i| has_phrase(&pdf.pages[*i], display)).collect();
-    match pages.as_slice() {
-        [one] => Ok((one + 1, display.to_string())),
-        [] => Err(t("mail.plan.noPageNamesThem")),
-        _ => Err(t("mail.plan.pagesNameThem")),
-    }
-}
-
 /// "Subject: …" in the request, if written.
 fn subject_in(request: &str) -> Option<String> {
     let lower = request.to_lowercase();
@@ -486,15 +472,6 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
         .chain(pdf.pages.iter().flat_map(|p| addresses_in(p)))
         .chain(cx.messages.iter().map(|m| super::rules::address(&m.sender)))
         .collect();
-    // Each listed email's sender, by address, with the name they sent it under.
-    let senders: HashMap<String, String> = cx
-        .messages
-        .iter()
-        .filter_map(|m| {
-            let name = m.sender.rsplit_once('<')?.0.trim().trim_matches('"').trim().to_string();
-            (!name.is_empty()).then(|| (super::rules::address(&m.sender), name))
-        })
-        .collect();
     for recipient in asked.and_then(|step| step["recipients"].as_array()).into_iter().flatten() {
         let email = recipient["email"].as_str().unwrap_or("").trim().to_lowercase();
         let name = recipient["name"].as_str().unwrap_or("").trim().to_string();
@@ -510,19 +487,17 @@ fn merge(asked: Option<&Value>, cx: &Context, problems: &mut Vec<String>) -> Opt
             problems.push(merge_for(&who, tf("mail.plan.unknownAddress", &[("email", &email)])));
             continue;
         }
-        // What ties an address to a page is the page itself: the address printed on it. An
-        // address from an email counts only through its sender's own full name, printed on
-        // exactly one page. The brain's say-so ties nothing: an email can tell it anything.
+        // What ties an address to a page is the page itself: the address printed on it. (An
+        // address the person wrote, with its name, was placed above.) Neither the brain's
+        // say-so nor an email's From name ties anything: an email can claim any name, and
+        // tell the brain anything.
         let printed = pdf.pages.iter().any(|page| fold(page).contains(&email));
         let found = if printed {
             page_for(pdf, (!name.is_empty()).then_some(name.as_str()), &email).and_then(|(page, name)| {
                 if fold(&pdf.pages[page - 1]).contains(&email) { Ok((page, name)) } else { Err(t("mail.plan.noPageNamesThem")) }
             })
         } else {
-            match senders.get(&email) {
-                Some(display) => sender_page(pdf, display),
-                None => Err(t("mail.plan.noPageNamesThem")),
-            }
+            Err(t("mail.plan.noPageNamesThem"))
         };
         match found {
             Ok((page, name)) => add(&mut sends, Send { name, email, page }, problems),
@@ -980,11 +955,12 @@ mod tests {
         )
         .unwrap();
         let PlanStep::Merge { sends, subject, .. } = &plan.steps[0] else { panic!() };
-        // Ana's address is her email's sender; page 2 doesn't name her, so her own page is found.
-        // Bo is printed alone on page 2.
+        // Bo is printed alone on page 2. Ana's address is only her email's sender, which ties
+        // it to no page: the person writes it in the request, or it's printed on her page.
         assert_eq!(subject, "Payslip for {name}");
-        assert_eq!(sends.iter().map(|s| (s.email.as_str(), s.page)).collect::<Vec<_>>(), [("bo@example.org", 2), ("ana@example.org", 1)]);
+        assert_eq!(sends.iter().map(|s| (s.email.as_str(), s.page)).collect::<Vec<_>>(), [("bo@example.org", 2)]);
         assert_eq!(plan.problems, [
+            "Merge, Ana Ruiz: no page names them",
             "Merge, Zed: zed@invented.example isn’t in the request, the PDF or the emails",
             "Merge, Bo: no valid address",
         ]);
@@ -1000,7 +976,7 @@ mod tests {
                 {"name":"Chloé Martin","email":"winner@spam.net","page":3},
                 {"name":"Ana Ruiz","email":"ana@example.org","page":1}
             ]}]}),
-            "Send everyone their payslip",
+            "Send everyone their payslip. Ana Ruiz ana@example.org",
             false,
             Some(&pdf),
         )
