@@ -51,9 +51,11 @@ On the React side, each part has its own folder: `src/<part>/model.ts` and `src/
 - `cargo run --example surface_host [kind]` does the same through Rust and the C entry points. Here `kind` is a card kind, for example `approval`.
 - `swift run --package-path native/surface-lab SurfaceLab <fixture> --render <folder>` draws every scene into pictures without a screen. AppKit views (the Metal glow, the pointer probe) are left out of pictures.
 - `SurfaceLab <fixture> <index> --seconds 10 --frames` shows a scene live and reports frame times while the cat moves. Add `--open` to see it opened, as a click opens it.
-- Measured on a 14-inch MacBook Pro at 120 Hz, release build, on 2026-11-16:
-  - frame times while the cat moves: median 8.33 ms, 95th percentile 8.6 ms;
-  - average CPU over ten seconds: 2.9% open with the glow, 2.1% peeking, 0.4% hidden.
+- `--capture` lets screenshots see the island; Buntini itself keeps it out of them.
+- Measured on a 14-inch MacBook Pro at 120 Hz, release build, on 2026-11-17, as CPU time over eight seconds:
+  - 0.6% hidden: the cat rests while nothing of it shows;
+  - 2.6% peeking with a focus timer, 2.9% opened with a session's steps;
+  - frame times while the cat moves: median 7.5 ms, 95th percentile 15 ms, the same as the build before.
 - The cat is drawn every frame only while it moves; at rest it isn't drawn at all. The glow is drawn once; Core Animation makes it breathe.
 
 Don't run `swift build` inside this folder. Cargo watches it, and a `.build` folder here makes every Rust build start over. Build through `native/surface-lab` instead.

@@ -76,6 +76,8 @@ if let index {
     }
     step()
 }
+// --capture: screenshots may see the island.
+if arguments.contains("--capture") { runtime.allowCapture() }
 // --open: opened, as a click on the island opens it.
 if arguments.contains("--open") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { runtime.open() } }
 if arguments.contains("--frames") { SurfaceFrames.start() }

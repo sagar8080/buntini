@@ -72,6 +72,11 @@ final class IslandWindow {
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
+    /// Lets screenshots see the island. Only SurfaceLab asks; Buntini keeps it out of them.
+    func allowCapture() {
+        panel.sharingType = .readOnly
+    }
+
     func close() {
         timer?.invalidate()
         timer = nil

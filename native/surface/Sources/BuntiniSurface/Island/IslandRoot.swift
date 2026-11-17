@@ -89,7 +89,9 @@ struct IslandRoot: View {
 
     /// The cat, which can be picked up and carried to a corner or back to the top.
     private func cat(_ cat: SurfaceKit.Cat) -> some View {
-        CatView(cat: cat, active: !model.asleep)
+        // Hidden at the notch nothing of it shows, so it rests and costs nothing; in a corner
+        // its tile stays on screen and so does its life.
+        CatView(cat: cat, active: !model.asleep && (model.mode != .hidden || model.inCorner))
             .contextMenu { Wardrobe(cat: cat, send: send) }
             .matchedGeometryEffect(id: "cat", in: space)
             .opacity(model.carrying ? 0 : 1)
