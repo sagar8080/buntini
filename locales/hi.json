@@ -377,6 +377,7 @@
   "flow.error.micStopped": "माइक्रोफ़ोन रुक गया। फिर कोशिश करें।",
   "flow.error.noRecordingFolder": "Buntini रिकॉर्डिंग के लिए फ़ोल्डर नहीं बना सका।",
   "flow.error.notRecording": "कोई कॉल रिकॉर्ड नहीं हो रही।",
+  "flow.error.passwordField": "पासवर्ड फ़ील्ड में कुछ भी नहीं लिखा गया।",
   "flow.error.recordCallsOff": "पहले सेटिंग्स में “कॉल रिकॉर्ड करें” चालू करें।",
   "flow.error.wordsLost": "शब्द वापस नहीं आए। फिर कोशिश करें।",
   "flow.models.needsSpace": "इसके लिए {size} GB ख़ाली जगह चाहिए।",

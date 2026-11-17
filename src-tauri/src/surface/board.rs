@@ -119,6 +119,11 @@ impl Board {
         }
     }
 
+    /// The id of the card in front when the board last picked.
+    pub fn front(&self) -> Option<&str> {
+        self.shown.as_ref().map(|(id, _, _)| id.as_str())
+    }
+
     /// Every pill, most urgent first.
     pub fn pills(&self) -> Vec<Pill> {
         let mut pills: Vec<&Pill> = self.sources.values().flat_map(|c| &c.pills).collect();

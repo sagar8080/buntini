@@ -373,6 +373,7 @@
   "flow.error.micStopped": "ไมโครโฟนหยุดทำงาน ลองอีกครั้ง",
   "flow.error.noRecordingFolder": "Buntini สร้างโฟลเดอร์สำหรับการบันทึกไม่ได้",
   "flow.error.notRecording": "ไม่มีการโทรที่กำลังบันทึก",
+  "flow.error.passwordField": "ไม่ได้พิมพ์อะไรลงในช่องรหัสผ่าน",
   "flow.error.recordCallsOff": "เปิด “บันทึกการโทร” ในการตั้งค่าก่อน",
   "flow.error.wordsLost": "ข้อความไม่กลับมา ลองอีกครั้ง",
   "flow.models.needsSpace": "ต้องมีพื้นที่ว่าง {size} GB",

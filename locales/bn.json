@@ -377,6 +377,7 @@
   "flow.error.micStopped": "মাইক্রোফোন থেমে গেছে। আবার চেষ্টা করুন।",
   "flow.error.noRecordingFolder": "Buntini রেকর্ডিংয়ের জন্য ফোল্ডার তৈরি করতে পারেনি।",
   "flow.error.notRecording": "কোনো কল রেকর্ড হচ্ছে না।",
+  "flow.error.passwordField": "পাসওয়ার্ড ফিল্ডে কিছুই লেখা হয়নি।",
   "flow.error.recordCallsOff": "আগে সেটিংসে কল রেকর্ড চালু করুন।",
   "flow.error.wordsLost": "শব্দগুলো ফিরে আসেনি। আবার চেষ্টা করুন।",
   "flow.models.needsSpace": "এর জন্য {size} GB খালি জায়গা দরকার।",

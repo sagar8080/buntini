@@ -648,6 +648,8 @@ pub async fn start_recording(
             "User started push to talk"
         },
     );
+    // "Hey Buntini" lets go of the microphone first, as it does for dictation.
+    crate::flow::voice_turn().await;
     let listening = state
         .voice
         .start(crate::voice::Listen { barge_in }, crate::voice::events(app))

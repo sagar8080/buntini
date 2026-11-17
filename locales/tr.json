@@ -377,6 +377,7 @@
   "flow.error.micStopped": "Mikrofon durdu. Yeniden dene.",
   "flow.error.noRecordingFolder": "Buntini kayıt için klasör oluşturamadı.",
   "flow.error.notRecording": "Kaydedilen bir görüşme yok.",
+  "flow.error.passwordField": "Parola alanına hiçbir şey yazılmadı.",
   "flow.error.recordCallsOff": "Önce Ayarlar’da “Görüşmeleri kaydet”i aç.",
   "flow.error.wordsLost": "Sözcükler geri gelmedi. Yeniden dene.",
   "flow.models.needsSpace": "Bunun için {size} GB boş alan gerekiyor.",

@@ -373,6 +373,7 @@
   "flow.error.micStopped": "マイクが停止しました。もう一度お試しください。",
   "flow.error.noRecordingFolder": "Buntiniが録音用のフォルダを作成できませんでした。",
   "flow.error.notRecording": "録音中の通話はありません。",
+  "flow.error.passwordField": "パスワード欄には何も入力していません。",
   "flow.error.recordCallsOff": "先に設定で「通話を録音」をオンにしてください。",
   "flow.error.wordsLost": "文字が返ってきませんでした。もう一度お試しください。",
   "flow.models.needsSpace": "{size} GBの空き容量が必要です。",

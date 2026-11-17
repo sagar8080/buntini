@@ -76,6 +76,13 @@ pub fn pills() -> Vec<Pill> {
     HUB.0.lock().unwrap().board.pills()
 }
 
+/// The id of the card in front on the island now, if any.
+pub fn front_card() -> Option<String> {
+    let mut hub = HUB.0.lock().unwrap();
+    hub.board.pick(now_ms());
+    hub.board.front().map(str::to_string)
+}
+
 /// Hands an action to the part that owns its source, as if it came from a surface: a
 /// shortcut that opens a pill, say.
 pub fn act(action: Action) {

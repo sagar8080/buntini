@@ -377,6 +377,7 @@
   "flow.error.micStopped": "Le micro s’est arrêté. Réessaie.",
   "flow.error.noRecordingFolder": "Buntini n’a pas pu créer de dossier pour l’enregistrement.",
   "flow.error.notRecording": "Aucun appel n’est en cours d’enregistrement.",
+  "flow.error.passwordField": "Rien n’a été saisi dans un champ de mot de passe.",
   "flow.error.recordCallsOff": "Active d’abord Enregistrer les appels dans Réglages.",
   "flow.error.wordsLost": "Les mots ne sont pas revenus. Réessaie.",
   "flow.models.needsSpace": "Il faut {size} Go d’espace libre.",

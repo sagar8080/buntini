@@ -427,11 +427,15 @@ fn notice(line: &str) {
     publish();
 }
 
-/// Ask about a capture: the chat takes the picture from here.
+/// The chat attaches the files of this event in its composer, as it does files dropped on
+/// the island (src/App.tsx), under the same rules as any attachment.
+const ATTACH_EVENT: &str = "island-files";
+
+/// Ask about a capture: the picture is attached in the chat, to go with your question.
 fn ask(path: &Path) {
     if let Some(app) = APP.get() {
         crate::show_companion(app);
-        let _ = app.emit("capture-ask", json!({ "path": path }));
+        let _ = app.emit(ATTACH_EVENT, vec![path.to_string_lossy().into_owned()]);
     }
 }
 
@@ -770,6 +774,13 @@ mod tests {
         assert!((2298..2800).contains(&ended), "ended at {ended} ms: {seen:?}");
         assert_eq!(pills, ["Focus", "Rest", "Focus", "Rest", "Focus", "Rest", "Focus", "Long rest"]);
         assert!(surface::pills().iter().all(|pill| pill.id != FOCUS_ID), "the pill goes with the set");
+    }
+
+    #[test]
+    fn ask_attaches_the_capture_where_the_chat_listens() {
+        // The chat adds these paths to the composer as attachments.
+        let app = include_str!("../../../src/App.tsx");
+        assert!(app.contains(&format!("listen<string[]>('{ATTACH_EVENT}'")) && app.contains("attachFiles("));
     }
 
     #[test]

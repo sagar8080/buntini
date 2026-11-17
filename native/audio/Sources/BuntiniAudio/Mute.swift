@@ -75,12 +75,16 @@ final class MuteState {
         return ours
     }
 
-    /// Unmutes what this muted, or the devices Rust remembered from before a crash.
-    func unmute(_ devices: [String]? = nil) {
-        let list = devices ?? ours
+    /// Unmutes what this muted, and the devices Rust remembered (an earlier helper's, from
+    /// before a crash). Returns every device it was asked to unmute, for Rust to forget.
+    @discardableResult
+    func unmute(_ devices: [String]? = nil) -> [String] {
+        var list = ours
+        for uid in devices ?? [] where !list.contains(uid) { list.append(uid) }
         for uid in list {
             if let device = OutputMute.device(uid: uid) { OutputMute.set(device, muted: false) }
         }
-        ours.removeAll { list.contains($0) }
+        ours.removeAll()
+        return list
     }
 }

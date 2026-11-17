@@ -66,7 +66,7 @@ async fn check(helper: PathBuf, models: PathBuf, input: PathBuf, flow: Settings,
                     let paste = native::should_paste(&focus);
                     let words = typed.clone();
                     let pasted = tokio::task::spawn_blocking(move || {
-                        if paste && native::paste(&words) {
+                        if paste && native::paste(&words) == native::Pasted::Arrived {
                             return true;
                         }
                         native::copy(&words);

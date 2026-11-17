@@ -42,6 +42,15 @@ impl Service {
 
     /// Sends one command, starting the helper first when it isn't running.
     pub async fn send(&self, command: Value) -> Result<(), String> {
+        self.write(command, true).await
+    }
+
+    /// Sends one command to the helper that is running; none is started for it.
+    pub async fn send_running(&self, command: Value) -> Result<(), String> {
+        self.write(command, false).await
+    }
+
+    async fn write(&self, command: Value, start: bool) -> Result<(), String> {
         let mut running = self.running.lock().await;
         if let Some(service) = running.as_mut() {
             if !matches!(service.child.try_wait(), Ok(None)) {
@@ -49,6 +58,9 @@ impl Service {
             }
         }
         if running.is_none() {
+            if !start {
+                return Err(t("flow.error.helperStopped"));
+            }
             *running = Some(self.spawn()?);
         }
         let service = running.as_mut().expect("just started");
@@ -190,6 +202,9 @@ for line in sys.stdin:
         assert!(service.running().await);
         service.stop().await;
         assert_eq!(name(&next(&mut events).await), "exited");
+        assert!(!service.running().await);
+        // Some commands mustn't start a helper just for themselves.
+        assert!(service.send_running(json!({"op": "unmute", "devices": []})).await.is_err());
         assert!(!service.running().await);
     }
 

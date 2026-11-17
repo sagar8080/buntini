@@ -393,6 +393,7 @@
   "flow.error.micStopped": "توقف الميكروفون. حاول مجددًا.",
   "flow.error.noRecordingFolder": "تعذّر على Buntini إنشاء مجلد للتسجيل.",
   "flow.error.notRecording": "لا توجد مكالمة قيد التسجيل.",
+  "flow.error.passwordField": "لم تتم كتابة أي شيء في حقل كلمة المرور.",
   "flow.error.recordCallsOff": "شغّل “تسجيل المكالمات” في الإعدادات أولًا.",
   "flow.error.wordsLost": "لم تصل الكلمات. حاول مجددًا.",
   "flow.models.needsSpace": "يتطلب هذا {size} غ.ب من المساحة الفارغة.",
