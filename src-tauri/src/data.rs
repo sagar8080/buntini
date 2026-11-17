@@ -250,6 +250,11 @@ where
     if let Err(error) = state.voice.stop_speaking().await {
         failures.push(error);
     }
+    // Dictation, the wake word and call notes stop, and words still on their way are dropped,
+    // before the database is emptied.
+    if let Err(error) = crate::flow::erase(state).await {
+        failures.push(error);
+    }
     if let Err(error) = sign_out().await {
         failures.push(error);
     }
