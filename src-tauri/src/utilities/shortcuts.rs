@@ -57,7 +57,7 @@ pub const ACTIONS: [Action; 8] = [
     Action { id: "nextPill", default: Some((30, &["control", "option"], "⌃⌥]")) },
     Action { id: "mute", default: Some((46, &["control", "option"], "⌃⌥M")) },
     Action { id: "screenshot", default: Some((19, &["shift", "command"], "⇧⌘2")) },
-    Action { id: "area", default: Some((1, &["shift", "command"], "⇧⌘S")) },
+    Action { id: "area", default: Some((1, &["control", "option"], "⌃⌥S")) },
     Action { id: "focus", default: Some((3, &["control", "option"], "⌃⌥F")) },
 ];
 
@@ -127,6 +127,10 @@ const SYSTEM: [(u16, u32); 18] = [
 /// select all, save, new, open, print, find, new tab, settings.
 const EVERY_APP: [u16; 16] = [12, 13, 4, 46, 8, 9, 7, 6, 0, 1, 45, 31, 35, 3, 17, 43];
 
+/// ⇧⌘ and one of these is in most apps: Save As or Duplicate, redo, a new window or folder,
+/// reopen the closed tab, find the previous one, close the window, and the tab before or after.
+const EVERY_APP_SHIFT: [u16; 8] = [1, 6, 45, 17, 5, 13, 33, 30];
+
 /// Why `shortcut` can't be used for `id`, in a few words; none when it can.
 pub fn problem(id: &str, shortcut: &Shortcut, current: &[(&'static str, Option<Shortcut>)], dictation: Option<&Shortcut>) -> Option<String> {
     let known_names = ["command", "option", "control", "shift"];
@@ -140,7 +144,7 @@ pub fn problem(id: &str, shortcut: &Shortcut, current: &[(&'static str, Option<S
     if SYSTEM.contains(&(shortcut.key_code, mask)) {
         return Some(t("utilities.shortcuts.macosUses"));
     }
-    if mask == 0x100 && EVERY_APP.contains(&shortcut.key_code) || mask == 0x300 && shortcut.key_code == 6 {
+    if mask == 0x100 && EVERY_APP.contains(&shortcut.key_code) || mask == 0x300 && EVERY_APP_SHIFT.contains(&shortcut.key_code) {
         return Some(t("utilities.shortcuts.everyAppUses"));
     }
     if dictation.is_some_and(|chord| chord.same_keys(shortcut)) {
@@ -174,7 +178,7 @@ mod tests {
         let set: Vec<_> = all.iter().filter_map(|(id, shortcut)| shortcut.as_ref().map(|s| (*id, s.label.as_str()))).collect();
         assert_eq!(
             set,
-            [("companion", "⇧⌘Space"), ("chat", "⌃⌥Space"), ("waiting", "⌃⌥A"), ("nextPill", "⌃⌥]"), ("mute", "⌃⌥M"), ("screenshot", "⇧⌘2"), ("area", "⇧⌘S"), ("focus", "⌃⌥F")]
+            [("companion", "⇧⌘Space"), ("chat", "⌃⌥Space"), ("waiting", "⌃⌥A"), ("nextPill", "⌃⌥]"), ("mute", "⌃⌥M"), ("screenshot", "⇧⌘2"), ("area", "⌃⌥S"), ("focus", "⌃⌥F")]
         );
         // Every default passes its own checks.
         for (id, shortcut) in &all {
@@ -199,6 +203,8 @@ mod tests {
         assert_eq!(check(9, &["control", "command"]).as_deref(), Some("macOS uses it"), "paste the last dictation");
         assert_eq!(check(8, &["command"]).as_deref(), Some("Every app uses it"), "copy");
         assert_eq!(check(6, &["shift", "command"]).as_deref(), Some("Every app uses it"), "redo");
+        assert_eq!(check(1, &["shift", "command"]).as_deref(), Some("Every app uses it"), "Save As, Duplicate");
+        assert_eq!(check(17, &["shift", "command"]).as_deref(), Some("Every app uses it"), "reopen the closed tab");
         assert_eq!(check(1, &["shift"]).as_deref(), Some("Add ⌘, ⌃ or ⌥"), "it would type a capital");
         assert_eq!(check(1, &[]).as_deref(), Some("Add ⌘, ⌃ or ⌥"));
         assert_eq!(check(200, &["command"]).as_deref(), Some("Can’t be used"));

@@ -62,7 +62,7 @@ test('each tab has settings and no label is listed twice on one tab', () => {
 
 test('the preview keeps shortcuts and refuses what Buntini would', () => {
   const rows = preview({ op: 'shortcuts' }) as ShortcutRow[];
-  assert.deepEqual(rows.map(row => row.shortcut?.label), ['⇧⌘Space', '⌃⌥Space', '⌃⌥A', '⌃⌥]', '⌃⌥M', '⇧⌘2', '⇧⌘S', '⌃⌥F']);
+  assert.deepEqual(rows.map(row => row.shortcut?.label), ['⇧⌘Space', '⌃⌥Space', '⌃⌥A', '⌃⌥]', '⌃⌥M', '⇧⌘2', '⌃⌥S', '⌃⌥F']);
   assert.throws(() => preview({ op: 'setShortcut', id: 'focus', shortcut: { keyCode: 3, modifiers: ['shift'], label: '⇧F' } }), /Add ⌘, ⌃ or ⌥/);
   assert.throws(() => preview({ op: 'setShortcut', id: 'focus', shortcut: { keyCode: 19, modifiers: ['command', 'shift'], label: '⇧⌘2' } }), /Screenshot uses it/);
   const next = preview({ op: 'setShortcut', id: 'focus', shortcut: { keyCode: 3, modifiers: ['control', 'option', 'command'], label: '⌃⌥⌘F' } }) as ShortcutRow[];

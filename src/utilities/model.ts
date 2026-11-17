@@ -203,7 +203,7 @@ const defaultShortcuts = (): ShortcutRow[] => [
   row('nextPill', t('utilities.shortcuts.nextPill'), 30, ['control', 'option'], '⌃⌥]'),
   row('mute', t('utilities.shortcuts.mute'), 46, ['control', 'option'], '⌃⌥M'),
   row('screenshot', t('utilities.shortcuts.screenshot'), 19, ['shift', 'command'], '⇧⌘2'),
-  row('area', t('utilities.shortcuts.area'), 1, ['shift', 'command'], '⇧⌘S'),
+  row('area', t('utilities.shortcuts.area'), 1, ['control', 'option'], '⌃⌥S'),
   row('focus', t('utilities.shortcuts.focus'), 3, ['control', 'option'], '⌃⌥F'),
 ];
 /** The preview's changed shortcuts, by id. */
