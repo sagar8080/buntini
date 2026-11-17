@@ -144,7 +144,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
-    if (name === 'check_server') return { base: 'http://localhost:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
+    if (name === 'check_server') return { base: 'http://127.0.0.1:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
     // The preview has no download to run: it shows setup partway through.
     if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;

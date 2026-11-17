@@ -60,8 +60,9 @@ export function offeredProviders(installed: string[] | undefined, chosen: CloudP
   return cloudProviders.filter(item => item.kind !== 'tool' || item.id === chosen || (installed ?? []).includes(item.id));
 }
 
-/** LM Studio's usual address on this Mac. */
-export const lmStudioAddress = 'localhost:1234';
+/** LM Studio's usual address on this Mac, as the literal IPv4 loopback: "localhost" can
+    mean ::1 first, where another program could be listening. */
+export const lmStudioAddress = '127.0.0.1:1234';
 
 // Read in the language spoken when shown.
 export const backendLabel: Readonly<Record<ModelBackend, string>> = { apple: 'Apple Intelligence', get mlx() { return t('brain.backend.mlx'); }, get cloud() { return t('brain.backend.cloud'); } };
