@@ -40,6 +40,7 @@ fn main() {
         state: if waiting { PillState::Waiting } else { PillState::Working },
         badge: Some("buntini".into()),
         progress: None,
+        card: None,
     };
     let offers = card
         .map(|card| Offer { card, urgency: if waiting { Urgency::Waiting } else { Urgency::Info }, at_ms: surface::now_ms(), ttl_ms: None })
