@@ -377,6 +377,7 @@
   "flow.error.micStopped": "The microphone stopped. Try again.",
   "flow.error.noRecordingFolder": "Buntini couldn’t make a folder for the recording.",
   "flow.error.notRecording": "No call is recording.",
+  "flow.error.passwordField": "Nothing was typed into a password field.",
   "flow.error.recordCallsOff": "Turn on Record calls in Settings first.",
   "flow.error.wordsLost": "The words didn’t come back. Try again.",
   "flow.models.needsSpace": "This needs {size} GB free.",

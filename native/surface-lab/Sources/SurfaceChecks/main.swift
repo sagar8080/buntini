@@ -1,6 +1,7 @@
 // Checks the Swift side of the surface contract against the fixture Rust also checks
 // (src-tauri/src/surface/mod.rs): everything decodes, writes back the same, and every card
 // kind is covered. Exits 1 on the first failure.
+import AppKit
 import BuntiniSurface
 import Foundation
 import SurfaceKit
@@ -68,8 +69,29 @@ let corner = IslandGeometry.panelFrame(screen, placement: .bottomRight)
 let tile = IslandGeometry.screenRect(panel: corner, size: IslandGeometry.tile, placement: .bottomRight)
 guard tile.maxX == screen.visibleFrame.maxX - IslandGeometry.cornerMargin, tile.minY == screen.visibleFrame.minY + IslandGeometry.cornerMargin else { fail("the corner tile isn't in its corner: \(tile)") }
 
+// Dictation's clipboard, on a private pasteboard: a password manager's item is never written
+// back, the clipboard otherwise goes back as it was, and words not seen to arrive stay on it.
+let board = NSPasteboard(name: NSPasteboard.Name("app.buntini.checks.\(UUID().uuidString)"))
+board.clearContents()
+let secret = NSPasteboardItem()
+secret.setString("hunter2", forType: .string)
+secret.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+board.writeObjects([secret])
+let concealed = Paster.save(board)
+Paster.end("dictated", saved: concealed, ours: Paster.place("dictated", on: board, transient: true), arrived: true, pasteboard: board)
+guard board.string(forType: .string) == nil, (board.pasteboardItems ?? []).isEmpty else { fail("a concealed clipboard item was written back") }
+board.clearContents()
+board.setString("mine", forType: .string)
+let plain = Paster.save(board)
+Paster.end("dictated", saved: plain, ours: Paster.place("dictated", on: board, transient: true), arrived: true, pasteboard: board)
+guard board.string(forType: .string) == "mine" else { fail("the clipboard wasn't put back after the words arrived") }
+Paster.end("dictated", saved: Paster.save(board), ours: Paster.place("dictated", on: board, transient: true), arrived: false, pasteboard: board)
+guard board.string(forType: .string) == "dictated", board.pasteboardItems?.first?.types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType")) == false else { fail("words not seen to arrive aren't left on the clipboard") }
+guard !Paster.arrived(before: nil, after: "n4"), !Paster.arrived(before: "n4", after: nil), !Paster.arrived(before: "n4", after: "n4"), Paster.arrived(before: "n4", after: "n9") else { fail("a field that says nothing counts as the words arriving") }
+board.releaseGlobally()
+
 if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(problem)") }
 if let problem = SurfaceSounds.problem() { fail(problem) }
 if let problem = MarkupCheck.problem() { fail(problem) }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws")
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; dictation's clipboard checks pass; shaders compile; sounds play; mark-up draws")

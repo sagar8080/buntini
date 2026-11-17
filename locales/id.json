@@ -373,6 +373,7 @@
   "flow.error.micStopped": "Mikrofon berhenti. Coba lagi.",
   "flow.error.noRecordingFolder": "Buntini tidak dapat membuat folder untuk rekaman.",
   "flow.error.notRecording": "Tidak ada panggilan yang sedang direkam.",
+  "flow.error.passwordField": "Tidak ada yang diketik ke kolom kata sandi.",
   "flow.error.recordCallsOff": "Nyalakan Rekam panggilan di Pengaturan dulu.",
   "flow.error.wordsLost": "Kata-katanya tidak kembali. Coba lagi.",
   "flow.models.needsSpace": "Ini perlu ruang kosong {size} GB.",

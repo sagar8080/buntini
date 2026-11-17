@@ -377,6 +377,7 @@
   "flow.error.micStopped": "O microfone parou. Tente de novo.",
   "flow.error.noRecordingFolder": "O Buntini não conseguiu criar uma pasta para a gravação.",
   "flow.error.notRecording": "Nenhuma ligação está sendo gravada.",
+  "flow.error.passwordField": "Nada foi digitado em um campo de senha.",
   "flow.error.recordCallsOff": "Ative Gravar ligações nos Ajustes primeiro.",
   "flow.error.wordsLost": "As palavras não voltaram. Tente de novo.",
   "flow.models.needsSpace": "São necessários {size} GB livres.",

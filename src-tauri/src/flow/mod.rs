@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use text::{Mode, Replacement, Snippet, Style};
 
-pub use runtime::start;
+pub use runtime::{erase, start, voice_turn};
 
 /// The key that dictates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

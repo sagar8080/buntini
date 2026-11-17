@@ -373,6 +373,7 @@
   "flow.error.micStopped": "마이크가 멈췄어요. 다시 시도하세요.",
   "flow.error.noRecordingFolder": "Buntini가 녹음용 폴더를 만들지 못했어요.",
   "flow.error.notRecording": "녹음 중인 통화가 없어요.",
+  "flow.error.passwordField": "암호 입력란에는 아무것도 입력하지 않았습니다.",
   "flow.error.recordCallsOff": "먼저 설정에서 통화 녹음을 켜세요.",
   "flow.error.wordsLost": "받아쓴 내용을 받지 못했어요. 다시 시도하세요.",
   "flow.models.needsSpace": "여유 공간이 {size}GB 필요해요.",

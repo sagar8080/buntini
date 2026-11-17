@@ -385,6 +385,7 @@
   "flow.error.micStopped": "Микрофон отключился. Попробуйте ещё раз.",
   "flow.error.noRecordingFolder": "Buntini не удалось создать папку для записи.",
   "flow.error.notRecording": "Звонок не записывается.",
+  "flow.error.passwordField": "В поле пароля ничего не введено.",
   "flow.error.recordCallsOff": "Сначала включите «Записывать звонки» в Настройках.",
   "flow.error.wordsLost": "Текст не вернулся. Попробуйте ещё раз.",
   "flow.models.needsSpace": "Нужно {size} ГБ свободного места.",

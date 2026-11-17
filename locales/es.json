@@ -377,6 +377,7 @@
   "flow.error.micStopped": "El micrófono se ha detenido. Vuelve a intentarlo.",
   "flow.error.noRecordingFolder": "Buntini no ha podido crear una carpeta para la grabación.",
   "flow.error.notRecording": "No se está grabando ninguna llamada.",
+  "flow.error.passwordField": "No se escribió nada en un campo de contraseña.",
   "flow.error.recordCallsOff": "Primero activa Grabar llamadas en Ajustes.",
   "flow.error.wordsLost": "No han llegado las palabras. Vuelve a intentarlo.",
   "flow.models.needsSpace": "Necesita {size} GB libres.",

@@ -10,7 +10,7 @@ extern "C" {
     fn buntini_flow_watch(callback: Callback, config: *const u8, length: usize) -> bool;
     fn buntini_flow_unwatch();
     fn buntini_flow_focus(out: *mut u8, capacity: usize) -> isize;
-    fn buntini_flow_paste(text: *const u8, length: usize) -> bool;
+    fn buntini_flow_paste(text: *const u8, length: usize) -> i32;
     fn buntini_flow_copy(text: *const u8, length: usize) -> bool;
 }
 
@@ -56,6 +56,10 @@ pub fn unwatch() {
 pub struct Focus {
     pub app: String,
     pub bundle: String,
+    /// The app's process.
+    pub pid: i64,
+    /// Which element has the caret (its accessibility hash); 0 when none was found.
+    pub field: u64,
     pub role: String,
     pub subrole: String,
     /// The value can be set.
@@ -63,8 +67,21 @@ pub struct Focus {
     /// It reports a selection (a caret counts).
     pub selection: bool,
     pub secure: bool,
+    /// Secure input is on somewhere (a password field, or a terminal's Secure Keyboard Entry).
+    pub secure_input: bool,
     /// Buntini may use Accessibility.
     pub trusted: bool,
+}
+
+/// A password is being typed: dictated words are dropped, never typed or copied.
+pub fn secure(focus: &Focus) -> bool {
+    focus.secure || focus.secure_input || focus.subrole == "AXSecureTextField"
+}
+
+/// Whether the caret is still where it was: the same app, the same field and the same kind
+/// of field. The words are typed only then.
+pub fn same_field(before: &Focus, now: &Focus) -> bool {
+    !before.bundle.is_empty() && before.bundle == now.bundle && before.pid == now.pid && before.field == now.field && before.role == now.role && before.subrole == now.subrole
 }
 
 /// What's in front. Call off the main thread: it asks the app over Accessibility.
@@ -87,24 +104,39 @@ const TEXT_ROLES: [&str; 5] = ["AXTextField", "AXTextArea", "AXComboBox", "AXSea
 /// Whether the words should be typed where the caret is, or kept to paste by hand. A text
 /// role, or a web or Electron editor that takes a value and shows a caret; never a password.
 pub fn should_paste(focus: &Focus) -> bool {
-    if !focus.trusted || focus.secure || focus.subrole == "AXSecureTextField" {
+    if !focus.trusted || secure(focus) {
         return false;
     }
     let texty = TEXT_ROLES.contains(&focus.role.as_str());
     (texty && (focus.settable || focus.selection)) || (focus.settable && focus.selection)
 }
 
-/// Pastes with ⌘V, keeping the clipboard as it was. False when it couldn't.
-pub fn paste(text: &str) -> bool {
+/// What became of a paste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pasted {
+    /// The field was seen to take the words; the clipboard is as it was.
+    Arrived,
+    /// The words are on the clipboard to paste by hand (they may have been typed too).
+    OnClipboard,
+    /// A password was being typed: nothing pasted, the clipboard untouched.
+    Refused,
+}
+
+/// Pastes with ⌘V, keeping the clipboard as it was when the words are seen to arrive.
+pub fn paste(text: &str) -> Pasted {
     #[cfg(target_os = "macos")]
     {
         // SAFETY: a live slice for the duration of the call; Swift copies it.
-        unsafe { buntini_flow_paste(text.as_ptr(), text.len()) }
+        match unsafe { buntini_flow_paste(text.as_ptr(), text.len()) } {
+            1 => Pasted::Arrived,
+            -1 => Pasted::Refused,
+            _ => Pasted::OnClipboard,
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = text;
-        false
+        Pasted::Refused
     }
 }
 
@@ -194,7 +226,22 @@ mod tests {
     fn never_into_a_password_or_without_accessibility() {
         assert!(!should_paste(&Focus { secure: true, ..field("AXTextField", true, true) }));
         assert!(!should_paste(&Focus { subrole: "AXSecureTextField".into(), ..field("AXTextField", true, true) }));
+        assert!(!should_paste(&Focus { secure_input: true, ..field("AXTextArea", true, true) }), "Secure Keyboard Entry");
         assert!(!should_paste(&Focus { trusted: false, ..field("AXTextArea", true, true) }));
+        assert!(secure(&Focus { secure_input: true, ..Focus::default() }));
+        assert!(!secure(&field("AXTextArea", true, true)));
+    }
+
+    #[test]
+    fn the_caret_must_still_be_in_the_same_field() {
+        let notes = Focus { bundle: "com.apple.Notes".into(), pid: 7, field: 42, ..field("AXTextArea", true, true) };
+        assert!(same_field(&notes, &notes.clone()));
+        assert!(!same_field(&notes, &Focus { field: 43, ..notes.clone() }), "another field");
+        assert!(!same_field(&notes, &Focus { bundle: "com.apple.Terminal".into(), pid: 9, ..notes.clone() }), "another app");
+        assert!(!same_field(&notes, &Focus { role: "AXTextField".into(), ..notes.clone() }));
+        assert!(!same_field(&Focus::default(), &Focus::default()), "nothing known");
+        let read: Focus = serde_json::from_str(r#"{"app":"Notes","bundle":"com.apple.Notes","pid":7,"field":42,"role":"AXTextArea","secureInput":true,"trusted":true}"#).unwrap();
+        assert!(read.secure_input && read.field == 42 && read.pid == 7);
     }
 
     #[test]

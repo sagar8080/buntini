@@ -63,28 +63,38 @@ pub fn record(db: &Connection, entry: &NewDictation, now: DateTime<Utc>) -> Resu
     )
     .map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
-    // Old words go; their counts stay for the statistics.
-    let cutoff = (now - Duration::days(KEEP_DAYS)).to_rfc3339();
-    db.execute("UPDATE flow_dictations SET text='' WHERE at < ?1 AND text <> ''", [cutoff]).map_err(|e| e.to_string())?;
+    purge(db, now)?;
     Ok(id)
 }
 
+/// The oldest moment whose words are still kept. Times are saved as UTC RFC 3339, so they
+/// compare as text.
+fn cutoff(now: DateTime<Utc>) -> String {
+    (now - Duration::days(KEEP_DAYS)).to_rfc3339()
+}
+
+/// Old words go; their counts stay for the statistics. Runs at start, on a timer and with
+/// each dictation.
+pub fn purge(db: &Connection, now: DateTime<Utc>) -> Result<(), String> {
+    db.execute("UPDATE flow_dictations SET text='' WHERE at < ?1 AND text <> ''", [cutoff(now)]).map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// The latest dictations whose words are still kept, newest first.
-pub fn recent(db: &Connection, limit: usize) -> Result<Vec<Dictation>, String> {
+pub fn recent(db: &Connection, limit: usize, now: DateTime<Utc>) -> Result<Vec<Dictation>, String> {
     let mut statement = db
-        .prepare("SELECT id,at,app,words,text,pasted FROM flow_dictations WHERE text <> '' ORDER BY id DESC LIMIT ?1")
+        .prepare("SELECT id,at,app,words,text,pasted FROM flow_dictations WHERE text <> '' AND at >= ?2 ORDER BY id DESC LIMIT ?1")
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map([limit as i64], |row| {
+        .query_map(params![limit as i64, cutoff(now)], |row| {
             Ok(Dictation { id: row.get(0)?, at: row.get(1)?, app: row.get(2)?, words: row.get(3)?, text: row.get(4)?, pasted: row.get(5)? })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 
-/// The last thing dictated, for ⌃⌘V.
-pub fn last_text(db: &Connection) -> Result<Option<String>, String> {
-    db.query_row("SELECT text FROM flow_dictations WHERE text <> '' ORDER BY id DESC LIMIT 1", [], |row| row.get(0))
+/// The last thing dictated, for ⌃⌘V, while its words are still kept.
+pub fn last_text(db: &Connection, now: DateTime<Utc>) -> Result<Option<String>, String> {
+    db.query_row("SELECT text FROM flow_dictations WHERE text <> '' AND at >= ?1 ORDER BY id DESC LIMIT 1", [cutoff(now)], |row| row.get(0))
         .optional()
         .map_err(|e| e.to_string())
 }
@@ -186,14 +196,17 @@ pub struct Note {
     pub todos: Vec<String>,
 }
 
-pub fn save_note(db: &Connection, note: &Note) -> Result<(), String> {
+/// A new note, when a recording starts.
+pub fn add_note(db: &Connection, note: &Note) -> Result<(), String> {
     let data = serde_json::to_string(note).map_err(|e| e.to_string())?;
-    db.execute(
-        "INSERT INTO flow_notes(id,data,created_at) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
-        params![note.id, data, note.created_at],
-    )
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    db.execute("INSERT INTO flow_notes(id,data,created_at) VALUES(?1,?2,?3)", params![note.id, data, note.created_at]).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Saves a note that is still there. A note deleted meanwhile (by you, Clear history or
+/// Delete everything) stays deleted: false.
+pub fn update_note(db: &Connection, note: &Note) -> Result<bool, String> {
+    let data = serde_json::to_string(note).map_err(|e| e.to_string())?;
+    db.execute("UPDATE flow_notes SET data=?2 WHERE id=?1", params![note.id, data]).map(|changed| changed > 0).map_err(|e| e.to_string())
 }
 
 pub fn notes(db: &Connection) -> Result<Vec<Note>, String> {
@@ -256,15 +269,15 @@ mod tests {
         let db = db();
         let then = Utc.with_ymd_and_hms(2026, 9, 1, 12, 0, 0).unwrap();
         record(&db, &NewDictation { app: "Notes", bundle: "b", text: "an old thought", speaking_ms: 900, pasted: true }, then).unwrap();
-        assert_eq!(last_text(&db).unwrap().as_deref(), Some("an old thought"));
+        assert_eq!(last_text(&db, then).unwrap().as_deref(), Some("an old thought"));
         let now = Utc.with_ymd_and_hms(2026, 11, 16, 12, 0, 0).unwrap();
         record(&db, &NewDictation { app: "Notes", bundle: "b", text: "a new one", speaking_ms: 900, pasted: true }, now).unwrap();
-        let kept = recent(&db, 10).unwrap();
+        let kept = recent(&db, 10, now).unwrap();
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].text, "a new one");
         assert_eq!(stats(&db, now.date_naive()).unwrap().words, 6);
         forget(&db, kept[0].id).unwrap();
-        assert_eq!(last_text(&db).unwrap(), None);
+        assert_eq!(last_text(&db, now).unwrap(), None);
         clear(&db).unwrap();
         assert_eq!(stats(&db, now.date_naive()).unwrap().dictations, 2);
         erase(&db).unwrap();
@@ -272,19 +285,50 @@ mod tests {
     }
 
     #[test]
+    fn words_older_than_a_month_go_without_a_new_dictation() {
+        let db = db();
+        let then = Utc.with_ymd_and_hms(2026, 10, 1, 12, 0, 0).unwrap();
+        record(&db, &NewDictation { app: "Notes", bundle: "b", text: "kept a while", speaking_ms: 900, pasted: true }, then).unwrap();
+        let later = then + Duration::days(KEEP_DAYS) + Duration::minutes(1);
+        // Not shown or pasted once their time is up, even before the purge runs.
+        assert!(recent(&db, 10, later).unwrap().is_empty());
+        assert_eq!(last_text(&db, later).unwrap(), None);
+        assert_eq!(recent(&db, 10, then).unwrap().len(), 1, "still in the database until purged");
+        purge(&db, later).unwrap();
+        assert!(recent(&db, 10, then).unwrap().is_empty());
+        assert_eq!(stats(&db, later.date_naive()).unwrap().words, 3, "the counts stay");
+    }
+
+    #[test]
     fn notes_are_saved_updated_and_listed_newest_first() {
         let db = db();
         let mut note = Note { id: "n1".into(), title: "Standup".into(), created_at: "2026-11-16T10:00:00Z".into(), seconds: 60.0, state: "processing".into(), lines: vec![], summary: String::new(), key_points: vec![], todos: vec![] };
-        save_note(&db, &note).unwrap();
+        add_note(&db, &note).unwrap();
         note.state = "ready".into();
         note.todos = vec!["Send the deck".into()];
-        save_note(&db, &note).unwrap();
-        save_note(&db, &Note { id: "n2".into(), created_at: "2026-11-16T11:00:00Z".into(), ..note.clone() }).unwrap();
+        assert!(update_note(&db, &note).unwrap());
+        add_note(&db, &Note { id: "n2".into(), created_at: "2026-11-16T11:00:00Z".into(), ..note.clone() }).unwrap();
         let listed = notes(&db).unwrap();
         assert_eq!(listed.iter().map(|note| note.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
         assert_eq!(listed[1].todos, ["Send the deck"]);
         delete_note(&db, "n2").unwrap();
         clear(&db).unwrap();
+        assert!(notes(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_deleted_note_is_not_brought_back_by_a_late_save() {
+        let db = db();
+        let note = Note { id: "n1".into(), title: "Call".into(), created_at: "2026-11-16T10:00:00Z".into(), seconds: 0.0, state: "processing".into(), lines: vec![], summary: String::new(), key_points: vec![], todos: vec![] };
+        add_note(&db, &note).unwrap();
+        delete_note(&db, "n1").unwrap();
+        assert!(!update_note(&db, &Note { state: "ready".into(), ..note.clone() }).unwrap());
+        add_note(&db, &note).unwrap();
+        clear(&db).unwrap();
+        assert!(!update_note(&db, &note).unwrap());
+        add_note(&db, &note).unwrap();
+        erase(&db).unwrap();
+        assert!(!update_note(&db, &note).unwrap());
         assert!(notes(&db).unwrap().is_empty());
     }
 

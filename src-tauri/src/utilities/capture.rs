@@ -1,10 +1,12 @@
 //! Screenshots and captures. The whole screen goes to the clipboard with a thumbnail in the
 //! corner; part of the screen goes to the island, which offers to paste, copy, mark up or ask
 //! about it. Pictures are taken by /usr/sbin/screencapture into Buntini's cache folder, kept a
-//! day for dragging out and pasting, and never sent anywhere unless you choose Ask.
+//! day for dragging out and pasting, and never sent anywhere unless you choose Ask. Dictation
+//! pastes a capture only while its card is in front on the island and the dictation started
+//! over it; never a whole-screen screenshot.
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crate::surface::cards::utilities::{Capture, Overlay};
 use crate::surface::{self, Card, CardBody, Offer, Source, Urgency};
@@ -37,14 +39,23 @@ struct State {
     selecting: bool,
     /// A picture is being taken.
     busy: bool,
-    /// The last capture shown, and when it went away (none while still shown).
-    last: Option<(PathBuf, Option<Instant>)>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { thumbnail: None, card: None, blocked: None, selecting: false, busy: false, last: None });
+static STATE: Mutex<State> = Mutex::new(State { thumbnail: None, card: None, blocked: None, selecting: false, busy: false });
 
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    let mut state = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A capture whose time on the island is up is gone, not merely hidden.
+    let now = surface::now_ms();
+    if state.card.as_ref().is_some_and(|(_, at_ms)| !live(*at_ms, now)) {
+        state.card = None;
+    }
+    state
+}
+
+/// Whether a capture offered at `at_ms` is still on the island.
+fn live(at_ms: u64, now_ms: u64) -> bool {
+    now_ms < at_ms.saturating_add(CARD_MS)
 }
 
 /// The island's capture cards.
@@ -80,18 +91,7 @@ fn show_overlay(state: &State) {
     surface::set_overlay(overlay);
 }
 
-/// Marks what's on screen for dictation: shown now, or gone at this moment.
-fn seen(state: &mut State) {
-    let shown = state.thumbnail.as_ref().or(state.card.as_ref().map(|(shot, _)| shot)).map(|shot| shot.path.clone());
-    state.last = match (shown, state.last.take()) {
-        (Some(path), _) => Some((path, None)),
-        (None, Some((path, None))) => Some((path, Some(Instant::now()))),
-        (None, last) => last,
-    };
-}
-
 fn changed(state: &mut State) {
-    seen(state);
     show_overlay(state);
 }
 
@@ -193,7 +193,6 @@ pub fn selected(rect: [f64; 4]) {
         match result {
             Ok(shot) => {
                 state.card = Some((shot, surface::now_ms()));
-                seen(&mut state);
                 drop(state);
                 super::publish();
             }
@@ -231,11 +230,7 @@ fn card_path(card: Option<&str>) -> Option<PathBuf> {
 }
 
 fn forget_card() {
-    {
-        let mut state = state();
-        state.card = None;
-        seen(&mut state);
-    }
+    state().card = None;
     super::publish();
 }
 
@@ -285,11 +280,7 @@ pub fn act(name: &str, card: Option<&str>, value: Option<&serde_json::Value>) ->
                 return Err("That picture isn't Buntini's.".into());
             }
             let (width, height) = png_size(&path).ok_or("The marked-up picture didn't read.")?;
-            {
-                let mut state = state();
-                state.card = Some((Shot { path, width, height }, surface::now_ms()));
-                seen(&mut state);
-            }
+            state().card = Some((Shot { path, width, height }, surface::now_ms()));
             super::publish();
             Ok(())
         }
@@ -297,22 +288,42 @@ pub fn act(name: &str, card: Option<&str>, value: Option<&serde_json::Value>) ->
     }
 }
 
-/// A capture showing now, or gone within `within`, for dictation: holding the dictation key
-/// while one shows pastes it with the words. Taken once.
-pub fn for_dictation(within: Duration) -> Option<PathBuf> {
-    let mut state = state();
-    let (path, gone) = state.last.clone()?;
-    if gone.is_some_and(|gone| gone.elapsed() > within) || !path.exists() {
+/// The capture card's picture, when the card is in front on the island now.
+fn in_front(card: Option<&(Shot, u64)>, front: Option<&str>, now_ms: u64) -> Option<PathBuf> {
+    let (shot, at_ms) = card?;
+    (front == Some(CARD_ID) && live(*at_ms, now_ms)).then(|| shot.path.clone())
+}
+
+/// The capture showing on the island, for a dictation starting now. A whole-screen
+/// screenshot (the thumbnail) never counts.
+pub fn showing() -> Option<PathBuf> {
+    if !surface::running() {
         return None;
     }
-    state.last = None;
-    let showing = state.thumbnail.take().is_some() | state.card.take().is_some();
-    if showing {
-        show_overlay(&state);
-        drop(state);
-        super::publish();
-    }
+    let front = surface::front_card();
+    in_front(state().card.as_ref(), front.as_deref(), surface::now_ms())
+}
+
+/// The capture a dictation started over, if its card is still in front: it is pasted with the
+/// words, and taken off the island.
+pub fn for_dictation(started_over: &Path) -> Option<PathBuf> {
+    let path = showing().filter(|path| path == started_over && path.exists())?;
+    forget_card();
     Some(path)
+}
+
+/// Delete everything: no capture on the island or in the corner, and none kept.
+pub fn erase(cache_dir: &Path) -> Result<(), String> {
+    {
+        let mut state = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *state = State::default();
+        show_overlay(&state);
+    }
+    super::publish();
+    match std::fs::remove_dir_all(cache_dir.join("captures")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err("Couldn’t remove the captures.".into()),
+        _ => Ok(()),
+    }
 }
 
 /// Pastes a capture where the caret is, keeping the clipboard as it was.
@@ -446,6 +457,32 @@ mod tests {
         prune(folder.path(), SystemTime::now() + Duration::from_secs(2 * 24 * 3600));
         let left: Vec<_> = std::fs::read_dir(folder.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
         assert_eq!(left, ["notes.txt"]);
+    }
+
+    #[test]
+    fn dictation_takes_only_a_capture_card_in_front_and_in_time() {
+        let shot = Shot { path: PathBuf::from("/captures/Capture.png"), width: 10, height: 10 };
+        let card = (shot.clone(), 1_000);
+        assert_eq!(in_front(Some(&card), Some(CARD_ID), 5_000), Some(shot.path.clone()));
+        assert_eq!(in_front(Some(&card), Some("agent.ask"), 5_000), None, "another card covers it");
+        assert_eq!(in_front(Some(&card), None, 5_000), None, "the island shows no card");
+        assert_eq!(in_front(Some(&card), Some(CARD_ID), 1_000 + CARD_MS), None, "its time is up");
+        assert_eq!(in_front(None, Some(CARD_ID), 5_000), None, "dismissed, copied or pasted");
+    }
+
+    #[test]
+    fn a_capture_expires_and_erase_removes_every_capture() {
+        let folder = tempfile::tempdir().unwrap();
+        let captures = folder.path().join("captures");
+        std::fs::create_dir_all(&captures).unwrap();
+        png(&captures.join("a.png"), 1, 1);
+        assert!(live(1_000, 1_000 + CARD_MS - 1) && !live(1_000, 1_000 + CARD_MS));
+        STATE.lock().unwrap().card = Some((Shot { path: captures.join("a.png"), width: 1, height: 1 }, surface::now_ms()));
+        STATE.lock().unwrap().thumbnail = Some(Shot { path: captures.join("a.png"), width: 1, height: 1 });
+        erase(folder.path()).unwrap();
+        assert!(state().card.is_none() && state().thumbnail.is_none());
+        assert!(!captures.exists());
+        erase(folder.path()).unwrap();
     }
 
     #[test]

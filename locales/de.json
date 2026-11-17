@@ -377,6 +377,7 @@
   "flow.error.micStopped": "Das Mikrofon wurde gestoppt. Versuche es erneut.",
   "flow.error.noRecordingFolder": "Buntini konnte keinen Ordner für die Aufnahme anlegen.",
   "flow.error.notRecording": "Es wird kein Gespräch aufgenommen.",
+  "flow.error.passwordField": "In ein Passwortfeld wurde nichts eingegeben.",
   "flow.error.recordCallsOff": "Schalte zuerst „Gespräche aufnehmen“ in den Einstellungen ein.",
   "flow.error.wordsLost": "Die Worte sind nicht zurückgekommen. Versuche es erneut.",
   "flow.models.needsSpace": "Dafür brauchst du {size} GB freien Speicher.",

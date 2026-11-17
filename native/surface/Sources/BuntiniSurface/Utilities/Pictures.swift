@@ -24,7 +24,7 @@ enum Pictures {
     /// Blocks the calling thread for about a second; call it off the main thread. False when
     /// ⌘V couldn't be sent (no Accessibility).
     static func paste(_ url: URL) -> Bool {
-        let started: (saved: [[NSPasteboard.PasteboardType: Data]], ours: Int)? = onMainSync {
+        let started: (saved: Paster.Saved, ours: Int)? = onMainSync {
             let pasteboard = NSPasteboard.general
             let saved = Paster.save(pasteboard)
             guard let ours = copy(url, pasteboard: pasteboard, transient: true) else { return nil }

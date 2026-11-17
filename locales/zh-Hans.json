@@ -373,6 +373,7 @@
   "flow.error.micStopped": "麦克风已停止。请重试。",
   "flow.error.noRecordingFolder": "Buntini 无法为录音创建文件夹。",
   "flow.error.notRecording": "没有正在录制的通话。",
+  "flow.error.passwordField": "没有在密码栏中输入任何内容。",
   "flow.error.recordCallsOff": "请先在“设置”中打开“录制通话”。",
   "flow.error.wordsLost": "文字没有返回。请重试。",
   "flow.models.needsSpace": "需要 {size} GB 可用空间。",
