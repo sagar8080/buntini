@@ -51,6 +51,7 @@
   "agents.request.read": "{file} lesen",
   "agents.request.readAFile": "Eine Datei lesen",
   "agents.request.runCommand": "Einen Befehl ausführen",
+  "agents.request.codexCommandScope": "Befehl kann außerhalb der Sandbox laufen",
   "agents.request.searchFiles": "Dateien durchsuchen",
   "agents.request.searchWeb": "Im Web suchen",
   "agents.request.startPlan": "Mit seinem Plan beginnen",

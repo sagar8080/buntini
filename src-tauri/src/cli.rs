@@ -1,4 +1,4 @@
-//! Command-line tools as brains: Claude Code, Codex, Gemini CLI and Copilot CLI, each
+//! Command-line brains: Claude Code, Codex, Gemini CLI, Copilot CLI and Cursor, each
 //! answering on the person's own plan, signed in as they are in a terminal. Buntini reads no
 //! credential of theirs and makes no network call for them: it starts the tool, hands it the
 //! conversation and reads the answer.
@@ -19,9 +19,8 @@
 //! read them. The tool runs in a process group of its own, and the whole group is stopped
 //! when the run ends.
 //!
-//! Cursor isn't offered: its ask mode keeps tools that read any file and search the web,
-//! with no documented way to switch them or its hooks off, and it takes the conversation
-//! only as an argument.
+//! Cursor uses its SDK with an empty tool allowlist and no settings sources. It uses its own
+//! browser login and stores the turn in Buntini's private, temporary run folder.
 //!
 //! These are external brains (`privacy.rs`): they see only what the person shares.
 use crate::{cloud::Provider, worker::Turn};
@@ -49,26 +48,28 @@ pub struct Tool {
     pub sees_images: bool,
 }
 
-pub const TOOLS: [Tool; 4] = [
+pub const TOOLS: [Tool; 5] = [
     Tool { id: "claude-code", name: "Claude Code", programs: &["claude"], sign_in: "claude", sees_images: false },
     Tool { id: "codex", name: "Codex", programs: &["codex"], sign_in: "codex login", sees_images: true },
     Tool { id: "gemini-cli", name: "Gemini CLI", programs: &["gemini"], sign_in: "gemini", sees_images: false },
     Tool { id: "copilot", name: "Copilot", programs: &["copilot"], sign_in: "copilot login", sees_images: true },
+    Tool { id: "cursor", name: "Cursor", programs: &["node"], sign_in: CURSOR_LOGIN, sees_images: false },
 ];
 
-/// Brains an earlier version offered and this one doesn't: settings that chose one move off it.
-pub const RETIRED: [&str; 1] = ["cursor"];
+const CURSOR_LOGIN: &str = r#"node --input-type=module -e 'const { Cursor } = await import(process.argv[1]); await Cursor.auth.login()' "$(npm root -g)/@cursor/sdk/dist/esm/index.js""#;
+const CURSOR_SDK_VERSION: &str = "1.4.0";
 
 const fn entry(id: &'static str, name: &'static str, sees_images: bool) -> Provider {
     Provider { id, name, model: "", input_per_m: 0.0, output_per_m: 0.0, base: None, sees_images }
 }
 
 /// The same tools as Cloud model brains: on the person's plan, so nothing is priced here.
-pub const PROVIDERS: [Provider; 4] = [
+pub const PROVIDERS: [Provider; 5] = [
     entry("claude-code", "Claude Code", false),
     entry("codex", "Codex", true),
     entry("gemini-cli", "Gemini CLI", false),
     entry("copilot", "Copilot", true),
+    entry("cursor", "Cursor", false),
 ];
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
@@ -152,6 +153,7 @@ fn bundled_codex() -> Vec<PathBuf> {
 /// "codex-cli 0.167.0-alpha.4.1" as comparable numbers.
 fn version(text: &str) -> Vec<u64> {
     text.split_whitespace()
+        .map(|word| word.strip_prefix('v').unwrap_or(word))
         .find(|word| word.chars().next().is_some_and(|c| c.is_ascii_digit()))
         .map(|word| word.split(['.', '-']).map_while(|part| part.parse().ok()).collect())
         .unwrap_or_default()
@@ -195,6 +197,22 @@ fn version_of(path: &Path) -> Vec<u64> {
     version(&said)
 }
 
+/// The supported SDK is installed with the Node executable's global npm packages.
+fn cursor_sdk(node: &Path) -> Option<PathBuf> {
+    let resolved = node.canonicalize().ok()?;
+    for node in [node, resolved.as_path()] {
+        let Some(prefix) = node.parent().and_then(Path::parent) else { continue };
+        let root = prefix.join("lib/node_modules/@cursor/sdk");
+        let Ok(manifest) = std::fs::read(root.join("package.json")) else { continue };
+        let Ok(manifest) = serde_json::from_slice::<Value>(&manifest) else { continue };
+        let entry = root.join("dist/esm/index.js");
+        if manifest["name"] == "@cursor/sdk" && manifest["version"] == CURSOR_SDK_VERSION && entry.is_file() {
+            return Some(entry);
+        }
+    }
+    None
+}
+
 fn locate(tool: &Tool) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     for name in tool.programs {
@@ -208,7 +226,7 @@ fn locate(tool: &Tool) -> Option<PathBuf> {
     }
     let mut found: Vec<PathBuf> = Vec::new();
     for path in candidates {
-        if executable(&path) && !found.contains(&path) {
+        if executable(&path) && !found.contains(&path) && (tool.id != "cursor" || cursor_sdk(&path).is_some()) {
             found.push(path);
         }
     }
@@ -479,6 +497,8 @@ const CODEX_OFF: [&str; 34] = [
 struct Prepared {
     system: Option<PathBuf>,
     gemini_policy: Option<PathBuf>,
+    cursor_sdk: Option<PathBuf>,
+    cursor_run: PathBuf,
 }
 
 /// What one run is started with: its arguments and what goes on standard input. Nothing of
@@ -523,6 +543,13 @@ fn command_line(tool: &Tool, model: &str, system: &str, prompt: &str, pictures: 
             }
             for picture in pictures {
                 args.extend(["--attachment".into(), picture.display().to_string()]);
+            }
+            (args, combined)
+        }
+        "cursor" => {
+            let mut args = strings(&["--input-type=module", "--eval", include_str!("cli/cursor.mjs"), "--"]);
+            if let Some(sdk) = &prepared.cursor_sdk {
+                args.extend([sdk.display().to_string(), prepared.cursor_run.display().to_string(), model.unwrap_or_default().into()]);
             }
             (args, combined)
         }
@@ -624,6 +651,16 @@ impl Reading {
                 }
                 _ => None,
             },
+            "cursor" => {
+                // The SDK bridge sends only its own narrow protocol, never raw SDK logs.
+                match event["type"].as_str() {
+                    Some("tool") => self.own_tool = true,
+                    Some("result") => self.result = event["text"].as_str().map(str::to_string),
+                    Some("error") => self.failure = event["message"].as_str().map(str::to_string),
+                    _ => {}
+                }
+                None
+            }
             "copilot" => match event["type"].as_str().unwrap_or("") {
                 kind if kind.starts_with("tool.") => {
                     self.own_tool = true;
@@ -816,9 +853,10 @@ where
     let system = format!("{}{}", system(&messages), tool_instructions(&tools));
     let prompt = transcript(&messages);
     let paths = write_pictures(payload, &run)?;
-    let mut prepared = Prepared { system: None, gemini_policy: None };
+    let mut prepared = Prepared { system: None, gemini_policy: None, cursor_sdk: None, cursor_run: run.0.clone() };
     match tool.id {
         "claude-code" => prepared.system = Some(run.write("instructions.txt", system.as_bytes())?),
+        "cursor" => prepared.cursor_sdk = Some(cursor_sdk(&program).ok_or("Install @cursor/sdk@1.4.0 to use Cursor.")?),
         "gemini-cli" => {
             let policy = run.write(GEMINI_POLICY_FILE, GEMINI_POLICY.as_bytes())?;
             run.write(GEMINI_SETTINGS, gemini_settings(&policy).as_bytes())?;
@@ -1012,7 +1050,7 @@ mod tests {
 
     #[test]
     fn each_tool_runs_without_its_own_tools() {
-        let prepared = Prepared { system: Some(PathBuf::from("/tmp/buntini-test/run-1/instructions.txt")), gemini_policy: Some(PathBuf::from("/tmp/buntini-test/run-1/gemini-policy.toml")) };
+        let prepared = Prepared { system: Some(PathBuf::from("/tmp/buntini-test/run-1/instructions.txt")), gemini_policy: Some(PathBuf::from("/tmp/buntini-test/run-1/gemini-policy.toml")), cursor_sdk: Some(PathBuf::from("/tmp/sdk/index.js")), cursor_run: PathBuf::from("/tmp/run") };
         for tool in &TOOLS {
             let (args, input) = command_line(tool, "", "SYSTEM", "PROMPT", &[], &prepared);
             let joined = args.join(" ");
@@ -1031,6 +1069,10 @@ mod tests {
                     assert!(args.contains(&"read-only".to_string()) && args.contains(&"--ignore-user-config".to_string()) && args.contains(&"web_search=\"disabled\"".to_string()));
                     assert!(input.contains("SYSTEM"));
                 }
+                "cursor" => {
+                    assert!(args.windows(3).any(|pair| pair == ["--", "/tmp/sdk/index.js", "/tmp/run"]));
+                    assert!(input.contains("SYSTEM"));
+                }
                 "copilot" => assert!(args.contains(&"--available-tools=buntini_none".to_string()) && input.contains("SYSTEM")),
                 "gemini-cli" => {
                     assert!(args.contains(&"plan".to_string()) && input.contains("SYSTEM"));
@@ -1045,7 +1087,7 @@ mod tests {
         let (args, _) = command_line(tool("codex").unwrap(), "", "s", "p", &[PathBuf::from("/tmp/x/picture-1.png")], &prepared);
         assert!(args.windows(2).any(|pair| pair == ["--image", "/tmp/x/picture-1.png"]));
         assert_eq!(args.last().map(String::as_str), Some("-"), "the prompt is read from standard input");
-        assert!(tool("cursor").is_none() && provider("cursor").is_none() && RETIRED.contains(&"cursor"), "Cursor isn't offered");
+        assert_eq!(provider("cursor").unwrap().name, "Cursor");
     }
 
     #[test]

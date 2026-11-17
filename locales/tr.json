@@ -51,6 +51,7 @@
   "agents.request.read": "{file} dosyasını oku",
   "agents.request.readAFile": "Bir dosyayı oku",
   "agents.request.runCommand": "Bir komut çalıştır",
+  "agents.request.codexCommandScope": "Komut korumalı alan dışında çalışabilir",
   "agents.request.searchFiles": "Dosyalarda ara",
   "agents.request.searchWeb": "Web’de ara",
   "agents.request.startPlan": "Planına başla",

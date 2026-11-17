@@ -57,6 +57,7 @@ test('command-line tools are offered only when installed, and a chosen one stays
   assert.deepEqual(tools(ids(undefined, 'anthropic')), []);
   assert.deepEqual(tools(ids(['codex', 'copilot'], 'anthropic')), ['codex', 'copilot']);
   assert.ok(ids([], 'gemini-cli').includes('gemini-cli'), 'a tool already chosen can still be seen and changed');
-  assert.ok(!cloudProviders.some(item => (item.id as string) === 'cursor'), 'Cursor is not offered');
+  assert.ok(ids(['cursor'], 'anthropic').includes('cursor'), 'Cursor is offered when its SDK is installed');
+  assert.ok(!ids([], 'anthropic').includes('cursor'), 'Cursor requires its SDK');
   for (const id of ['deepseek', 'qwen', 'moonshot', 'lmstudio']) assert.ok(ids([], 'anthropic').includes(id), id);
 });

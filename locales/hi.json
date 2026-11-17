@@ -51,6 +51,7 @@
   "agents.request.read": "{file} पढ़ें",
   "agents.request.readAFile": "एक फ़ाइल पढ़ें",
   "agents.request.runCommand": "एक कमांड चलाएँ",
+  "agents.request.codexCommandScope": "कमांड सैंडबॉक्स के बाहर चल सकती है",
   "agents.request.searchFiles": "फ़ाइलें खोजें",
   "agents.request.searchWeb": "वेब पर खोजें",
   "agents.request.startPlan": "इसके प्लान पर काम शुरू करें",

@@ -51,6 +51,7 @@
   "agents.request.read": "读取 {file}",
   "agents.request.readAFile": "读取文件",
   "agents.request.runCommand": "运行命令",
+  "agents.request.codexCommandScope": "此命令可能在沙盒外运行",
   "agents.request.searchFiles": "搜索文件",
   "agents.request.searchWeb": "搜索网页",
   "agents.request.startPlan": "按计划开始",

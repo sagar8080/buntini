@@ -51,6 +51,7 @@
   "agents.request.read": "Leer {file}",
   "agents.request.readAFile": "Leer un archivo",
   "agents.request.runCommand": "Ejecutar un comando",
+  "agents.request.codexCommandScope": "El comando puede ejecutarse fuera del entorno aislado",
   "agents.request.searchFiles": "Buscar archivos",
   "agents.request.searchWeb": "Buscar en la web",
   "agents.request.startPlan": "Empezar con su plan",

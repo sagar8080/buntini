@@ -9,6 +9,7 @@
 //!
 //! Nothing here goes to a model or leaves the Mac.
 
+mod codex;
 mod dialect;
 mod diff;
 pub mod recap;
@@ -204,6 +205,7 @@ struct Hub {
     next: u64,
     waiting: Vec<Waiting>,
     sessions: HashMap<(Agent, String), session::Session>,
+    codex_app_server_threads: HashMap<String, usize>,
     /// Last week's recap while it shows.
     recap: Option<(crate::surface::Card, u64)>,
     /// Each agent's plan windows, as last heard.
@@ -405,6 +407,11 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
             surface::publish(&hub);
         }
         "PermissionRequest" => {
+            // App Server asks after the hooks and includes the execution directory and
+            // permissions. Leave shell decisions to it for threads on its connection.
+            if agent == Agent::Codex && is_shell(&event.tool) && hub().codex_app_server_threads.contains_key(&event.session) {
+                return;
+            }
             if let Some(reply) = ask(agent, socket_agent, &event, &stream).await {
                 let mut line = reply.into_bytes();
                 line.push(b'\n');
@@ -616,35 +623,39 @@ fn finished(agent: Agent, event: &HookEvent) {
     }
 }
 
+/// A card belongs to a single live request. Dropping its owner withdraws it.
+struct Pending(String);
+
+impl Pending {
+    fn show(view: AgentRequest, agent: Agent, session: String, tool: String, input: Value) -> (Self, oneshot::Receiver<Answer>) {
+        let pending = Self(view.id.clone());
+        let (sender, receiver) = oneshot::channel();
+        let mut hub = hub();
+        hub.waiting.push(Waiting { view, agent, session, tool, input, reply: Some(sender), at_ms: crate::surface::now_ms() });
+        emit_requests(&hub);
+        (pending, receiver)
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut hub = hub();
+        hub.waiting.retain(|waiting| waiting.view.id != self.0);
+        emit_requests(&hub);
+    }
+}
+
 /// Shows the request and waits for the click, the hook going away, or the time limit.
 /// Returns what the hook prints back, if anything.
 async fn ask(agent: Agent, socket_agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<String> {
     let view = describe(agent, event)?;
-    let id = view.id.clone();
-    let (sender, receiver) = oneshot::channel();
-    {
-        let mut hub = hub();
-        hub.waiting.push(Waiting {
-            view,
-            agent,
-            session: event.session.clone(),
-            tool: event.tool.clone(),
-            input: event.input.clone(),
-            reply: Some(sender),
-            at_ms: crate::surface::now_ms(),
-        });
-        emit_requests(&hub);
-    }
+    let (pending, receiver) = Pending::show(view, agent, event.session.clone(), event.tool.clone(), event.input.clone());
     let answer = tokio::select! {
         answer = receiver => answer.ok(),
         _ = hook_gone(stream) => None,
         _ = tokio::time::sleep(decision_budget(agent)) => None,
     };
-    {
-        let mut hub = hub();
-        hub.waiting.retain(|waiting| waiting.view.id != id);
-        emit_requests(&hub);
-    }
+    drop(pending);
     let answer = answer?;
     let line = decision(&answer, event).map(|decision| dialect::reply(socket_agent, decision).to_string());
     if line.is_some() && event.tool != "AskUserQuestion" {
@@ -683,6 +694,10 @@ fn next_id() -> String {
     format!("agent-{}-{}", std::process::id(), hub.next)
 }
 
+fn is_shell(tool: &str) -> bool {
+    matches!(tool, "Bash" | "shell" | "local_shell" | "exec_command" | "unified_exec")
+}
+
 /// What the request is, in words. None for something Buntini can't show at all, which then
 /// stays with the terminal. Allow is offered only when everything it approves is on the
 /// card: the whole command, every line an edit changes, no setting that changes how it runs.
@@ -699,7 +714,7 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
             questions = parse_questions(input)?;
             (String::new(), String::new(), false)
         }
-        "Bash" | "shell" | "local_shell" | "exec_command" | "unified_exec" => {
+        tool if is_shell(tool) => {
             let command = match input.get("command").or_else(|| input.get("cmd")) {
                 Some(Value::Array(parts)) => parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "),
                 Some(Value::String(command)) => command.trim().to_string(),

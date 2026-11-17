@@ -51,6 +51,7 @@
   "agents.request.read": "Прочитать {file}",
   "agents.request.readAFile": "Прочитать файл",
   "agents.request.runCommand": "Выполнить команду",
+  "agents.request.codexCommandScope": "Команда может выполняться вне песочницы",
   "agents.request.searchFiles": "Искать в файлах",
   "agents.request.searchWeb": "Искать в интернете",
   "agents.request.startPlan": "Приступить к плану",

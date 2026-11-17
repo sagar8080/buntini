@@ -51,6 +51,7 @@
   "agents.request.read": "{file}を読み取る",
   "agents.request.readAFile": "ファイルを読み取る",
   "agents.request.runCommand": "コマンドを実行",
+  "agents.request.codexCommandScope": "コマンドがサンドボックスの外で実行される場合があります",
   "agents.request.searchFiles": "ファイルを検索",
   "agents.request.searchWeb": "Webを検索",
   "agents.request.startPlan": "計画に着手",

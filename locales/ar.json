@@ -51,6 +51,7 @@
   "agents.request.read": "قراءة {file}",
   "agents.request.readAFile": "قراءة ملف",
   "agents.request.runCommand": "تشغيل أمر",
+  "agents.request.codexCommandScope": "قد يُنفَّذ الأمر خارج بيئة العزل",
   "agents.request.searchFiles": "البحث في الملفات",
   "agents.request.searchWeb": "البحث في الويب",
   "agents.request.startPlan": "البدء بتنفيذ خطته",

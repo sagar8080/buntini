@@ -51,6 +51,7 @@
   "agents.request.read": "讀取 {file}",
   "agents.request.readAFile": "讀取檔案",
   "agents.request.runCommand": "執行指令",
+  "agents.request.codexCommandScope": "此命令可能在沙箱外執行",
   "agents.request.searchFiles": "搜尋檔案",
   "agents.request.searchWeb": "搜尋網路",
   "agents.request.startPlan": "開始執行它的計畫",

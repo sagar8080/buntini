@@ -51,6 +51,7 @@
   "agents.request.read": "Baca {file}",
   "agents.request.readAFile": "Baca file",
   "agents.request.runCommand": "Jalankan perintah",
+  "agents.request.codexCommandScope": "Perintah dapat berjalan di luar sandbox",
   "agents.request.searchFiles": "Cari file",
   "agents.request.searchWeb": "Cari di web",
   "agents.request.startPlan": "Mulai rencananya",

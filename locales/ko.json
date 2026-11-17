@@ -51,6 +51,7 @@
   "agents.request.read": "{file} 읽기",
   "agents.request.readAFile": "파일 읽기",
   "agents.request.runCommand": "명령 실행",
+  "agents.request.codexCommandScope": "명령이 샌드박스 외부에서 실행될 수 있음",
   "agents.request.searchFiles": "파일 검색",
   "agents.request.searchWeb": "웹 검색",
   "agents.request.startPlan": "계획대로 시작",

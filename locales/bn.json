@@ -51,6 +51,7 @@
   "agents.request.read": "{file} পড়া",
   "agents.request.readAFile": "একটি ফাইল পড়া",
   "agents.request.runCommand": "একটি কমান্ড চালানো",
+  "agents.request.codexCommandScope": "কমান্ডটি স্যান্ডবক্সের বাইরে চলতে পারে",
   "agents.request.searchFiles": "ফাইলে খোঁজা",
   "agents.request.searchWeb": "ওয়েবে খোঁজা",
   "agents.request.startPlan": "এর প্ল্যান শুরু করা",

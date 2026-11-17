@@ -51,6 +51,7 @@
   "agents.request.read": "Lire {file}",
   "agents.request.readAFile": "Lire un fichier",
   "agents.request.runCommand": "Exécuter une commande",
+  "agents.request.codexCommandScope": "La commande peut s’exécuter hors du bac à sable",
   "agents.request.searchFiles": "Rechercher dans les fichiers",
   "agents.request.searchWeb": "Rechercher sur le web",
   "agents.request.startPlan": "Lancer son plan",

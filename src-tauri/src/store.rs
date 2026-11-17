@@ -99,12 +99,6 @@ impl Store {
         let mut settings: Settings = raw
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        // A command-line brain that is no longer offered (Cursor) isn't run: the brain moves
-        // to the default provider, which needs a key before anything is sent.
-        if crate::cli::RETIRED.contains(&settings.cloud_provider.as_str()) {
-            settings.cloud_provider = Settings::default().cloud_provider;
-            settings.cloud_model.clear();
-        }
         // The fox and nine-tailed fox were retired; anyone who chose one gets the cat.
         if settings.avatar == "fox" || settings.avatar == "kyuubi" {
             settings.avatar = "cat".into();
@@ -1501,7 +1495,7 @@ mod tests {
         assert!(s.saved_search("test").unwrap().is_none());
     }
     #[test]
-    fn a_brain_no_longer_offered_is_never_run() {
+    fn an_existing_cursor_selection_survives_loading_settings() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         let mut raw = serde_json::to_value(Settings::default()).unwrap();
         raw["modelBackend"] = serde_json::json!("cloud");
@@ -1509,8 +1503,8 @@ mod tests {
         raw["cloudModel"] = serde_json::json!("gpt-5");
         s.db.execute("INSERT INTO preferences VALUES('settings',?1)", [raw.to_string()]).unwrap();
         let settings = s.settings().unwrap();
-        assert_eq!(settings.cloud_provider, Settings::default().cloud_provider);
-        assert!(settings.cloud_model.is_empty());
+        assert_eq!(settings.cloud_provider, "cursor");
+        assert_eq!(settings.cloud_model, "gpt-5");
         assert!(settings.validate().is_ok(), "the settings still save");
     }
     #[test]

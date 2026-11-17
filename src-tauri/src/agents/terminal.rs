@@ -2,7 +2,7 @@
 //! session there, and handing it a dropped file's path. Apps are opened through Launch
 //! Services (`open -b`), since an app that isn't in front can't activate another one.
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use super::session::Host;
@@ -91,7 +91,7 @@ fn host_for(pill: &str) -> Result<Host, String> {
 }
 
 /// A single-quoted shell word.
-fn quote(text: &str) -> String {
+pub(super) fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
@@ -102,16 +102,21 @@ fn quote(text: &str) -> String {
 /// (both CLIs end their options there). Claude Code still takes a first word that is one of
 /// its commands as that command (`claude -- doctor` runs doctor), so its prompt goes with a
 /// space after it, which no command's name has. The shell stays open after the agent ends.
-pub fn launch_script(agent: Agent, project: &Path, prompt: &str) -> Result<String, String> {
+fn launch_script(agent: Agent, project: &Path, prompt: &str, relay: Option<&super::codex::Relay>) -> Result<String, String> {
     let program = match agent {
         Agent::Claude => "claude",
         Agent::Codex => "codex",
         _ => return Err(format!("{} can't be started from Buntini yet.", agent.name())),
     };
-    let run = match (agent, prompt.trim().is_empty()) {
+    let plain = match (agent, prompt.trim().is_empty()) {
         (_, true) => program.to_string(),
         (Agent::Claude, false) => format!("{program} -- \"$buntini_prompt \""),
         (_, false) => format!("{program} -- \"$buntini_prompt\""),
+    };
+    let run = if let Some(relay) = relay {
+        relay.command(&plain, !prompt.trim().is_empty())
+    } else {
+        plain
     };
     Ok(format!(
         "#!/bin/sh\nrm -f \"$0\"\ncd {} || exit 1\nexport BUNTINI_PROMPT={}\nexec \"${{SHELL:-/bin/zsh}}\" -lic {}\n",
@@ -129,17 +134,21 @@ pub fn start(agent: Agent, project: &Path, prompt: &str, scripts_dir: &Path) -> 
     if prompt.chars().count() > 8_000 {
         return Err("That prompt is too long to start a session with.".into());
     }
-    let script = launch_script(agent, project, prompt)?;
+    let relay = if agent == Agent::Codex { super::codex::Relay::new().ok() } else { None };
+    let script = launch_script(agent, project, prompt, relay.as_ref())?;
     std::fs::create_dir_all(scripts_dir).map_err(|error| error.to_string())?;
     let _ = std::fs::set_permissions(scripts_dir, std::fs::Permissions::from_mode(0o700));
     let path: PathBuf = scripts_dir.join(format!("buntini-{}-{}.command", agent.id(), uuid::Uuid::new_v4()));
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|error| error.to_string())?;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o700).open(&path).map_err(|error| error.to_string())?;
     file.write_all(script.as_bytes()).map_err(|error| error.to_string())?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).map_err(|error| error.to_string())?;
     let terminal = last_terminal().filter(|bundle| APPS.iter().any(|app| app.bundle == *bundle && app.scripts)).unwrap_or("com.apple.Terminal");
     open_app(terminal, Some(&path)).inspect_err(|_| {
         let _ = std::fs::remove_file(&path);
-    })
+    })?;
+    if let Some(relay) = relay {
+        tauri::async_runtime::spawn(relay.serve());
+    }
+    Ok(())
 }
 
 /// The terminal the most recent session ran in.
@@ -291,7 +300,7 @@ mod tests {
 
     #[test]
     fn the_prompt_never_becomes_shell() {
-        let script = launch_script(Agent::Claude, Path::new("/Users/me/it's here"), "say $(whoami) and 'quote' `x`").unwrap();
+        let script = launch_script(Agent::Claude, Path::new("/Users/me/it's here"), "say $(whoami) and 'quote' `x`", None).unwrap();
         assert!(script.contains("cd '/Users/me/it'\\''s here' || exit 1"));
         assert!(script.contains("export BUNTINI_PROMPT='say $(whoami) and '\\''quote'\\'' `x`'"));
         assert!(script.contains("claude -- \"$buntini_prompt \""));
@@ -303,7 +312,7 @@ mod tests {
             std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do printf '[%s]' \"$a\"; done > \"$OUT\"\nprintf ' env=%s' \"${BUNTINI_PROMPT-unset}\" >> \"$OUT\"\n").unwrap();
             std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
             let out = dir.path().join("out");
-            let script = launch_script(agent, dir.path(), prompt).unwrap();
+            let script = launch_script(agent, dir.path(), prompt, None).unwrap();
             let script = script.replace("exec \"${SHELL:-/bin/zsh}\" -lic", "exec /bin/sh -c").replace("; exec \"${SHELL:-/bin/zsh}\" -l", "");
             let path = dir.path().join("start.command");
             std::fs::write(&path, script).unwrap();
@@ -343,6 +352,6 @@ mod tests {
         assert_eq!(terminal_for(&host("zed", "dev.zed.Zed", "")), None);
         assert_eq!(terminal_for(&host("", "", "claude-desktop")), None);
         assert_eq!(escape_path("/tmp/plain.txt"), "/tmp/plain.txt");
-        assert!(launch_script(Agent::Gemini, Path::new("/tmp"), "x").is_err());
+        assert!(launch_script(Agent::Gemini, Path::new("/tmp"), "x", None).is_err());
     }
 }

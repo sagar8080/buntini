@@ -51,6 +51,7 @@
   "agents.request.read": "Read {file}",
   "agents.request.readAFile": "Read a file",
   "agents.request.runCommand": "Run a command",
+  "agents.request.codexCommandScope": "Command may run outside the sandbox",
   "agents.request.searchFiles": "Search files",
   "agents.request.searchWeb": "Search the web",
   "agents.request.startPlan": "Start on its plan",

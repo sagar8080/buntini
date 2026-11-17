@@ -51,6 +51,7 @@
   "agents.request.read": "อ่าน {file}",
   "agents.request.readAFile": "อ่านไฟล์",
   "agents.request.runCommand": "เรียกใช้คำสั่ง",
+  "agents.request.codexCommandScope": "คำสั่งอาจทำงานนอกแซนด์บ็อกซ์",
   "agents.request.searchFiles": "ค้นหาไฟล์",
   "agents.request.searchWeb": "ค้นหาเว็บ",
   "agents.request.startPlan": "เริ่มทำตามแผน",
