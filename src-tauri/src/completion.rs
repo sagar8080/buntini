@@ -646,44 +646,11 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     }
 }
 
-pub(crate) fn claims_own_write(text: &str) -> bool {
-    let text = unquoted(text);
-    let tokens = words(&text);
-    let writes = [
-        "created",
-        "added",
-        "saved",
-        "sent",
-        "booked",
-        "reserved",
-        "purchased",
-        "ordered",
-        "scheduled",
-        "deleted",
-        "cancelled",
-        "canceled",
-        "updated",
-        "changed",
-        "moved",
-        "ran",
-        "opened",
-        "submitted",
-        "posted",
-        "paid",
-        "transferred",
-        "emailed",
-        "set",
-        "enabled",
-        "forwarded",
-        "archived",
-        "unsubscribed",
-        "accepted",
-        "declined",
-        "replied",
-        "trashed",
-        "blocked",
-        "marked",
-    ];
+/// Whether Buntini says it did something itself: "Done.", "I've moved it", "we sent it".
+/// Read-only answers may describe what was read ("your dentist is booked for 15:00"); they
+/// may never say this.
+fn says_it_did(text: &str) -> bool {
+    let tokens = words(text);
     if tokens.first().is_some_and(|first| *first == "done") && tokens.len() <= 4 {
         return true;
     }
@@ -698,9 +665,55 @@ pub(crate) fn claims_own_write(text: &str) -> bool {
         {
             tail = &tail[1..];
         }
-        if tail.first().is_some_and(|word| writes.contains(word)) {
+        if tail.first().is_some_and(|word| WRITES.contains(word)) {
             return true;
         }
+    }
+    false
+}
+
+/// Verbs that tell a change as done.
+const WRITES: [&str; 33] = [
+    "created",
+    "added",
+    "saved",
+    "sent",
+    "booked",
+    "reserved",
+    "purchased",
+    "ordered",
+    "scheduled",
+    "deleted",
+    "cancelled",
+    "canceled",
+    "updated",
+    "changed",
+    "moved",
+    "ran",
+    "opened",
+    "submitted",
+    "posted",
+    "paid",
+    "transferred",
+    "emailed",
+    "set",
+    "enabled",
+    "forwarded",
+    "archived",
+    "unsubscribed",
+    "accepted",
+    "declined",
+    "replied",
+    "trashed",
+    "blocked",
+    "marked",
+];
+
+pub(crate) fn claims_own_write(text: &str) -> bool {
+    let text = unquoted(text);
+    let writes = WRITES;
+    if says_it_did(&text) {
+        return true;
     }
     // A change told as a result, without anyone doing it: "Brightness set to 50%", "Wi-Fi
     // turned off", "the timer has been started". "Can be set to" explains; it isn't one.
@@ -1555,6 +1568,12 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         if supplied && actions.is_empty() && !unsupported {
             return Ok(text.to_string());
         }
+        // A question answered from what was read: "your dentist is booked 15:00 to 15:45"
+        // says what the calendar holds. Only Buntini saying it did something is a claim.
+        let read = steps.iter().any(|step| !step.effect && step.state == "succeeded");
+        if read && actions.is_empty() && !unsupported && !says_it_did(&unquoted(text)) {
+            return Ok(text.to_string());
+        }
         return Err("The response claimed an action without a verified receipt. Buntini has not confirmed that it was done.".into());
     }
     Ok(text.to_string())
@@ -1573,6 +1592,26 @@ mod tests {
         for said in ["Brightness can be set to 50% in Control Centre.", "You can turn the volume down with F11.", "To set a timer, open Clock.", "The capital of Australia is Canberra.", "Your meeting starts at 3."] {
             assert!(!claims_own_write(said), "{said}");
         }
+    }
+
+    #[test]
+    fn an_answer_may_describe_what_it_read_but_never_say_it_did_something() {
+        let read = |tool: &str| Step { id: "1".into(), tool: tool.into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None, evidence: Some(serde_json::json!({"text":"1. Dentist 15:00-15:45"})) };
+        for (asked, said) in [
+            ("What's the total time I'm booked for tomorrow?", "You're booked for 75 minutes tomorrow: 30 for the 1:1 and 45 for the dentist."),
+            ("Will the dentist be done before 4pm tomorrow?", "Yes. Your dentist appointment is scheduled from 3:00 to 3:45 pm, so it ends 15 minutes before 4."),
+            ("Is the Priya catch-up tomorrow a quick one or a long one?", "Quick: it's set for 30 minutes, 11:00 to 11:30."),
+        ] {
+            assert_eq!(validate_answer(asked, said, &[read("read_calendar")]).as_deref(), Ok(said), "{said}");
+        }
+        // Buntini saying it did something is still a claim, read or not.
+        for said in ["I've moved your dentist appointment to 4pm.", "Done.", "We sent the reply to Ana."] {
+            assert!(validate_answer("When is the dentist tomorrow?", said, &[read("read_calendar")]).is_err(), "{said}");
+        }
+        // Nothing read: a description of a change can't rest on anything.
+        assert!(validate_answer("When is the dentist tomorrow?", "Your dentist appointment is scheduled for 3pm.", &[]).is_err());
+        // Something asked to be done: only a receipt says it was.
+        assert!(validate_answer("move the dentist to 4pm", "Your dentist appointment is now moved to 4pm.", &[read("read_calendar")]).is_err());
     }
 
     #[test]
