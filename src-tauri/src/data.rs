@@ -292,6 +292,8 @@ where
             failures.push(error);
         }
     }
+    // With their keys gone, developer services drop what they showed and any poll under way.
+    crate::services::erase();
     if let Err(error) = state.voice.clear_cache() {
         failures.push(error);
     }
