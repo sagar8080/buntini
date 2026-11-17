@@ -3670,7 +3670,8 @@ where
         // look online and the index has that receipt in the user's mail: it's about their own things.
         let looked_up = flow.contract.outcomes.iter().filter(|outcome| outcome.kind == "read").all(|outcome| outcome.accepted_tools == ["look_up_online"])
             && flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read")
-            && !crate::search_intent::told_to_search(&goal_now);
+            && !crate::search_intent::told_to_search(&goal_now)
+            && crate::personal_answer::points_at_own_record(&goal_now);
         if looked_up {
             let hits = index_hits(state, settings, &goal_now);
             if let Some(found) = crate::personal_answer::index_route(&goal_now, &hits).filter(|found| !found.is_empty()) {

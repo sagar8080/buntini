@@ -124,6 +124,17 @@ fn says_mine(goal: &str) -> bool {
         || [["do", "i"], ["did", "i"], ["am", "i"], ["have", "i"], ["i", "had"], ["was", "i"], ["should", "i"], ["i", "need"]].iter().any(|pair| words.windows(2).any(|run| run == pair))
 }
 
+/// Whether a question that sounds like a look online points at something the user has: their
+/// own ("my order") or a record by kind ("the price on Apple's receipt"). "Who won the Arsenal
+/// game" or "the price of AirPods Pro" stays online, though a newsletter or an old receipt in
+/// mail may hold its words.
+pub fn points_at_own_record(goal: &str) -> bool {
+    const RECORDS: [&str; 18] = [
+        "receipt", "receipts", "invoice", "invoices", "bill", "statement", "notice", "newsletter", "email", "emails", "mail", "inbox", "message", "confirmation", "booking", "reservation", "calendar", "reminder",
+    ];
+    says_mine(goal) || crate::skills::words(goal).replace('\'', "").split(' ').any(|word| RECORDS.contains(&word))
+}
+
 /// The words of a question to look for in the local index, each with whether it's written
 /// as a name ("GitHub", "Nest") somewhere other than the start of a sentence.
 pub fn index_words(goal: &str) -> Vec<(String, bool)> {
@@ -1569,6 +1580,16 @@ fn app_of(tool: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::apps::{calendar_evidence, reminder_evidence, sample_inbox, Agenda, Event, Reminder};
+
+    #[test]
+    fn only_a_look_that_points_at_own_records_is_read_from_the_apps() {
+        for goal in ["What are the monthly price and storage size on Apple's subscription receipt?", "how much was my last order", "what did the energy newsletter say the price was"] {
+            assert!(points_at_own_record(goal), "{goal}");
+        }
+        for goal in ["who won the Arsenal game last night", "what's the price of AirPods Pro", "cheapest flights to Lisbon in March"] {
+            assert!(!points_at_own_record(goal), "{goal}");
+        }
+    }
 
     fn step(tool: &str, evidence: Value) -> Step {
         Step { id: "s".into(), tool: tool.into(), arguments: json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None, evidence: Some(evidence) }
