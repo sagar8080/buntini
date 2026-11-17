@@ -75,6 +75,8 @@ pub(crate) fn asks(text: &str) -> bool {
     match words.as_slice() {
         [] => true,
         ["can" | "could" | "would" | "will", "you" | "u", ..] => false,
+        // "Give me the start and end of the dentist appointment" asks to be told something.
+        ["give" | "tell" | "show", "me", ..] => true,
         [first, ..] => ASKING.contains(&first.replace('’', "'").as_str()),
     }
 }
@@ -124,9 +126,21 @@ pub enum Intent {
     LookUp,
 }
 
+/// Whether the request says which of the user's apps to read from: "from my email give the
+/// Nest energy change and from my reminders the car task" asks to be told, not to add anything.
+fn reads_from_an_app(request: &str) -> bool {
+    const APPS: [&str; 8] = ["mail", "email", "emails", "inbox", "calendar", "reminders", "notes", "messages"];
+    let words: Vec<String> = request.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect();
+    words.windows(2).any(|pair| pair[0] == "from" && APPS.contains(&pair[1].as_str()))
+        || words.windows(3).any(|run| run[0] == "from" && ["my", "the"].contains(&run[1].as_str()) && APPS.contains(&run[2].as_str()))
+}
+
 /// What a request asks for by meaning. A question can only be a look online; a model's
 /// own answer to "will it rain tomorrow" is made up.
 pub fn read(request: &str) -> Option<Intent> {
+    if ENABLED.load(Ordering::SeqCst) && reads_from_an_app(request) {
+        return None;
+    }
     let question = asks(request);
     // "Remind me what the code was" asks; it isn't a reminder. A question can still be a look.
     if !ENABLED.load(Ordering::SeqCst) || (!question && crate::completion::non_action(&request.trim().to_lowercase())) {
@@ -178,7 +192,7 @@ mod tests {
 
     #[test]
     fn questions_are_told_from_requests() {
-        for question in ["what's on tomorrow", "did Ana write back", "free at 11?", "can I freeze milk", "is wifi on", "any emails"] {
+        for question in ["what's on tomorrow", "did Ana write back", "free at 11?", "can I freeze milk", "is wifi on", "any emails", "give me the start and end of the dentist appointment", "tell me the first appointment tomorrow"] {
             assert!(asks(question), "{question}");
         }
         for request in ["timer 25 min", "can you call mum", "brightness to 50%", "quit Spotify", "could you add eggs to my reminders"] {
@@ -211,6 +225,14 @@ mod tests {
         for (tool, _) in CUES {
             assert!(crate::tools::name(tool).is_some(), "{tool}");
         }
+    }
+
+    #[test]
+    fn naming_an_app_to_read_from_asks_rather_than_acts() {
+        assert!(reads_from_an_app("From my email give the Nest energy change and from my reminders the car task."));
+        assert!(reads_from_an_app("From Mail give the amount of the ride receipt"));
+        assert!(!reads_from_an_app("add milk to my reminders"));
+        assert!(!reads_from_an_app("put lunch with Ana in my calendar"));
     }
 
     #[test]

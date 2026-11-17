@@ -425,6 +425,7 @@ async fn live_personal_answers() {
         let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":asked_text})];
         let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
         let rows: Vec<(&str, bool, &str, &str, &str)> = inbox.iter().map(|row| (row.0.as_str(), row.1, row.2, row.3, row.4)).collect();
+        let started = std::time::Instant::now();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(150),
             continue_workflow_using(&state, &mut task, &Channel::new(|_| Ok(())), Arc::new(AtomicBool::new(false)), &settings, &mut flow, |tool, args| {
@@ -454,6 +455,7 @@ async fn live_personal_answers() {
             }),
         )
         .await;
+        let elapsed = started.elapsed().as_millis() as u64;
         let error = match result {
             Ok(Ok(())) => None,
             Ok(Err(error)) => Some(error),
@@ -472,7 +474,7 @@ async fn live_personal_answers() {
         let row = json!({
             "question": asked_text, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
             "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state})).collect::<Vec<_>>(),
-            "modelCalls": state.models.apple.model_calls(), "error": error, "answer": shown, "choices": task.choices,
+            "modelCalls": state.models.apple.model_calls(), "elapsedMs": elapsed, "error": error, "answer": shown, "choices": task.choices,
             "outcomes": flow.contract.outcomes.iter().map(|o| json!({"kind":o.kind,"tool":o.tool,"status":o.status,"accepted":o.accepted_tools,"required":o.required_arguments})).collect::<Vec<_>>(),
             "ownSources": flow.contract.own_sources, "offered": flow.offered,
             "modelSaid": flow.messages.iter().rev().find(|message| message["role"] == "assistant").map(|message| message["content"].clone()),

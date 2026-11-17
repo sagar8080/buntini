@@ -193,6 +193,12 @@ fn asks_what_shops_charge(prompt: &str) -> bool {
     shopping && !about_a_word && !words.iter().any(|word| OWN.contains(word)) && crate::completion::requested_actions(prompt) == (vec![], false)
 }
 
+/// Whether the request itself says to look online ("search for", "google", "look up"), as
+/// opposed to only sounding like a shopping question.
+pub fn told_to_search(prompt: &str) -> bool {
+    asks_for_current_weather(prompt) || asked_to_search(prompt).is_some()
+}
+
 fn parsed_search(prompt: &str) -> Option<(&'static str, &str)> {
     if asks_for_current_weather(prompt) {
         return Some(("the web", prompt.trim()));

@@ -3592,18 +3592,29 @@ fn worked_answer(flow: &Workflow) -> Option<String> {
     crate::worked::answer(&flow.goal, &flow.steps, today)
 }
 
+/// Ends the task with an answer Rust wrote, with nothing left to do.
+fn finish_with(state: &AppState, flow: &mut Workflow, task: &mut TaskRecord, channel: &Channel<TaskEvent>, answer: String) -> Result<(), String> {
+    task.answer = answer;
+    flow.contract.mark_answer_complete();
+    flow.state = "completed".into();
+    task.state = "completed".into();
+    state.store.lock().unwrap().checkpoint(flow, task)?;
+    emit(channel, "delta", &task.id, Some(task.answer.clone()));
+    Ok(())
+}
+
 /// The app-read boundary is injectable so complete planning/approval journeys can
 /// run against controlled observations without reading personal accounts.
-/// Whether the question's words are in the user's own mail, calendar or reminders, by the local
-/// index and only those it may use. The model called it general, and it may not be.
-fn index_holds(state: &AppState, settings: &Settings, goal: &str) -> bool {
-    let query = crate::personal_answer::index_query(goal);
-    if query.is_empty() {
-        return false;
-    }
+/// Where the question's words are in the user's own mail, calendar and reminders, by the local
+/// index and only the apps it may use. Nothing is read from the apps for this.
+fn index_hits(state: &AppState, settings: &Settings, goal: &str) -> crate::personal_answer::IndexHits {
+    let apps = |source: &str| ["mail", "calendar", "reminders"].contains(&source) && crate::apps::allowed(settings, source);
     let store = state.store.lock().unwrap();
-    crate::memory_index::search_visible(&store.db, &query, None, 1, |hit| ["mail", "calendar", "reminders"].contains(&hit.source.as_str()) && crate::apps::allowed(settings, &hit.source))
-        .is_ok_and(|hits| !hits.is_empty())
+    let built = crate::memory_index::counts(&store.db).is_ok_and(|counts| counts.iter().any(|(source, count)| *count > 0 && apps(source)));
+    let words = crate::personal_answer::index_words(goal);
+    let plain: Vec<String> = words.iter().map(|(word, _)| word.clone()).collect();
+    let matches = crate::memory_index::word_matches(&store.db, &plain, apps).unwrap_or_default();
+    crate::personal_answer::IndexHits { built, words, matches }
 }
 
 async fn continue_workflow_using<F, Fut>(
@@ -3654,42 +3665,76 @@ where
     }
     if small && flow.steps.is_empty() && flow.contract.own_sources.is_none() {
         flow.refresh_contract();
+        let goal_now = flow.contract.current_request.clone();
+        // "What's the price on Apple's receipt" sounds like a look online, but nothing says to
+        // look online and the index has that receipt in the user's mail: it's about their own things.
+        let looked_up = flow.contract.outcomes.iter().filter(|outcome| outcome.kind == "read").all(|outcome| outcome.accepted_tools == ["look_up_online"])
+            && flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read")
+            && !crate::search_intent::told_to_search(&goal_now)
+            && crate::personal_answer::points_at_own_record(&goal_now);
+        if looked_up {
+            let hits = index_hits(state, settings, &goal_now);
+            if let Some(found) = crate::personal_answer::index_route(&goal_now, &hits).filter(|found| !found.is_empty()) {
+                flow.contract.answer_from_own_apps();
+                flow.contract.own_sources = Some(found);
+            }
+        }
+    }
+    if small && flow.steps.is_empty() && flow.contract.own_sources.is_none() {
         let earlier = flow.messages.iter().rev().filter(|message| message["role"] == "user").nth(1).and_then(|message| message["content"].as_str());
-        let (mut sources, asked) = crate::personal_answer::source_requests(&flow.contract.current_request, earlier, &flow.contract);
-        let chose_mine = crate::personal_answer::chose_my_things(&flow.contract.current_request);
-        let asked = if chose_mine { sources = crate::personal_answer::every_source(); Vec::new() } else { asked };
-        let sorted = !asked.is_empty();
-        if state.models.small(settings) {
-            for request in asked {
-                phase(channel, &task.id, "thinking");
-                let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
-                if cancel.load(Ordering::Relaxed) {
-                    return Err("Task cancelled.".into());
+        let goal_now = flow.contract.current_request.clone();
+        let (mut sources, asked) = crate::personal_answer::source_requests(&goal_now, earlier, &flow.contract);
+        let own_shape = crate::personal_answer::about_own_things(&goal_now, &flow.contract);
+        // No app named: the local index says where the question's words are, and that nothing
+        // has them, before any model guesses. A word nothing holds isn't read for.
+        let unsettled = sources.is_empty() && (!asked.is_empty() || own_shape);
+        let hits = if unsettled { index_hits(state, settings, &goal_now) } else { crate::personal_answer::IndexHits::default() };
+        let routed = crate::personal_answer::index_route(&goal_now, &hits).filter(|_| unsettled);
+        let reads_apps = offered.iter().any(|tool| crate::personal_answer::every_source().contains(tool));
+        let mut known = None;
+        match routed {
+            // Nothing of the user's own has the question's words, so nothing is read for it.
+            Some(found) if found.is_empty() && own_shape && reads_apps => known = Some("chat.answer.notInYourApps"),
+            Some(found) if !found.is_empty() => sources = found,
+            found => {
+                // The model says whether it's about the user's own things at all; the index has
+                // already said where any of it is.
+                if found.is_none() {
+                    let mut guesses: Vec<String> = Vec::new();
+                    for request in asked.iter().cloned() {
+                        phase(channel, &task.id, "thinking");
+                        let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err("Task cancelled.".into());
+                        }
+                        if let Some(Some(source)) = turn.ok().and_then(|turn| crate::personal_answer::parse_source(&turn.text)) {
+                            if !guesses.contains(&source) {
+                                guesses.push(source);
+                            }
+                        }
+                    }
+                    if unsettled {
+                        sources = crate::personal_answer::guided_route(&goal_now, &hits, &guesses, own_shape);
+                    }
                 }
-                if let Some(Some(source)) = turn.ok().and_then(|turn| crate::personal_answer::parse_source(&turn.text)) {
-                    if !sources.contains(&source) {
-                        sources.push(source);
+                // Not about the user's own things: a small model asked for a detail nobody has
+                // given makes one up, so it's asked first whether there is one to give. With no
+                // words to say what thing, it's chat ("how are you").
+                if sources.is_empty() && !asked.is_empty() && !own_shape && !hits.words.is_empty() {
+                    phase(channel, &task.id, "thinking");
+                    let turn = state.models.generate(settings, crate::personal_answer::not_given_request(&goal_now), cancel.clone(), |_| {}).await;
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err("Task cancelled.".into());
+                    }
+                    if turn.is_ok_and(|turn| crate::personal_answer::not_given(&turn.text)) {
+                        known = Some("chat.answer.notGiven");
                     }
                 }
             }
         }
-        // Told "general" about the user's own things, a small model makes up the answer.
-        let goal_now = flow.contract.current_request.clone();
-        let own_shape = crate::personal_answer::about_own_things(&goal_now, &flow.contract);
-        if small && sources.is_empty() && !crate::personal_answer::chose_already(&goal_now) && (own_shape || (sorted && index_holds(state, settings, &goal_now))) {
-            // Nothing it can read: the answer is what would change that, further down.
-            if offered.iter().any(|tool| crate::personal_answer::every_source().contains(tool)) {
-                let (question, choices) = crate::personal_answer::ask_which(&goal_now);
-                task.answer = question;
-                task.choices = choices;
-                flow.contract.mark_answer_complete();
-                flow.state = "completed".into();
-                task.state = "completed".into();
-                state.store.lock().unwrap().checkpoint(flow, task)?;
-                emit(channel, "delta", &task.id, Some(task.answer.clone()));
-                return Ok(());
-            }
-            sources = crate::personal_answer::every_source();
+        if let Some(key) = known {
+            flow.contract.own_sources = Some(vec![]);
+            return finish_with(state, flow, task, channel, crate::i18n::t(key));
         }
         // It's in the app, not in what Buntini remembers. With the app off, memory still is.
         let remembers = flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.accepted_tools.iter().all(|tool| tool == "search_memory"));
@@ -3708,6 +3753,12 @@ where
         let goal = flow.contract.current_request.clone();
         let named: Vec<Vec<String>> = flow.contract.own_sources.iter().flatten().filter(|source| !crate::personal_answer::only_a_guess(&goal, &flow.contract, source)).map(|source| vec![source.clone()]).collect();
         let guessed_off: Vec<String> = flow.contract.own_sources.iter().flatten().filter(|source| crate::personal_answer::only_a_guess(&goal, &flow.contract, source) && !offered.contains(source)).cloned().collect();
+        // Files can only be searched in a folder the user shared.
+        let in_files = flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read" && outcome.status != "complete" && outcome.accepted_tools == ["search_files"]);
+        if in_files && !offered.iter().any(|tool| tool == "search_files") {
+            flow.contract.outcomes.retain(|outcome| outcome.kind != "read");
+            return finish_with(state, flow, task, channel, crate::i18n::t("chat.answer.noFolders"));
+        }
         for tools in required.chain(named) {
             let tools: Vec<&str> = tools.iter().map(String::as_str).collect();
             if let Some(message) = crate::personal_answer::unavailable(&tools, &offered, |app| crate::apps::allowed(settings, app)) {
@@ -3798,14 +3849,33 @@ where
         if small && own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
                 let now = chrono::Local::now().naive_local();
-                let answer = match crate::personal_answer::direct_answer(&flow.contract.current_request, &reads, now) {
-                    Some(answer) => answer,
-                    None => {
-                        let goal = flow.contract.current_request.clone();
-                        let read: Vec<crate::workflows::Step> = reads.iter().map(|step| (*step).clone()).collect();
-                        tokio::task::spawn_blocking(move || crate::personal_answer::closest(&goal, &read.iter().collect::<Vec<_>>())).await.map_err(|e| e.to_string())?
+                // A question across apps is answered app by app, each part from its own records.
+                let mut answers = Vec::new();
+                for (part, part_reads) in crate::personal_answer::parts(&flow.contract.current_request, &reads) {
+                    if let Some(answer) = crate::personal_answer::direct_answer(&part, &part_reads, now) {
+                        answers.push(answer);
+                        continue;
                     }
-                };
+                    // The model points at the records and words that answer; Rust checks and writes.
+                    let mut pointed = None;
+                    if let Some(request) = crate::personal_answer::pick_request(&part, &part_reads, now) {
+                        phase(channel, &task.id, "thinking");
+                        let turn = state.models.generate(settings, request, cancel.clone(), |_| {}).await;
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err("Task cancelled.".into());
+                        }
+                        pointed = turn.ok().and_then(|turn| crate::personal_answer::from_pick(&part, &part_reads, &turn.text, now.date()));
+                    }
+                    let answer = match pointed {
+                        Some(answer) => answer,
+                        None => {
+                            let read: Vec<crate::workflows::Step> = part_reads.iter().map(|step| (*step).clone()).collect();
+                            tokio::task::spawn_blocking(move || crate::personal_answer::closest(&part, &read.iter().collect::<Vec<_>>())).await.map_err(|e| e.to_string())?
+                        }
+                    };
+                    answers.push(answer);
+                }
+                let answer = answers.join("\n\n");
                 task.answer = answer;
                 flow.contract.mark_answer_complete();
                 flow.state = "completed".into();
