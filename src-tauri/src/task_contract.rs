@@ -2453,6 +2453,15 @@ impl TaskContract {
         }
         (!messages.is_empty()).then(||messages.join("\n\n"))
     }
+    /// The request turned out to be about the user's own things, which the local index holds:
+    /// the online look it was read as goes, and its answer stays.
+    pub fn answer_from_own_apps(&mut self) {
+        self.outcomes.retain(|outcome| !(outcome.kind == "read" && outcome.accepted_tools == ["look_up_online"]));
+        if !self.outcomes.iter().any(|outcome| outcome.kind == "answer") {
+            let goal = self.current_request.clone();
+            self.push_outcome("answer", &goal, vec![], json!({}), vec![]);
+        }
+    }
     pub fn mark_answer_complete(&mut self) {
         if self
             .outcomes
