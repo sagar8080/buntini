@@ -214,16 +214,41 @@ pub fn same_box(a: &Mailbox, b: &Mailbox) -> bool {
 }
 
 /// Mailboxes nothing is ever moved into: mail there is sent, waits to be sent, is a draft, or
-/// is on its way to being deleted.
+/// is on its way to being deleted. Servers name them in the account's language, so the
+/// common ones are here in the languages Buntini speaks, folded (lower case, no accents).
 const NOT_A_DESTINATION: &[&str] = &[
+    // English
     "outbox", "drafts", "draft", "sent", "sent messages", "sent mail", "sent items", "sendlater", "send later", "trash",
-    "deleted messages", "deleted items", "bin", "recently deleted", "notes",
+    "deleted messages", "deleted items", "deleted", "bin", "recently deleted", "notes",
+    // German
+    "papierkorb", "geloschte elemente", "geloschte objekte", "entwurfe", "gesendet", "gesendete elemente", "gesendete objekte", "postausgang",
+    // French
+    "corbeille", "brouillons", "envoyes", "elements envoyes", "messages envoyes", "elements supprimes", "messages supprimes", "boite d'envoi",
+    // Spanish and Portuguese
+    "papelera", "borradores", "enviados", "elementos enviados", "elementos eliminados", "mensajes eliminados", "bandeja de salida",
+    "lixeira", "lixo", "rascunhos", "itens enviados", "itens excluidos", "itens eliminados", "caixa de saida", "mensagens enviadas",
+    // Italian, Dutch, Turkish, Indonesian
+    "cestino", "bozze", "posta inviata", "elementi inviati", "elementi eliminati", "posta in uscita",
+    "prullenbak", "concepten", "verzonden", "verzonden items", "verwijderde items", "postvak uit",
+    "cop kutusu", "taslaklar", "gonderilmis", "gonderilmis ogeler", "silinmis ogeler", "giden kutusu",
+    "sampah", "draf", "terkirim", "item terkirim", "item terhapus", "kotak keluar",
+    // Russian, Japanese, Chinese, Korean, Arabic, Hindi, Thai, Bengali
+    "корзина", "удаленные", "удалённые", "черновики", "отправленные", "исходящие",
+    "ゴミ箱", "下書き", "送信済み", "送信済みメール", "削除済みアイテム", "送信トレイ",
+    "废纸篓", "已删除", "草稿", "草稿箱", "已发送", "发件箱", "垃圾箱", "已刪除", "已傳送", "寄件備份", "寄件匣",
+    "휴지통", "임시 보관함", "보낸 편지함", "지운 편지함", "보낼 편지함",
+    "المهملات", "المسودات", "المرسلة", "العناصر المحذوفة", "صندوق الصادر",
+    "कचरा", "ड्राफ़्ट", "भेजे गए", "रद्दी", "ถังขยะ", "ฉบับร่าง", "ส่งแล้ว", "ট্র্যাশ", "খসড়া", "পাঠানো",
 ];
 
-/// Whether moving an email into `mailbox` would send it, make it a draft or delete it.
+/// Whether moving an email into `mailbox` would send it, make it a draft or delete it: any
+/// part of its path counts, so "Deleted Items/Projects" is refused as well as "Trash".
 pub fn forbidden_destination(mailbox: &Mailbox) -> bool {
-    let leaf = fold(super::log::leaf(&mailbox.path));
-    NOT_A_DESTINATION.contains(&leaf.trim())
+    mailbox.path.split('/').any(|part| {
+        let part = fold(part);
+        let part = part.trim().trim_start_matches('[').trim_end_matches(']');
+        NOT_A_DESTINATION.contains(&part)
+    })
 }
 
 fn plain(value: &str, what: &str) -> Result<(), String> {
@@ -377,7 +402,11 @@ mod tests {
     #[test]
     fn mail_is_never_moved_where_it_would_be_sent_drafted_or_deleted() {
         let at = |account: &str, path: &str| Mailbox { account: account.into(), path: path.into() };
-        for path in ["Outbox", "Drafts", "Sent Messages", "[Gmail]/Sent Mail", "Trash", "[Gmail]/Trash", "Deleted Items", "SendLater", "Bin"] {
+        for path in [
+            "Outbox", "Drafts", "Sent Messages", "[Gmail]/Sent Mail", "Trash", "[Gmail]/Trash", "Deleted Items", "SendLater", "Bin",
+            // In the account's language, and anywhere in the path.
+            "[Gmail]/Papierkorb", "Corbeille", "Gelöschte Elemente", "Papelera", "Éléments supprimés", "ゴミ箱", "Deleted Items/Projects", "Trash/Old",
+        ] {
             assert!(forbidden_destination(&at("Work", path)), "{path}");
         }
         for path in ["INBOX", "Junk", "Archive", "Newsletters", "Work/Clients", "Sentences", "[Gmail]/All Mail"] {

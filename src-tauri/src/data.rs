@@ -261,6 +261,9 @@ where
         .index_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
     crate::local_setup::erase(state);
+    if let Err(error) = crate::mail::erase().await {
+        failures.push(error);
+    }
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }

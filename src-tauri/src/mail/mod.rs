@@ -355,6 +355,31 @@ fn log_path(dir: &Path) -> PathBuf {
     dir.join("log.json")
 }
 
+/// Delete everything: the log of changes, the pages and files copied for drafts, and every
+/// email, plan and change held in memory. Waits for a run under way to finish first.
+pub async fn erase() -> Result<(), String> {
+    let _one = WORK.lock().await;
+    let dir = {
+        let mut hub = hub();
+        hub.log = log::Log::default();
+        hub.pending = None;
+        hub.planned = None;
+        hub.open = None;
+        hub.pool.clear();
+        hub.query.clear();
+        hub.status = None;
+        hub.dir.clone()
+    };
+    publish();
+    match dir {
+        Some(dir) => match std::fs::remove_dir_all(&dir) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err("Couldn’t remove Mail’s log and copied files.".into()),
+            _ => Ok(()),
+        },
+        None => Ok(()),
+    }
+}
+
 /// Starts the island's mail card and the background look at Mail.
 pub fn start(app: AppHandle) {
     let dir = app.path().app_data_dir().ok().map(|data| data.join("mail"));
@@ -664,13 +689,24 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
             if rules::forbidden_destination(to) {
                 return Err(tf("mail.error.notMovedTo", &[("mailbox", &to.path)]));
             }
+            // Without its Message-ID an email can't be told from others like it, here or after.
+            if target.header.trim().is_empty() {
+                return Err(t("mail.error.incompleteEmail"));
+            }
             let mut argv = box_args(target).to_vec();
             argv.extend([to.account.clone(), to.path.clone()]);
-            let (id, _, path) = script::parse_move(&script::run(script::MOVE, &argv, 60).await?)?;
+            let (id, left, path) = script::parse_move(&script::run(script::MOVE, &argv, 60).await?)?;
+            // A copy still where it was means Mail didn't move it, whatever is in the destination.
+            if left > 0 {
+                return Err(t("mail.error.notKept"));
+            }
             let to = Mailbox { account: to.account.clone(), path };
             Ok(log::Entry::new(Change::Move { from: target.mailbox.clone(), to, id }, Some(target), &target.subject, why))
         }
         Step::Junk { target } => {
+            if target.header.trim().is_empty() {
+                return Err(t("mail.error.incompleteEmail"));
+            }
             let (was, now, at, id) = script::parse_junk(&script::run(script::JUNK, &box_args(target), 60).await?)?;
             if !now {
                 return Err(t("mail.error.notKept"));
@@ -705,7 +741,14 @@ async fn run_step(step: &Step, why: Why) -> Result<log::Entry, String> {
             if !to.is_empty() && saved.to.iter().map(|a| a.to_lowercase()).collect::<Vec<_>>() != [to.to_lowercase()] {
                 return Err(t("mail.error.otherRecipient"));
             }
-            if saved.attachments.len() != files.len() {
+            // The very files handed over, by name, not just as many of them.
+            // Compared without accents, which Mail may hand back decomposed.
+            let key = |name: &str| rules::fold(&name.chars().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect::<String>());
+            let mut wanted: Vec<String> = files.iter().filter_map(|f| f.file_name()).map(|n| key(&n.to_string_lossy())).collect();
+            let mut attached: Vec<String> = saved.attachments.iter().map(|name| key(name)).collect();
+            wanted.sort();
+            attached.sort();
+            if attached != wanted {
                 return Err(t("mail.error.attachmentsLost"));
             }
             Ok(log::Entry::new(Change::Draft { id: saved.id, to: saved.to, attachments: saved.attachments }, None, subject, why))
@@ -935,10 +978,16 @@ fn plan_steps(planned: &Planned, dir: &Path) -> Result<Vec<(Step, Why)>, String>
             plan::PlanStep::Merge { subject, body, sends } => {
                 let pdf = planned.plan.pdf.as_ref().ok_or_else(|| t("mail.error.planNoPdf"))?;
                 let folder = dir.join("merge").join(&planned.plan.id);
-                std::fs::create_dir_all(&folder).map_err(|_| t("mail.error.pagesNotSaved"))?;
-                for send in sends {
+                for (n, send) in sends.iter().enumerate() {
                     let page = planned.pages.get(send.page - 1).ok_or_else(|| t("mail.error.pdfChanged"))?;
-                    let file = merge::page_file(&folder, &pdf.name, &send.name);
+                    // Each person's page in a folder of its own: two people whose names read
+                    // alike never share, or overwrite, one file.
+                    let own = folder.join(n.to_string());
+                    std::fs::create_dir_all(&own).map_err(|_| t("mail.error.pagesNotSaved"))?;
+                    let file = merge::page_file(&own, &pdf.name, &send.name);
+                    if file.exists() {
+                        return Err(t("mail.error.pagesNotSaved"));
+                    }
                     std::fs::write(&file, &page.pdf).map_err(|_| t("mail.error.pagesNotSaved"))?;
                     let draft = Step::Draft {
                         to: send.email.clone(),
