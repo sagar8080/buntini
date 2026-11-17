@@ -59,9 +59,10 @@ pub struct Session {
     pub announce: bool,
     /// The agent is asking in its own terminal (agents Buntini can't answer for).
     pub asking: bool,
-    /// The prompt the current turn began with: agents that report it before every model
-    /// call (Antigravity, Hermes) send it again and again.
-    last_prompt: String,
+    /// A fingerprint of the prompt the current turn began with (the words aren't kept):
+    /// agents that report it before every model call (Antigravity, Hermes) send it again
+    /// and again.
+    last_prompt: u64,
 }
 
 impl Session {
@@ -78,7 +79,7 @@ impl Session {
             message: String::new(),
             announce: false,
             asking: false,
-            last_prompt: String::new(),
+            last_prompt: 0,
         }
     }
 
@@ -95,21 +96,24 @@ impl Session {
 
     /// The person sent a prompt: a new turn.
     pub fn prompt(&mut self, prompt: &str, now_ms: u64) {
-        if self.phase == Phase::Working && !prompt.is_empty() && prompt == self.last_prompt {
+        let fingerprint = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            prompt.hash(&mut hasher);
+            hasher.finish()
+        };
+        if self.phase == Phase::Working && !prompt.is_empty() && fingerprint == self.last_prompt {
             self.last_ms = now_ms;
             return;
         }
-        self.last_prompt = prompt.to_string();
+        self.last_prompt = fingerprint;
         self.asking = false;
         self.phase = Phase::Working;
         self.turn_started_ms = Some(now_ms);
         self.last_ms = now_ms;
         self.message.clear();
         self.announce = false;
-        let text = first_line(prompt, 60);
-        if !text.is_empty() {
-            self.push(Step { label: tf("agents.step.prompt", &[("text", &text)]), detail: None, tool: String::new(), input_key: String::new(), diff: None, file: None, failed: false, done: true });
-        }
+        // The prompt's words never show: only what the agent does with them (PRIVACY.md).
     }
 
     /// A tool is about to run.
@@ -367,11 +371,12 @@ mod tests {
         session.after("Edit", &edit, false, 30);
         session.after("Bash", &json!({ "command": "cargo test" }), true, 40);
         let labels: Vec<_> = session.steps.iter().map(|step| step.label.as_str()).collect();
-        assert_eq!(labels, ["“Fix the bug in the cart”", "Edits · cart.rs", "Tests · cargo test"]);
-        let edited = &session.steps[1];
+        // The prompt itself is never a step.
+        assert_eq!(labels, ["Edits · cart.rs", "Tests · cargo test"]);
+        let edited = &session.steps[0];
         assert_eq!(edited.file.as_deref(), Some("cart.rs"));
         assert_eq!(edited.diff.as_ref().map(|diff| (diff.added, diff.removed)), Some((2, 1)));
-        assert!(session.steps[2].failed);
+        assert!(session.steps[1].failed);
     }
 
     #[test]
@@ -398,11 +403,12 @@ mod tests {
         session.prompt("list files", 0);
         session.before("run_command", &json!({ "CommandLine": "ls" }), 1);
         session.prompt("list files", 2);
-        assert_eq!(session.steps.len(), 2);
-        assert_eq!(session.turn_started_ms, Some(0));
+        assert_eq!(session.steps.len(), 1);
+        assert_eq!(session.turn_started_ms, Some(0), "the same turn");
         session.stop("", false, 3);
         session.prompt("list files", 4);
-        assert_eq!(session.steps.len(), 3, "a new turn with the same words is a new turn");
+        assert_eq!(session.turn_started_ms, Some(4), "a new turn with the same words is a new turn");
+        assert_eq!(session.phase, Phase::Working);
     }
 
     #[test]

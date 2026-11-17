@@ -6,8 +6,10 @@ import type { AgentAnswer, AgentFinished, AgentRequest } from './types';
 /** How long a card shows before a click counts, so one aimed at whatever was under it doesn't. */
 const ARMING_MS = 700;
 
-/** What Claude Code or Codex wants to do, or asks. Nothing is allowed until Allow or an answer
-    is clicked; "In terminal" leaves it to the agent's own prompt. */
+/** What Claude Code or Codex wants to do, or asks, shown whole: the command, every line an edit
+    changes, and the rules Always keeps. Nothing is allowed until Allow or an answer is clicked;
+    "In terminal" leaves it to the agent's own prompt, and is all there is besides Deny when
+    something Allow would approve can't be shown. */
 export function AgentCard({ request, more, onAnswer, className = '' }: { request: AgentRequest; more: number; onAnswer: (answer: AgentAnswer) => Promise<void>; className?: string }) {
   const shownAt = useRef(Date.now());
   const [busy, setBusy] = useState(false);
@@ -22,6 +24,8 @@ export function AgentCard({ request, more, onAnswer, className = '' }: { request
     try { await onAnswer(next); } finally { setBusy(false); }
   }
   const question = request.questions[step];
+  // Allow, and Always with it, only when everything they approve is shown here (agents.rs `describe`).
+  const always = !!request.allow && !!request.always;
   function choose(value: string | string[]) {
     if (!armed()) return;
     const all = { ...answers, [question.question]: value };
@@ -41,8 +45,10 @@ export function AgentCard({ request, more, onAnswer, className = '' }: { request
       <div className="agent-actions">{terminal}{question.multiSelect && <button type="button" className="agent-allow" disabled={busy || !picked.length} onClick={() => choose(picked)}>{step + 1 < request.questions.length ? t('common.next') : t('common.send')}</button>}</div>
     </> : <>
       <strong>{request.title}</strong>
-      {request.detail && (request.code ? <pre>{request.detail}</pre> : <p>{request.detail}</p>)}
-      <div className="agent-actions">{terminal}<button type="button" disabled={busy} onClick={() => void answer({ kind: 'deny' })}>{request.plan ? t('agentRequests.keepPlanning') : t('agentRequests.deny')}</button>{request.always && <button type="button" disabled={busy} onClick={() => void answer({ kind: 'always' })}>{request.plan ? t('agentRequests.acceptEdits') : t('agentRequests.always')}</button>}<button type="button" className="agent-allow" disabled={busy} onClick={() => void answer({ kind: 'allow' })}>{busy ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{request.plan ? t('agentRequests.start') : t('agentRequests.allow')}</button></div>
+      {request.detail && (request.code ? <pre dir="ltr">{request.detail}</pre> : <p>{request.detail}</p>)}
+      {!!request.changes?.length && <div className="agent-changes" dir="ltr">{request.changes.map((line, index) => <div key={index} className={line.kind}>{line.kind === 'gap' ? '⋯' : `${line.kind === 'add' ? '+ ' : line.kind === 'remove' ? '− ' : '  '}${line.text}`}</div>)}</div>}
+      {always && !!request.rules?.length && <ul className="agent-rules">{request.rules.map((rule, index) => <li key={index}><code dir="ltr">{rule.rule}</code><span>{rule.place}</span></li>)}</ul>}
+      <div className="agent-actions">{terminal}<button type="button" disabled={busy} onClick={() => void answer({ kind: 'deny' })}>{request.plan ? t('agentRequests.keepPlanning') : t('agentRequests.deny')}</button>{always && <button type="button" disabled={busy} onClick={() => void answer({ kind: 'always' })}>{request.plan ? t('agentRequests.acceptEdits') : t('agentRequests.always')}</button>}{request.allow && <button type="button" className="agent-allow" disabled={busy} onClick={() => void answer({ kind: 'allow' })}>{busy ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{request.plan ? t('agentRequests.start') : t('agentRequests.allow')}</button>}</div>
     </>}
   </div>;
 }

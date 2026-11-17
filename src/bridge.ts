@@ -59,8 +59,9 @@ function previewCodingAgents(): CodingAgent[] {
   return [{ id: 'claude', name: 'Claude Code', available: true, connected: on('claude'), heard: true, problem: '', usage: on('claude-usage') }, { id: 'codex', name: 'Codex', available: true, connected: on('codex'), heard: false, problem: '' }, { id: 'copilot', name: 'Copilot CLI', available: true, connected: on('copilot'), heard: false, problem: '' }];
 }
 let previewAgentRequests: AgentRequest[] = import.meta.env.DEV && new URLSearchParams(location.search).has('agents-preview') ? [
-  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], always: true, createdAt: '2026-11-15T12:00:00Z' },
-  { id: 'preview-agent-3', agent: 'Claude Code', project: 'buntini', title: 'Start on its plan', detail: '1. Add the island\n2. Wire the agents', code: false, questions: [], always: true, plan: true, createdAt: '2026-11-15T12:00:02Z' },
+  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], always: true, allow: true, rules: [{ rule: 'Bash(cargo test:*)', place: 'This project' }], createdAt: '2026-11-15T12:00:00Z' },
+  { id: 'preview-agent-4', agent: 'Claude Code', project: 'buntini', title: 'Edit cart.ts', detail: 'src/cart.ts', code: true, questions: [], allow: true, changes: [{ kind: 'remove', text: 'return total;' }, { kind: 'add', text: 'return total + tax(total);' }], createdAt: '2026-11-15T12:00:01Z' },
+  { id: 'preview-agent-3', agent: 'Claude Code', project: 'buntini', title: 'Start on its plan', detail: '1. Add the island\n2. Wire the agents', code: false, questions: [], always: true, allow: true, plan: true, createdAt: '2026-11-15T12:00:02Z' },
   { id: 'preview-agent-2', agent: 'Claude Code', project: 'buntini', title: '', detail: '', code: false, createdAt: '2026-11-15T12:00:05Z', questions: [{ question: 'Where should the request card go when the panel is open?', header: 'Placement', multiSelect: false, options: [{ label: 'Top of the panel', description: '' }, { label: 'Above the composer', description: '' }] }] },
 ] : [];
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.

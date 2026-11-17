@@ -71,5 +71,19 @@ guard tile.maxX == screen.visibleFrame.maxX - IslandGeometry.cornerMargin, tile.
 if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(problem)") }
 if let problem = SurfaceSounds.problem() { fail(problem) }
 if let problem = MarkupCheck.problem() { fail(problem) }
+if let problem = MainActor.assumeIsolated({ IslandKeyCheck.problem() }) { fail(problem) }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws")
+// Placeholders fill in one pass: a value is never filled again.
+guard Lexicon.fill("{a} and {b}", ["a": "{b}", "b": "x"]) == "{b} and x",
+      Lexicon.fill("{missing} {a", ["a": "y"]) == "{missing} {a",
+      Lexicon.fill("{a}{a}", ["a": "é"]) == "éé" else { fail("placeholders are filled more than once") }
+
+// A click in the moment after a card comes forward doesn't count.
+let shown = Date()
+guard !Arming.ready(since: shown, now: shown.addingTimeInterval(0.5)), Arming.ready(since: shown, now: shown.addingTimeInterval(0.71)) else { fail("cards arm at the wrong time") }
+
+// An approval from a Buntini that doesn't say Allow fits offers none.
+let older = #"{"agent":"Codex","project":null,"title":"Run a command","detail":"ls","code":true,"always":true,"plan":false}"#
+guard let approval = try? JSONDecoder().decode(Approval.self, from: Data(older.utf8)), !approval.allow, approval.changes.isEmpty, approval.rules.isEmpty else { fail("an approval without allow offers Allow") }
+
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; fields take the keyboard and buttons don't")

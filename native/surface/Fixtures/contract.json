@@ -225,7 +225,14 @@
      "detail": "cargo test --locked",
      "code": true,
      "always": true,
-     "plan": false
+     "plan": false,
+     "allow": true,
+     "rules": [
+      {
+       "rule": "Bash(cargo test --locked)",
+       "place": "This project"
+      }
+     ]
     }
    },
    "held": true,
@@ -1074,6 +1081,104 @@
    "flow": null,
    "overlay": null,
    "sound": null
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "claude-1",
+     "source": "agents",
+     "label": "Claude Code",
+     "tint": "#D97757",
+     "state": "waiting",
+     "badge": "buntini",
+     "progress": null
+    },
+    {
+     "id": "codex-1",
+     "source": "agents",
+     "label": "Codex",
+     "tint": "#10A37F",
+     "state": "working",
+     "badge": null,
+     "progress": null
+    },
+    {
+     "id": "github",
+     "source": "services",
+     "label": "GitHub",
+     "tint": "#6E7681",
+     "state": "error",
+     "badge": "CI",
+     "progress": null
+    },
+    {
+     "id": "music",
+     "source": "media",
+     "label": "Music",
+     "tint": "#FA2D48",
+     "state": "idle",
+     "badge": null,
+     "progress": 0.42
+    }
+   ],
+   "overflow": [
+    "claude-2",
+    "claude-3"
+   ],
+   "card": {
+    "id": "a2",
+    "source": "agents",
+    "body": {
+     "kind": "approval",
+     "agent": "Claude Code",
+     "project": "buntini",
+     "title": "Edit cart.ts",
+     "detail": "src/cart.ts",
+     "code": true,
+     "always": false,
+     "plan": false,
+     "allow": true,
+     "changes": [
+      {
+       "kind": "same",
+       "text": "export function total(items: Item[]) {"
+      },
+      {
+       "kind": "remove",
+       "text": "  return items.reduce((sum, item) => sum + item.price, 0);"
+      },
+      {
+       "kind": "add",
+       "text": "  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);"
+      },
+      {
+       "kind": "add",
+       "text": "  return subtotal + tax(subtotal);"
+      },
+      {
+       "kind": "same",
+       "text": "}"
+      }
+     ]
+    }
+   },
+   "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null,
+   "interrupt": true
   }
  ],
  "actions": [

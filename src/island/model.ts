@@ -10,11 +10,12 @@ export interface IslandSettings {
 }
 export const defaults: IslandSettings = { placement: 'auto', updates: false };
 
-/** What `island_call` accepts; mirrors `island::Op`. */
-export type IslandOp = { op: 'ping' };
+/** What `island_call` accepts; mirrors `island::Op`. `busy`: a question typed in the island wasn't asked. */
+export type IslandOp = { op: 'ping' } | { op: 'busy' };
 
 /** What the browser preview answers for `island_call`. */
 export function preview(op: IslandOp): unknown {
   if (op.op === 'ping') return true;
+  if (op.op === 'busy') return null;
   throw new Error(t('common.desktopOnly'));
 }

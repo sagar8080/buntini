@@ -137,6 +137,16 @@ impl Board {
         let hold = self.shown.as_ref().map(|(_, _, since)| since.saturating_add(HOLD_MS));
         expiries.chain(hold).filter(|at| *at > now_ms).min()
     }
+
+    /// How long the card `id` has been in front, as last picked. None when it isn't.
+    pub fn in_front_ms(&self, id: &str, now_ms: u64) -> Option<u64> {
+        self.shown.as_ref().filter(|(shown, _, _)| shown == id).map(|(_, _, since)| now_ms.saturating_sub(*since))
+    }
+
+    /// Something waits on the person: an approval or a question.
+    pub fn waiting(&self, now_ms: u64) -> bool {
+        self.sources.values().flat_map(|c| &c.offers).any(|offer| offer.urgency == Urgency::Waiting && offer.live(now_ms))
+    }
 }
 
 /// Waiting first, then errors, work in progress, finished, idle.
@@ -190,6 +200,22 @@ mod tests {
         assert!(picked.held && picked.interrupt);
         board.set(Source::Agents, Contribution::default());
         assert!(!board.pick(HOLD_MS * 2).interrupt, "news doesn't open the island");
+    }
+
+    #[test]
+    fn a_card_s_time_in_front_counts_from_when_it_came_forward() {
+        let mut board = Board::default();
+        board.set(Source::Agents, Contribution { pills: vec![], offers: vec![offer("first", Urgency::Waiting, 0, None), offer("second", Urgency::Waiting, 10, None)] });
+        assert!(board.waiting(100));
+        board.pick(100);
+        assert_eq!(board.in_front_ms("first", 900), Some(800));
+        // Queued behind the first, the second hasn't been in front at all.
+        assert_eq!(board.in_front_ms("second", 900), None);
+        board.set(Source::Agents, Contribution { pills: vec![], offers: vec![offer("second", Urgency::Waiting, 10, None)] });
+        board.pick(1_000);
+        assert_eq!(board.in_front_ms("second", 1_200), Some(200), "old, but only just in front");
+        board.set(Source::Agents, Contribution::default());
+        assert!(!board.waiting(1_300));
     }
 
     #[test]

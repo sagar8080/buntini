@@ -1,6 +1,7 @@
 //! A tour of the island: a scripted minute of what it does, with made-up sessions, mail and
 //! music from the shared sample scenes. Nothing is sent, read or saved, and clicks on the
-//! tour's cards only move it along.
+//! tour's cards only move it along (`surface::tour_only`). It waits while something real
+//! waits on the person.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -9,6 +10,9 @@ use serde_json::Value;
 use crate::surface::{self, Card, Contribution, Mood, Offer, Pill, PillState, Source, Urgency};
 
 const SAMPLES: &str = include_str!("../../../native/surface/Fixtures/contract.json");
+
+/// The start of every tour card's and pill's id.
+pub const PREFIX: &str = "demo:";
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static NEXT: AtomicBool = AtomicBool::new(false);
@@ -61,22 +65,29 @@ pub fn start() {
         let pills: Vec<Pill> = samples
             .iter()
             .find(|(kind, _, _)| kind == "approval")
-            .map(|(_, _, pills)| pills.iter().cloned().map(|pill| Pill { source: Source::Island, id: format!("demo:{}", pill.id), state: PillState::Working, ..pill }).collect())
+            .map(|(_, _, pills)| pills.iter().cloned().map(|pill| Pill { source: Source::Island, id: format!("{PREFIX}{}", pill.id), state: PillState::Working, ..pill }).collect())
             .unwrap_or_default();
         for (kind, seconds, mood) in STEPS {
             let Some((_, card, _)) = samples.iter().find(|(name, _, _)| name == kind) else { continue };
             *MOOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = *mood;
-            let card = Card { id: format!("demo:{}", card.id), source: Source::Island, body: card.body.clone() };
+            let card = Card { id: format!("{PREFIX}{}", card.id), source: Source::Island, body: card.body.clone() };
             surface::publish(Source::Island, Contribution {
                 pills: pills.clone(),
                 offers: vec![Offer { card, urgency: Urgency::Alert, at_ms: surface::now_ms(), ttl_ms: None }],
             });
             NEXT.store(false, Ordering::SeqCst);
-            for _ in 0..seconds * 10 {
+            let mut left = seconds * 10;
+            while left > 0 {
                 std::thread::sleep(Duration::from_millis(100));
+                // A real request in front of the tour: the tour waits for it.
+                if surface::waiting() {
+                    NEXT.store(false, Ordering::SeqCst);
+                    continue;
+                }
                 if NEXT.swap(false, Ordering::SeqCst) {
                     break;
                 }
+                left -= 1;
             }
         }
         *MOOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;

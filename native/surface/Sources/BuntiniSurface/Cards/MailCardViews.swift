@@ -65,21 +65,27 @@ private enum MailTime {
     }
 }
 
-/// As tall as its content up to `maxHeight`, scrolling beyond it.
+/// As tall as its content up to `maxHeight`, scrolling beyond it. A picture can't hold a
+/// scroll view, so it gets the top of the content.
 private struct MailFit<Content: View>: View {
     let maxHeight: CGFloat
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
+    @Environment(\.inPicture) private var inPicture
 
     var body: some View {
-        ScrollView {
-            content()
-                .background(GeometryReader { proxy in
-                    Color.clear.preference(key: MailFitHeight.self, value: proxy.size.height)
-                })
+        if inPicture {
+            content().frame(maxHeight: maxHeight, alignment: .top).clipped()
+        } else {
+            ScrollView {
+                content()
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: MailFitHeight.self, value: proxy.size.height)
+                    })
+            }
+            .frame(height: min(max(height, 1), maxHeight))
+            .onPreferenceChange(MailFitHeight.self) { height = $0 }
         }
-        .frame(height: min(max(height, 1), maxHeight))
-        .onPreferenceChange(MailFitHeight.self) { height = $0 }
     }
 }
 
@@ -275,13 +281,14 @@ private struct MailPendingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: L(.mail), title: pending.title)
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(Array(pending.lines.prefix(8).enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.caption).opacity(0.85).lineLimit(3)
+            // Every line Allow carries out, whole; past the room there is, it scrolls.
+            MailFit(maxHeight: 170) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(pending.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.caption).opacity(0.85).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                if pending.lines.count > 8 {
-                    Text("+\(pending.lines.count - 8)").font(.caption2).opacity(0.6)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 6) {
                 Spacer()
@@ -289,6 +296,8 @@ private struct MailPendingView: View {
                 IslandButton(label: L(.allow), prominent: true) { act("allow", .string(pending.id)) }
             }
         }
+        // A change that takes another's place starts the arming delay again.
+        .arms(on: pending)
     }
 }
 
@@ -299,13 +308,14 @@ private struct MailPlanView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: L(.mailPlan), title: plan.summary.isEmpty ? L(.plan) : plan.summary)
-            MailFit(maxHeight: 200) {
+            // Every line Run carries out, whole and wrapped; past the room there is, it scrolls.
+            MailFit(maxHeight: 170) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(plan.lines.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.caption).opacity(0.85).lineLimit(2)
+                        Text(line).font(.caption).opacity(0.85).fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(Array(plan.problems.enumerated()), id: \.offset) { _, problem in
-                        Text(problem).font(.caption2).foregroundStyle(Color.orange.opacity(0.85)).lineLimit(2)
+                        Text(problem).font(.caption2).foregroundStyle(Color.orange.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -316,5 +326,7 @@ private struct MailPlanView: View {
                 IslandButton(label: L(.run), prominent: true) { act("run", .string(plan.id)) }
             }
         }
+        // A plan that takes another's place starts the arming delay again.
+        .arms(on: plan)
     }
 }
