@@ -392,6 +392,9 @@ async fn live_personal_answers() {
     // `BUNTINI_PERSONAL_BRAIN=chatgpt`: the same made-up records through a ChatGPT plan. It
     // signs in once in the browser, and the session lasts only as long as this run.
     let on_chatgpt = on_chatgpt().await;
+    // `BUNTINI_PERSONAL_BRAIN=codex` (or another command-line brain's id): the same made-up
+    // records through that tool, signed in as it is in a terminal.
+    let on_cli = std::env::var("BUNTINI_PERSONAL_BRAIN").ok().filter(|id| crate::cli::tool(id).is_some());
     crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
     crate::intent::enable();
     let tomorrow = (today + Duration::days(1)).format("%A").to_string();
@@ -413,11 +416,15 @@ async fn live_personal_answers() {
         if on_chatgpt {
             use_chatgpt(&mut settings);
         }
+        if let Some(id) = &on_cli {
+            use_chatgpt(&mut settings);
+            settings.cloud_provider = id.clone();
+        }
         state.store.lock().unwrap().save_settings(&settings).unwrap();
         seed_index(&state, &inbox, today);
         let mut task: TaskRecord = serde_json::from_value(json!({
             "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
-            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt { "cloud" } else { "apple" }
+            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt || on_cli.is_some() { "cloud" } else { "apple" }
         }))
         .unwrap();
         state.store.lock().unwrap().save_task(&task).unwrap();
