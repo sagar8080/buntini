@@ -27,7 +27,12 @@ final class IslandWindow {
         model = IslandModel(screen: screen.map(ScreenShape.init) ?? ScreenShape(frame: .zero, visibleFrame: .zero, safeTop: 0, auxLeft: nil, auxRight: nil, statusBar: 24))
 
         let container = NSView(frame: NSRect(origin: .zero, size: IslandGeometryPanel.size))
-        let host = NSHostingView(rootView: IslandRoot(model: model, send: send))
+        let panel = self.panel
+        let host = NSHostingView(rootView: IslandRoot(model: model, send: { action in
+            send(action)
+            // A button did its work: keystrokes go back to the app you're in.
+            panel.giveKeyBack()
+        }))
         host.frame = container.bounds
         host.autoresizingMask = [.width, .height]
         container.addSubview(host)
@@ -44,7 +49,8 @@ final class IslandWindow {
         // Typing takes the keyboard without bringing Buntini forward; done, it gives it back.
         typingWatch = model.$typing.removeDuplicates().sink { [weak self] typing in
             guard let self else { return }
-            if typing { self.panel.makeKey() } else if self.panel.isKeyWindow { self.panel.resignKey() }
+            self.panel.typing = typing
+            if typing { self.panel.makeKey() }
         }
 
         observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification) { [weak self] in self?.place() }
