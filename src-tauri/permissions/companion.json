@@ -89,7 +89,6 @@
           "pet_drop",
           "forget_window",
           "pick_files",
-          "cli_status",
           "pet_world",
           "pet_move",
           "pet_stop",

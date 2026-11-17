@@ -24,7 +24,7 @@ export type PetMotion = 'calm' | 'playful' | 'sleepy';
 /** accent is the resolved accessory colour (#RRGGBB). */
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: string }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
-export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'qwen' | 'moonshot' | 'chatgpt' | 'lmstudio' | 'custom' | 'claude-code' | 'codex' | 'gemini-cli' | 'cursor' | 'copilot';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'qwen' | 'moonshot' | 'chatgpt' | 'lmstudio' | 'custom' | 'claude-code' | 'codex' | 'gemini-cli' | 'copilot';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Cloud, Cpu, KeyRound, LoaderCircle, Server, Terminal } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
@@ -66,7 +66,7 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
   </div>;
   if (provider.kind === 'tool') return <div className="cloud-settings">
     {providers}
-    <ToolStatus id={provider.id} signIn={provider.signIn || ''} installed={!!diagnostics.cliTools?.includes(provider.id)} />
+    {!diagnostics.cliTools?.includes(provider.id) && <p className="field-help">{t('settings.brain.notInstalled')}</p>}
     {shares}
   </div>;
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
@@ -118,22 +118,6 @@ function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'd
     {!found && draft.cloudModel.trim() && <span className="field-help">{t('settings.brain.using', { model: draft.cloudModel.trim() })}</span>}
     {(found?.onThisMac || (!found && draft.cloudOnThisMac)) && <Toggle label={t('settings.brain.onThisMac')} checked={draft.cloudOnThisMac} onChange={value => update('cloudOnThisMac', value)} />}
   </>;
-}
-
-/** A command-line tool's sign-in, where the tool can say: a word only when there's
-    something to do. */
-function ToolStatus({ id, signIn, installed }: { id: string; signIn: string; installed: boolean }) {
-  const [signedIn, setSignedIn] = useState<boolean | null | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    setSignedIn(undefined);
-    if (installed) void command<boolean | null>('cli_status', { id }).then(value => { if (live) setSignedIn(value); }).catch(() => { if (live) setSignedIn(null); });
-    return () => { live = false; };
-  }, [id, installed]);
-  if (!installed) return <p className="field-help">{t('settings.brain.notInstalled')}</p>;
-  if (signedIn === undefined) return <p className="field-help"><LoaderCircle size={11} className="spin" /></p>;
-  if (signedIn === false) return <p className="field-help">{t('settings.brain.notSignedIn')} · <code>{signIn}</code></p>;
-  return signedIn ? <p className="field-help"><Check size={11} /> {t('settings.brain.signedIn')}</p> : null;
 }
 
 /** What this cloud brain may see, asked where it is picked. */

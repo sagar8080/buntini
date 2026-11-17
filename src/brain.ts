@@ -47,7 +47,6 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
   { id: 'claude-code', name: 'Claude Code', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'claude' },
   { id: 'codex', name: 'Codex', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'codex login' },
   { id: 'gemini-cli', name: 'Gemini CLI', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'gemini' },
-  { id: 'cursor', name: 'Cursor', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'cursor-agent login' },
   { id: 'copilot', name: 'Copilot', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'copilot login' },
   // LM Studio's server on this Mac, ready-made.
   { id: 'lmstudio', name: 'LM Studio', model: '', input: 0, output: 0, keys: '', kind: 'server' },
