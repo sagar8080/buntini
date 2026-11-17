@@ -144,7 +144,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
-    if (name === 'check_server') return { base: 'http://localhost:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
+    if (name === 'check_server') return { base: 'http://127.0.0.1:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
     // The preview has no download to run: it shows setup partway through.
     if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;
@@ -178,7 +178,7 @@ export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskE
   if (!desktop) throw new Error('This is the browser preview. Open Buntini with npm run desktop to run local tools and chat with Qwen.');
   const channel = new Channel<TaskEvent>();
   channel.onmessage = onEvent;
-  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path } : { kind: 'window', id: item.id });
+  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path, brain: item.brain } : { kind: 'window', id: item.id, brain: item.brain });
   return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null, attachments: sent.length ? sent : null });
 }
 export async function continueTask(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, onEvent: (event: TaskEvent) => void): Promise<TaskRecord> {

@@ -47,7 +47,6 @@ export const cloudProviders: { id: CloudProvider; name: string; model: string; i
   { id: 'claude-code', name: 'Claude Code', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'claude' },
   { id: 'codex', name: 'Codex', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'codex login' },
   { id: 'gemini-cli', name: 'Gemini CLI', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'gemini' },
-  { id: 'cursor', name: 'Cursor', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'cursor-agent login' },
   { id: 'copilot', name: 'Copilot', model: '', input: 0, output: 0, keys: '', kind: 'tool', signIn: 'copilot login' },
   // LM Studio's server on this Mac, ready-made.
   { id: 'lmstudio', name: 'LM Studio', model: '', input: 0, output: 0, keys: '', kind: 'server' },
@@ -61,8 +60,9 @@ export function offeredProviders(installed: string[] | undefined, chosen: CloudP
   return cloudProviders.filter(item => item.kind !== 'tool' || item.id === chosen || (installed ?? []).includes(item.id));
 }
 
-/** LM Studio's usual address on this Mac. */
-export const lmStudioAddress = 'localhost:1234';
+/** LM Studio's usual address on this Mac, as the literal IPv4 loopback: "localhost" can
+    mean ::1 first, where another program could be listening. */
+export const lmStudioAddress = '127.0.0.1:1234';
 
 // Read in the language spoken when shown.
 export const backendLabel: Readonly<Record<ModelBackend, string>> = { apple: 'Apple Intelligence', get mlx() { return t('brain.backend.mlx'); }, get cloud() { return t('brain.backend.cloud'); } };

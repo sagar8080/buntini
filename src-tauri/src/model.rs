@@ -66,6 +66,57 @@ pub fn server_address(settings: &Settings) -> Option<Result<String, String>> {
     }
 }
 
+/// A key for the user's own server is saved with the address it was given for, so it goes
+/// to that address and to no other.
+pub fn bound_key(base: &str, key: &str) -> String {
+    serde_json::json!({"base": base, "key": key}).to_string()
+}
+
+/// The address a saved server key belongs to, and the key. One saved by an earlier version,
+/// with no address, belongs to the address the settings had when it was saved (`legacy`).
+fn key_and_address(saved: &str, legacy: Option<String>) -> (Option<String>, String) {
+    match serde_json::from_str::<Value>(saved) {
+        Ok(bound) if bound.is_object() => (bound["base"].as_str().map(str::to_string), bound["key"].as_str().unwrap_or_default().to_string()),
+        _ => (legacy, saved.to_string()),
+    }
+}
+
+/// The key to send to the user's own server at `base`: the saved one only when it was saved
+/// for that address, else none.
+pub fn server_key_for(saved: &str, base: &str, legacy: Option<String>) -> String {
+    match key_and_address(saved, legacy) {
+        (Some(address), key) if address == base => key,
+        _ => String::new(),
+    }
+}
+
+/// The saved key for the server these settings use, at `base`.
+pub fn server_key(settings: &Settings, base: &str) -> String {
+    let Ok(saved) = crate::web::credential(&settings.cloud_provider) else { return String::new() };
+    server_key_for(&saved, base, server_address(settings).and_then(Result::ok))
+}
+
+/// Whether moving from `previous` to `next` takes "Your server" away from the address its
+/// saved key was given for: then the key is forgotten.
+pub fn server_key_stale(saved: &str, previous: &Settings, next: &Settings) -> bool {
+    let legacy = cloud::server_base(&previous.cloud_url).ok();
+    let (address, _) = key_and_address(saved, legacy);
+    address != cloud::server_base(&next.cloud_url).ok()
+}
+
+/// Forgets the saved "Your server" key once the address it was given for changes.
+pub fn keep_server_key_with_its_address(previous: &Settings, next: &Settings) {
+    // Tests never touch the Keychain of the Mac they run on.
+    if cfg!(test) || previous.cloud_url.trim() == next.cloud_url.trim() {
+        return;
+    }
+    if let Ok(saved) = crate::web::credential("custom") {
+        if server_key_stale(&saved, previous, next) {
+            let _ = crate::web::set_credential("custom", "");
+        }
+    }
+}
+
 /// Whether the brain these settings use can be shown pictures.
 pub fn sees_images(settings: &Settings) -> bool {
     backend(settings) == Backend::Cloud && cloud::provider(&settings.cloud_provider).is_some_and(|provider| provider.sees_images)
@@ -469,7 +520,9 @@ impl ModelHub {
         // The user's own server isn't billed by Buntini's count, and its key is optional.
         if let Some(address) = server_address(settings) {
             let base = address?;
-            let key = crate::web::credential(provider.id).unwrap_or_default();
+            let key = server_key(settings, &base);
+            // Mail and pages can't pose as turns of the conversation on the server's model.
+            let payload = cloud::disarmed(&payload);
             return match cloud::generate(provider, settings.cloud_model.trim(), &key, &payload, Some(&base), cancel, on_token).await {
                 Ok((turn, _)) => Ok(turn),
                 Err(cloud::Failure::Rejected(message) | cloud::Failure::Failed(message)) => Err(message),
@@ -614,6 +667,21 @@ pub fn apple_advice(reason: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_server_key_goes_only_to_the_address_it_was_saved_for() {
+        let saved = bound_key("http://127.0.0.1:11434/v1", "secret");
+        assert_eq!(server_key_for(&saved, "http://127.0.0.1:11434/v1", None), "secret");
+        assert_eq!(server_key_for(&saved, "https://elsewhere.example/v1", None), "", "a new address never gets it");
+        // A key from before addresses were kept belongs to the address saved with the settings.
+        assert_eq!(server_key_for("legacy", "http://127.0.0.1:11434/v1", Some("http://127.0.0.1:11434/v1".into())), "legacy");
+        assert_eq!(server_key_for("legacy", "https://elsewhere.example/v1", Some("http://127.0.0.1:11434/v1".into())), "");
+        let at = |url: &str| Settings { cloud_provider: "custom".into(), cloud_url: url.into(), ..Settings::default() };
+        assert!(!server_key_stale(&saved, &at("localhost:11434"), &at("127.0.0.1:11434")), "the same server, written another way");
+        assert!(server_key_stale(&saved, &at("localhost:11434"), &at("https://elsewhere.example")), "moving away forgets it");
+        assert!(server_key_stale("legacy", &at("localhost:11434"), &at("studio.local:1234")));
+        assert!(!server_key_stale(&bound_key("https://elsewhere.example/v1", "k"), &at("localhost:11434"), &at("https://elsewhere.example")), "a key just saved for the new address stays");
+    }
 
     fn settings(backend: &str) -> Settings {
         Settings {

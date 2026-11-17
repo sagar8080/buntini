@@ -364,7 +364,6 @@ pub fn run() {
             attach::pet_drop,
             attach::forget_window,
             attach::pick_files,
-            cli::cli_status,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

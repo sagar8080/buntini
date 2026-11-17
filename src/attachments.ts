@@ -1,18 +1,31 @@
-import type { Attached } from './types';
+import type { Attached, Settings } from './types';
 
 /* What sits in the composer to go with the next messages: files, and at most one window.
-   They stay until removed or a new topic starts, so follow-up questions see them too. */
+   They stay until removed or a new topic starts, so follow-up questions see them too. Each
+   goes only to the brain it was attached under: when the brain changes, by the person or by
+   Buntini, it leaves the composer. */
+
+/** Which brain the settings use, as attach.rs brain_key has it: a server by its address. */
+export function brainKey(settings: Pick<Settings, 'modelBackend' | 'cloudProvider' | 'cloudUrl'>): string {
+  if (settings.modelBackend !== 'cloud') return settings.modelBackend;
+  return settings.cloudProvider === 'custom' ? `cloud:custom:${settings.cloudUrl.trim()}` : `cloud:${settings.cloudProvider}`;
+}
+
+/** What may still go with a message to `brain`, and what was attached under another. */
+export function forBrain(current: Attached[], brain: string): { kept: Attached[]; dropped: Attached[] } {
+  return { kept: current.filter(item => item.brain === brain), dropped: current.filter(item => item.brain !== brain) };
+}
 
 /** As many as Buntini takes with one message (attach.rs MAX_ATTACHMENTS). */
 export const maxAttached = 6;
 
-/** Adds files, each once, up to the limit. */
-export function addFiles(current: Attached[], paths: string[], limit = maxAttached): Attached[] {
+/** Adds files, each once, up to the limit, attached under `brain`. */
+export function addFiles(current: Attached[], paths: string[], brain: string, limit = maxAttached): Attached[] {
   const next = [...current];
   for (const path of paths) {
     if (!path.startsWith('/') || next.some(item => item.kind === 'file' && item.path === path)) continue;
     if (next.length >= limit) break;
-    next.push({ kind: 'file', path });
+    next.push({ kind: 'file', path, brain });
   }
   return next;
 }

@@ -2535,33 +2535,63 @@ pub(crate) async fn control_music(
         );
     }
     let parts: Vec<&str> = result.trim().split('\t').collect();
-    Ok(match (action, parts.as_slice()) {
-        (_, ["closed"]) => format!("{name} isn’t open, so nothing is playing."),
-        (_, ["stopped"]) => format!("Nothing is playing in {name}."),
-        ("now_playing", [state, track, show, episode]) if app == "tv" => format!(
-            "{name} is {}: “{track}”{}.",
-            if *state == "paused" { "paused on" } else { "playing" },
-            from_show(show, episode)
-        ),
-        (_, ["track", title, show]) if app == "tv" => format!("Playing “{title}”{} in {name}.", from_show(show, "")),
-        ("next", _) if app == "tv" => format!("Skipped to the next episode in {name}."),
-        ("previous", _) if app == "tv" => format!("Went back in {name}."),
-        ("now_playing", [state, track, artist, album]) => format!(
-            "{name} is {}: “{track}” by {artist}, from {album}.",
-            if *state == "paused" {
-                "paused on"
-            } else {
-                "playing"
-            }
-        ),
-        (_, ["playlist", playlist]) => format!("Playing the “{playlist}” playlist in {name}."),
-        (_, ["track", track, artist]) => format!("Playing “{track}” by {artist} in {name}."),
-        (_, ["notfound"]) => format!("Nothing in your {name} library matches that."),
-        ("pause", _) => format!("Paused {name}."),
-        ("next", _) => format!("Skipped to the next track in {name}."),
-        ("previous", _) => format!("Went back a track in {name}."),
-        _ => format!("{name} is playing."),
-    })
+    let read = action == "now_playing" || matches!(parts.as_slice(), ["closed"] | ["stopped"] | ["notfound"]);
+    if read {
+        return Ok(played(app, name, action, &parts, None));
+    }
+    // The player is asked once, a moment later, what it's doing now: only that is claimed.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let now = osascript(script, &["now_playing".into(), String::new()], 10).await.unwrap_or_default();
+    Ok(played(app, name, action, &parts, Some(now.trim())))
+}
+
+/// What a playback request did, in words: `result` is the player's answer to the request and
+/// `now` its state read back afterwards. A change is claimed only when `now` shows it;
+/// otherwise the reply says what was asked.
+fn played(app: &str, name: &str, action: &str, result: &[&str], now: Option<&str>) -> String {
+    let tv = app == "tv";
+    match (action, result) {
+        (_, ["closed"]) => return format!("{name} isn’t open, so nothing is playing."),
+        (_, ["stopped"]) => return format!("Nothing is playing in {name}."),
+        (_, ["notfound"]) => return format!("Nothing in your {name} library matches that."),
+        ("now_playing", [state, track, show, episode]) if tv => {
+            return format!("{name} is {}: “{track}”{}.", if *state == "paused" { "paused on" } else { "playing" }, from_show(show, episode));
+        }
+        ("now_playing", [state, track, artist, album]) => {
+            return format!("{name} is {}: “{track}” by {artist}, from {album}.", if *state == "paused" { "paused on" } else { "playing" });
+        }
+        _ => {}
+    }
+    // The state read back: playing or paused, and on what.
+    let parts: Vec<&str> = now.unwrap_or_default().split('\t').collect();
+    let (state, on) = match parts.as_slice() {
+        [state @ ("playing" | "paused"), track, second, third] if !track.is_empty() => {
+            (*state, if tv { format!("“{track}”{}", from_show(second, third)) } else if second.is_empty() { format!("“{track}”") } else { format!("“{track}” by {second}") })
+        }
+        [state @ ("playing" | "paused" | "stopped"), ..] => (*state, String::new()),
+        ["closed"] => ("closed", String::new()),
+        _ => ("unknown", String::new()),
+    };
+    let playing = state == "playing";
+    let now_on = |fallback: String| if playing && !on.is_empty() { format!("{name} is now playing {on}.") } else { fallback };
+    match (action, result) {
+        ("pause", _) if matches!(state, "paused" | "stopped") => format!("Paused {name}."),
+        ("pause", _) if playing => format!("Asked {name} to pause, but it’s still playing."),
+        ("pause", _) => format!("Asked {name} to pause."),
+        ("next", _) => now_on(format!("Asked {name} for the next {}.", if tv { "episode" } else { "track" })),
+        ("previous", _) => now_on(format!("Asked {name} to go back.")),
+        (_, ["playlist", playlist]) if playing => format!("Playing the “{playlist}” playlist in {name}."),
+        (_, ["playlist", playlist]) => format!("Asked {name} to play the “{playlist}” playlist."),
+        (_, ["track", title, show]) if tv => {
+            if playing && parts.get(1) == Some(title) { format!("Playing “{title}”{} in {name}.", from_show(show, "")) } else { now_on(format!("Asked {name} to play “{title}”.")) }
+        }
+        (_, ["track", track, artist]) => {
+            if playing && parts.get(1) == Some(track) { format!("Playing “{track}” by {artist} in {name}.") } else { now_on(format!("Asked {name} to play “{track}” by {artist}.")) }
+        }
+        _ if playing && !on.is_empty() => format!("{name} is playing {on}."),
+        _ if playing => format!("{name} is playing."),
+        _ => format!("Asked {name} to play."),
+    }
 }
 
 fn matches_pressed_track(label: &str, state: &str) -> bool {
@@ -3334,6 +3364,26 @@ async fn connect_app_asked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_is_claimed_only_once_the_player_says_so() {
+        let ok: &[&str] = &["ok"];
+        assert_eq!(played("music", "Music", "pause", ok, Some("paused\tSo What\tMiles Davis\tKind of Blue")), "Paused Music.");
+        assert_eq!(played("music", "Music", "pause", ok, Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Asked Music to pause, but it’s still playing.");
+        assert_eq!(played("spotify", "Spotify", "pause", ok, Some("")), "Asked Spotify to pause.", "nothing read back, nothing claimed");
+        assert_eq!(played("music", "Music", "next", ok, Some("playing\tBlue in Green\tMiles Davis\tKind of Blue")), "Music is now playing “Blue in Green” by Miles Davis.");
+        assert_eq!(played("music", "Music", "next", ok, Some("closed")), "Asked Music for the next track.");
+        assert_eq!(played("tv", "TV", "next", ok, Some("paused\tEpisode 2\tSeverance\tSeason 1, Episode 2")), "Asked TV for the next episode.");
+        assert_eq!(played("music", "Music", "previous", ok, None), "Asked Music to go back.");
+        assert_eq!(played("music", "Music", "play", ok, Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Music is playing “So What” by Miles Davis.");
+        assert_eq!(played("music", "Music", "play", ok, Some("paused\tSo What\tMiles Davis\tKind of Blue")), "Asked Music to play.");
+        assert_eq!(played("music", "Music", "play", &["track", "So What", "Miles Davis"], Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Playing “So What” by Miles Davis in Music.");
+        assert_eq!(played("music", "Music", "play", &["track", "So What", "Miles Davis"], Some("stopped")), "Asked Music to play “So What” by Miles Davis.");
+        assert_eq!(played("music", "Music", "play", &["playlist", "Focus"], Some("playing\tA\tB\tC")), "Playing the “Focus” playlist in Music.");
+        assert_eq!(played("music", "Music", "play", &["playlist", "Focus"], Some("paused\tA\tB\tC")), "Asked Music to play the “Focus” playlist.");
+        assert_eq!(played("music", "Music", "now_playing", &["paused", "So What", "Miles Davis", "Kind of Blue"], None), "Music is paused on: “So What” by Miles Davis, from Kind of Blue.");
+        assert_eq!(played("music", "Music", "play", &["notfound"], None), "Nothing in your Music library matches that.");
+    }
 
     #[test]
     fn connecting_mail_tells_no_account_and_refusal_apart_from_a_failure() {

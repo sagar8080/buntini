@@ -87,7 +87,7 @@ async fn live_chat_brains_and_attachments() {
             .unwrap();
             state.store.lock().unwrap().save_task(&task).unwrap();
             if let Some(file) = case.attached {
-                crate::attach::stage(&task.id, vec![crate::attach::Attachment::File { path: fixtures.join(file).display().to_string() }]);
+                crate::attach::stage(&task.id, vec![crate::attach::Attachment::File { path: fixtures.join(file).display().to_string(), brain: None }]);
             }
             let started = std::time::Instant::now();
             let streamed = Arc::new(Mutex::new(String::new()));

@@ -371,6 +371,8 @@ pub(crate) async fn save_settings_in(
         state.active.lock().unwrap().remove(&reservation);
     }
     saved?;
+    // A key for "Your server" stays with the address it was given for.
+    crate::model::keep_server_key_with_its_address(&previous, &settings);
     state.audit("settings.saved", "Local preferences updated");
     Ok(settings)
 }
@@ -452,14 +454,32 @@ pub fn warm_up_soon(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move { warm_up(&app.state::<AppState>()).await });
 }
 /// Checks the user's own server from Settings: what address it means, what it offers, and
-/// whether that address can only be this Mac.
+/// whether that address can only be this Mac. A key given here is saved with that address
+/// once the server takes it, and a saved key only goes to the address it was saved for.
 #[tauri::command]
-pub async fn check_server(address: String, provider: Option<String>) -> Result<Value, String> {
-    let base = crate::cloud::server_base(&address)?;
-    // LM Studio keeps its own optional key; any other address is "Your server".
+pub async fn check_server(address: String, provider: Option<String>, key: Option<String>, state: State<'_, AppState>) -> Result<Value, String> {
+    // LM Studio is always at its own address and keeps its own optional key; any other
+    // address is "Your server".
     let id = if provider.as_deref() == Some("lmstudio") { "lmstudio" } else { "custom" };
-    let key = crate::web::credential(id).unwrap_or_default();
+    let base = if id == "lmstudio" { crate::cloud::LM_STUDIO.to_string() } else { crate::cloud::server_base(&address)? };
+    let given = key.map(|key| key.trim().to_string()).filter(|key| !key.is_empty());
+    if given.as_ref().is_some_and(|key| key.len() > 2048 || key.chars().any(char::is_control)) {
+        return Err("Invalid API key.".into());
+    }
+    let key = match &given {
+        Some(key) => key.clone(),
+        None => {
+            let settings = state.store.lock().unwrap().settings()?;
+            let legacy = if settings.cloud_provider == id { crate::model::server_address(&settings).and_then(Result::ok) } else { None };
+            crate::web::credential(id).map(|saved| crate::model::server_key_for(&saved, &base, legacy)).unwrap_or_default()
+        }
+    };
     let models = crate::cloud::server_models(&base, &key).await?;
+    if let Some(key) = given {
+        let _gate = state.config_gate.lock().await;
+        web::set_credential(id, &crate::model::bound_key(&base, &key))?;
+        state.audit("credential.updated", &format!("{id} credential updated in macOS Keychain"));
+    }
     Ok(json!({"base":base,"models":models,"onThisMac":crate::cloud::server_is_this_mac(&base)}))
 }
 
@@ -4421,6 +4441,12 @@ pub async fn run_task(
             return Err(error);
         }
     };
+    // What was attached goes only to the brain it was attached under, even when the brain
+    // changed by itself a moment ago.
+    if let Err(error) = crate::attach::same_brain(&attachments, &task_settings) {
+        state.active.lock().unwrap().remove(&task.id);
+        return Err(error);
+    }
     task.backend = task_settings.model_backend.clone();
     let mut approved = None;
     if mode == "web" {

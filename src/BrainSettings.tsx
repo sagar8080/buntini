@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Cloud, Cpu, KeyRound, LoaderCircle, Server, Terminal } from 'lucide-react';
 import IntelligenceMark from './IntelligenceMark';
 import LocalModel from './LocalModel';
@@ -61,12 +61,12 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
   const shares = <CloudShares name={provider.name} shared={draft.externalShares} onChange={value => update('externalShares', value)} />;
   if (provider.kind === 'server') return <div className="cloud-settings">
     {providers}
-    <ServerSettings key={provider.id} draft={draft} update={update} saved={saved} onError={onError} onKey={onKey} />
+    <ServerSettings key={provider.id} draft={draft} update={update} saved={saved} onError={onError} onRefresh={onRefresh} onNotice={onNotice} />
     {!draft.cloudOnThisMac && shares}
   </div>;
   if (provider.kind === 'tool') return <div className="cloud-settings">
     {providers}
-    <ToolStatus id={provider.id} signIn={provider.signIn || ''} installed={!!diagnostics.cliTools?.includes(provider.id)} />
+    {!diagnostics.cliTools?.includes(provider.id) && <p className="field-help">{t('settings.brain.notInstalled')}</p>}
     {shares}
   </div>;
   if (provider.id === 'chatgpt') return <div className="cloud-settings">
@@ -91,7 +91,7 @@ function CloudSettings({ draft, update, diagnostics, onError, onKey, onRefresh, 
 }
 
 /** The user's own server: its address, which of its models, and whether it stays on this Mac. */
-function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'draft' | 'update' | 'onError' | 'onKey'> & { saved: boolean }) {
+function ServerSettings({ draft, update, saved, onError, onRefresh, onNotice }: Pick<Props, 'draft' | 'update' | 'onError' | 'onRefresh' | 'onNotice'> & { saved: boolean }) {
   // LM Studio is always at its own address on this Mac; any other server is the one given.
   const lmStudio = draft.cloudProvider === 'lmstudio';
   const [address, setAddress] = useState(lmStudio ? lmStudioAddress : draft.cloudUrl);
@@ -101,8 +101,9 @@ function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'd
   async function connect() {
     setChecking(true);
     try {
-      if (key) { await onKey(lmStudio ? 'lmstudio' : 'custom', key); setKey(''); }
-      const server = await command<{ base: string; models: string[]; onThisMac: boolean }>('check_server', { address, provider: draft.cloudProvider });
+      // A key is saved with the address it was given for, once the server takes it.
+      const server = await command<{ base: string; models: string[]; onThisMac: boolean }>('check_server', { address, provider: draft.cloudProvider, key: key.trim() || null });
+      if (key.trim()) { setKey(''); await onRefresh(); onNotice(t('app.notice.keySaved')); }
       setFound(server);
       if (!lmStudio) { setAddress(server.base); update('cloudUrl', server.base); }
       if (!server.onThisMac) update('cloudOnThisMac', false);
@@ -112,28 +113,12 @@ function ServerSettings({ draft, update, saved, onError, onKey }: Pick<Props, 'd
   return <>
     {lmStudio
       ? <div className="row-actions"><button type="button" className="secondary-button" disabled={checking} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : <Server size={13} />} {t('settings.connect')}</button></div>
-      : <div className="key-input"><Server size={14} /><input autoComplete="off" spellCheck={false} value={address} onChange={event => setAddress(event.target.value)} placeholder="localhost:11434" aria-label={t('settings.brain.serverAddress')} /><button type="button" disabled={checking || !address.trim()} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : t('settings.connect')}</button></div>}
+      : <div className="key-input"><Server size={14} /><input autoComplete="off" spellCheck={false} value={address} onChange={event => setAddress(event.target.value)} placeholder="127.0.0.1:11434" aria-label={t('settings.brain.serverAddress')} /><button type="button" disabled={checking || !address.trim()} onClick={() => void connect()}>{checking ? <LoaderCircle size={14} className="spin" /> : t('settings.connect')}</button></div>}
     <div className="key-input"><KeyRound size={14} /><input type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={saved ? t('settings.keySaved') : t('settings.brain.apiKeyOptional')} aria-label={t('settings.brain.serverKey')} /></div>
     {found && <div className="chip-row" role="radiogroup" aria-label={t('settings.brain.model')}>{found.models.map(model => <button type="button" key={model} role="radio" aria-checked={model === draft.cloudModel.trim()} className={model === draft.cloudModel.trim() ? 'active' : ''} onClick={() => update('cloudModel', model)}>{model}</button>)}</div>}
     {!found && draft.cloudModel.trim() && <span className="field-help">{t('settings.brain.using', { model: draft.cloudModel.trim() })}</span>}
     {(found?.onThisMac || (!found && draft.cloudOnThisMac)) && <Toggle label={t('settings.brain.onThisMac')} checked={draft.cloudOnThisMac} onChange={value => update('cloudOnThisMac', value)} />}
   </>;
-}
-
-/** A command-line tool's sign-in, where the tool can say: a word only when there's
-    something to do. */
-function ToolStatus({ id, signIn, installed }: { id: string; signIn: string; installed: boolean }) {
-  const [signedIn, setSignedIn] = useState<boolean | null | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    setSignedIn(undefined);
-    if (installed) void command<boolean | null>('cli_status', { id }).then(value => { if (live) setSignedIn(value); }).catch(() => { if (live) setSignedIn(null); });
-    return () => { live = false; };
-  }, [id, installed]);
-  if (!installed) return <p className="field-help">{t('settings.brain.notInstalled')}</p>;
-  if (signedIn === undefined) return <p className="field-help"><LoaderCircle size={11} className="spin" /></p>;
-  if (signedIn === false) return <p className="field-help">{t('settings.brain.notSignedIn')} · <code>{signIn}</code></p>;
-  return signedIn ? <p className="field-help"><Check size={11} /> {t('settings.brain.signedIn')}</p> : null;
 }
 
 /** What this cloud brain may see, asked where it is picked. */
