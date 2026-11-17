@@ -13,6 +13,67 @@ public struct Approval: Codable, Equatable, Sendable {
     public let always: Bool
     /// The agent's plan, waiting to be started.
     public let plan: Bool
+    /// "Allow" can be offered: everything it approves is shown. Off when the detail had to be
+    /// cut or the request carries something the card can't show; then only Deny and In
+    /// terminal are. A Buntini that leaves it out offers no Allow.
+    public let allow: Bool
+    /// What an edit changes, line by line.
+    public let changes: [DiffLine]
+    /// What "Always" keeps, and where.
+    public let rules: [AgentRule]
+
+    private enum CodingKeys: String, CodingKey {
+        case agent, project, title, detail, code, always, plan, allow, changes, rules
+    }
+
+    public init(agent: String, project: String?, title: String, detail: String?, code: Bool, always: Bool, plan: Bool, allow: Bool, changes: [DiffLine] = [], rules: [AgentRule] = []) {
+        self.agent = agent
+        self.project = project
+        self.title = title
+        self.detail = detail
+        self.code = code
+        self.always = always
+        self.plan = plan
+        self.allow = allow
+        self.changes = changes
+        self.rules = rules
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agent = try c.decode(String.self, forKey: .agent)
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        title = try c.decode(String.self, forKey: .title)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        code = try c.decode(Bool.self, forKey: .code)
+        always = try c.decode(Bool.self, forKey: .always)
+        plan = try c.decodeIfPresent(Bool.self, forKey: .plan) ?? false
+        allow = try c.decodeIfPresent(Bool.self, forKey: .allow) ?? false
+        changes = try c.decodeIfPresent([DiffLine].self, forKey: .changes) ?? []
+        rules = try c.decodeIfPresent([AgentRule].self, forKey: .rules) ?? []
+    }
+
+    /// As Rust writes it: empty lists left out.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(agent, forKey: .agent)
+        try c.encodeIfPresent(project, forKey: .project)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encode(code, forKey: .code)
+        try c.encode(always, forKey: .always)
+        try c.encode(plan, forKey: .plan)
+        try c.encode(allow, forKey: .allow)
+        if !changes.isEmpty { try c.encode(changes, forKey: .changes) }
+        if !rules.isEmpty { try c.encode(rules, forKey: .rules) }
+    }
+}
+
+/// A rule "Always" keeps, as the agent writes it, and where it's kept.
+public struct AgentRule: Codable, Equatable, Sendable {
+    public let rule: String
+    /// This session or this project, in words.
+    public let place: String
 }
 
 /// One to four questions an agent asks.

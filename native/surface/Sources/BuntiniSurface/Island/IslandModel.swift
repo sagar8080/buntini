@@ -57,7 +57,10 @@ final class IslandModel: ObservableObject {
         if dragging && scene?.card == nil { return 110 }
         guard let card = scene?.card else { return max(130, 86 + CGFloat(scene?.pills.count ?? 0) * 30) }
         switch card.body {
-        case .approval: return 138
+        // The whole command and every changed line, scrolling past a point, and the rules
+        // Always keeps.
+        case .approval(let approval):
+            return 100 + (approval.title.count > 52 ? 18 : 0) + (ApprovalCardView.hasBody(approval) ? ApprovalCardView.bodyHeight(approval) + 8 : 0) + ApprovalCardView.rulesHeight(approval)
         case .question(let q): return 120 + CGFloat(min(q.questions.first?.options.count ?? 2, 4) > 3 ? 40 : 0)
         case .ticker: return 118
         case .diff: return 230
@@ -65,7 +68,8 @@ final class IslandModel: ObservableObject {
         case .recap: return 150
         case .usage: return 110
         case .service: return 150
-        case .mail: return 200
+        // A change or a plan waiting for Allow or Run lists every line it carries out.
+        case .mail(let mail): return mail.pending != nil || mail.plan != nil ? 290 : 200
         case .nowPlaying: return 112
         case .timer: return 100
         case .capture: return 150

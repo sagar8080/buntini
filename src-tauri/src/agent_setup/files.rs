@@ -91,11 +91,14 @@ export default {{
     .into_bytes()
 }
 
-/// Amp: a plugin that lets every tool run as it would and tells Buntini about it.
+/// Amp: a plugin that tells Buntini what each tool did, once it has run. It has no
+/// `tool.call` handler: Amp's plugin API has no answer there that leaves the call to Amp's own
+/// permissions ("allow" lets it run, and a handler must answer), so a tool shows on the
+/// ticker when its result comes.
 pub fn amp(socket: &Path) -> Vec<u8> {
     format!(
         r#"// Tells Buntini what Amp is doing, for its island. Written by Buntini; turning Amp off in
-// Buntini removes it. Every tool runs as it would without it.
+// Buntini removes it. It only listens: it never answers for a tool.
 import net from "node:net"
 
 const SOCKET = {socket}
@@ -112,10 +115,6 @@ const cwd = () => {{ try {{ return process.cwd() }} catch {{ return "" }} }}
 export default function (amp: any) {{
   amp.on("session.start", async (event: any, ctx: any) => {{ send({{ hook_event_name: "SessionStart", session_id: thread(event, ctx), cwd: cwd() }}) }})
   amp.on("agent.start", async (event: any, ctx: any) => {{ send({{ hook_event_name: "UserPromptSubmit", session_id: thread(event, ctx), cwd: cwd(), prompt: typeof event?.message === "string" ? event.message : "" }}) }})
-  amp.on("tool.call", async (event: any, ctx: any) => {{
-    send({{ hook_event_name: "PreToolUse", session_id: thread(event, ctx), cwd: cwd(), tool_name: String(event?.tool ?? ""), tool_input: event?.input ?? {{}} }})
-    return {{ action: "allow" }}
-  }})
   amp.on("tool.result", async (event: any, ctx: any) => {{ send({{ hook_event_name: event?.status === "error" ? "PostToolUseFailure" : "PostToolUse", session_id: thread(event, ctx), cwd: cwd(), tool_name: String(event?.tool ?? ""), tool_input: event?.input ?? {{}} }}) }})
   amp.on("agent.end", async (event: any, ctx: any) => {{ send({{ hook_event_name: "Stop", session_id: thread(event, ctx), cwd: cwd(), last_assistant_message: typeof event?.message === "string" ? event.message : "" }}) }})
 }}
@@ -221,7 +220,10 @@ mod tests {
         let js = String::from_utf8(opencode(socket)).unwrap();
         assert!(js.contains(r#"const SOCKET = "/Users/o\"neil/buntini/opencode.sock""#));
         let ts = String::from_utf8(amp(socket)).unwrap();
-        assert!(ts.contains("return { action: \"allow\" }"));
+        assert!(ts.contains(r#"const SOCKET = "/Users/o\"neil/buntini/opencode.sock""#));
+        // It never answers for a tool: no `tool.call` handler, nothing returned.
+        assert!(!ts.contains("tool.call") && !ts.contains("action"), "{ts}");
+        assert!(ts.contains("amp.on(\"tool.result\""));
         let (manifest, code) = hermes(socket);
         assert!(String::from_utf8(manifest).unwrap().starts_with("name: buntini\n"));
         assert!(String::from_utf8(code).unwrap().contains(r#"SOCKET = "/Users/o\"neil/buntini/opencode.sock""#));

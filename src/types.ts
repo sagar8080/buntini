@@ -178,7 +178,8 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 /** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 /** A coding agent's request, shown on the cat (agents.rs). `questions` is set when it asks rather than acts. */
-export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; createdAt: string }
+/** `allow`: everything Allow approves is shown, so it can be offered; otherwise only Deny and In terminal. `changes`: every line an edit changes. `rules`: what Always keeps, and where. */
+export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; allow?: boolean; changes?: { kind: string; text: string }[]; rules?: { rule: string; place: string }[]; createdAt: string }
 export interface AgentQuestion { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
 export interface AgentFinished { agent: string; project: string; message: string }
 export type AgentAnswer = { kind: 'allow' } | { kind: 'always' } | { kind: 'deny' } | { kind: 'terminal' } | { kind: 'answers'; answers: Record<string, string | string[]> };

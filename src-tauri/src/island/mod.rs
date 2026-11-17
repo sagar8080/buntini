@@ -140,12 +140,26 @@ static CHANGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 pub enum Op {
     /// Answers true: the command is wired.
     Ping,
+    /// A question typed in the island wasn't asked: the chat was busy. The island says so.
+    Busy,
 }
+
+/// How long the island says a question wasn't asked.
+const BUSY_MS: u64 = 4_000;
 
 #[tauri::command]
 pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
     match op {
         Op::Ping => Ok(serde_json::Value::Bool(true)),
+        Op::Busy => {
+            publish(vec![Offer {
+                card: Card { id: "busy".into(), source: Source::Island, body: CardBody::Vitals(crate::surface::cards::utilities::Vitals { line: t("island.notAsked") }) },
+                urgency: Urgency::Alert,
+                at_ms: surface::now_ms(),
+                ttl_ms: Some(BUSY_MS),
+            }]);
+            Ok(serde_json::Value::Null)
+        }
     }
 }
 
@@ -308,8 +322,8 @@ fn show_chat(app: &AppHandle) {
 }
 
 fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
-    // A click on the tour only moves it along.
-    if action.card.as_deref().is_some_and(|card| card.starts_with("demo:")) {
+    // A click on the tour only moves it along (every one is made that, `surface::tour_only`).
+    if action.card.as_deref().is_some_and(|card| card.starts_with(demo::PREFIX)) {
         demo::advance();
         return Ok(());
     }

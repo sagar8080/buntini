@@ -128,7 +128,8 @@ fn note_command_for(socket: &Path, event: &str) -> String {
 }
 
 /// Antigravity's tool hook: it must always answer, so without Buntini it lets the agent's
-/// own rules decide.
+/// own rules decide. "allow" is Antigravity's neutral answer, handing the call on to its next
+/// hook or default policy (antigravity.google/docs/hooks); `auto_approve` would approve it.
 fn antigravity_tool_command(socket: &Path) -> String {
     let path = shell_quote(&socket.to_string_lossy());
     format!(
@@ -582,6 +583,10 @@ fn status_line_edited(bytes: Option<&[u8]>, socket: &Path, on: bool, previous: O
 pub fn set_plan_usage(on: bool) -> Result<(), String> {
     let socket_dir = agents::socket_dir().ok_or("Buntini is still starting. Try again in a moment.")?;
     let dir = config_dir(Agent::Claude).filter(|dir| dir.is_dir()).ok_or("Claude Code isn’t set up on this Mac.")?;
+    plan_usage_at(&dir, socket_dir, on)
+}
+
+fn plan_usage_at(dir: &Path, socket_dir: &Path, on: bool) -> Result<(), String> {
     let path = dir.join(file_name(Agent::Claude));
     let kept = socket_dir.join("claude-statusline-previous.json");
     let previous = std::fs::read(&kept).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()).and_then(|value| value.get("previous").cloned()).filter(|value| !value.is_null());
@@ -613,6 +618,66 @@ pub fn refresh() {
     }
 }
 
+/// For Delete everything: Buntini's hooks and plugins come out of every agent, as switching
+/// each off does, Claude Code gets its own status line back, and what Buntini kept about the
+/// agents goes too: the week's recap, the copies of their settings files (which can hold
+/// keys), the markers that an agent has reached Buntini, and session scripts not yet run.
+/// `data_dir` and `cache_dir` are Buntini's own folders. Says what couldn't be done.
+pub fn erase(data_dir: &Path, cache_dir: &Path) -> Result<(), String> {
+    // Tests never touch the agents' real settings, nor what other tests hold in memory.
+    let dirs: fn(Agent) -> Option<PathBuf> = if cfg!(test) { |_| None } else { config_dir };
+    let erased = erase_at(data_dir, cache_dir, dirs);
+    if !cfg!(test) {
+        agents::forget();
+    }
+    erased
+}
+
+fn erase_at(data_dir: &Path, cache_dir: &Path, dirs: impl Fn(Agent) -> Option<PathBuf>) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for agent in Agent::ALL.into_iter().filter(|agent| kind(*agent).is_some()) {
+        let Some(dir) = dirs(agent).filter(|dir| dir.is_dir()) else { continue };
+        let status = status_at(agent, Some(dir.clone()));
+        if status.usage == Some(true) {
+            if let Err(problem) = plan_usage_at(&dir, data_dir, false) {
+                problems.push(problem);
+            }
+        }
+        if status.connected {
+            if let Err(problem) = connect_at(agent, &dir, data_dir, false) {
+                problems.push(problem);
+            }
+        }
+    }
+    let gone = |result: std::io::Result<()>, what: &str, problems: &mut Vec<String>| {
+        if let Err(error) = result.filter_not_found() {
+            problems.push(format!("Buntini couldn’t remove {what}: {error}"));
+        }
+    };
+    // After the hooks came out, since that keeps a copy of each file first.
+    gone(std::fs::remove_dir_all(data_dir.join("agent-backups")), "the copies of agents' settings", &mut problems);
+    gone(std::fs::remove_dir_all(cache_dir.join("agent-scripts")), "the session scripts", &mut problems);
+    gone(std::fs::remove_file(agents::recap::path(data_dir)), "the week with the agents", &mut problems);
+    gone(std::fs::remove_file(data_dir.join("claude-statusline-previous.json")), "Claude Code's status line", &mut problems);
+    for agent in Agent::ALL {
+        gone(std::fs::remove_file(data_dir.join(format!("{}.heard", agent.id()))), "an agent's marker", &mut problems);
+    }
+    if problems.is_empty() { Ok(()) } else { Err(problems.join(" ")) }
+}
+
+trait NotFoundIsFine {
+    fn filter_not_found(self) -> std::io::Result<()>;
+}
+
+impl NotFoundIsFine for std::io::Result<()> {
+    fn filter_not_found(self) -> std::io::Result<()> {
+        match self {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn coding_agents() -> Vec<CodingAgent> {
     Agent::ALL.into_iter().filter(|agent| kind(*agent).is_some()).map(|agent| status_at(agent, config_dir(agent))).collect()
@@ -637,6 +702,46 @@ mod tests {
 
     fn sockets() -> tempfile::TempDir {
         tempfile::Builder::new().prefix("buntini").tempdir().unwrap()
+    }
+
+    #[test]
+    fn delete_everything_takes_buntini_out_of_every_agent_and_forgets_them() {
+        let data = sockets();
+        let cache = tempfile::tempdir().unwrap();
+        let homes = tempfile::tempdir().unwrap();
+        let claude = homes.path().join("claude");
+        let amp = homes.path().join("amp");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::create_dir_all(amp.join("plugins")).unwrap();
+        let theirs = b"{\n  \"model\": \"opus\",\n  \"statusLine\": { \"type\": \"command\", \"command\": \"~/bin/line.sh\" }\n}\n";
+        std::fs::write(claude.join("settings.json"), theirs).unwrap();
+        connect_at(Agent::Claude, &claude, data.path(), true).unwrap();
+        plan_usage_at(&claude, data.path(), true).unwrap();
+        connect_at(Agent::Amp, &amp, data.path(), true).unwrap();
+        assert!(status_at(Agent::Claude, Some(claude.clone())).connected && status_at(Agent::Amp, Some(amp.clone())).connected);
+        std::fs::write(crate::agents::recap::path(data.path()), b"{}").unwrap();
+        std::fs::write(data.path().join("claude.heard"), b"").unwrap();
+        std::fs::create_dir_all(cache.path().join("agent-scripts")).unwrap();
+        std::fs::write(cache.path().join("agent-scripts/buntini-claude-1.command"), b"export BUNTINI_PROMPT='secret'").unwrap();
+        assert!(data.path().join("agent-backups").is_dir());
+
+        let dirs = |agent: Agent| match agent {
+            Agent::Claude => Some(claude.clone()),
+            Agent::Amp => Some(amp.clone()),
+            _ => None,
+        };
+        erase_at(data.path(), cache.path(), dirs).unwrap();
+        // The person's own settings, as they were, and no plugin of Buntini's.
+        let after: Value = serde_json::from_slice(&std::fs::read(claude.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(after, serde_json::from_slice::<Value>(theirs).unwrap());
+        assert!(!amp.join("plugins/buntini.ts").exists());
+        for gone in [data.path().join("agent-backups"), crate::agents::recap::path(data.path()), data.path().join("claude.heard"), data.path().join("claude-statusline-previous.json"), cache.path().join("agent-scripts")] {
+            assert!(!gone.exists(), "{}", gone.display());
+        }
+        // Again, with nothing left: nothing to do and nothing wrong.
+        erase_at(data.path(), cache.path(), dirs).unwrap();
+        // And the public one never reaches the real agents from a test.
+        erase(data.path(), cache.path()).unwrap();
     }
 
     fn installed(bytes: Option<&[u8]>, agent: Agent, socket_dir: &Path) -> Vec<u8> {

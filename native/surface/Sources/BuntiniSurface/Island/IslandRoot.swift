@@ -299,12 +299,24 @@ struct DropTarget: View {
     }
 }
 
-/// Picks the view for a card. Each part of Buntini owns its views in Cards/.
+/// Picks the view for a card. Each part of Buntini owns its views in Cards/. Nothing a card
+/// sends counts in the moment after it comes forward (`Arming`): that click was aimed at
+/// whatever was there before.
 struct CardView: View {
     let card: Card
     let send: (Action) -> Void
+    @State private var shown = Date()
 
     var body: some View {
+        views(send: { action in
+            if Arming.ready(since: shown) { send(action) }
+        })
+        .environment(\.armedSince, shown)
+        .onChange(of: card.id) { _ in shown = Date() }
+    }
+
+    @ViewBuilder
+    private func views(send: @escaping (Action) -> Void) -> some View {
         switch card.body {
         case .approval(let value): ApprovalCardView(card: card, approval: value, send: send)
         case .question(let value): QuestionCardView(card: card, question: value, send: send)

@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 pub use board::{Contribution, Offer, Urgency, ERROR_MS, FINISH_MS, HOLD_MS};
 pub use scene::{Action, Card, CardBody, Cat, Home, Mood, Pill, PillState, Placement, Scene, Source, CONTRACT};
 
@@ -83,9 +85,38 @@ pub fn front_card() -> Option<String> {
     hub.board.front().map(str::to_string)
 }
 
+/// How long the card `id` has been in front of the island. None when it isn't in front.
+pub fn shown_ms(id: &str, now_ms: u64) -> Option<u64> {
+    HUB.0.lock().unwrap().board.in_front_ms(id, now_ms)
+}
+
+/// Something on the island waits on the person: an approval or a question.
+pub fn waiting() -> bool {
+    HUB.0.lock().unwrap().board.waiting(now_ms())
+}
+
 /// Hands an action to the part that owns its source, as if it came from a surface: a
 /// shortcut that opens a pill, say.
 pub fn act(action: Action) {
+    dispatch(action);
+}
+
+/// What a click on the island's tour becomes: its cards and pills are samples that look like
+/// the real ones, so a click on one only moves the tour along, and never reaches the part
+/// whose card it imitates (the person's music, mail, timer or agents).
+fn tour_only(action: Action) -> Action {
+    let sample = |text: &str| text.starts_with(crate::island::demo::PREFIX);
+    let from_tour = action.card.as_deref().is_some_and(sample)
+        || matches!(&action.value, Some(Value::String(text)) if sample(text))
+        || action.value.as_ref().and_then(|value| value.get("pill")).and_then(Value::as_str).is_some_and(sample);
+    if !from_tour {
+        return action;
+    }
+    Action { source: Source::Island, card: Some(crate::island::demo::PREFIX.into()), name: "advance".into(), value: None }
+}
+
+fn dispatch(action: Action) {
+    let action = tour_only(action);
     let handler = HANDLERS.lock().unwrap().get(&action.source).cloned();
     if let Some(handler) = handler {
         handler(action);
@@ -302,16 +333,27 @@ fn route(bytes: &[u8]) {
         eprintln!("A surface action didn't read");
         return;
     };
-    let handler = HANDLERS.lock().unwrap().get(&action.source).cloned();
-    if let Some(handler) = handler {
-        handler(action);
-    }
+    dispatch(action);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+
+    #[test]
+    fn a_click_on_the_tour_only_moves_it_along() {
+        let tour = |source: Source, card: Option<&str>, name: &str, value: Option<Value>| tour_only(Action { source, card: card.map(str::to_string), name: name.into(), value });
+        let advance = Action { source: Source::Island, card: Some("demo:".into()), name: "advance".into(), value: None };
+        // Play on the tour's music, Sort on its inbox, Allow on its approval: none reach the real part.
+        assert_eq!(tour(Source::Media, Some("demo:np1"), "pause", None), advance);
+        assert_eq!(tour(Source::Mail, Some("demo:mail"), "sort", None), advance);
+        assert_eq!(tour(Source::Agents, Some("demo:a1"), "allow", None), advance);
+        assert_eq!(tour(Source::Agents, None, "pill", Some(Value::String("demo:claude-1".into()))), advance);
+        assert_eq!(tour(Source::Island, Some("drop"), "dropInto", Some(serde_json::json!({ "pill": "demo:claude-1", "paths": [] }))), advance);
+        // Real cards are left as they are.
+        let real = Action { source: Source::Media, card: Some("np1".into()), name: "pause".into(), value: None };
+        assert_eq!(tour_only(real.clone()), real);
+    }
 
     const FIXTURE: &str = include_str!("../../../native/surface/Fixtures/contract.json");
 

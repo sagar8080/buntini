@@ -294,6 +294,11 @@ where
     }
     // With their keys gone, developer services drop what they showed and any poll under way.
     crate::services::erase();
+    // Coding agents: Buntini's hooks and plugins come out of their settings, as when each is
+    // switched off, and its backups of those settings, the recap and its scripts go.
+    if let Err(error) = crate::agent_setup::erase(&state.data_dir, &state.cache_dir) {
+        failures.push(error);
+    }
     if let Err(error) = state.voice.clear_cache() {
         failures.push(error);
     }

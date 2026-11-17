@@ -179,9 +179,27 @@ public enum Lexicon {
     /// The text for `label`, its `{name}` placeholders filled. Before any words arrive (a
     /// fixture without them), the key shows, so a gap is plain to see.
     public static func text(_ label: Word, _ values: [String: String] = [:]) -> String {
-        var text = words?.labels[label.rawValue] ?? label.rawValue
-        for (name, value) in values { text = text.replacingOccurrences(of: "{\(name)}", with: value) }
-        return text
+        fill(words?.labels[label.rawValue] ?? label.rawValue, values)
+    }
+
+    /// `template` with each `{name}` it has replaced by its value, in one pass, as Rust and
+    /// TypeScript do: a value that itself says `{other}` stays as it is. Unknown names stay.
+    public static func fill(_ template: String, _ values: [String: String]) -> String {
+        guard !values.isEmpty else { return template }
+        var out = ""
+        var rest = template[...]
+        while let open = rest.firstIndex(of: "{") {
+            out += rest[..<open]
+            let after = rest.index(after: open)
+            if let close = rest[after...].firstIndex(of: "}"), let value = values[String(rest[after..<close])] {
+                out += value
+                rest = rest[rest.index(after: close)...]
+            } else {
+                out += "{"
+                rest = rest[after...]
+            }
+        }
+        return out + rest
     }
 
     /// The keys a set of words lacks, for the checks.

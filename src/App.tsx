@@ -34,6 +34,7 @@ import ConnectApps from './ConnectApps';
 import { AgentCard, AgentDone } from './AgentRequests';
 import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './voiceLoop';
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
+import { callIsland } from './island/api';
 import { applyFlowOnSave } from './flow/api';
 import { callUtilities } from './utilities/api';
 import { addFiles, addWindow, brainKey, forBrain, removeAttached } from './attachments';
@@ -458,7 +459,11 @@ export default function App() {
     // The island's wardrobe changed the cat's look.
     const look = listen('settings-changed', () => { void refresh().catch(() => {}); });
     // Typed in the island: asked here, where the answer shows.
-    const asked = listen<string>('island-ask', event => { void expand(true); void submitRef.current(event.payload); });
+    // It goes without the composer's attachments; dropped because something is under way, the island says so.
+    const asked = listen<string>('island-ask', event => {
+      void expand(true);
+      void submitRef.current(event.payload, undefined, undefined, false, true).then(taken => { if (taken === false) void callIsland({ op: 'busy' }).catch(() => {}); });
+    });
     // Buntini's language changed, from Settings or on the Mac.
     const spoken = listen<string>('language', event => { void speakLanguage(event.payload); });
     return () => { void subscription.then(unlisten => unlisten()); void apple.then(unlisten => unlisten()); void brain.then(unlisten => unlisten()); void look.then(unlisten => unlisten()); void asked.then(unlisten => unlisten()); void spoken.then(unlisten => unlisten()); };
@@ -574,11 +579,13 @@ export default function App() {
     else window.open(CHATGPT_URL, '_blank', 'noreferrer');
   }, []);
   // `spoken`: the user asked by voice, so the answer is spoken back unless they turned that off.
-  const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false) => {
+  // `fromIsland`: typed in the island, which shows no attachments, so none go with it.
+  // Resolves to false when the question wasn't asked because something else is under way.
+  const submit = useCallback(async (prompt: string = input, chosenMode: Mode = mode, approvalId?: string, spoken = false, fromIsland = false) => {
     // A spoken question arrives as the recording winds down, so it isn't held back by it.
-    if (!prompt.trim() || (sheetWaiting.current && !approvalId) || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return;
+    if (!prompt.trim() || (sheetWaiting.current && !approvalId) || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return false;
     // What's attached goes with an ordinary message only, never a lookup or a resumed one.
-    const sending = chosenMode === 'auto' && !approvalId ? attachedRef.current : [];
+    const sending = chosenMode === 'auto' && !approvalId && !fromIsland ? attachedRef.current : [];
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
