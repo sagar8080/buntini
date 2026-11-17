@@ -87,11 +87,29 @@ func recordPickIDs(_ request: [String: Any]) throws -> [String]? {
     return ids
 }
 
-func validatedRecordPick(_ json: String, ids: [String]) throws -> String {
+func validatedRecordPick(_ json: String, ids: [String], quote: Bool = false) throws -> String {
     func invalid() -> Failure { Failure(code: "invalid_record_pick", message: "Apple Intelligence returned a record that wasn't read.") }
-    guard let value = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
-          let picked = value["ids"] as? [String], Set(picked).isSubset(of: Set(ids)) else { throw invalid() }
-    let encoded = try JSONSerialization.data(withJSONObject: ["ids": picked], options: [.sortedKeys])
+    guard let value = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { throw invalid() }
+    let output: [String: Any]
+    if quote {
+        // The words are only the model's pointer: the controller shows them only when they
+        // are, word for word, in the record they point at.
+        guard let answers = value["answers"] as? [[String: Any]], answers.count <= ids.count + 1 else { throw invalid() }
+        var kept: [[String: String]] = []
+        for answer in answers {
+            guard let id = answer["id"] as? String, ids.contains(id) || id == "none", let words = answer["words"] as? String, words.count <= 400 else { throw invalid() }
+            if id != "none" {
+                kept.append(["id": id, "words": words])
+            }
+        }
+        let asks = value["asks"] as? String ?? "several"
+        guard ["one", "several"].contains(asks) else { throw invalid() }
+        output = ["answers": kept, "asks": asks]
+    } else {
+        guard let picked = value["ids"] as? [String], Set(picked).isSubset(of: Set(ids)) else { throw invalid() }
+        output = ["ids": picked]
+    }
+    let encoded = try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])
     guard let result = String(data: encoded, encoding: .utf8) else { throw invalid() }
     return result
 }
@@ -720,8 +738,21 @@ func researchSchema(sourceIDs: [String], evidenceKind: String = "pages") throws 
 }
 
 @available(macOS 26.0, *)
-func recordPickSchema(ids: [String], most: Int?) throws -> GenerationSchema {
+func recordPickSchema(ids: [String], most: Int?, quote: Bool = false) throws -> GenerationSchema {
     let record = DynamicGenerationSchema(name: "ChoiceNumber", description: "One of the numbers given", anyOf: ids)
+    if quote {
+        // One choice alone can't be generated, and "none" is a real answer: no record answers.
+        let record = DynamicGenerationSchema(name: "RecordNumber", description: "The number of a record, or none", anyOf: ids + ["none"])
+        let answer = DynamicGenerationSchema(name: "Answer", description: "A record that answers the question, and its words that do", properties: [
+            .init(name: "id", description: "The number of a record that answers the question", schema: record),
+            .init(name: "words", description: "The few words in that record that answer the question, copied exactly", schema: DynamicGenerationSchema(type: String.self)),
+        ])
+        return try GenerationSchema(root: DynamicGenerationSchema(name: "Answers", description: "The records that answer the question", properties: [
+            .init(name: "asks", description: "Whether the question asks about one record or several", schema: DynamicGenerationSchema(name: "HowMany", anyOf: ["one", "several"])),
+            // An array of at most one can't be generated, so there's always room for two.
+            .init(name: "answers", description: "One entry per record that answers the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: answer, minimumElements: 0, maximumElements: max(most ?? ids.count, 2))),
+        ]), dependencies: [])
+    }
     return try GenerationSchema(root: DynamicGenerationSchema(name: "Choice", description: "The numbers that answer the question", properties: [
         .init(name: "ids", description: most == 1 ? "The one number that answers the question" : "The numbers that answer the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: record, minimumElements: most == 1 ? 1 : 0, maximumElements: most ?? ids.count)),
     ]), dependencies: [])
@@ -812,9 +843,10 @@ func generate(_ id: String, _ request: [String: Any]) async {
         if let recordIDs = try recordPickIDs(request) {
             let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
             emit(["id": id, "type": "model_call", "stage": "pick"])
-            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int), options: GenerationOptions(temperature: 0))
+            let quote = request["record_quote"] as? Bool == true
+            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int, quote: quote), options: GenerationOptions(temperature: 0))
             try requireCompleteGeneration(result.rawContent.isComplete)
-            emit(["id": id, "type": "done", "text": try validatedRecordPick(result.content.jsonString, ids: recordIDs), "finish_reason": "stop"])
+            emit(["id": id, "type": "done", "text": try validatedRecordPick(result.content.jsonString, ids: recordIDs, quote: quote), "finish_reason": "stop"])
             return
         }
         if let sourceIDs = try researchSourceIDs(request) {
@@ -1926,6 +1958,17 @@ func contractSelfTest() async -> Int32 {
             }
         }
         try require(try validatedRecordPick("{\"ids\":[\"2\"]}", ids: ["1", "2"]) == "{\"ids\":[\"2\"]}", "A pick from the records read stands")
+        try require(try validatedRecordPick("{\"asks\":\"one\",\"answers\":[{\"id\":\"2\",\"words\":\"$18.40\"}]}", ids: ["1", "2"], quote: true) == "{\"answers\":[{\"id\":\"2\",\"words\":\"$18.40\"}],\"asks\":\"one\"}", "A pointer to words in a record read stands")
+        try require(try validatedRecordPick("{\"asks\":\"several\",\"answers\":[]}", ids: ["1", "2"], quote: true) == "{\"answers\":[],\"asks\":\"several\"}", "Pointing at nothing stands")
+        try require(try validatedRecordPick("{\"asks\":\"one\",\"answers\":[{\"id\":\"none\",\"words\":\"\"}]}", ids: ["1"], quote: true) == "{\"answers\":[],\"asks\":\"one\"}", "Pointing at none is pointing at nothing")
+        for invalid in ["{\"answers\":[{\"id\":\"3\",\"words\":\"x\"}]}", "{\"answers\":[{\"id\":\"1\"}]}", "{\"ids\":[\"1\"]}", "{\"asks\":\"all\",\"answers\":[]}"] {
+            do {
+                _ = try validatedRecordPick(invalid, ids: ["1", "2"], quote: true)
+                try require(false, "A pointer at a record that wasn't read, or without words, can't stand")
+            } catch let failure as Failure {
+                try require(failure.code == "invalid_record_pick", "A pointer outside the records read is rejected")
+            }
+        }
         do {
             _ = try validatedRecordPick("{\"ids\":[\"3\"]}", ids: ["1", "2"])
             try require(false, "A record that wasn't read can't be picked")
