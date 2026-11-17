@@ -2242,6 +2242,30 @@ fn select_mail_rows(
     Ok(selected)
 }
 
+/// How many of these rows came in on each day, and how many of those are unread, newest
+/// day first: (YYYY-MM-DD, messages, unread).
+fn mail_counts_by_day(rows: &[Vec<String>]) -> Vec<(String, usize, usize)> {
+    let mut days: Vec<(String, usize, usize)> = Vec::new();
+    for row in rows {
+        let Some(day) = row[0].get(..10).filter(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok()) else { continue };
+        let unread = usize::from(row[2] == "false");
+        match days.iter_mut().find(|(seen, ..)| seen == day) {
+            Some(entry) => {
+                entry.1 += 1;
+                entry.2 += unread;
+            }
+            None => days.push((day.to_string(), 1, unread)),
+        }
+    }
+    days.sort_by(|a, b| b.0.cmp(&a.0));
+    days
+}
+
+/// "Tue 17 Nov" for a YYYY-MM-DD day.
+fn day_name(day: &str) -> String {
+    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").map_or_else(|_| day.to_string(), |date| date.format("%a %-d %b").to_string())
+}
+
 fn mail_evidence(
     query: &str,
     unread: bool,
@@ -2306,12 +2330,21 @@ fn mail_evidence(
             .join("\n");
         format!("Email in the inbox, returned messages newest first:\n{lines}")
     };
+    // Every matching message is counted by day, so a count doesn't rest on the few shown.
+    let by_day = mail_counts_by_day(&found.rows);
     if !complete {
         display += &format!("\nPartial inbox result: showing {} of {} matching messages. Search covers only the last {days} days.", selected.len(), found.total);
+        if !by_day.is_empty() {
+            let exact = found.rows.len() == found.total;
+            let counts: Vec<String> = by_day.iter().map(|(day, all, unread)| format!("{}: {all} ({unread} unread)", day_name(day))).collect();
+            let scope = if exact { format!("all {}", found.total) } else { format!("the newest {} scanned", found.rows.len()) };
+            display += &format!("\nMatching messages by day received, counting {scope}: {}.", counts.join("; "));
+        }
     }
+    let counts: Vec<Value> = by_day.iter().map(|(day, all, unread)| json!({"day":day,"messages":all,"unread":unread})).collect();
     Ok(evidence(
         "mail",
-        json!({"app":"mail","mailbox":"inbox","query":query,"unreadOnly":unread,
+        json!({"app":"mail","mailbox":"inbox","query":query,"unreadOnly":unread,"countsByDay":counts,
         "lookbackDays":days,"limit":limit.clamp(1,8),"metadataScanLimit":300,"metadataScanned":found.rows.len(),
         "order":if found.rows.len() == found.total { "newest_first" } else { "newest_in_scanned_prefix" },"excerptLimit":500}),
         records,
@@ -3548,6 +3581,24 @@ mod tests {
             .unwrap()
             .rows
             .is_empty());
+    }
+
+    #[test]
+    fn a_partial_mail_read_still_counts_every_message_by_day() {
+        let inbox: Vec<(String, bool, String, String, String)> = (0..12)
+            .map(|at| {
+                let day = if at < 6 { "2026-11-17" } else { "2026-11-16" };
+                (format!("{day} {:02}:00", 20 - at), at % 4 != 0, format!("Sender {at}"), format!("Subject {at}"), "Hi".to_string())
+            })
+            .collect();
+        let rows: Vec<(&str, bool, &str, &str, &str)> = inbox.iter().map(|row| (row.0.as_str(), row.1, row.2.as_str(), row.3.as_str(), row.4.as_str())).collect();
+        let value = inbox_world("", false, 8, &rows);
+        let text = value["text"].as_str().unwrap();
+        assert!(text.contains("counting all 12: Tue 17 Nov: 6 (2 unread); Mon 16 Nov: 6 (1 unread)."), "{text}");
+        assert_eq!(value["scope"]["countsByDay"][1], json!({"day":"2026-11-16","messages":6,"unread":1}));
+        // Everything shown: nothing more to count.
+        let few = inbox_world("", false, 8, &rows[..3]);
+        assert!(!few["text"].as_str().unwrap().contains("by day"));
     }
 
     #[test]
