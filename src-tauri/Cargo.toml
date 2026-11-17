@@ -45,6 +45,9 @@ candle-core = { version = "0.11.1", features = ["accelerate"] }
 candle-nn = "0.11.1"
 candle-transformers = "0.11.1"
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
+# Lists an update's entries before anything is unpacked. Already built for candle; no
+# compression features, so only stored entries (links) are ever read.
+zip = { version = "9.2", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"

@@ -4,16 +4,22 @@
 //!   It looks for a newer published release of Buntini on GitHub.
 //! - **What Install checks:**
 //!   - the zip's size and SHA-256 against the release's `SHA256SUMS.txt`;
-//!   - the app inside: bundle `app.buntini.companion`, Developer ID team `UU6JNBQ2T8`, the
-//!     release's version, a strict signature check, and Gatekeeper.
+//!   - before anything is unpacked, every entry in the zip: only `Buntini.app/…`, no absolute
+//!     or `..` paths, links only to places inside the app, and one entry per name;
+//!   - the app inside: a strict signature check that codesign itself holds to Buntini's code
+//!     requirement (Developer ID team `UU6JNBQ2T8`, bundle `app.buntini.companion`, notarized),
+//!     the same bundle id and the release's version in its Info.plist, and Gatekeeper, which
+//!     must be on.
 //! - **Restart:** only after all of that, and when you press Restart, does the new copy take
-//!   this one's place and open.
+//!   this one's place and open. It is checked again first, since it may have waited for hours.
+//!   It waits in a cache folder only you can open.
 //! - **What's new:** shows once, after the update.
-use std::io::Write;
+use std::collections::HashSet;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -33,6 +39,9 @@ const SUMS: &str = "SHA256SUMS.txt";
 const BUNDLE: &str = "app.buntini.companion";
 const TEAM: &str = "UU6JNBQ2T8";
 const MAX_ZIP: u64 = 400 * 1024 * 1024;
+/// What the zip may unpack to, and how many entries it may hold.
+const MAX_UNPACKED: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_ENTRIES: usize = 20_000;
 const CARD: &str = "update";
 /// You were asked once whether Buntini may look for updates.
 const ASKED: &str = "updates.asked";
@@ -113,14 +122,28 @@ pub fn start(app: AppHandle) {
             show(&app, Stage::Asking);
         }
         loop {
-            let checked = preference(&app, CHECKED_AT).and_then(|at| at.parse::<u64>().ok()).unwrap_or(0);
-            if allowed(&app) && surface::now_ms().saturating_sub(checked) >= DAY_MS && matches!(stage(), Stage::Idle | Stage::Current) {
+            let checked = preference(&app, CHECKED_AT).and_then(|at| at.parse::<u64>().ok());
+            if allowed(&app) && check_due(checked, wall_ms()) && matches!(stage(), Stage::Idle | Stage::Current) {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { check(&app, false).await });
             }
             std::thread::sleep(Duration::from_secs(60 * 60));
         }
     });
+}
+
+/// Unix milliseconds by the wall clock, which, unlike `surface::now_ms`, carries across launches.
+fn wall_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
+}
+
+/// A day since the last look. A time from the future (the clock moved back) or from before
+/// this was wall-clock time counts as long ago.
+pub(crate) fn check_due(checked: Option<u64>, now: u64) -> bool {
+    match checked {
+        Some(at) if at <= now => now - at >= DAY_MS,
+        _ => true,
+    }
 }
 
 /// From the menu bar: look now, and say so when this is the newest.
@@ -142,7 +165,7 @@ async fn check(app: &AppHandle, asked: bool) {
             return;
         }
     };
-    set_preference(app, CHECKED_AT, &surface::now_ms().to_string());
+    set_preference(app, CHECKED_AT, &wall_ms().to_string());
     let current = app.package_info().version.to_string();
     match latest {
         Some(release) if newer(&release.version, &current) => show(app, Stage::Available(release)),
@@ -223,9 +246,11 @@ async fn install(app: AppHandle, release: Release) {
 
 async fn prepare(app: &AppHandle, release: &Release) -> Result<PathBuf, String> {
     this_app()?;
-    let folder = updates_dir(app)?.join(&release.version);
+    let dir = updates_dir(app)?;
+    private_dir(&dir).map_err(|_| t("updates.error.noRoom"))?;
+    let folder = dir.join(&release.version);
     let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).map_err(|_| t("updates.error.noRoom"))?;
+    private_dir(&folder).map_err(|_| t("updates.error.noRoom"))?;
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15 * 60))
@@ -255,6 +280,11 @@ async fn prepare(app: &AppHandle, release: &Release) -> Result<PathBuf, String> 
     let version = release.version.clone();
     let unpacked = folder.join("app");
     tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
+        // The checksums come from the same release as the zip, so they prove only that the
+        // download is whole: nothing in it is unpacked until every entry is known to stay
+        // inside Buntini.app.
+        check_archive(&zip)?;
+        private_dir(&unpacked).map_err(|_| t("updates.error.noRoom"))?;
         run("/usr/bin/ditto", &["-x".as_ref(), "-k".as_ref(), zip.as_os_str(), unpacked.as_os_str()]).map_err(|_| t("updates.error.unzip"))?;
         let _ = std::fs::remove_file(&zip);
         let new_app = unpacked.join("Buntini.app");
@@ -342,32 +372,277 @@ fn run(program: &str, args: &[&std::ffi::OsStr]) -> Result<std::process::Output,
     if output.status.success() { Ok(output) } else { Err(()) }
 }
 
-/// The new copy is Buntini, from its developer, the version the release says, and Gatekeeper
-/// lets it open.
+/// The code requirement the new copy must meet, which codesign itself enforces: Apple's
+/// Developer ID chain, issued to Buntini's team, for Buntini's bundle id, and (for an update)
+/// notarized by Apple.
+fn requirement(notarized: bool) -> String {
+    format!(
+        "={}anchor apple generic and identifier \"{BUNDLE}\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"{TEAM}\"",
+        if notarized { "notarized and " } else { "" }
+    )
+}
+
+/// The new copy is Buntini, from its developer and notarized, the version the release says,
+/// and Gatekeeper lets it open.
 fn verify(app: &Path, version: &str) -> Result<(), String> {
-    if !app.join("Contents/Info.plist").is_file() {
+    let plist = app.join("Contents/Info.plist");
+    if !plist.is_file() {
         return Err(t("updates.error.noApp"));
     }
-    let path = app.as_os_str();
-    run("/usr/bin/codesign", &["--verify".as_ref(), "--deep".as_ref(), "--strict".as_ref(), path]).map_err(|_| t("updates.error.brokenSignature"))?;
-    let details = Command::new("/usr/bin/codesign").args(["-dv".as_ref(), "--verbose=2".as_ref(), path]).output().map_err(|_| t("updates.error.readSignature"))?;
-    let (identifier, team) = signed_by(&String::from_utf8_lossy(&details.stderr));
-    if identifier.as_deref() != Some(BUNDLE) || team.as_deref() != Some(TEAM) {
+    signed_by_buntini(app, true)?;
+    if plist_value(&plist, "CFBundleIdentifier").as_deref() != Some(BUNDLE) {
         return Err(t("updates.error.otherDeveloper"));
     }
-    let plist = app.join("Contents/Info.plist");
-    let shown = run("/usr/libexec/PlistBuddy", &["-c".as_ref(), "Print :CFBundleShortVersionString".as_ref(), plist.as_os_str()]).map_err(|_| t("updates.error.readVersion"))?;
-    if String::from_utf8_lossy(&shown.stdout).trim() != version {
+    if plist_value(&plist, "CFBundleShortVersionString").ok_or_else(|| t("updates.error.readVersion"))? != version {
         return Err(t("updates.error.otherVersion"));
     }
-    run("/usr/sbin/spctl", &["--assess".as_ref(), "--type".as_ref(), "execute".as_ref(), path]).map_err(|_| t("updates.error.gatekeeper"))?;
+    gatekeeper(app)
+}
+
+/// codesign checks the whole bundle strictly and holds it to Buntini's requirement. Only its
+/// exit status counts, never what it prints: the bundle's author chooses names that appear
+/// there.
+fn signed_by_buntini(app: &Path, notarized: bool) -> Result<(), String> {
+    let status = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict", "-R"])
+        .arg(requirement(notarized))
+        .arg(app)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|_| t("updates.error.readSignature"))?;
+    match status.code() {
+        Some(0) => Ok(()),
+        // Soundly signed, but not by Buntini's developer, or not notarized.
+        Some(3) => Err(t("updates.error.otherDeveloper")),
+        _ => Err(t("updates.error.brokenSignature")),
+    }
+}
+
+/// One value from an Info.plist.
+fn plist_value(plist: &Path, key: &str) -> Option<String> {
+    let print = format!("Print :{key}");
+    let shown = run("/usr/libexec/PlistBuddy", &["-c".as_ref(), print.as_ref(), plist.as_os_str()]).ok()?;
+    Some(String::from_utf8_lossy(&shown.stdout).trim().to_string())
+}
+
+/// Gatekeeper accepts the copy for itself: an `override=` means assessments are switched off
+/// and anything would pass.
+fn gatekeeper(app: &Path) -> Result<(), String> {
+    let output = Command::new("/usr/sbin/spctl")
+        .args(["--assess", "--type", "execute", "-vv"])
+        .arg(app)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|_| t("updates.error.gatekeeper"))?;
+    let said = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    gatekeeper_verdict(output.status.success(), &said)
+}
+
+pub(crate) fn gatekeeper_verdict(accepted: bool, said: &str) -> Result<(), String> {
+    if said.contains("override=") {
+        return Err(t("updates.error.gatekeeperOff"));
+    }
+    if accepted { Ok(()) } else { Err(t("updates.error.gatekeeper")) }
+}
+
+/// Every entry of the downloaded zip, checked before `ditto` unpacks any of it. The checksums
+/// come from the same release, so they can't vouch for what is inside.
+/// - **Names:** inside `Buntini.app/`, with no absolute path, `..`, `.`, empty part, backslash
+///   or control character, and each once, ignoring case as the Mac's disk does.
+/// - **Kinds:** from a Unix system, as ditto writes them, and only folders, files and links,
+///   with no setuid, setgid or sticky bit.
+/// - **Links:** stored as they are, relative, leading inside the app, never climbing back out
+///   of another link, and nothing unpacked through one.
+/// - **Layout:** one index, closing the file, whose entries lie back to back from the start,
+///   each named as its own header names it: an unzipper reading from the front finds the same
+///   entries as one reading the index.
+pub(crate) fn check_archive(path: &Path) -> Result<(), String> {
+    check_entries(path).map_err(|_| t("updates.error.unsafeArchive"))
+}
+
+/// An entry as its local header and the index describe it.
+struct Entry {
+    parts: Vec<String>,
+    link: Option<usize>,
+    start: u64,
+    end: u64,
+    descriptor: bool,
+    crc: u32,
+}
+
+const LOCAL: [u8; 4] = *b"PK\x03\x04";
+const CENTRAL: [u8; 4] = *b"PK\x01\x02";
+const DESCRIPTOR: [u8; 4] = *b"PK\x07\x08";
+const END: [u8; 4] = *b"PK\x05\x06";
+
+fn le16(bytes: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([bytes[at], bytes[at + 1]])
+}
+
+fn le32(bytes: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+}
+
+fn read_at(file: &mut std::fs::File, at: u64, into: &mut [u8]) -> Result<(), ()> {
+    file.seek(SeekFrom::Start(at)).map_err(drop)?;
+    file.read_exact(into).map_err(drop)
+}
+
+fn check_entries(path: &Path) -> Result<(), ()> {
+    let mut file = std::fs::File::open(path).map_err(drop)?;
+    let length = file.metadata().map_err(drop)?.len();
+    // The end record closes the file, with no comment to hide another one in.
+    let mut end = [0u8; 22];
+    read_at(&mut file, length.checked_sub(22).ok_or(())?, &mut end)?;
+    if end[..4] != END || le16(&end, 20) != 0 {
+        return Err(());
+    }
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(std::fs::File::open(path).map_err(drop)?)).map_err(drop)?;
+    if archive.offset() != 0 || archive.is_empty() || archive.len() > MAX_ENTRIES {
+        return Err(());
+    }
+    let mut entries = Vec::with_capacity(archive.len());
+    let mut names = HashSet::new();
+    let mut unpacked = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index).map_err(drop)?;
+        let name = std::str::from_utf8(entry.name_raw()).map_err(drop)?;
+        let parts = entry_parts(name)?;
+        // The index's own record, read as written: the zip crate drops setuid bits, and makes
+        // up a mode for entries from other systems.
+        let mut central = [0u8; 46];
+        read_at(&mut file, entry.central_header_start(), &mut central)?;
+        if central[..4] != CENTRAL || central[5] != 3 {
+            return Err(());
+        }
+        let mode = le32(&central, 38) >> 16;
+        let folder = name.ends_with('/');
+        let fits = match mode & 0o170000 {
+            0o040000 => folder,
+            0o100000 | 0o120000 => !folder,
+            _ => false,
+        };
+        if !fits || mode & 0o7000 != 0 || entry.encrypted() || !names.insert(parts.join("/").to_lowercase()) {
+            return Err(());
+        }
+        unpacked = unpacked.checked_add(entry.size()).filter(|total| *total <= MAX_UNPACKED).ok_or(())?;
+        // The entry's local header says what the index says: the same name, method and flags.
+        let mut local = [0u8; 30];
+        read_at(&mut file, entry.header_start(), &mut local)?;
+        if local[..4] != LOCAL {
+            return Err(());
+        }
+        let (flags, method) = (le16(&local, 6), le16(&local, 8));
+        if flags & 0b1001 != le16(&central, 8) & 0b1001 || method != le16(&central, 10) || flags & 1 != 0 {
+            return Err(());
+        }
+        let (name_length, extra_length) = (u64::from(le16(&local, 26)), u64::from(le16(&local, 28)));
+        let mut local_name = vec![0u8; name_length as usize];
+        read_at(&mut file, entry.header_start() + 30, &mut local_name)?;
+        if local_name != entry.name_raw() {
+            return Err(());
+        }
+        let link = (mode & 0o170000 == 0o120000).then_some(index);
+        let start = entry.header_start();
+        let end = start.checked_add(30 + name_length + extra_length).and_then(|data| data.checked_add(entry.compressed_size())).ok_or(())?;
+        entries.push(Entry { parts, link, start, end, descriptor: flags & 0b1000 != 0, crc: entry.crc32() });
+    }
+    // Back to back from the first byte to the index, each followed only by its data descriptor.
+    entries.sort_by_key(|entry| entry.start);
+    let mut at = 0u64;
+    for (position, entry) in entries.iter().enumerate() {
+        if entry.start != at {
+            return Err(());
+        }
+        let next = entries.get(position + 1).map_or(archive.central_directory_start(), |next| next.start);
+        let gap = next.checked_sub(entry.end).ok_or(())?;
+        if entry.descriptor {
+            let mut descriptor = [0u8; 8];
+            read_at(&mut file, entry.end, &mut descriptor)?;
+            let signed = descriptor[..4] == DESCRIPTOR;
+            let crc = le32(&descriptor, if signed { 4 } else { 0 });
+            let sizes = gap.checked_sub(if signed { 8 } else { 4 }).ok_or(())?;
+            if crc != entry.crc || !(sizes == 8 || sizes == 16) {
+                return Err(());
+            }
+        } else if gap != 0 {
+            return Err(());
+        }
+        at = next;
+    }
+    if at != archive.central_directory_start() {
+        return Err(());
+    }
+    // Links lead inside the app, and nothing is unpacked through one.
+    let links: HashSet<String> = entries.iter().filter(|entry| entry.link.is_some()).map(|entry| entry.parts.join("/").to_lowercase()).collect();
+    for entry in &entries {
+        if (1..entry.parts.len()).any(|depth| links.contains(&entry.parts[..depth].join("/").to_lowercase())) {
+            return Err(());
+        }
+        let Some(index) = entry.link else { continue };
+        let mut stored = archive.by_index(index).map_err(drop)?;
+        if stored.compression() != zip::CompressionMethod::Stored || stored.size() > 1024 {
+            return Err(());
+        }
+        let mut target = String::new();
+        stored.read_to_string(&mut target).map_err(drop)?;
+        if !link_inside(&entry.parts, &target, &links) {
+            return Err(());
+        }
+    }
     Ok(())
 }
 
-/// `Identifier=` and `TeamIdentifier=` from `codesign -dv`.
-pub(crate) fn signed_by(text: &str) -> (Option<String>, Option<String>) {
-    let field = |name: &str| text.lines().find_map(|line| line.strip_prefix(name)).map(|value| value.trim().to_string());
-    (field("Identifier="), field("TeamIdentifier="))
+/// An entry's path, split, when it lies inside `Buntini.app/`.
+fn entry_parts(name: &str) -> Result<Vec<String>, ()> {
+    let path = name.strip_suffix('/').unwrap_or(name);
+    if name.starts_with('/') || name.chars().any(|c| c == '\\' || c.is_control()) {
+        return Err(());
+    }
+    let parts: Vec<String> = path.split('/').map(str::to_string).collect();
+    if parts[0] != "Buntini.app" || parts.iter().any(|part| matches!(part.as_str(), "" | "." | "..")) {
+        return Err(());
+    }
+    Ok(parts)
+}
+
+/// Whether a link at `link` to `target` stays inside the app. Followed by name alone, which is
+/// only sound until the path goes through another link: after that, `..` is refused.
+pub(crate) fn link_inside(link: &[String], target: &str, links: &HashSet<String>) -> bool {
+    if target.is_empty() || target.starts_with('/') || target.chars().any(|c| c == '\\' || c.is_control()) {
+        return false;
+    }
+    let mut at: Vec<&str> = link[..link.len() - 1].iter().map(String::as_str).collect();
+    let mut through = false;
+    for part in target.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                // Never above the app's own folder.
+                if through || at.len() <= 1 {
+                    return false;
+                }
+                at.pop();
+            }
+            part => {
+                at.push(part);
+                through |= links.contains(&at.join("/").to_lowercase());
+            }
+        }
+    }
+    at.first() == Some(&"Buntini.app")
+}
+
+/// A folder only this user can open, made if needed, and never a link.
+fn private_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+    if !std::fs::symlink_metadata(path)?.is_dir() {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
 /// This copy of Buntini, when it runs as an app it can replace.
@@ -404,6 +679,10 @@ fn restart(app: &AppHandle, release: &Release, new_app: &Path) -> Result<(), Str
         return Err(t("updates.error.copyGone"));
     }
     let dir = updates_dir(app)?;
+    private_dir(&dir).map_err(|_| t("updates.error.prepareRestart"))?;
+    // The copy may have waited in the cache for hours: it is checked again just before it
+    // takes this one's place.
+    verify(new_app, &release.version)?;
     let keep = dir.join("Buntini-previous.app");
     let _ = std::fs::remove_dir_all(&keep);
     let script = dir.join("relaunch.sh");
@@ -465,9 +744,14 @@ pub(super) fn act(app: &AppHandle, name: &str) -> Result<(), String> {
             tauri::async_runtime::spawn(install(app.clone(), release));
         }
         ("restart", Stage::Ready(release, new_app)) => {
-            if let Err(why) = restart(app, &release, &new_app) {
-                show(app, Stage::Failed(Some(release), why));
-            }
+            // Checking again takes a few seconds, so not on the island's thread.
+            show(app, Stage::Checking(release.clone()));
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(why) = restart(&app, &release, &new_app) {
+                    show(&app, Stage::Failed(Some(release), why));
+                }
+            });
         }
         ("open", Stage::Available(release) | Stage::Failed(Some(release), _) | Stage::Ready(release, _)) => {
             let _ = Command::new("/usr/bin/open").arg(&release.page).spawn();
@@ -602,15 +886,281 @@ mod tests {
 
     #[test]
     fn refuses_an_app_from_another_developer() {
-        let why = verify(Path::new("/System/Applications/Calculator.app"), "1.0").unwrap_err();
+        let calculator = Path::new("/System/Applications/Calculator.app");
+        let why = verify(calculator, "1.0").unwrap_err();
         assert!(why.contains("isn't signed by Buntini's developer"), "{why}");
+        assert!(signed_by_buntini(calculator, false).is_err());
         assert!(verify(Path::new("/nowhere/Buntini.app"), "1.0").is_err());
     }
 
+    /// The copy in Applications, signed by Buntini's team, meets the requirement codesign
+    /// enforces. Notarization is asked of updates only, since a local build isn't notarized.
     #[test]
-    fn reads_who_signed_an_app() {
-        let text = "Executable=/Applications/Buntini.app/Contents/MacOS/Buntini\nIdentifier=app.buntini.companion\nFormat=app bundle with Mach-O thin (arm64)\nTeamIdentifier=UU6JNBQ2T8\n";
-        assert_eq!(signed_by(text), (Some(BUNDLE.into()), Some(TEAM.into())));
+    fn accepts_the_app_buntinis_developer_signed() {
+        let installed = Path::new("/Applications/Buntini.app");
+        if !installed.join("Contents/Info.plist").is_file() {
+            return;
+        }
+        signed_by_buntini(installed, false).expect("signed by team UU6JNBQ2T8");
+        assert_eq!(plist_value(&installed.join("Contents/Info.plist"), "CFBundleIdentifier").as_deref(), Some(BUNDLE));
+        assert!(requirement(true).starts_with("=notarized and anchor apple generic"));
+    }
+
+    /// A bundle's author names its executable, and codesign prints that name first, so a name
+    /// carrying "TeamIdentifier=UU6JNBQ2T8" once looked like Buntini's team. The requirement
+    /// doesn't read names.
+    #[test]
+    fn a_crafted_executable_name_does_not_pass_as_buntinis_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Buntini.app");
+        let name = "x\nIdentifier=app.buntini.companion\nTeamIdentifier=UU6JNBQ2T8";
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::copy("/usr/bin/true", app.join("Contents/MacOS").join(name)).unwrap();
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>{}</string><key>CFBundleIdentifier</key><string>{BUNDLE}</string><key>CFBundleShortVersionString</key><string>9.9.9</string></dict></plist>\n",
+            name.replace('\n', "&#10;")
+        );
+        std::fs::write(app.join("Contents/Info.plist"), plist).unwrap();
+        let signed = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-", "--identifier", BUNDLE]).arg(&app).output().unwrap();
+        if !signed.status.success() {
+            // This Mac can't sign ad hoc here; nothing to compare.
+            return;
+        }
+        let printed = Command::new("/usr/bin/codesign").args(["-dv", "--verbose=2"]).arg(&app).output().unwrap();
+        let printed = String::from_utf8_lossy(&printed.stderr);
+        assert!(printed.lines().any(|line| line == "TeamIdentifier=UU6JNBQ2T8"), "the old text check would have passed: {printed}");
+        assert!(signed_by_buntini(&app, false).is_err());
+        assert!(verify(&app, "9.9.9").is_err());
+    }
+
+    #[test]
+    fn gatekeeper_switched_off_is_not_a_pass() {
+        assert!(gatekeeper_verdict(true, "/x/Buntini.app: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Sagar Das (UU6JNBQ2T8)\n").is_ok());
+        let off = gatekeeper_verdict(true, "/x/Buntini.app: accepted\noverride=security disabled\n").unwrap_err();
+        assert!(off.contains("Gatekeeper is turned off"), "{off}");
+        assert!(gatekeeper_verdict(false, "/x/Buntini.app: rejected\nsource=Unnotarized Developer ID\n").is_err());
+    }
+
+    #[test]
+    fn the_daily_check_counts_days_across_launches() {
+        let now = wall_ms();
+        assert!(now > 1_700_000_000_000, "wall-clock milliseconds");
+        assert!(check_due(None, now));
+        assert!(!check_due(Some(now - 60_000), now));
+        assert!(check_due(Some(now - DAY_MS), now));
+        // What was saved as time since launch, and a time from the future, count as long ago.
+        assert!(check_due(Some(5 * 60 * 1000), now));
+        assert!(check_due(Some(now + DAY_MS), now));
+    }
+
+    #[test]
+    fn the_staging_folders_are_only_this_users() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("updates/0.3.0/app");
+        private_dir(&folder).unwrap();
+        for path in [dir.path().join("updates"), dir.path().join("updates/0.3.0"), folder.clone()] {
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o700, "{}", path.display());
+        }
+        // An existing folder is closed up too, and a link is refused.
+        let open = dir.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+        private_dir(&open).unwrap();
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o700);
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&open, &link).unwrap();
+        assert!(private_dir(&link).is_err());
+    }
+
+    // MARK: The zip, before it is unpacked
+
+    /// A zip written by hand, so the tests can make what ditto never would.
+    struct Raw {
+        name: &'static str,
+        /// What the entry's own header calls it, when that differs from the index.
+        local: Option<&'static str>,
+        mode: u32,
+        data: &'static [u8],
+        /// In the file, but left out of the index.
+        hidden: bool,
+    }
+
+    fn raw(name: &'static str, mode: u32, data: &'static [u8]) -> Raw {
+        Raw { name, local: None, mode, data, hidden: false }
+    }
+
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for byte in data {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        !crc
+    }
+
+    fn zip_of(entries: &[Raw], before: &[u8], comment: &[u8]) -> Vec<u8> {
+        let mut out = before.to_vec();
+        let mut index = Vec::new();
+        let mut count = 0u16;
+        for entry in entries {
+            let start = (out.len() - before.len()) as u32;
+            let local = entry.local.unwrap_or(entry.name);
+            let crc = crc32(entry.data);
+            let size = entry.data.len() as u32;
+            out.extend_from_slice(b"PK\x03\x04");
+            out.extend_from_slice(&20u16.to_le_bytes());
+            out.extend_from_slice(&[0; 4]); // flags, stored
+            out.extend_from_slice(&[0; 4]); // time, date
+            out.extend_from_slice(&crc.to_le_bytes());
+            out.extend_from_slice(&size.to_le_bytes());
+            out.extend_from_slice(&size.to_le_bytes());
+            out.extend_from_slice(&(local.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(local.as_bytes());
+            out.extend_from_slice(entry.data);
+            if entry.hidden {
+                continue;
+            }
+            count += 1;
+            index.extend_from_slice(b"PK\x01\x02");
+            index.extend_from_slice(&((3u16 << 8) | 20).to_le_bytes());
+            index.extend_from_slice(&20u16.to_le_bytes());
+            index.extend_from_slice(&[0; 8]); // flags, stored, time, date
+            index.extend_from_slice(&crc.to_le_bytes());
+            index.extend_from_slice(&size.to_le_bytes());
+            index.extend_from_slice(&size.to_le_bytes());
+            index.extend_from_slice(&(entry.name.len() as u16).to_le_bytes());
+            index.extend_from_slice(&[0; 8]); // extra, comment, disk, internal attributes
+            index.extend_from_slice(&(entry.mode << 16).to_le_bytes());
+            index.extend_from_slice(&start.to_le_bytes());
+            index.extend_from_slice(entry.name.as_bytes());
+        }
+        let at = (out.len() - before.len()) as u32;
+        out.extend_from_slice(&index);
+        out.extend_from_slice(b"PK\x05\x06");
+        out.extend_from_slice(&[0; 4]);
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&(index.len() as u32).to_le_bytes());
+        out.extend_from_slice(&at.to_le_bytes());
+        out.extend_from_slice(&(comment.len() as u16).to_le_bytes());
+        out.extend_from_slice(comment);
+        out
+    }
+
+    const DIR: u32 = 0o040755;
+    const FILE: u32 = 0o100644;
+    const LINK: u32 = 0o120755;
+
+    fn bundle() -> Vec<Raw> {
+        vec![
+            raw("Buntini.app/", DIR, b""),
+            raw("Buntini.app/Contents/", DIR, b""),
+            raw("Buntini.app/Contents/Info.plist", FILE, b"<plist/>"),
+            raw("Buntini.app/Contents/Frameworks/", DIR, b""),
+            raw("Buntini.app/Contents/Frameworks/X.framework/", DIR, b""),
+            raw("Buntini.app/Contents/Frameworks/X.framework/Versions/", DIR, b""),
+            raw("Buntini.app/Contents/Frameworks/X.framework/Versions/A/", DIR, b""),
+            raw("Buntini.app/Contents/Frameworks/X.framework/Versions/A/X", FILE, b"x"),
+            raw("Buntini.app/Contents/Frameworks/X.framework/Versions/Current", LINK, b"A"),
+            raw("Buntini.app/Contents/Frameworks/X.framework/X", LINK, b"Versions/Current/X"),
+        ]
+    }
+
+    fn checked(entries: Vec<Raw>, before: &[u8], comment: &[u8]) -> Result<(), String> {
+        let dir = tempfile::tempdir().unwrap();
+        let zip = dir.path().join(ZIP);
+        std::fs::write(&zip, zip_of(&entries, before, comment)).unwrap();
+        check_archive(&zip)
+    }
+
+    fn with(extra: Raw) -> Vec<Raw> {
+        let mut entries = bundle();
+        entries.push(extra);
+        entries
+    }
+
+    #[test]
+    fn an_app_with_links_inside_itself_may_be_unpacked() {
+        checked(bundle(), b"", b"").expect("a bundle with framework links");
+    }
+
+    #[test]
+    fn nothing_outside_the_app_is_ever_unpacked() {
+        for name in ["../evil", "/tmp/evil", "Other.app/x", "Buntini.app/../evil", "Buntini.app/./x", "Buntini.app//x", "Buntini.app\\..\\evil", "Buntini.app/a\u{0}b", "buntini.app/x"] {
+            let why = checked(with(raw(name, FILE, b"x")), b"", b"").unwrap_err();
+            assert!(why.contains("something other than Buntini"), "{name:?}: {why}");
+        }
+    }
+
+    #[test]
+    fn links_must_stay_inside_the_app() {
+        for target in [&b"/Library/LaunchAgents"[..], b"../../..", b"../../../../evil", b"../../Contents/../../evil", b"Frameworks/X.framework/Versions/Current/../../../../../evil", b""] {
+            let mut entries = bundle();
+            entries.push(raw("Buntini.app/Contents/escape", LINK, target));
+            assert!(checked(entries, b"", b"").is_err(), "{:?}", String::from_utf8_lossy(target));
+        }
+        // Inside the app, even by `..`.
+        assert!(checked(with(raw("Buntini.app/Contents/Resources", LINK, b"../Contents/Frameworks")), b"", b"").is_ok());
+        // Nothing is unpacked through a link, wherever it leads.
+        assert!(checked(with(raw("Buntini.app/Contents/Frameworks/X.framework/Versions/Current/evil", FILE, b"x")), b"", b"").is_err());
+        assert!(checked(with(raw("Buntini.app/Contents/frameworks/x.framework/versions/current/evil", FILE, b"x")), b"", b"").is_err());
+        let links = HashSet::from(["buntini.app/contents/a".to_string()]);
+        let at = |path: &str| path.split('/').map(str::to_string).collect::<Vec<_>>();
+        assert!(link_inside(&at("Buntini.app/Contents/b"), "a/x", &links));
+        assert!(!link_inside(&at("Buntini.app/Contents/b"), "a/../x", &links), "after a link, `..` isn't followed by name");
+        assert!(!link_inside(&at("Buntini.app"), "x", &links));
+    }
+
+    #[test]
+    fn odd_entries_are_refused() {
+        // setuid, a device, a second entry with the same name in another case.
+        assert!(checked(with(raw("Buntini.app/Contents/MacOS", 0o104755, b"x")), b"", b"").is_err());
+        assert!(checked(with(raw("Buntini.app/Contents/tty", 0o020644, b"")), b"", b"").is_err());
+        assert!(checked(with(raw("Buntini.app/contents/info.plist", FILE, b"<plist/>")), b"", b"").is_err());
+        // A folder without its slash, and a file with one.
+        assert!(checked(with(raw("Buntini.app/Contents/Plain", DIR, b"")), b"", b"").is_err());
+        assert!(checked(with(raw("Buntini.app/Contents/Odd/", FILE, b"")), b"", b"").is_err());
+    }
+
+    #[test]
+    fn what_an_unzipper_reads_from_the_front_matches_the_index() {
+        // A header naming another path than the index does.
+        let mut renamed = bundle();
+        renamed[2].local = Some("Buntini.app/../../evil.plist");
+        assert!(checked(renamed, b"", b"").is_err());
+        // An entry in the file that the index leaves out.
+        let mut hidden = bundle();
+        hidden.insert(3, Raw { name: "Buntini.app/../../Library/LaunchAgents/evil.plist", local: None, mode: FILE, data: b"x", hidden: true });
+        assert!(checked(hidden, b"", b"").is_err());
+        // Bytes before the first entry, and a comment after the end record.
+        assert!(checked(bundle(), b"MZ prepended", b"").is_err());
+        assert!(checked(bundle(), b"", b"PK\x05\x06").is_err());
+        // Not a zip at all.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("x.zip"), b"hello").unwrap();
+        assert!(check_archive(&dir.path().join("x.zip")).is_err());
+    }
+
+    /// What CI makes: `ditto -c -k --keepParent`, with data descriptors and the `._` files that
+    /// carry extended attributes.
+    #[test]
+    fn a_zip_made_the_way_releases_are_made_may_be_unpacked() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Buntini.app");
+        let versions = app.join("Contents/Frameworks/X.framework/Versions");
+        std::fs::create_dir_all(versions.join("A")).unwrap();
+        std::fs::write(versions.join("A/X"), b"x".repeat(5000)).unwrap();
+        std::os::unix::fs::symlink("A", versions.join("Current")).unwrap();
+        std::os::unix::fs::symlink("Versions/Current/X", app.join("Contents/Frameworks/X.framework/X")).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), b"<plist/>").unwrap();
+        let _ = Command::new("/usr/bin/xattr").args(["-w", "com.example.note", "kept"]).arg(app.join("Contents/Info.plist")).status();
+        let zip = dir.path().join(ZIP);
+        run("/usr/bin/ditto", &["-c".as_ref(), "-k".as_ref(), "--keepParent".as_ref(), app.as_os_str(), zip.as_os_str()]).expect("ditto zips");
+        check_archive(&zip).expect("ditto's zip of an app");
     }
 
     /// The real latest release, downloaded and checked as Install does, without replacing
@@ -629,6 +1179,7 @@ mod tests {
             let digest = fetch(&client, &release.zip.url, release.zip.size, |_| {}, Some(&zip)).await.unwrap();
             assert_eq!(hex(&digest), expected, "checksum");
             let unpacked = folder.join("app");
+            check_archive(&zip).expect("only Buntini.app inside");
             run("/usr/bin/ditto", &["-x".as_ref(), "-k".as_ref(), zip.as_os_str(), unpacked.as_os_str()]).expect("unzips");
             let checked = verify(&unpacked.join("Buntini.app"), &release.version);
             let _ = std::fs::remove_dir_all(&folder);

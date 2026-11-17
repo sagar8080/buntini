@@ -280,6 +280,7 @@ dependencies = [
  "tokio",
  "uuid",
  "walkdir",
+ "zip",
 ]
 
 [[package]]
