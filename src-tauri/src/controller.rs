@@ -322,6 +322,9 @@ pub(crate) async fn save_settings_in(
         return Err("Your data was erased, so this settings change wasn’t saved.".into());
     }
     let previous = state.store.lock().unwrap().settings()?;
+    // A developer service's host changes only with its key (services::Op::SaveKey), so a key
+    // never goes to a host it wasn't entered for.
+    settings.services = previous.services.clone();
     let changed = previous.model_backend != settings.model_backend
         || previous.python_path != settings.python_path
         || previous.model_path != settings.model_path
@@ -471,6 +474,7 @@ pub async fn set_api_key(
     if provider == crate::chatgpt::KEYCHAIN_ID {
         return Err("Use Sign in with ChatGPT in Settings → Brain.".into());
     }
+    service_key_refused(&provider)?;
     if !key.trim().is_empty() {
         match provider.as_str() {
             "ebay" => {
@@ -487,6 +491,15 @@ pub async fn set_api_key(
         "credential.updated",
         &format!("{provider} credential updated in macOS Keychain"),
     );
+    Ok(())
+}
+
+/// A developer service's key is saved only through Settings → Connections, which checks it
+/// (Stripe takes only a restricted key) and binds it to its host.
+pub(crate) fn service_key_refused(provider: &str) -> Result<(), String> {
+    if crate::services::KEY_IDS.contains(&provider) {
+        return Err(crate::i18n::t("services.error.useConnections"));
+    }
     Ok(())
 }
 /// What a chosen folder is usable as: a Python environment gives its bin/python, a

@@ -3,11 +3,12 @@
 //!
 //! Each service is asked a fixed, read-only question on a fixed HTTPS host, or on the person's
 //! own host for GitLab, Gitea and n8n. Its key stays in the Keychain (through `web::keychain`)
-//! and never goes back to the UI. Every request is reserved against a daily and monthly
-//! allowance first. A service is polled only while something watches it: the island (unless the
-//! person hid its pill there) or Settings → Connections, and only while someone is at the Mac.
-//! Errors and rate limits push the next poll back. What a service shows becomes a tinted pill
-//! and a card on the island.
+//! together with the host it was entered for, is sent only to that host, and never goes back to
+//! the UI. Only `SaveKey` changes a host, and a new host needs the key again. Every request is
+//! reserved against a daily and monthly allowance first. A service is polled only while someone
+//! is at the Mac and something on screen shows it: the island (unless the person hid its pill
+//! there) or Settings → Connections. Errors and rate limits push the next poll back. What a
+//! service shows becomes a tinted pill and a card on the island.
 mod calcom;
 mod fetch;
 mod gitea;
@@ -23,7 +24,7 @@ mod vercel;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, LazyLock, Mutex, Once,
 };
 
@@ -170,7 +171,7 @@ impl Settings {
         for kind in [Kind::Gitlab, Kind::Gitea, Kind::N8n] {
             let host = self.raw_host(kind);
             if !host.is_empty() && normalize_host(host).as_deref() != Ok(host) {
-                return Err(format!("Enter {}'s address as a host name, like git.example.com.", kind.name()));
+                return Err(crate::i18n::tf("services.error.address", &[("service", &kind.name())]));
             }
         }
         Ok(())
@@ -183,6 +184,23 @@ impl Settings {
             Kind::N8n => &self.n8n_host,
             _ => "",
         }
+    }
+
+    /// Sets a self-hosted service's host, normalized; empty clears it. Services on a fixed host
+    /// take none.
+    fn set_host(&mut self, kind: Kind, input: &str) -> Result<(), String> {
+        let host = match input.trim() {
+            "" => String::new(),
+            input => normalize_host(input).map_err(|_| crate::i18n::tf("services.error.address", &[("service", &kind.name())]))?,
+        };
+        match kind {
+            Kind::Gitlab => self.gitlab_host = host,
+            Kind::Gitea => self.gitea_host = host,
+            Kind::N8n => self.n8n_host = host,
+            _ if host.is_empty() => {}
+            _ => return Err(crate::i18n::tf("services.error.address", &[("service", &kind.name())])),
+        }
+        Ok(())
     }
 
     /// Where the service's API lives, once it is known.
@@ -216,6 +234,34 @@ pub fn normalize_host(input: &str) -> Result<String, String> {
         Some(port) => format!("{host}:{port}"),
         None => host.to_string(),
     })
+}
+
+/// A key as the Keychain keeps it: with the host it was entered for.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bound {
+    host: String,
+    key: String,
+}
+
+/// What the Keychain keeps for a key entered for `host`.
+fn bind(host: &str, key: &str) -> Result<String, String> {
+    serde_json::to_string(&Bound { host: host.into(), key: key.into() }).map_err(|error| error.to_string())
+}
+
+/// The saved key, only when it was entered for `host`. A bare key, saved before keys kept their
+/// host, counts only for a service whose host is fixed.
+fn key_for(kind: Kind, saved: &str, host: &str) -> Option<String> {
+    let (bound, key) = match serde_json::from_str::<Bound>(saved) {
+        Ok(Bound { host, key }) => (host, key),
+        Err(_) => (kind.api_host()?.to_string(), saved.to_string()),
+    };
+    (bound == host && !key.is_empty()).then_some(key)
+}
+
+/// The key that may be sent to `host`, from the Keychain.
+fn saved_key(kind: Kind, host: &str) -> Option<String> {
+    key_for(kind, &crate::web::credential(kind.id()).ok()?, host)
 }
 
 /// What a service remembers between polls: slow-changing answers and when they were fetched.
@@ -272,11 +318,22 @@ struct Live {
     checked_at: Option<i64>,
     /// The cancel flag of the poll in flight.
     in_flight: Option<Arc<AtomicBool>>,
-    /// Bumped when the key or host changes, so an older poll's answer is dropped.
+    /// New whenever the key or host changes or everything is erased, so an older poll's answer
+    /// is dropped. Never 0 once in the hub.
     generation: u64,
     /// The host the last poll asked.
     host: Option<String>,
     shown: publish::Shown,
+}
+
+/// Every generation comes from here, so none is handed out twice, even after Delete everything
+/// empties the hub.
+static GENERATIONS: AtomicU64 = AtomicU64::new(1);
+
+impl Live {
+    fn fresh(host: Option<String>) -> Live {
+        Live { generation: GENERATIONS.fetch_add(1, Ordering::Relaxed), host, ..Default::default() }
+    }
 }
 
 #[derive(Default)]
@@ -290,6 +347,24 @@ struct Hub {
     erasures: u64,
 }
 
+/// Stops every poll in flight and forgets everything: what each service showed, which were
+/// hidden and whether Settings watches. Answers still on their way are dropped.
+fn clear(hub: &mut Hub) {
+    for live in hub.live.values() {
+        if let Some(cancel) = &live.in_flight {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+    *hub = Hub { erasures: hub.erasures, ..Default::default() };
+}
+
+/// For Delete everything, once the keys are gone: stops every poll, forgets what the services
+/// showed and which were hidden, and takes them off the island now.
+pub fn erase() {
+    clear(&mut HUB.lock().unwrap());
+    publish_now();
+}
+
 static HUB: LazyLock<Mutex<Hub>> = LazyLock::new(Default::default);
 static REGISTER: Once = Once::new();
 const HIDDEN_KEY: &str = "services.hidden";
@@ -297,7 +372,7 @@ const HIDDEN_KEY: &str = "services.hidden";
 const WATCH_SECONDS: i64 = 120;
 /// Nobody has touched the Mac for this long: nothing is watched.
 const AWAY_SECONDS: f64 = 15.0 * 60.0;
-/// Seconds between polls while something is still running there.
+/// Seconds between polls while something is still running there (PRIVACY.md says so).
 const BUSY_EVERY: i64 = 30;
 /// The longest any wait is stretched to.
 const LONGEST_WAIT: i64 = 3600;
@@ -344,6 +419,19 @@ fn idle_seconds() -> f64 {
     0.0
 }
 
+/// Whether a service is polled now: only while someone is at the Mac, and while Settings →
+/// Connections is on screen or the island shows the service's pill.
+fn watched(present: bool, settings_on_screen: bool, island: bool, hidden: bool) -> bool {
+    present && (settings_on_screen || (island && !hidden))
+}
+
+/// Settings is on screen: the companion is open, expanded and not minimized.
+fn settings_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main").is_some_and(|window| {
+        window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true) && crate::overlay::is_expanded()
+    })
+}
+
 /// Polls the services that are due. Called from the scheduler's tick, which already pauses
 /// while a task runs and catches up after the Mac wakes.
 pub async fn run_due(app: &tauri::AppHandle) {
@@ -352,39 +440,36 @@ pub async fn run_due(app: &tauri::AppHandle) {
     let Ok(settings) = state.store.lock().unwrap().settings() else { return };
     let now = Utc::now().timestamp();
     let present = idle_seconds() < AWAY_SECONDS;
-    let island = crate::surface::running();
+    // The island is on screen while it runs, unless the display sleeps or the Mac is locked.
+    let island = crate::surface::running() && !crate::media::screen_away();
+    let on_screen = settings_visible(app) && !crate::media::screen_away();
     let erasures = state.erasures.load(Ordering::SeqCst);
     let due: Vec<(Kind, u64, Arc<AtomicBool>)> = {
         let mut hub = HUB.lock().unwrap();
         if hub.erasures != erasures {
             // Delete everything ran: forget what was shown and hidden.
-            for live in hub.live.values() {
-                if let Some(cancel) = &live.in_flight {
-                    cancel.store(true, Ordering::Relaxed);
-                }
-            }
-            *hub = Hub { erasures, ..Default::default() };
+            clear(&mut hub);
+            hub.erasures = erasures;
         }
         if !hub.hidden_loaded {
             hub.hidden = load_hidden(&state);
             hub.hidden_loaded = true;
         }
-        let settings_open = hub.watched_until > now;
+        let settings_open = hub.watched_until > now && on_screen;
         let hidden = hub.hidden.clone();
         Kind::ALL
             .into_iter()
             .filter_map(|kind| {
-                let watched = settings_open || (island && present && !hidden.contains(&kind));
-                let live = hub.live.entry(kind).or_default();
+                let live = hub.live.entry(kind).or_insert_with(|| Live::fresh(None));
                 let host = settings.services.host(kind);
                 if live.host != host {
                     // A new host is another account: start over there.
                     if let Some(cancel) = &live.in_flight {
                         cancel.store(true, Ordering::Relaxed);
                     }
-                    *live = Live { generation: live.generation + 1, host, ..Default::default() };
+                    *live = Live::fresh(host);
                 }
-                if !watched || live.in_flight.is_some() || live.next_at > now {
+                if !watched(present, settings_open, island, hidden.contains(&kind)) || live.in_flight.is_some() || live.next_at > now {
                     return None;
                 }
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -396,18 +481,20 @@ pub async fn run_due(app: &tauri::AppHandle) {
     for (kind, generation, cancel) in due {
         let app = app.clone();
         let settings = settings.services.clone();
-        tauri::async_runtime::spawn(async move { poll(&app, kind, &settings, generation, cancel).await });
+        tauri::async_runtime::spawn(async move { poll(&app, kind, &settings, generation, erasures, cancel).await });
     }
 }
 
-async fn poll(app: &tauri::AppHandle, kind: Kind, settings: &Settings, generation: u64, cancel: Arc<AtomicBool>) {
+async fn poll(app: &tauri::AppHandle, kind: Kind, settings: &Settings, generation: u64, erasures: u64, cancel: Arc<AtomicBool>) {
     let state = app.state::<AppState>();
     let now = Local::now().fixed_offset();
-    let (Ok(key), Some(host)) = (crate::web::credential(kind.id()), settings.host(kind)) else {
-        // No key or no host yet: look again soon (it is only a Keychain read), asking nothing.
+    // The key goes only to the host it was entered for, and only while that is still the host.
+    let host = settings.host(kind);
+    let key = host.as_deref().and_then(|host| saved_key(kind, host));
+    let (Some(key), Some(host)) = (key, host) else {
+        // No key for this host yet: look again soon (it is only a Keychain read), asking nothing.
         let mut hub = HUB.lock().unwrap();
-        let live = hub.live.entry(kind).or_default();
-        if live.generation == generation {
+        if let Some(live) = hub.live.get_mut(&kind).filter(|live| live.generation == generation) {
             *live = Live { generation, host: live.host.take(), next_at: now.timestamp() + 60, ..Default::default() };
         }
         drop(hub);
@@ -441,6 +528,10 @@ async fn poll(app: &tauri::AppHandle, kind: Kind, settings: &Settings, generatio
         }
         Err(failure) => (Err(failure), RateLimit::default(), memo),
     };
+    if state.erasures.load(Ordering::SeqCst) != erasures {
+        // Delete everything ran while this poll did: what came back is dropped.
+        return;
+    }
     let notes = settle(kind, generation, result, &limit, memo, now.timestamp());
     for (action, detail) in notes {
         state.audit(&action, &detail);
@@ -450,12 +541,14 @@ async fn poll(app: &tauri::AppHandle, kind: Kind, settings: &Settings, generatio
 
 /// Records a poll's outcome and returns the audit entries for what changed.
 fn settle(kind: Kind, generation: u64, result: Result<Snapshot, Failure>, limit: &RateLimit, memo: Memo, now: i64) -> Vec<(String, String)> {
-    let mut hub = HUB.lock().unwrap();
-    let live = hub.live.entry(kind).or_default();
-    if live.generation != generation {
-        // The key changed while this poll ran.
+    settle_in(&mut HUB.lock().unwrap(), kind, generation, result, limit, memo, now)
+}
+
+fn settle_in(hub: &mut Hub, kind: Kind, generation: u64, result: Result<Snapshot, Failure>, limit: &RateLimit, memo: Memo, now: i64) -> Vec<(String, String)> {
+    let Some(live) = hub.live.get_mut(&kind).filter(|live| live.generation == generation) else {
+        // The key or host changed, or everything was erased, while this poll ran.
         return vec![];
-    }
+    };
     live.in_flight = None;
     let before = live.health;
     live.memo = memo;
@@ -536,11 +629,11 @@ fn save_hidden(state: &AppState, hidden: &BTreeSet<Kind>) {
 /// Forgets what a service showed, after its key changed.
 fn reset(kind: Kind) {
     let mut hub = HUB.lock().unwrap();
-    let live = hub.live.entry(kind).or_default();
+    let live = hub.live.entry(kind).or_insert_with(|| Live::fresh(None));
     if let Some(cancel) = &live.in_flight {
         cancel.store(true, Ordering::Relaxed);
     }
-    *live = Live { generation: live.generation + 1, host: live.host.take(), ..Default::default() };
+    *live = Live::fresh(live.host.take());
 }
 
 fn register(app: tauri::AppHandle) {
@@ -599,10 +692,20 @@ fn act(app: &tauri::AppHandle, action: Action) {
 pub enum Op {
     /// Answers true: the command is wired.
     Ping,
-    /// Every service as Settings shows it. Asking counts as watching for two minutes.
+    /// Every service as Settings shows it. Asking counts as watching for two minutes, while
+    /// Settings stays on screen.
     Status,
-    /// Saves a service's key, or removes it when the key is empty.
-    SaveKey { service: Kind, key: String },
+    /// Settings stopped showing the services.
+    Unwatch,
+    /// Saves a service's key for its host, or removes the key when it is empty. `host`, for a
+    /// self-hosted service, is saved first, in the same step; a new host removes the key saved
+    /// for the old one.
+    SaveKey {
+        service: Kind,
+        key: String,
+        #[serde(default)]
+        host: Option<String>,
+    },
     /// Shows a service on the island again after it was hidden there.
     Show { service: Kind },
 }
@@ -623,8 +726,13 @@ pub struct Status {
     pub checked_at: Option<i64>,
 }
 
-fn statuses() -> Vec<Status> {
-    let configured: Vec<bool> = Kind::ALL.iter().map(|kind| crate::web::credential_saved(kind.id())).collect();
+/// Every service as Settings shows it. A key counts as saved only for the host it was entered
+/// for.
+fn statuses(settings: &Settings) -> Vec<Status> {
+    let configured: Vec<bool> = Kind::ALL
+        .iter()
+        .map(|&kind| crate::web::credential_saved(kind.id()) && settings.host(kind).is_some_and(|host| saved_key(kind, &host).is_some()))
+        .collect();
     let hub = HUB.lock().unwrap();
     Kind::ALL
         .into_iter()
@@ -656,9 +764,42 @@ fn check_key(kind: Kind, key: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What saving a key changes, decided before anything is written.
+#[derive(Debug, PartialEq)]
+struct KeyChange {
+    /// The hosts to save.
+    services: Settings,
+    /// Remove the key saved now: it is being replaced, removed, or was for another host.
+    remove: bool,
+    /// What the Keychain keeps afterwards: the key bound to its host.
+    save: Option<String>,
+}
+
+/// Saving `key` for `kind`, with its host when the person gave one. An empty key removes the
+/// saved one, and so does a new host: a key is entered again for every host.
+fn plan_key(services: &Settings, kind: Kind, key: &str, host: Option<&str>) -> Result<KeyChange, String> {
+    let key = key.trim();
+    if !key.is_empty() {
+        check_key(kind, key)?;
+    }
+    let mut next = services.clone();
+    if let Some(host) = host {
+        next.set_host(kind, host)?;
+        next.validate()?;
+    }
+    let address = next.host(kind);
+    let save = match (key, &address) {
+        ("", _) => None,
+        (_, None) => return Err(crate::i18n::tf("services.error.addressFirst", &[("service", &kind.name())])),
+        (key, Some(address)) => Some(bind(address, key)?),
+    };
+    Ok(KeyChange { remove: save.is_none() || address != services.host(kind), services: next, save })
+}
+
 #[tauri::command]
 pub async fn services_call(op: Op, app: tauri::AppHandle) -> Result<Value, String> {
     let state = app.state::<AppState>();
+    let services = || state.store.lock().unwrap().settings().map(|settings| settings.services);
     match op {
         Op::Ping => Ok(Value::Bool(true)),
         Op::Status => {
@@ -674,23 +815,40 @@ pub async fn services_call(op: Op, app: tauri::AppHandle) -> Result<Value, Strin
             if !was_watched {
                 crate::scheduler::tick_now();
             }
-            serde_json::to_value(statuses()).map_err(|error| error.to_string())
+            serde_json::to_value(statuses(&services()?)).map_err(|error| error.to_string())
         }
-        Op::SaveKey { service, key } => {
+        Op::Unwatch => {
+            HUB.lock().unwrap().watched_until = 0;
+            Ok(Value::Null)
+        }
+        Op::SaveKey { service, key, host } => {
+            let erasures = state.erasures.load(Ordering::SeqCst);
             let _gate = state.config_gate.lock().await;
-            let key = key.trim().to_string();
-            if !key.is_empty() {
-                check_key(service, &key)?;
+            if state.erasures.load(Ordering::SeqCst) != erasures {
+                return Err(crate::i18n::t("services.error.erased"));
             }
-            crate::web::set_credential(service.id(), &key)?;
+            let mut settings = state.store.lock().unwrap().settings()?;
+            let change = plan_key(&settings.services, service, &key, host.as_deref())?;
+            // The old key goes first, so no key is ever kept for a host it wasn't entered for.
+            if change.remove {
+                crate::web::set_credential(service.id(), "")?;
+            }
+            if change.services != settings.services {
+                settings.services = change.services;
+                state.store.lock().unwrap().save_settings(&settings)?;
+                state.audit("services.address", &format!("{}: {}", service.name(), settings.services.host(service).as_deref().unwrap_or("none")));
+            }
+            if let Some(saved) = &change.save {
+                crate::web::set_credential(service.id(), saved)?;
+            }
             state.audit(
                 "credential.updated",
-                &format!("{} credential {} in macOS Keychain", service.id(), if key.is_empty() { "removed" } else { "updated" }),
+                &format!("{} credential {} in macOS Keychain", service.id(), if change.save.is_none() { "removed" } else { "updated" }),
             );
             reset(service);
             publish_now();
             crate::scheduler::tick_now();
-            serde_json::to_value(statuses()).map_err(|error| error.to_string())
+            serde_json::to_value(statuses(&settings.services)).map_err(|error| error.to_string())
         }
         Op::Show { service } => {
             let hidden = {
@@ -703,7 +861,7 @@ pub async fn services_call(op: Op, app: tauri::AppHandle) -> Result<Value, Strin
                 live.next_at = 0;
             }
             crate::scheduler::tick_now();
-            serde_json::to_value(statuses()).map_err(|error| error.to_string())
+            serde_json::to_value(statuses(&services()?)).map_err(|error| error.to_string())
         }
     }
 }
@@ -900,6 +1058,113 @@ mod tests {
         assert_eq!(link_owner(&hub, "file:///etc/passwd"), None);
         hub.hidden.insert(Kind::Github);
         assert_eq!(link_owner(&hub, "https://github.com/a/b/pull/1"), None);
+    }
+
+    #[test]
+    fn a_key_goes_only_to_the_host_it_was_entered_for() {
+        let saved = bind("git.corp.example", "glpat-abc").unwrap();
+        assert_eq!(key_for(Kind::Gitlab, &saved, "git.corp.example").as_deref(), Some("glpat-abc"));
+        assert_eq!(key_for(Kind::Gitlab, &saved, "gitlab.com"), None);
+        assert_eq!(key_for(Kind::Gitlab, &saved, "git.corp.example:8443"), None);
+        let github = bind("api.github.com", "github_pat_abc").unwrap();
+        assert_eq!(key_for(Kind::Github, &github, "evil.example"), None);
+        // A bare key from before keys kept their host: fine where the host is fixed, never
+        // sent to a host the person names.
+        assert_eq!(key_for(Kind::Github, "github_pat_abc", "api.github.com").as_deref(), Some("github_pat_abc"));
+        assert_eq!(key_for(Kind::Gitlab, "glpat-abc", "gitlab.com"), None);
+        assert_eq!(key_for(Kind::N8n, "n8n_abc", "n8n.example.com"), None);
+        assert_eq!(key_for(Kind::Gitea, &bind("git.example.com", "").unwrap(), "git.example.com"), None);
+    }
+
+    #[test]
+    fn a_key_is_saved_with_its_host_and_a_new_host_needs_the_key_again() {
+        let none = Settings::default();
+        // A first self-hosted GitLab: the host is saved with the key, and the key is bound to
+        // it, never to gitlab.com.
+        let first = plan_key(&none, Kind::Gitlab, " glpat-abc ", Some("https://Git.Corp.example/")).unwrap();
+        assert_eq!(first.services.gitlab_host, "git.corp.example");
+        assert_eq!(first.save, Some(bind("git.corp.example", "glpat-abc").unwrap()));
+        assert!(first.remove, "the key saved for gitlab.com goes");
+        // Changing only the host removes the key and saves none.
+        let moved = plan_key(&first.services, Kind::Gitlab, "", Some("git.other.example")).unwrap();
+        assert_eq!(moved, KeyChange { services: Settings { gitlab_host: "git.other.example".into(), ..Default::default() }, remove: true, save: None });
+        // Disconnect always removes the key and leaves the host alone.
+        let disconnect = plan_key(&first.services, Kind::Gitlab, "", None).unwrap();
+        assert_eq!(disconnect, KeyChange { services: first.services.clone(), remove: true, save: None });
+        // A new key for the same host replaces the old one in place.
+        let again = plan_key(&first.services, Kind::Gitlab, "glpat-new", Some("git.corp.example")).unwrap();
+        assert!(!again.remove && again.services == first.services);
+        // Gitea and n8n have no host until the person gives one.
+        assert!(plan_key(&none, Kind::Gitea, "token", None).is_err());
+        assert!(plan_key(&none, Kind::N8n, "token", Some("http://n8n.example.com")).is_err());
+        assert!(plan_key(&none, Kind::Github, "github_pat_abc", Some("evil.example")).is_err());
+        assert_eq!(plan_key(&none, Kind::Github, "github_pat_abc", Some("")).unwrap().save, Some(bind("api.github.com", "github_pat_abc").unwrap()));
+        // Keys are still checked first.
+        assert!(plan_key(&none, Kind::Stripe, "sk_live_abc", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn settings_saves_never_change_a_services_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().join("resources")).unwrap();
+        let mut saved = state.store.lock().unwrap().settings().unwrap();
+        saved.services.gitlab_host = "git.corp.example".into();
+        state.store.lock().unwrap().save_settings(&saved).unwrap();
+        // An older draft from Settings still says gitlab.com.
+        let mut draft = saved.clone();
+        draft.services = Settings::default();
+        draft.user_name = "Edited".into();
+        let kept = crate::controller::save_settings_in(&state, draft).await.unwrap();
+        assert_eq!(kept.services.gitlab_host, "git.corp.example");
+        let stored = state.store.lock().unwrap().settings().unwrap();
+        assert_eq!((stored.services.gitlab_host.as_str(), stored.user_name.as_str()), ("git.corp.example", "Edited"));
+    }
+
+    #[test]
+    fn service_keys_are_saved_only_through_connections() {
+        for id in KEY_IDS {
+            assert!(crate::controller::service_key_refused(id).is_err(), "{id}");
+        }
+        for id in ["brave", "tavily", "ebay", "duffel", "openai"] {
+            assert!(crate::controller::service_key_refused(id).is_ok(), "{id}");
+        }
+    }
+
+    #[test]
+    fn an_answer_from_before_delete_everything_is_dropped() {
+        let mut hub = Hub::default();
+        let kind = Kind::Vercel;
+        hub.live.insert(kind, Live::fresh(Some("api.vercel.com".into())));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let old = {
+            let live = hub.live.get_mut(&kind).unwrap();
+            live.in_flight = Some(cancel.clone());
+            live.generation
+        };
+        clear(&mut hub);
+        assert!(cancel.load(Ordering::Relaxed), "the poll in flight is told to stop");
+        let snapshot = Snapshot { title: "Deployed".into(), ..Default::default() };
+        assert!(settle_in(&mut hub, kind, old, Ok(snapshot.clone()), &RateLimit::default(), Memo::default(), NOW).is_empty());
+        assert!(hub.live.is_empty());
+        // The next poll starts with a generation never used before, so the old answer still
+        // can't land.
+        hub.live.insert(kind, Live::fresh(Some("api.vercel.com".into())));
+        assert!(hub.live[&kind].generation > old);
+        assert!(settle_in(&mut hub, kind, old, Ok(snapshot), &RateLimit::default(), Memo::default(), NOW).is_empty());
+        assert!(hub.live[&kind].snapshot.is_none());
+    }
+
+    #[test]
+    fn polls_only_while_someone_is_there_and_it_is_on_screen() {
+        // Away from the Mac: nothing, whatever is open.
+        assert!(!watched(false, true, true, false));
+        // Settings on screen, or the pill on the island.
+        assert!(watched(true, true, false, false));
+        assert!(watched(true, false, true, false));
+        // A hidden pill, and Settings not on screen.
+        assert!(!watched(true, false, true, true));
+        assert!(watched(true, true, true, true));
+        assert!(!watched(true, false, false, false));
     }
 
     #[test]

@@ -25,7 +25,8 @@ export type ServiceStatus = {
 export type ServicesOp =
   | { op: 'ping' }
   | { op: 'status' }
-  | { op: 'saveKey'; service: ServiceId; key: string }
+  | { op: 'unwatch' }
+  | { op: 'saveKey'; service: ServiceId; key: string; host?: string }
   | { op: 'show'; service: ServiceId };
 
 export type ServiceInfo = { id: ServiceId; name: string; readonly detail: string; readonly placeholder: string; host?: keyof ServicesSettings; hostPlaceholder?: string };
@@ -59,6 +60,20 @@ export function normalizeHost(input: string): string | null {
   }
 }
 
+/** What Save sends for a service: the typed key, and the host when it changed. A key is bound to
+    its host, so a connected service needs its key again for a new host. Null while there is
+    nothing to save; an Error for an address that isn't https. */
+export function saveRequest(info: ServiceInfo, key: string, typedHost: string, savedHost: string, connected: boolean): { key: string; host?: string } | Error | null {
+  const trimmed = key.trim();
+  const hostChanged = !!info.host && typedHost.trim() !== savedHost;
+  if (!hostChanged) return trimmed ? { key: trimmed } : null;
+  const host = normalizeHost(typedHost);
+  if (host === null) return new Error(t('settings.services.httpsAddress'));
+  if (host === savedHost) return trimmed ? { key: trimmed } : null;
+  if (connected && !trimmed) return null;
+  return { key: trimmed, host };
+}
+
 /** The line under a service's name: what it shows now, or why it doesn't. */
 export function statusLine(info: ServiceInfo, status: ServiceStatus | undefined): string {
   if (!status?.configured) return info.detail;
@@ -76,6 +91,7 @@ export function statusLine(info: ServiceInfo, status: ServiceStatus | undefined)
 /** What the browser preview answers for `services_call`. */
 export function preview(op: ServicesOp): unknown {
   if (op.op === 'ping') return true;
+  if (op.op === 'unwatch') return null;
   if (op.op === 'status') {
     return services.map((service): ServiceStatus => ({ id: service.id, name: service.name, configured: false, hidden: false, health: 'waiting', title: null, message: null, checkedAt: null }));
   }

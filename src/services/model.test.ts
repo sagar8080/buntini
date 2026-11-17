@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { defaults, normalizeHost, preview, services, statusLine, type ServiceStatus } from './model.ts';
+import { defaults, normalizeHost, preview, saveRequest, services, statusLine, type ServiceStatus } from './model.ts';
 
 test('hosts become https host names, as Rust checks them', () => {
   assert.equal(normalizeHost(' https://Git.Example.com:8443/some/page '), 'git.example.com:8443');
@@ -36,4 +36,25 @@ test('the browser preview lists every service as not connected and never pretend
   assert.equal(listed.length, services.length);
   assert.ok(listed.every(status => !status.configured));
   assert.throws(() => preview({ op: 'saveKey', service: 'github', key: 'x' }));
+});
+
+test('Save sends the host with the key, and a new host needs the key again', () => {
+  const [github, gitlab] = services;
+  // Fixed hosts: just the key.
+  assert.deepEqual(saveRequest(github, ' github_pat_x ', '', '', false), { key: 'github_pat_x' });
+  assert.equal(saveRequest(github, '', '', '', true), null);
+  // A first self-hosted GitLab: the host goes in the same request as the key.
+  assert.deepEqual(saveRequest(gitlab, 'glpat-x', 'https://Git.Corp.example/', '', false), { key: 'glpat-x', host: 'git.corp.example' });
+  // Connected, with a new host: nothing to save until the key is entered again.
+  assert.equal(saveRequest(gitlab, '', 'git.other.example', 'git.corp.example', true), null);
+  assert.deepEqual(saveRequest(gitlab, 'glpat-y', 'git.other.example', 'git.corp.example', true), { key: 'glpat-y', host: 'git.other.example' });
+  // Not connected: the host alone may be saved.
+  assert.deepEqual(saveRequest(gitlab, '', 'git.other.example', '', false), { key: '', host: 'git.other.example' });
+  // The same host typed differently is no change.
+  assert.deepEqual(saveRequest(gitlab, 'glpat-x', 'GIT.corp.example', 'git.corp.example', true), { key: 'glpat-x' });
+  assert.ok(saveRequest(gitlab, 'glpat-x', 'http://git.corp.example', '', false) instanceof Error);
+});
+
+test('the browser preview lets Settings stop watching', () => {
+  assert.equal(preview({ op: 'unwatch' }), null);
 });

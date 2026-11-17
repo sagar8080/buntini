@@ -110,6 +110,11 @@ fn hub() -> MutexGuard<'static, Hub> {
     HUB.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The display sleeps or the session is locked, so the island isn't on screen.
+pub fn screen_away() -> bool {
+    hub().asleep
+}
+
 /// Starts reading the players and handling the card. Call once the island is up.
 pub fn start(app: AppHandle) {
     let covers = app.path().app_cache_dir().ok().map(|dir| dir.join("covers"));
