@@ -239,4 +239,77 @@ mod tests {
     fn off_unless_enabled() {
         assert_eq!(read("set a timer for 5 minutes"), None);
     }
+
+    /// With the bundled meaning model: asking to be shown one's own things in some order or
+    /// form is no action, while asking for something added or changed still is one.
+    #[test]
+    #[ignore = "loads the bundled meaning model; run with --ignored"]
+    fn live_showing_is_not_changing() {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        enable();
+        let mut wrong = Vec::new();
+        for request in [
+            "Sort my reminders by due date, soonest first, with undated ones last.",
+            "Alphabetise my reminder titles, one per line.",
+            "Turn my reminders into one short sentence I could read aloud.",
+            "order my tasks by when they're due",
+            "list my to-dos from oldest to newest",
+            "give me a quick rundown of my day in two sentences",
+            "put this week's meetings in a numbered list",
+            "show yesterday's unread emails",
+            "read my reminders back to me",
+            "summarise my inbox in three bullets",
+            "arrange my events for saturday by start time",
+            "count the meetings I have this week",
+        ] {
+            if let Some(intent) = read(request) {
+                wrong.push(format!("{request} -> {intent:?}"));
+            }
+        }
+        for (request, tool) in [
+            ("remind me to buy milk tomorrow", "add_reminder"),
+            ("add eggs to my reminders", "add_reminder"),
+            ("put lunch with Ana in my calendar on friday at 1", "add_calendar_event"),
+            ("book a dentist appointment on my calendar for next tuesday at 3", "add_calendar_event"),
+            ("mark the laundry reminder as done", "complete_reminder"),
+            ("push the call mum reminder to thursday", "reschedule_reminder"),
+            ("move my dentist appointment to 4pm", "update_calendar_event"),
+            ("create a note called packing list", "create_note"),
+            ("remind me to call the plumber at 5", "add_reminder"),
+            ("add bread and butter to my reminders", "add_reminder"),
+            ("move my 3pm meeting to thursday", "update_calendar_event"),
+            ("set a timer for 10 minutes", "set_timer"),
+        ] {
+            if read(request) != Some(Intent::Action(tool)) {
+                wrong.push(format!("{request} -> {:?}, wanted {tool}", read(request)));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// The kinds nearest a request, best first, with their scores. For tuning the examples.
+    #[test]
+    #[ignore = "loads the bundled meaning model; prints scores for BUNTINI_INTENT_PROBE"]
+    fn live_probe_scores() {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        let examples = examples().unwrap();
+        for request in std::env::var("BUNTINI_INTENT_PROBE").unwrap_or_default().split('|').filter(|r| !r.is_empty()) {
+            let vector = unit(&crate::embedding::embed_within(&[instruction(request).to_string()], false, WAIT).unwrap().pop().unwrap().unwrap());
+            let mut scores: Vec<(&str, Vec<f32>)> = Vec::new();
+            for (kind, example) in examples {
+                let similarity: f32 = vector.iter().zip(example).map(|(a, b)| a * b).sum();
+                match scores.iter_mut().find(|(name, _)| name == kind) {
+                    Some((_, list)) => list.push(similarity),
+                    None => scores.push((kind.as_str(), vec![similarity])),
+                }
+            }
+            let mut ranked: Vec<(&str, f32)> = scores.into_iter().map(|(kind, mut list)| {
+                list.sort_by(|a, b| b.total_cmp(a));
+                let top = &list[..list.len().min(NEAREST)];
+                (kind, top.iter().sum::<f32>() / top.len() as f32)
+            }).collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+            println!("PROBE {request}: {:?}", &ranked[..3]);
+        }
+    }
 }
