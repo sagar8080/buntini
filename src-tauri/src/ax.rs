@@ -256,6 +256,13 @@ pub struct WindowText {
     pub cut: bool,
     /// It is the app's main window (for a browser, the one its private-window check sees).
     pub main: bool,
+    /// A password field has the app's focus: nothing of the window is read.
+    pub secure: bool,
+}
+
+/// Whether an element is a password field.
+fn password_field(element: &Element) -> bool {
+    [element.text("AXRole"), element.text("AXSubrole")].iter().any(|role| role == "AXSecureTextField")
 }
 
 /// Reads the window of app `pid` at `frame` (x, y, width, height, as CoreGraphics reports
@@ -290,6 +297,10 @@ pub fn window_text(pid: i32, frame: (f64, f64, f64, f64), front: bool, cap: usiz
     };
     let title = window.text("AXTitle");
     let main = window.flag("AXMain").unwrap_or(false);
+    // Someone typing a password in the app: the window isn't read at all.
+    if app.element("AXFocusedUIElement").is_some_and(|focused| password_field(&focused)) {
+        return Ok(WindowText { title, url: None, text: String::new(), cut: false, main, secure: true });
+    }
     let nodes = window.descendants(20_000);
     let area = nodes.iter().find(|element| element.text("AXRole") == "AXWebArea").cloned();
     let url = area.as_ref().and_then(|area| area.url("AXURL")).filter(|url| url.starts_with("http"));
@@ -320,7 +331,7 @@ pub fn window_text(pid: i32, frame: (f64, f64, f64, f64), front: bool, cap: usiz
         text.push_str(value);
         text.push(if role == "AXStaticText" { ' ' } else { '\n' });
     }
-    Ok(WindowText { title, url, text: text.trim().to_string(), cut, main })
+    Ok(WindowText { title, url, text: text.trim().to_string(), cut, main, secure: false })
 }
 
 /// Each of an app's windows as (title, position, size), for checking what a drop finds.

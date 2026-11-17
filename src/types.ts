@@ -7,7 +7,8 @@ import type { MediaSettings } from './media/model';
 import type { UtilitiesSettings } from './utilities/model';
 export type Mode = 'auto' | 'files' | 'system' | 'web';
 /** Something handed over with a message: a file, or a window the cat was let go over. */
-export type Attached = { kind: 'file'; path: string } | { kind: 'window'; id: string; app: string; title: string };
+/** `brain`: the brain it was attached under (`attachments.ts` brainKey), the only one it goes to. */
+export type Attached = { kind: 'file'; path: string; brain: string } | { kind: 'window'; id: string; app: string; title: string; brain: string };
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
 export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';

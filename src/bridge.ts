@@ -178,7 +178,7 @@ export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskE
   if (!desktop) throw new Error('This is the browser preview. Open Buntini with npm run desktop to run local tools and chat with Qwen.');
   const channel = new Channel<TaskEvent>();
   channel.onmessage = onEvent;
-  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path } : { kind: 'window', id: item.id });
+  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path, brain: item.brain } : { kind: 'window', id: item.id, brain: item.brain });
   return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null, attachments: sent.length ? sent : null });
 }
 export async function continueTask(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, onEvent: (event: TaskEvent) => void): Promise<TaskRecord> {

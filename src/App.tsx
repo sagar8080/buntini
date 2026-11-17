@@ -36,7 +36,7 @@ import { Endpointer, isConversationEnd, shouldBargeIn, type Listening } from './
 import { bootstrap, command, continueTask, desktop, errorMessage, runTask, saveSettings } from './bridge';
 import { applyFlowOnSave } from './flow/api';
 import { callUtilities } from './utilities/api';
-import { addFiles, addWindow, removeAttached } from './attachments';
+import { addFiles, addWindow, brainKey, forBrain, removeAttached } from './attachments';
 import AttachedChips from './AttachedChips';
 import { follow, speak as speakLanguage, useLanguage } from './locales';
 import { locale, number, t, tn } from './i18n.ts';
@@ -353,9 +353,19 @@ export default function App() {
   const nudgeAction = useRef<(action: NudgeAction) => void>(() => {});
   const attachedRef = useRef<Attached[]>([]);
   attachedRef.current = attached;
+  // The brain in use: what's attached goes to it alone.
+  const brain = data ? brainKey(data.settings) : '';
+  const brainRef = useRef(brain);
+  brainRef.current = brain;
+  useEffect(() => {
+    const { kept, dropped } = forBrain(attachedRef.current, brain);
+    if (!dropped.length) return;
+    dropped.forEach(item => { if (item.kind === 'window') void command('forget_window', { id: item.id }).catch(() => {}); });
+    setAttached(kept);
+  }, [brain]);
   const attachFiles = useCallback((paths: string[]) => {
     if (!paths.length) return;
-    setAttached(current => addFiles(current, paths));
+    setAttached(current => addFiles(current, paths, brainRef.current));
     setPage('home');
     void expand(true);
   }, [expand]);
@@ -377,7 +387,7 @@ export default function App() {
     onAction: action => nudgeAction.current(action),
     // Let go over another app's window: it goes with the next messages, and the chat opens.
     onWindow: dropped => {
-      const { next, replaced } = addWindow(attachedRef.current, { kind: 'window', ...dropped });
+      const { next, replaced } = addWindow(attachedRef.current, { kind: 'window', ...dropped, brain: brainRef.current });
       if (replaced) void command('forget_window', { id: replaced.id }).catch(() => {});
       setAttached(next); setPage('home'); void expand(true);
     },

@@ -526,7 +526,7 @@ pub fn read_handed(path: &Path, helper: &Path, cancel: &Arc<AtomicBool>) -> Resu
 
 /// Opens a file the person chose, only if it is a regular file once any link is followed,
 /// and without following a link swapped in after that.
-fn open_handed(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_handed(path: &Path) -> std::io::Result<File> {
     let real = path.canonicalize()?;
     #[cfg(unix)]
     let file = {

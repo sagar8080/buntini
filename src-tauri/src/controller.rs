@@ -4426,6 +4426,12 @@ pub async fn run_task(
             return Err(error);
         }
     };
+    // What was attached goes only to the brain it was attached under, even when the brain
+    // changed by itself a moment ago.
+    if let Err(error) = crate::attach::same_brain(&attachments, &task_settings) {
+        state.active.lock().unwrap().remove(&task.id);
+        return Err(error);
+    }
     task.backend = task_settings.model_backend.clone();
     let mut approved = None;
     if mode == "web" {
