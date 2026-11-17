@@ -125,6 +125,7 @@ pub(super) fn publish(hub: &Hub) {
             state,
             badge: some(session.project()),
             progress: None,
+            card: (session.phase == Phase::Working && !session.steps.is_empty()).then(|| ticker_id(session)),
         });
         if session.phase == Phase::Working && !session.steps.is_empty() {
             offers.push(Offer { card: ticker(session), urgency: Urgency::Info, at_ms: session.last_ms, ttl_ms: None });

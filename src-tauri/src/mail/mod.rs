@@ -1096,6 +1096,7 @@ fn contribution(hub: &Hub) -> Contribution {
             state: if waiting { PillState::Waiting } else { PillState::Idle },
             badge: (unread > 0).then(|| unread.to_string()),
             progress: None,
+            card: None,
         });
     }
     if waiting || hub.card_at.is_some() {

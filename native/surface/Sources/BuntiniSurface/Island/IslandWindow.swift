@@ -98,7 +98,7 @@ final class IslandWindow {
             let frame = IslandGeometry.panelFrame(model.screen, placement: destination)
             let landing: CGPoint
             if destination == .auto {
-                let peek = IslandGeometry.screenRect(panel: frame, size: IslandGeometry.size(.peek, screen: model.screen, openHeight: 0), placement: .auto)
+                let peek = IslandGeometry.screenRect(panel: frame, size: IslandGeometry.size(.peek, screen: model.screen, openHeight: 0, wings: model.glance?.wings ?? IslandGeometry.peekWings), placement: .auto)
                 landing = CGPoint(x: peek.minX + 16 + model.band / 2, y: peek.midY)
             } else {
                 let tile = IslandGeometry.screenRect(panel: frame, size: IslandGeometry.tile, placement: destination)

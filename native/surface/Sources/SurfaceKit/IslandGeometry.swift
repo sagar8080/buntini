@@ -51,19 +51,24 @@ public enum IslandGeometry {
         return shown > 0 ? min(shown, 40) : screen.statusBar
     }
 
-    /// The island's size in each mode. `openHeight` is the card's height below the top edge.
-    public static func size(_ mode: IslandMode, screen: ScreenShape, openHeight: CGFloat) -> CGSize {
+    /// Widest a wing grows to hold what it shows.
+    public static let widestWing: CGFloat = 150
+
+    /// The island's size in each mode. `openHeight` is the card's height below the top edge;
+    /// `wings` the room each side of the notch, wider while there is more to show.
+    public static func size(_ mode: IslandMode, screen: ScreenShape, openHeight: CGFloat, wings: CGFloat = peekWings) -> CGSize {
+        let wings = min(max(wings, peekWings), widestWing)
         if let notch = notch(screen) {
             switch mode {
             case .hidden: return notch
-            case .peek: return CGSize(width: notch.width + 2 * peekWings, height: notch.height)
-            case .open: return CGSize(width: max(openWidth, notch.width + 2 * peekWings), height: notch.height + openHeight)
+            case .peek: return CGSize(width: notch.width + 2 * wings, height: notch.height)
+            case .open: return CGSize(width: max(openWidth, notch.width + 2 * wings), height: notch.height + openHeight)
             }
         }
         let bar = menuBar(screen)
         switch mode {
         case .hidden: return CGSize(width: 0, height: 0)
-        case .peek: return CGSize(width: 200, height: bar)
+        case .peek: return CGSize(width: 40 + 2 * wings, height: bar)
         case .open: return CGSize(width: openWidth, height: bar + openHeight)
         }
     }
@@ -127,10 +132,12 @@ extension IslandGeometry {
 
     /// The island's size in a corner: the tile at rest, the tile and its pills when peeking,
     /// the card when open.
-    public static func cornerSize(_ mode: IslandMode, openHeight: CGFloat, pills: Int) -> CGSize {
+    public static func cornerSize(_ mode: IslandMode, openHeight: CGFloat, pills: Int, glance: CGFloat? = nil) -> CGSize {
         switch mode {
         case .hidden: return tile
-        case .peek: return CGSize(width: tile.width + (pills > 0 ? 18 + 13 * CGFloat(min(pills, 4)) : 0), height: tile.height)
+        case .peek:
+            if let glance { return CGSize(width: tile.width + (glance > 0 ? 14 + glance : 0), height: tile.height) }
+            return CGSize(width: tile.width + (pills > 0 ? 18 + 13 * CGFloat(min(pills, 4)) : 0), height: tile.height)
         case .open: return CGSize(width: openWidth, height: 20 + openHeight)
         }
     }

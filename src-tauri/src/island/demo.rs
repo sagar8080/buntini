@@ -65,7 +65,7 @@ pub fn start() {
         let pills: Vec<Pill> = samples
             .iter()
             .find(|(kind, _, _)| kind == "approval")
-            .map(|(_, _, pills)| pills.iter().cloned().map(|pill| Pill { source: Source::Island, id: format!("{PREFIX}{}", pill.id), state: PillState::Working, ..pill }).collect())
+            .map(|(_, _, pills)| pills.iter().cloned().map(|pill| Pill { source: Source::Island, id: format!("{PREFIX}{}", pill.id), state: PillState::Working, card: pill.card.as_ref().map(|card| format!("{PREFIX}{card}")), ..pill }).collect())
             .unwrap_or_default();
         for (kind, seconds, mood) in STEPS {
             let Some((_, card, _)) = samples.iter().find(|(name, _, _)| name == kind) else { continue };

@@ -14,6 +14,8 @@ pub const FINISH_MS: u64 = 5_200;
 pub const ERROR_MS: u64 = 30_000;
 /// Pills shown at once.
 pub const VISIBLE_PILLS: usize = 4;
+/// Cards kept beside the one in front, to switch to once the island is opened.
+pub const SHELF: usize = 8;
 
 /// Lower is more urgent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,6 +64,8 @@ pub struct Picked {
     pub pills: Vec<Pill>,
     pub overflow: Vec<String>,
     pub card: Option<Card>,
+    /// The other news worth a look, newest first.
+    pub shelf: Vec<Card>,
     pub held: bool,
     /// The card is waiting or an alert, not news: the island opens for it.
     pub interrupt: bool,
@@ -101,6 +105,14 @@ impl Board {
             _ => (offer.card.id.clone(), offer.urgency, now_ms),
         });
 
+        let mut shelf: Vec<Card> = Vec::new();
+        for offer in live.iter().filter(|offer| offer.urgency == Urgency::Info) {
+            if front.is_none_or(|front| front.card.id != offer.card.id) && !shelf.iter().any(|card| card.id == offer.card.id) {
+                shelf.push(offer.card.clone());
+            }
+        }
+        shelf.truncate(SHELF);
+
         let mut pills: Vec<&Pill> = self.sources.values().flat_map(|c| &c.pills).collect();
         pills.sort_by_key(|pill| rank(pill.state));
         let overflow = pills
@@ -113,6 +125,7 @@ impl Board {
             pills: pills.into_iter().take(VISIBLE_PILLS).cloned().collect(),
             overflow,
             card: front.map(|offer| offer.card.clone()),
+            shelf,
             held,
             interrupt: front.is_some_and(|offer| offer.urgency != Urgency::Info),
             urgency: front.map(|offer| offer.urgency),
@@ -180,7 +193,7 @@ mod tests {
     }
 
     fn pill(id: &str, state: PillState) -> Pill {
-        Pill { id: id.into(), source: Source::Agents, label: id.into(), tint: "#888888".into(), state, badge: None, progress: None }
+        Pill { id: id.into(), source: Source::Agents, label: id.into(), tint: "#888888".into(), state, badge: None, progress: None, card: None }
     }
 
     fn shown(board: &mut Board, now: u64) -> Option<String> {
@@ -286,6 +299,24 @@ mod tests {
         let picked = board.pick(0);
         assert_eq!(picked.pills.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["wait0", "wait1", "wait2", "wait3"]);
         assert_eq!(picked.overflow, ["wait4", "wait5"]);
+    }
+
+    #[test]
+    fn the_other_news_stays_on_the_shelf_to_switch_to() {
+        let mut board = Board::default();
+        board.set(Source::Media, Contribution { pills: vec![], offers: vec![offer("music", Urgency::Info, 10, None)] });
+        board.set(Source::Utilities, Contribution { pills: vec![], offers: vec![offer("focus", Urgency::Info, 20, None), offer("gone", Urgency::Info, 0, Some(5))] });
+        board.set(Source::Agents, Contribution { pills: vec![], offers: vec![offer("ask", Urgency::Waiting, 30, None), offer("done", Urgency::Alert, 40, Some(10_000))] });
+        let picked = board.pick(100);
+        assert_eq!(picked.card.map(|card| card.id).as_deref(), Some("ask"));
+        // News only, newest first; neither what waits nor what has had its time.
+        assert_eq!(picked.shelf.iter().map(|card| card.id.as_str()).collect::<Vec<_>>(), ["focus", "music"]);
+
+        // The card in front isn't on the shelf as well.
+        board.set(Source::Agents, Contribution::default());
+        let picked = board.pick(100 + HOLD_MS);
+        assert_eq!(picked.card.map(|card| card.id).as_deref(), Some("focus"));
+        assert_eq!(picked.shelf.iter().map(|card| card.id.as_str()).collect::<Vec<_>>(), ["music"]);
     }
 
     #[test]

@@ -246,6 +246,7 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         pills: picked.pills,
         overflow: picked.overflow,
         card: picked.card,
+        shelf: picked.shelf,
         held: picked.held,
         interrupt: picked.interrupt,
         cat,

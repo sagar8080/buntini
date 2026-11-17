@@ -67,6 +67,10 @@ pub struct Pill {
     pub badge: Option<String>,
     /// 0…1 when the pill shows progress.
     pub progress: Option<f64>,
+    /// The id of the card that goes with this pill, when it isn't the pill's own id. Left
+    /// out when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -131,6 +135,10 @@ pub struct Scene {
     pub overflow: Vec<String>,
     /// The card in front, if any.
     pub card: Option<Card>,
+    /// What else can be looked at once the island is opened, newest first: each pill's card
+    /// and the plan windows. Left out when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shelf: Vec<Card>,
     /// Something waits on the person: the island stays open.
     pub held: bool,
     /// The card in front asks for attention, so the island opens by itself. Otherwise it

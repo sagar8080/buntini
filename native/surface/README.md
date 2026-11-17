@@ -5,7 +5,8 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
 ## How it fits together
 
 - **Rust owns the state.** Each part of Buntini calls `surface::publish(source, Contribution { pills, offers })`.
-  - `surface/board.rs` picks the card in front.
+  - `surface/board.rs` picks the card in front, and keeps the other news on the scene's `shelf`.
+  - A pill names its card in `card` when the two ids differ (an agent session and its steps).
   - A whole `Scene` goes to Swift as JSON, at most once a frame.
 - **Swift draws it.**
   - The scene is decoded into `SurfaceKit` types.
@@ -13,6 +14,14 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
   - `surface::on_action(source, …)` hands it to the part that owns it.
 - **Voice bands** skip the scene: `surface::levels([f32; 9])`.
 - **Words** are the `surface.*` keys of `locales/<language>.json`. Rust sends them with the first scene and when the language changes (`words`); Swift keeps the last ones (`Words.swift`, `L(.chat)`). A new label goes in `Word`, in `locales/*.json` and in the fixture's first scene.
+
+## What the island shows
+
+- **Hidden** while nothing runs. Pointing at the notch shows the cat.
+- **Beside the notch** (`Glance`): the most pressing pill. It shows a mark for what it is and how it's doing, its few characters (time left, a count, a project), then a dot for each of the next three, then "+N". The wings widen to hold it, up to `widestWing`. Resting the pointer there shows the lead in words, or what the Mac needs.
+- **Opened by a click** (`Home`): the question field and Chat, then a chip for each thing running (`Chips`), then the chosen chip's card. A choice holds until the island closes. A session's chip goes to its terminal once its card shows, or when it has none.
+- **Opened by itself** for what waits on you or news worth an interruption. The cat stays in its wing, except beside a hello, a finished turn or dropped files.
+- Spinners and music bars are Core Animation layers (`GlanceViews.swift`), so they cost the app nothing between changes.
 
 ## Who owns what
 
@@ -41,7 +50,7 @@ On the React side, each part has its own folder: `src/<part>/model.ts` and `src/
 - `swift run --package-path native/surface-lab SurfaceLab native/surface/Fixtures/contract.json [index]` opens the real island with fixture scenes and prints every action.
 - `cargo run --example surface_host [kind]` does the same through Rust and the C entry points. Here `kind` is a card kind, for example `approval`.
 - `swift run --package-path native/surface-lab SurfaceLab <fixture> --render <folder>` draws every scene into pictures without a screen. AppKit views (the Metal glow, the pointer probe) are left out of pictures.
-- `SurfaceLab <fixture> <index> --seconds 10 --frames` shows a scene live and reports frame times while the cat moves.
+- `SurfaceLab <fixture> <index> --seconds 10 --frames` shows a scene live and reports frame times while the cat moves. Add `--open` to see it opened, as a click opens it.
 - Measured on a 14-inch MacBook Pro at 120 Hz, release build, on 2026-11-16:
   - frame times while the cat moves: median 8.33 ms, 95th percentile 8.6 ms;
   - average CPU over ten seconds: 2.9% open with the glow, 2.1% peeking, 0.4% hidden.

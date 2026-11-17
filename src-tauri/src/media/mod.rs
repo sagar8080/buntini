@@ -386,6 +386,7 @@ fn contribution(shown: &Shown, pill: bool, progress: Option<f64>) -> Contributio
             state: if reading.playing { PillState::Working } else { PillState::Idle },
             badge: reading.artist.clone(),
             progress,
+            card: None,
         })
         .into_iter()
         .collect();

@@ -79,7 +79,7 @@ pub fn contribution(views: &[View]) -> Contribution {
     let mut contribution = Contribution::default();
     for view in views {
         let id = card_id(view.kind);
-        let pill = |state, badge| Pill { id: id.clone(), source: Source::Services, label: view.kind.name().into(), tint: view.kind.tint().into(), state, badge, progress: None };
+        let pill = |state, badge| Pill { id: id.clone(), source: Source::Services, label: view.kind.name().into(), tint: view.kind.tint().into(), state, badge, progress: None, card: None };
         let Some(snapshot) = view.snapshot else {
             if view.rejected {
                 contribution.pills.push(pill(PillState::Error, None));
@@ -244,6 +244,7 @@ mod tests {
             pills: picked.pills,
             overflow: picked.overflow,
             card: picked.card,
+            shelf: picked.shelf,
             held: picked.held,
             interrupt: picked.interrupt,
             cat: Cat::default(),

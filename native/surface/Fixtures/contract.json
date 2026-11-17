@@ -1179,6 +1179,348 @@
    "overlay": null,
    "sound": null,
    "interrupt": true
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "s1",
+     "source": "services",
+     "label": "GitHub",
+     "tint": "#6E7681",
+     "state": "error",
+     "badge": "CI",
+     "progress": null
+    },
+    {
+     "id": "agent:codex:1",
+     "source": "agents",
+     "label": "Codex",
+     "tint": "#10A37F",
+     "state": "working",
+     "badge": "buntini",
+     "progress": null,
+     "card": "t1"
+    },
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "label": "Focus",
+     "tint": "#FF7A59",
+     "state": "working",
+     "badge": "22:00",
+     "progress": 0.27
+    },
+    {
+     "id": "n1",
+     "source": "media",
+     "label": "Instant Crush",
+     "tint": "#1ED760",
+     "state": "working",
+     "badge": "Daft Punk",
+     "progress": 0.42
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "t1",
+    "source": "agents",
+    "body": {
+     "kind": "ticker",
+     "agent": "Codex",
+     "project": "buntini",
+     "steps": [
+      {
+       "label": "Reads · lib.rs",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": false
+      },
+      {
+       "label": "Edits · surface.rs",
+       "detail": "src-tauri/src/surface.rs",
+       "added": 12,
+       "removed": 3,
+       "failed": false
+      },
+      {
+       "label": "Runs · cargo test",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": true
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null,
+   "shelf": [
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "body": {
+      "kind": "timer",
+      "label": "Focus",
+      "phase": "focus",
+      "endsAt": 1763301500,
+      "remaining": 1320.0,
+      "total": 1500.0,
+      "paused": false,
+      "round": 2,
+      "rounds": 4
+     }
+    },
+    {
+     "id": "n1",
+     "source": "media",
+     "body": {
+      "kind": "nowPlaying",
+      "player": "spotify",
+      "title": "Instant Crush",
+      "artist": "Daft Punk",
+      "album": "Random Access Memories",
+      "artwork": null,
+      "playing": true,
+      "position": 61.5,
+      "duration": 337.0,
+      "shuffle": false,
+      "repeatMode": "off",
+      "volume": 0.6,
+      "positionAt": null
+     }
+    },
+    {
+     "id": "u1",
+     "source": "agents",
+     "body": {
+      "kind": "usage",
+      "agent": "Claude",
+      "windows": [
+       {
+        "label": "5 hours",
+        "percent": 37.5,
+        "resetsAt": 1763300000
+       },
+       {
+        "label": "Week",
+        "percent": 12.0,
+        "resetsAt": null
+       }
+      ]
+     }
+    },
+    {
+     "id": "s1",
+     "source": "services",
+     "body": {
+      "kind": "service",
+      "service": "github",
+      "title": "2 reviews requested",
+      "rows": [
+       {
+        "id": "pr-12",
+        "title": "Add the island",
+        "detail": "example/buntini#12",
+        "state": "waiting",
+        "url": "https://github.com/example/buntini/pull/12"
+       },
+       {
+        "id": "ci",
+        "title": "CI failed on main",
+        "detail": null,
+        "state": "error",
+        "url": null
+       }
+      ],
+      "graph": [
+       0,
+       1,
+       3,
+       0,
+       2,
+       5,
+       0,
+       0,
+       4,
+       1,
+       0,
+       2,
+       3,
+       1,
+       6
+      ]
+     }
+    },
+    {
+     "id": "m1",
+     "source": "mail",
+     "body": {
+      "kind": "mail",
+      "filter": "unread",
+      "messages": [
+       {
+        "id": "msg-1",
+        "from": "Ana",
+        "subject": "Dinner on Tuesday",
+        "preview": "Are we still on?",
+        "unread": true,
+        "flagged": false,
+        "at": 1763290000
+       },
+       {
+        "id": "msg-2",
+        "from": "Bank",
+        "subject": "Statement",
+        "preview": null,
+        "unread": false,
+        "flagged": true,
+        "at": 1763200000
+       }
+      ],
+      "query": "",
+      "unread": 1,
+      "sortable": 2,
+      "more": false,
+      "open": {
+       "id": "msg-1",
+       "from": "Ana",
+       "subject": "Dinner on Tuesday",
+       "at": 1763290000,
+       "body": "Are we still on?\nLet me know.",
+       "attachments": [
+        "menu.pdf"
+       ],
+       "flagged": false,
+       "unread": true
+      },
+      "pending": null,
+      "plan": null,
+      "log": [
+       {
+        "id": "e1",
+        "label": "To Newsletters · This week in tech",
+        "undoable": true
+       },
+       {
+        "id": "e2",
+        "label": "Draft to ana@example.org · Payslip",
+        "undoable": false
+       }
+      ],
+      "status": null,
+      "closed": false
+     }
+    }
+   ]
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "label": "Focus",
+     "tint": "#FF7A59",
+     "state": "working",
+     "badge": "22:00",
+     "progress": 0.27
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.focus",
+    "source": "utilities",
+    "body": {
+     "kind": "timer",
+     "label": "Focus",
+     "phase": "focus",
+     "endsAt": 1763301500,
+     "remaining": 1320.0,
+     "total": 1500.0,
+     "paused": false,
+     "round": 2,
+     "rounds": 4
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "n1",
+     "source": "media",
+     "label": "Instant Crush",
+     "tint": "#1ED760",
+     "state": "working",
+     "badge": "Daft Punk",
+     "progress": 0.42
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "n1",
+    "source": "media",
+    "body": {
+     "kind": "nowPlaying",
+     "player": "spotify",
+     "title": "Instant Crush",
+     "artist": "Daft Punk",
+     "album": "Random Access Memories",
+     "artwork": null,
+     "playing": true,
+     "position": 61.5,
+     "duration": 337.0,
+     "shuffle": false,
+     "repeatMode": "off",
+     "volume": 0.6,
+     "positionAt": null
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
   }
  ],
  "actions": [

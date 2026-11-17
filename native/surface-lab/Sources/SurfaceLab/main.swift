@@ -44,7 +44,8 @@ if let flag = arguments.firstIndex(of: "--render"), arguments.indices.contains(f
         let kind = scene.card.map { "\($0.body.kind)" } ?? "none"
         for (name, screen) in [("notch", SurfaceSnapshot.notchedScreen), ("plain", SurfaceSnapshot.plainScreen)] {
             for (state, hover, expanded) in [("rest", false, false), ("hover", true, false), ("open", true, true)] {
-                if scene.card != nil && state != "rest" { continue }
+                // A card that opens the island shows at rest; news shows once it's opened.
+                if scene.opens && state != "rest" { continue }
                 guard let png = MainActor.assumeIsolated({ SurfaceSnapshot.png(scene: scene, screen: screen, hover: hover, expanded: expanded) }) else { continue }
                 try? png.write(to: folder.appendingPathComponent(String(format: "%02d-%@-%@-%@.png", number, kind, name, state)))
             }
@@ -75,6 +76,8 @@ if let index {
     }
     step()
 }
+// --open: opened, as a click on the island opens it.
+if arguments.contains("--open") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { runtime.open() } }
 if arguments.contains("--frames") { SurfaceFrames.start() }
 if let seconds {
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {

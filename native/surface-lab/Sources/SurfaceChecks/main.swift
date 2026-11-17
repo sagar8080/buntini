@@ -108,4 +108,30 @@ guard !Arming.ready(since: shown, now: shown.addingTimeInterval(0.5)), Arming.re
 let older = #"{"agent":"Codex","project":null,"title":"Run a command","detail":"ls","code":true,"always":true,"plan":false}"#
 guard let approval = try? JSONDecoder().decode(Approval.self, from: Data(older.utf8)), !approval.allow, approval.changes.isEmpty, approval.rules.isEmpty else { fail("an approval without allow offers Allow") }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't")
+// Beside the notch: the most pressing pill in a few characters, a dot for each of the next
+// three, then "+N"; music shows its bars, not its title.
+guard let busy = fixture.scenes.first(where: { $0.pills.count == 4 && $0.shelf != nil }) else { fail("no scene has several things running") }
+guard let glance = Glance.of(busy.pills, overflow: 2), glance.lead.id == busy.pills[0].id, glance.text == "CI", glance.others.count == 3, glance.more == 2,
+      glance.caption == "GitHub · CI", glance.wings > IslandGeometry.peekWings, glance.wings <= IslandGeometry.widestWing else { fail("the wing doesn't say what leads") }
+let music = busy.pills.first(where: { $0.source == .media })!
+guard Glance.of([music])?.text == nil, Glance.of([music])?.wings == IslandGeometry.peekWings, Glance.of([]) == nil else { fail("music's title went in the wing") }
+let long = try! JSONDecoder().decode(Pill.self, from: Data(##"{"id":"p","source":"services","label":"Vercel","tint":"#000000","state":"working","badge":"a-long-project-name","progress":null}"##.utf8))
+guard Glance.of([long])?.text == "a-long-p…", long.cardID == "p" else { fail("a long badge isn't cut") }
+guard IslandGeometry.size(.peek, screen: screen, openHeight: 0, wings: 400).width == IslandGeometry.notch(screen)!.width + 2 * IslandGeometry.widestWing else { fail("a wing grew past the widest") }
+
+// Opened: a chip for every pill, with its card, then the cards no pill stands for, but not
+// a diff; the newest news shows until another chip is chosen.
+let chips = Chips.of(busy)
+guard chips.prefix(4).map(\.id) == busy.pills.map(\.id), chips.count <= Chips.most else { fail("the chips aren't the pills, in order") }
+guard let codex = chips.first(where: { $0.pill?.source == .agents }), codex.card?.id == codex.pill?.card,
+      chips.first(where: { $0.pill?.source == .media })?.card?.id == music.id else { fail("a chip doesn't open its own card") }
+guard chips.contains(where: { $0.pill == nil && $0.symbol == "speedometer" }) else { fail("a plan window has no chip") }
+guard Chips.selected(busy, chosen: nil)?.id == busy.card?.id, Chips.selected(busy, chosen: music.id)?.id == music.id,
+      Chips.selected(busy, chosen: "gone")?.id == busy.card?.id else { fail("the wrong card shows when opened") }
+if let asking = fixture.scenes.first(where: { $0.opens && $0.card?.body.kind == .approval }) {
+    guard Chips.cards(asking).allSatisfy({ $0.id != asking.card?.id }) else { fail("a card that asks is offered as a chip as well") }
+}
+// The row fits: each as wide as it wants while they fit, the widest cut to share the rest.
+guard Chips.share([50, 60], room: 200) == [50, 60], Chips.share([50, 300, 400], room: 350) == [50, 150, 150] else { fail("chips don't share the row") }
+
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs")

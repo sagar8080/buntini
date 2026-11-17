@@ -1044,6 +1044,7 @@ impl Runtime {
                 state: if recording.stopping { PillState::Working } else { PillState::Waiting },
                 badge: None,
                 progress: None,
+                card: None,
             })
             .into_iter()
             .collect();

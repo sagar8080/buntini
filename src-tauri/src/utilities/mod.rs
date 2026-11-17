@@ -647,6 +647,7 @@ fn publish() {
                 state: if session.paused() { PillState::Idle } else if session.phase == Phase::Focus { PillState::Working } else { PillState::Done },
                 badge: Some(if session.paused() { t("utilities.focus.paused") } else { focus::badge(left) }),
                 progress: Some(1.0 - left as f64 / session.length().max(1) as f64),
+                card: None,
             });
             offers.push(Offer { card: Card { id: FOCUS_ID.into(), source: Source::Utilities, body: CardBody::Timer(card.clone()) }, urgency: Urgency::Info, at_ms: shown.focus_since, ttl_ms: None });
             if let Some(at) = shown.focus_alert {

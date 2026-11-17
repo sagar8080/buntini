@@ -1,24 +1,33 @@
 import SwiftUI
 import SurfaceKit
 
-/// Square where it meets the top of the screen; rounded below.
+/// Square where it meets the top of the screen and rounded below. At the notch its top
+/// corners flare out into the edge of the screen, the way the hardware's own corners do.
 struct IslandShape: Shape {
     var bottomRadius: CGFloat
+    var shoulder: CGFloat = 0
 
-    var animatableData: CGFloat {
-        get { bottomRadius }
-        set { bottomRadius = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(bottomRadius, shoulder) }
+        set {
+            bottomRadius = newValue.first
+            shoulder = newValue.second
+        }
     }
 
     func path(in rect: CGRect) -> Path {
-        let radius = min(bottomRadius, rect.width / 2, rect.height)
+        let flare = max(0, min(shoulder, rect.height / 2))
+        let radius = max(0, min(bottomRadius, rect.width / 2, rect.height - flare))
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.move(to: CGPoint(x: rect.minX - flare, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX + flare, y: rect.minY))
+        if flare > 0 { path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + flare), control: CGPoint(x: rect.maxX, y: rect.minY)) }
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
         path.addArc(center: CGPoint(x: rect.maxX - radius, y: rect.maxY - radius), radius: radius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
         path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
         path.addArc(center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius), radius: radius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + flare))
+        if flare > 0 { path.addQuadCurve(to: CGPoint(x: rect.minX - flare, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY)) }
         path.closeSubpath()
         return path
     }
@@ -35,8 +44,10 @@ struct IslandRoot: View {
         let mode = model.mode
         let rect = model.localRect
         let corner = model.inCorner
-        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? 26 : mode == .peek ? model.band / 2 : 8
-        let shape = AnyShape(corner ? AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) : AnyShape(IslandShape(bottomRadius: radius)))
+        let notch = model.hasNotch && !corner
+        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? 24 : mode == .peek ? model.band / 2 : 8
+        let flare: CGFloat = notch ? (mode == .open ? 10 : mode == .peek ? 7 : 0) : 0
+        let shape = corner ? AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) : AnyShape(IslandShape(bottomRadius: radius, shoulder: flare))
         ZStack(alignment: .topLeading) {
             if !inPicture {
                 GlowView(rect: rect, hangs: !corner, held: model.scene?.held == true && mode == .open, tint: model.scene?.cat.accent ?? "#F2B33D")
@@ -50,8 +61,9 @@ struct IslandRoot: View {
                 .shadow(color: .black.opacity(corner ? 0.35 : 0), radius: 14, y: 6)
                 .opacity(mode == .hidden && !corner ? 0 : 1)
                 .offset(x: rect.minX, y: rect.minY)
-            if let line = model.scene?.line, model.hover, mode == .peek {
-                HealthLine(text: line)
+            // Resting on the island: what it shows, in words, or what the Mac needs.
+            if model.hover, mode == .peek, let text = model.scene?.line ?? model.glance?.caption {
+                HealthLine(text: text)
                     .offset(x: rect.minX, y: model.placement == .bottomLeft || model.placement == .bottomRight ? rect.minY - 30 : rect.maxY + 8)
                     .frame(width: rect.width, alignment: .center)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -59,7 +71,7 @@ struct IslandRoot: View {
         }
         .frame(width: IslandGeometry.panel.width, height: IslandGeometry.panel.height, alignment: .topLeading)
         .animation(reduceMotion ? .easeOut(duration: 0.15) : mode == .open ? .spring(response: 0.5, dampingFraction: 0.72) : .timingCurve(0.45, 0, 0.2, 1, duration: 0.34), value: mode)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: rect)
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.4, dampingFraction: 0.8), value: rect)
         .animation(.easeOut(duration: 0.2), value: model.hover)
     }
 
@@ -67,7 +79,7 @@ struct IslandRoot: View {
     @ViewBuilder
     private func background(shape: AnyShape) -> some View {
         if model.hasNotch && !model.inCorner {
-            Color.black
+            shape.fill(Color.black)
         } else if #available(macOS 26.0, *) {
             Color.black.opacity(0.35).glassEffect(.regular, in: shape)
         } else {
@@ -97,62 +109,72 @@ struct IslandRoot: View {
         let scene = model.scene
         let corner = model.inCorner
         let trailing = model.placement == .topRight || model.placement == .bottomRight
+        // The cat steps out of its wing only to sit beside a hello, a finished turn or files.
+        let beside = mode == .open && model.interrupting.map(IslandModel.catBeside) == true
+        let catSide: CGFloat = corner ? (mode == .open ? 26 : IslandGeometry.tile.width - 10) : model.band - 2
         VStack(spacing: 0) {
-            // The top band: the cat and the pills. At the notch the cat sits on the left wing;
-            // in a corner it rests in its tile, nearest the corner.
+            // The top band: the cat in one wing, what's running in the other. In a corner
+            // the cat rests in its tile, nearest the corner.
             HStack(spacing: corner ? 10 : 0) {
-                if trailing, let scene, mode != .hidden {
-                    PillDots(pills: scene.pills, overflow: scene.overflow.count).padding(.leading, 14)
+                if trailing {
+                    glance(mode: mode).padding(.leading, 9)
                     Spacer(minLength: 0)
                 }
-                if mode != .open, let cat = scene?.cat {
+                if !beside, let cat = scene?.cat {
                     self.cat(cat)
-                        .frame(width: corner ? IslandGeometry.tile.width - 10 : model.band - 2, height: corner ? IslandGeometry.tile.height - 10 : model.band - 2)
-                        .padding(.leading, corner ? (trailing ? 0 : 5) : 16)
-                        .padding(.trailing, corner && trailing ? 5 : 0)
+                        .frame(width: catSide, height: catSide)
+                        .padding(.leading, corner ? (trailing ? 0 : (mode == .open ? 14 : 5)) : 16)
+                        .padding(.trailing, corner && trailing ? (mode == .open ? 14 : 5) : 0)
                 }
                 if !trailing {
                     Spacer(minLength: 0)
-                    if let scene, mode != .hidden {
-                        PillDots(pills: scene.pills, overflow: scene.overflow.count)
-                            .padding(.trailing, 16)
-                    }
+                    glance(mode: mode).padding(.trailing, corner ? 9 : 14)
                 }
             }
-            .frame(height: corner ? (mode == .open ? 36 : IslandGeometry.tile.height) : model.band)
+            .frame(height: corner ? (mode == .open ? 40 : IslandGeometry.tile.height) : model.band)
             .contentShape(Rectangle())
             .onTapGesture {
-                if scene?.opens != true { model.expanded.toggle() }
+                if model.interrupting == nil { model.expanded.toggle() }
             }
             if mode == .open {
-                HStack(alignment: .top, spacing: 14) {
-                    if let cat = scene?.cat {
-                        self.cat(cat).frame(width: 64, height: 68)
-                    }
-                    // The cat keeps its place; what the card says reads in its own direction.
-                    content(scene)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .inLanguage()
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, corner ? 0 : 8)
-                .padding(.bottom, 16)
-                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                opened(beside: beside)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .inLanguage()
+                    .padding(.horizontal, 18)
+                    .padding(.top, corner ? 0 : 10)
+                    .padding(.bottom, 16)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
         }
         .foregroundStyle(.white)
     }
 
+    /// The wing's readout while peeking; nothing once opened, where the chips say it.
     @ViewBuilder
-    private func content(_ scene: SurfaceScene?) -> some View {
-        if model.dragging, scene?.card == nil {
+    private func glance(mode: IslandMode) -> some View {
+        if mode == .peek, let glance = model.glance {
+            GlanceView(glance: glance).transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private func opened(beside: Bool) -> some View {
+        if model.dragging, model.scene?.card == nil {
             DropTarget()
-        } else if let card = scene?.card, scene?.opens == true || !model.typing {
-            CardView(card: card, send: send)
+        } else if let card = model.interrupting {
+            if beside, let cat = model.scene?.cat {
+                HStack(alignment: .top, spacing: 14) {
+                    self.cat(cat).frame(width: 64, height: 68)
+                    CardView(card: card, send: send).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .id(card.id)
-                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
-        } else if let scene {
-            Home(pills: scene.pills, model: model, send: send)
+            } else {
+                CardView(card: card, send: send)
+                    .id(card.id)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+            }
+        } else if model.scene != nil {
+            Home(model: model, width: model.size.width - 36, send: send)
         }
     }
 }
@@ -203,64 +225,49 @@ struct Wardrobe: View {
     }
 }
 
-/// Up to four tinted dots, then "+N".
-struct PillDots: View {
-    let pills: [Pill]
-    let overflow: Int
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(pills.prefix(4)) { pill in
-                Circle()
-                    .fill(Color(hex: pill.tint))
-                    .frame(width: 7, height: 7)
-                    .overlay(Circle().stroke(.white.opacity(pill.state == .waiting ? 0.9 : 0), lineWidth: 1.5).frame(width: 11, height: 11))
-                    .accessibilityLabel(pill.label)
-            }
-            if overflow > 0 { Text("+\(overflow)").font(.system(size: 10, weight: .semibold)).opacity(0.75) }
-        }
-    }
-}
-
-/// Opened with nothing to answer: what is running, a question for Buntini, and the way to
-/// the chat.
+/// Opened by a click: a question for Buntini and the way to the chat, then a chip for each
+/// thing running and the chosen one's card.
 struct Home: View {
-    let pills: [Pill]
     @ObservedObject var model: IslandModel
+    let width: CGFloat
     let send: (Action) -> Void
     @State private var question = ""
     @FocusState private var focused: Bool
     @Environment(\.inPicture) private var inPicture
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(pills) { pill in
-                Button {
-                    send(Action(source: pill.source, card: nil, name: "pill", value: .string(pill.id)))
-                } label: {
-                    HStack(spacing: 8) {
-                        Circle().fill(Color(hex: pill.tint)).frame(width: 8, height: 8)
-                        Text(pill.label).font(.callout.weight(.medium)).lineLimit(1)
-                        if let badge = pill.badge { Text(badge).font(.caption).opacity(0.6).lineLimit(1) }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(height: 24)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+        let chips = model.chips
+        let selected = model.selected
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 field
                     .font(.callout)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
-                UtilityHomeButtons(pills: pills, send: send)
+                UtilityHomeButtons(pills: model.scene?.pills ?? [], send: send)
                 IslandButton(label: L(.chat), prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
             }
+            if !chips.isEmpty {
+                ChipRow(chips: chips, selected: selected?.id, width: width, choose: choose)
+            }
+            if let card = selected {
+                CardView(card: card, send: send)
+                    .id(card.id)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: selected?.id)
         .onChange(of: focused) { now in model.typing = now }
         .onDisappear { model.typing = false }
+    }
+
+    private func choose(_ chip: Chip) {
+        if let card = chip.card, model.selected?.id != card.id {
+            model.chosen = card.id
+        } else if let pill = chip.pill {
+            send(Action(source: pill.source, card: nil, name: "pill", value: .string(pill.id)))
+        }
     }
 
     /// A picture can't hold a live text field, so it gets the field's look.

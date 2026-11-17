@@ -35,6 +35,11 @@ public struct Pill: Codable, Equatable, Identifiable, Sendable {
     public let badge: String?
     /// 0…1 when the pill shows progress.
     public let progress: Double?
+    /// The id of the card that goes with this pill, when it isn't the pill's own id.
+    public let card: String?
+
+    /// The id of the card that goes with this pill.
+    public var cardID: String { card ?? id }
 }
 
 public enum Mood: String, Codable, Sendable {
@@ -70,6 +75,8 @@ public struct SurfaceScene: Codable, Equatable, Sendable {
     public let overflow: [String]
     /// The card in front, if any.
     public let card: Card?
+    /// What else can be looked at once the island is opened, newest first. Left out when none.
+    public let shelf: [Card]?
     /// Something waits on the person: the island stays open.
     public let held: Bool
     /// The card in front asks for attention, so the island opens by itself. Otherwise it

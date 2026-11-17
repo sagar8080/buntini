@@ -57,6 +57,11 @@ public final class SurfaceRuntime {
         if let sound = scene.sound { sounds.play(sound.name, sequence: sound.sequence) }
     }
 
+    /// Opens the island as a click on it does, for SurfaceLab to look at it opened.
+    public func open() {
+        island?.model.expanded = true
+    }
+
     public func stop() {
         island?.close()
         flowPill?.close()
