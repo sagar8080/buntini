@@ -3833,8 +3833,12 @@ where
                 }
             }
             sources.sort_by_key(|tool| crate::personal_answer::every_source().iter().position(|source| source == tool));
-            let mut work_out = crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now);
-            if !work_out {
+            // By meaning first, on this Mac's search model, which tells the two kinds apart far more
+            // steadily than a small model's one-word choice; that choice can still add a work-out.
+            // A whole app as it is ("any new emails") is listed by Rust, never worked out.
+            let whole = crate::personal_answer::asks_for_whole_apps(&goal_now) && !crate::decision::asks_for_a_rewrite(&goal_now);
+            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || crate::decision::worked_out_by_meaning(&goal_now) == Some(true));
+            if !work_out && !whole {
                 phase(channel, &task.id, "thinking");
                 let turn = state.models.generate(settings, crate::decision::work_request(&goal_now), cancel.clone(), |_| {}).await;
                 if cancel.load(Ordering::Relaxed) {

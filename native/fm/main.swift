@@ -739,8 +739,10 @@ func researchSchema(sourceIDs: [String], evidenceKind: String = "pages") throws 
 }
 
 @available(macOS 26.0, *)
-func recordPickSchema(ids: [String], most: Int?, quote: Bool = false) throws -> GenerationSchema {
-    let record = DynamicGenerationSchema(name: "ChoiceNumber", description: "One of the numbers given", anyOf: ids)
+func recordPickSchema(ids: [String], most: Int?, quote: Bool = false, reason: String? = nil) throws -> GenerationSchema {
+    // A choice among words ("look up", "work out") is described as a choice, not a number.
+    let words = ids.allSatisfy { Int($0) == nil }
+    let record = DynamicGenerationSchema(name: words ? "Option" : "ChoiceNumber", description: words ? "One of the choices given" : "One of the numbers given", anyOf: ids)
     if quote {
         // One choice alone can't be generated, and "none" is a real answer: no record answers.
         let record = DynamicGenerationSchema(name: "RecordNumber", description: "The number of a record, or none", anyOf: ids + ["none"])
@@ -754,9 +756,13 @@ func recordPickSchema(ids: [String], most: Int?, quote: Bool = false) throws -> 
             .init(name: "answers", description: "One entry per record that answers the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: answer, minimumElements: 0, maximumElements: max(most ?? ids.count, 2))),
         ]), dependencies: [])
     }
-    return try GenerationSchema(root: DynamicGenerationSchema(name: "Choice", description: "The numbers that answer the question", properties: [
-        .init(name: "ids", description: most == 1 ? "The one number that answers the question" : "The numbers that answer the question; empty when none do", schema: DynamicGenerationSchema(arrayOf: record, minimumElements: most == 1 ? 1 : 0, maximumElements: most ?? ids.count)),
-    ]), dependencies: [])
+    let described = words ? (most == 1 ? "The one choice that fits" : "The choices that fit; empty when none do") : (most == 1 ? "The one number that answers the question" : "The numbers that answer the question; empty when none do")
+    var properties: [DynamicGenerationSchema.Property] = []
+    // A few words of its own first, when the controller asks: on macOS 27 a bare choice was
+    // nearly always the first one listed.
+    if let reason { properties.append(.init(name: "reason", description: reason, schema: DynamicGenerationSchema(type: String.self))) }
+    properties.append(.init(name: "ids", description: described, schema: DynamicGenerationSchema(arrayOf: record, minimumElements: most == 1 ? 1 : 0, maximumElements: most ?? ids.count)))
+    return try GenerationSchema(root: DynamicGenerationSchema(name: "Choice", description: words ? "The choice that fits" : "The numbers that answer the question", properties: properties), dependencies: [])
 }
 
 @available(macOS 26.0, *)
@@ -848,7 +854,8 @@ func generate(_ id: String, _ request: [String: Any]) async {
             let session = LanguageModelSession(model: permissive ? SystemLanguageModel(guardrails: .permissiveContentTransformations) : .default, tools: [], transcript: transcript)
             emit(["id": id, "type": "model_call", "stage": "pick"])
             let quote = request["record_quote"] as? Bool == true
-            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int, quote: quote), options: GenerationOptions(temperature: 0))
+            let reason = (request["record_reason"] as? String).flatMap { $0.isEmpty || $0.count > 200 ? nil : $0 }
+            let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int, quote: quote, reason: reason), options: GenerationOptions(temperature: 0))
             try requireCompleteGeneration(result.rawContent.isComplete)
             emit(["id": id, "type": "done", "text": try validatedRecordPick(result.content.jsonString, ids: recordIDs, quote: quote), "finish_reason": "stop"])
             return

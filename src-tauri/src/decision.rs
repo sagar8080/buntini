@@ -55,9 +55,12 @@ pub fn work_request(goal: &str) -> Value {
             {"role":"user","content":format!("Their question: {}", cut(goal, 400))},
         ],
         "tools": [],
-        "max_tokens": 60,
+        "max_tokens": 120,
         "record_pick": true,
-        "record_ids": ["look up", "work out"],
+        // macOS 27's model took the first option listed nearly every time, and chose far better
+        // after a few words of its own on what answering takes.
+        "record_ids": ["work out", "look up"],
+        "record_reason": "In a few words, what has to be done with the records to answer it",
         "record_most": 1,
         "record_permissive": true,
     })
@@ -102,6 +105,90 @@ pub fn general_request(goal: &str) -> Value {
     })
 }
 
+/// Example questions of each kind, for telling them apart by meaning on this Mac with the
+/// bundled search model. Written for this, not taken from any exam.
+const WORK_OUT_EXAMPLES: [&str; 26] = [
+    "how many meetings do I have next week",
+    "how many emails came in on Monday",
+    "how much free time do I have on Thursday afternoon",
+    "what's the total of my taxi receipts",
+    "how long are my calls on Friday altogether",
+    "is the plumber coming before or after the school run",
+    "which is first, the car service or the vet",
+    "how many days until my passport renewal is due",
+    "what's left on my shopping list if I buy the eggs",
+    "will I be home by 6 if the meeting runs to 5 and the drive is 40 minutes",
+    "do any of my events on Saturday overlap",
+    "can I fit a one-hour gym session in tomorrow morning",
+    "which costs more, the hotel or the flights, and by how much",
+    "how late am I on the rent reminder",
+    "how many of my reminders are overdue",
+    "what's the gap between my last meeting and dinner",
+    "sort my errands by due date",
+    "put next week's meetings in time order",
+    "give me today's schedule in one sentence",
+    "how much have I spent on groceries going by my receipts",
+    "count the unread emails from this week",
+    "is the deadline in Tom's email before my review meeting",
+    "how much earlier is the new time than what's on my calendar",
+    "if four of us split the dinner bill, what's each share",
+    "what's the earliest free hour I have on Wednesday",
+    "how many things are on my plate on Friday, events and reminders together",
+];
+const LOOK_UP_EXAMPLES: [&str; 24] = [
+    "when is my dentist appointment",
+    "where is the team offsite",
+    "what did Tom say about the budget",
+    "who sent the invoice email",
+    "what's the subject of the email from the bank",
+    "is there a reminder to buy stamps",
+    "what time is the flight on Friday",
+    "what's the tracking number for my shoe order",
+    "has Maria replied about the venue",
+    "what's on my calendar tomorrow",
+    "what are my reminders",
+    "what's the address of the vet",
+    "which list is the gym reminder on",
+    "did the landlord email about the boiler",
+    "what does the newsletter say about the markets",
+    "what's the code in the verification email",
+    "when is the library book due",
+    "what's the video link for the client call",
+    "what's in my inbox from today",
+    "what did the school email about the trip",
+    "who am I meeting on Thursday",
+    "what's the phone number in the plumber's email",
+    "has my parcel been delivered",
+    "what did I write on my passport reminder",
+];
+
+static EXAMPLES: std::sync::OnceLock<Option<Vec<(bool, Vec<f32>)>>> = std::sync::OnceLock::new();
+
+fn unit(vector: &[i8]) -> Vec<f32> {
+    let length = vector.iter().map(|value| f32::from(*value).powi(2)).sum::<f32>().sqrt().max(1.0);
+    vector.iter().map(|value| f32::from(*value) / length).collect()
+}
+
+/// Whether a question is nearer the work-out examples than the lookups, by meaning, with the
+/// search model bundled for the memory index. None when that model can't say now.
+pub fn worked_out_by_meaning(goal: &str) -> Option<bool> {
+    let wait = std::time::Duration::from_secs(2);
+    let examples = EXAMPLES
+        .get_or_init(|| {
+            let texts: Vec<String> = WORK_OUT_EXAMPLES.iter().chain(LOOK_UP_EXAMPLES.iter()).map(|text| text.to_string()).collect();
+            let vectors = crate::embedding::embed_within(&texts, false, wait).ok()?;
+            Some(vectors.into_iter().enumerate().filter_map(|(at, vector)| Some((at < WORK_OUT_EXAMPLES.len(), unit(&vector?)))).collect())
+        })
+        .as_ref()?;
+    let asked = unit(&crate::embedding::embed_within(&[goal.to_string()], false, wait).ok()?.pop()??);
+    let score = |work: bool| {
+        let mut near: Vec<f32> = examples.iter().filter(|(kind, _)| *kind == work).map(|(_, vector)| vector.iter().zip(&asked).map(|(a, b)| a * b).sum()).collect();
+        near.sort_by(|a, b| b.total_cmp(a));
+        near.iter().take(3).sum::<f32>() / 3.0
+    };
+    Some(score(true) > score(false))
+}
+
 /// Whether the model said the question has to be worked out. None when its reply isn't a choice.
 pub fn worked_out(reply: &str) -> Option<bool> {
     match first_id(reply)?.as_str() {
@@ -109,6 +196,12 @@ pub fn worked_out(reply: &str) -> Option<bool> {
         "look up" | "answer" => Some(false),
         _ => None,
     }
+}
+
+/// Whether a yes-or-no choice came back yes.
+#[cfg(test)]
+pub fn said_yes_text(reply: &str) -> bool {
+    first_id(reply).as_deref() == Some("yes")
 }
 
 fn first_id(reply: &str) -> Option<String> {
@@ -754,6 +847,8 @@ pub fn unconfirmed(answer: &str, known: &Known) -> Vec<String> {
 /// Capitalised words that are just English, never a name the answer could make up.
 const ORDINARY: &[&str] = &[
     "i", "i'm", "i've", "i'll", "i'd", "ok", "okay", "yes", "no", "not", "none", "nothing", "mail", "email", "emails", "calendar", "calendars", "reminder", "reminders", "buntini", "am", "pm", "today", "tomorrow", "yesterday", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    // Words a sentence can start with after a dash or bold text, which aren't names.
+    "you", "your", "yours", "you're", "you've", "you'll", "we", "they", "it", "its", "it's", "there", "there's", "this", "that", "these", "those", "the", "a", "an", "and", "but", "so", "then", "also", "both", "each", "all", "one", "if", "when", "after", "before", "from", "on", "at", "in", "with", "for", "to", "of", "by", "or", "nothing", "only", "here", "here's",
     "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "mon", "tue", "wed", "thu", "fri", "sat", "sun", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "inbox", "subject", "due", "total", "free", "busy", "work", "home", "personal", "list", "event", "events",
 ];
 
@@ -1051,6 +1146,7 @@ mod tests {
         assert_eq!(unconfirmed("You have 9 hours free from 11:00.", &digest.known), vec!["9 hours"]);
         assert_eq!(unconfirmed("The Dentist is at 16:00 on Friday.", &digest.known), vec!["16:00", "Friday"]);
         assert_eq!(unconfirmed("You're seeing Marco at 11:00.", &digest.known), vec!["Marco"]);
+        assert_eq!(unconfirmed("**Call mum** — You could fit it in from 11:30 to 15:00.", &digest.known), Vec::<String>::new());
         assert_eq!(unconfirmed("You have 17 reminders.", &digest.known), vec!["17"]);
     }
 

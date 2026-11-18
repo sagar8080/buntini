@@ -1163,6 +1163,14 @@ pub fn not_there(goal: &str, reads: &[&Step]) -> Option<String> {
     Some(format!("{thing}{span} mentions {named}."))
 }
 
+/// Whether every part of a question asks for a whole app as it is ("what's in my inbox", "any
+/// new emails", "what are my reminders"), which Rust lists itself.
+pub fn asks_for_whole_apps(goal: &str) -> bool {
+    let goal = &crate::task_contract::spelled(goal);
+    let clauses: Vec<&str> = goal.split(" and ").flat_map(|part| part.split(',')).filter(|clause| !clause.trim().is_empty()).collect();
+    !clauses.is_empty() && clauses.iter().all(|clause| settled_source(clause).is_some())
+}
+
 /// Whether the question wants everything it read, so no one needs to choose: "my inbox",
 /// "what's on my calendar tomorrow", or a search that already found only what it asked for.
 fn wants_everything(goal: &str, reads: &[&Step]) -> bool {

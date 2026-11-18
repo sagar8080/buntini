@@ -794,15 +794,44 @@ async fn live_real_apps() {
 #[tokio::test]
 #[ignore = "uses the real Apple model; prints its choices for BUNTINI_PROBE"]
 async fn live_decision_choices() {
+    crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
     let dir = tempfile::tempdir().unwrap();
     let state = live_state(dir.path());
     let settings = state.store.lock().unwrap().settings().unwrap();
     for goal in std::env::var("BUNTINI_PROBE").unwrap_or_default().split('|').filter(|goal| !goal.is_empty()) {
         let started = std::time::Instant::now();
-        let request = if std::env::var("BUNTINI_PROBE_GENERAL").is_ok() { crate::decision::general_work_request(goal) } else { crate::decision::work_request(goal) };
+        let mut request = if std::env::var("BUNTINI_PROBE_GENERAL").is_ok() { crate::decision::general_work_request(goal) } else { crate::decision::work_request(goal) };
+        // Other ways to put the same choice, to compare on a new OS's model.
+        match std::env::var("BUNTINI_PROBE_VARIANT").as_deref() {
+            Ok("swapped") => request["record_ids"] = json!(["work out", "look up"]),
+            Ok("reason") => request["record_reason"] = json!("In a few words, what has to be done with the records to answer it"),
+            Ok("reason-swapped") => {
+                request["record_reason"] = json!("In a few words, what has to be done with the records to answer it");
+                request["record_ids"] = json!(["work out", "look up"]);
+            }
+            Ok("yesno") => {
+                request["messages"] = json!([
+                    {"role":"system","content":"Decide whether answering a question about the user's own emails, calendar and reminders means working something out: counting, adding up, a length of time, a gap or free time, before or after, which comes first, how many days, what's left, sorting, comparing, or rewriting them in a format. Answer no when one record answers it as it stands: who sent something, what it says, when or where one thing is, or whether it exists.\n\nReply only with JSON in this form: {\"ids\":[\"no\"]}"},
+                    {"role":"user","content":format!("Their question: {goal}")},
+                ]);
+                request["record_ids"] = json!(["no", "yes"]);
+            }
+            Ok("free") => {
+                request = json!({"messages":[
+                    {"role":"system","content":"You sort questions about the user's own emails, calendar and reminders. Reply with one word. lookup: one record answers it as it stands (who sent something, what it says, when or where one thing is, whether it exists). calculate: the answer must be worked out from several records or from numbers in them (how many, a total, a length, a gap or free time, before or after, which is sooner, how many days, what's left, sorting, comparing, or rewriting in a format)."},
+                    {"role":"user","content":format!("Question: {goal}\nOne word, lookup or calculate:")},
+                ], "tools": [], "max_tokens": 10});
+            }
+            _ => {}
+        }
         let turn = state.models.generate(&settings, request, Arc::new(AtomicBool::new(false)), |_| {}).await;
         let said = turn.map(|turn| turn.text).unwrap_or_else(|error| error);
-        eprintln!("CHOICE {:?} {} ms | {goal} | {said}", crate::decision::worked_out(&said), started.elapsed().as_millis());
+        let worked = crate::decision::worked_out(&said).or_else(|| (said.to_lowercase().contains("calculate") || crate::decision::said_yes_text(&said)).then_some(true));
+        if std::env::var("BUNTINI_PROBE_MEANING").is_ok() {
+            eprintln!("MEANING {:?} | {goal}", crate::decision::worked_out_by_meaning(goal));
+            continue;
+        }
+        eprintln!("CHOICE {worked:?} {} ms | {goal} | {}", started.elapsed().as_millis(), said.replace('\n', " "));
     }
     state.models.shutdown().await;
 }
