@@ -122,6 +122,8 @@ export interface TaskRecord {
   cards?: ResultCard[];
   /** Answers to pick when Buntini asked something. Each sends its prompt. */
   choices?: { label: string; prompt: string; consent?: WorkoutConsent }[];
+  /** The apps the person tagged ("/calendar …"); only these were read. */
+  apps?: string[];
   system?: Record<string, unknown>;
   glance?: MacGlance;
   backend?: string;
@@ -215,3 +217,10 @@ export interface MacGlance {
 
 /** The person's answer about a brain working questions out, saved before the question is asked again. */
 export interface WorkoutConsent { brain: string; allow: boolean; shares: string[] }
+
+/** The tags that name the person's own apps at the start of a message, and the read each means. */
+export const appTags: { tag: string; app: string; read: string }[] = [
+  { tag: 'mail', app: 'mail', read: 'read_mail' },
+  { tag: 'calendar', app: 'calendar', read: 'read_calendar' },
+  { tag: 'reminders', app: 'reminders', read: 'read_reminders' },
+];

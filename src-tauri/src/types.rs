@@ -459,6 +459,9 @@ pub struct TaskRecord {
     /// Answers the user can pick when Buntini asked them something. Each sends its prompt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
+    /// The apps the person named with a tag ("/calendar …"): only these are read for it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

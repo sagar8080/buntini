@@ -559,14 +559,19 @@ async fn live_personal_answers() {
             Some(world) => world.seed(&state, today),
             None => seed_index(&state, &inbox, today),
         }
+        // As `run_task` reads them: "/calendar …" names the apps, and the rest is the question.
+        let (apps, untagged) = crate::decision::tagged(asked_text);
         let mut task: TaskRecord = serde_json::from_value(json!({
-            "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
-            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt || on_cli.is_some() { "cloud" } else { "apple" }
+            "id":uuid::Uuid::new_v4().to_string(), "prompt":untagged, "answer":"",
+            "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt || on_cli.is_some() { "cloud" } else { "apple" }, "apps":apps
         }))
         .unwrap();
         state.store.lock().unwrap().save_task(&task).unwrap();
-        let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
-        let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":asked_text})];
+        let mut offered = chat_tools(&settings, state.models.locality(&settings), false, true);
+        if !task.apps.is_empty() {
+            offered.retain(|tool| !["read_mail", "read_calendar", "read_reminders"].contains(tool) || task.apps.iter().any(|app| app == tool));
+        }
+        let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":untagged})];
         let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
         let rows: Vec<(&str, bool, &str, &str, &str)> = match &world {
             Some(world) => world.inbox.iter().map(|row| (row.0.as_str(), row.1, row.2.as_str(), row.3.as_str(), row.4.as_str())).collect(),

@@ -42,6 +42,7 @@ import AttachedChips from './AttachedChips';
 import { follow, speak as speakLanguage, useLanguage } from './locales';
 import { locale, number, t, tn } from './i18n.ts';
 import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval, WorkoutConsent } from './types';
+import { appTags } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
@@ -1078,6 +1079,7 @@ export default function App() {
             {toastAnchored && toast}
             {planning && <div className="planning-status" role="status"><LoaderCircle size={12} className="spin" /><span>{t('app.composer.oneMoment')}</span><button type="button" className="text-button" onClick={() => void cancel()}>{t('common.stop')}</button></div>}
             {mode !== 'auto' && <div className="mode-pill"><currentMode.icon size={13} /><span>{currentMode.name}</span><button type="button" aria-label={t('app.composer.backToAuto')} onClick={() => setMode('auto')} disabled={busy}><X size={12} /></button></div>}
+            {mode === 'auto' && !busy && /^\/[a-z]*$/i.test(input) && <div className="reply-chips tag-chips">{appTags.filter(tag => data?.settings.apps.includes(tag.app) && tag.tag.startsWith(input.slice(1).toLowerCase())).map(tag => <button type="button" key={tag.tag} onClick={() => { setInput(`/${tag.tag} `); inputRef.current?.focus(); }}>/{tag.tag}</button>)}</div>}
             <form className={`composer ${recording ? 'is-recording' : ''} ${dropping ? 'is-dropping' : ''}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
               {attached.length > 0 && <AttachedChips items={attached} disabled={busy} onRemove={detach} />}
               <textarea ref={inputRef} rows={1} value={recording || transcribing ? heard : input} onChange={event => setInput(event.target.value)} placeholder={recording ? (micOpen ? t('app.status.listening') : t('app.composer.micReady')) : transcribing ? t('app.composer.turningIntoWords') : mode === 'auto' && glance[0]?.kind === 'event' ? t('app.composer.askAbout', { title: glance[0].title }) : currentMode.placeholder} aria-label={t('app.composer.message', { name: assistantName })} disabled={pending} maxLength={8000} onFocus={() => { if (desktop) void command('capture_focus').catch(() => {}); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!busy) void submit(); } }} />

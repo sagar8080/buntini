@@ -146,6 +146,7 @@ mod tests {
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         }
     }
 

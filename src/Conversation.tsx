@@ -12,6 +12,7 @@ import { fileSize, relativeTime, safeHostname } from './format';
 import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
 import { locale, t, tn } from './i18n.ts';
 import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate, WorkoutConsent } from './types';
+import { appTags } from './types';
 
 type Props = {
   turns: TaskRecord[]; live: TaskRecord | null; busy: boolean; activity: string;
@@ -69,7 +70,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
     // A card that says it all stands alone; a model's own reply about the Mac sits above it.
     const cardOnly = !!item.glance && item.answer === item.glance.summary;
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
-      {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
+      {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.apps?.map(read => <span key={read} className="app-tag">/{appTags.find(tag => tag.read === read)?.tag ?? read}</span>)}{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>

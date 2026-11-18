@@ -3400,6 +3400,10 @@ async fn execute_with_settings(
     } else {
         chat_tools(&settings, locality, has_folders, mode == "auto")
     };
+    // A message tagged with its apps ("/mail …") reads those and none of the others.
+    if !task.apps.is_empty() {
+        offered.retain(|tool| !["read_mail", "read_calendar", "read_reminders"].contains(tool) || task.apps.iter().any(|app| app == tool));
+    }
     // Small models follow a note beside the question far better than one in the instructions.
     if files_off {
         if let Some(last) = messages.last_mut() {
@@ -3759,7 +3763,14 @@ where
     if small && flow.steps.is_empty() && flow.contract.own_sources.is_none() {
         let earlier = flow.messages.iter().rev().filter(|message| message["role"] == "user").nth(1).and_then(|message| message["content"].as_str());
         let goal_now = flow.contract.current_request.clone();
-        let (mut sources, asked) = crate::personal_answer::source_requests(&goal_now, earlier, &flow.contract);
+        // Apps the person tagged are the ones to read, for a question; nothing guesses others.
+        let writes = flow.contract.outcomes.iter().any(|outcome| outcome.kind == "write" || outcome.kind == "unsupported");
+        let tagged: Vec<String> = if writes { vec![] } else { task.apps.iter().filter(|app| offered.contains(app)).cloned().collect() };
+        if !tagged.is_empty() {
+            flow.contract.answer_from_own_apps();
+            flow.contract.outcomes.retain(|outcome| !(outcome.kind == "read" && !outcome.accepted_tools.is_empty() && outcome.accepted_tools.iter().all(|tool| crate::personal_answer::every_source().contains(tool) && !tagged.contains(tool))));
+        }
+        let (mut sources, asked) = if tagged.is_empty() { crate::personal_answer::source_requests(&goal_now, earlier, &flow.contract) } else { (tagged.clone(), vec![]) };
         let own_shape = crate::personal_answer::about_own_things(&goal_now, &flow.contract);
         // No app named: the local index says where the question's words are, and that nothing
         // has them, before any model guesses. A word nothing holds isn't read for.
@@ -3824,9 +3835,9 @@ where
         // about, then whether its answer is looked up or worked out, and by which brain.
         if !sources.is_empty() && reads_apps {
             let hits = if hits.built { hits } else { index_hits(state, settings, &goal_now) };
-            let mut notes = vec![format!("routed to {}", sources.join(", "))];
+            let mut notes = vec![format!("{} {}", if tagged.is_empty() { "routed to" } else { "tagged" }, sources.join(", "))];
             // Asked to judge this from the titles, Apple's model said yes to almost every app.
-            for (tool, titles) in hits.other_apps(&sources) {
+            for (tool, titles) in hits.other_apps(&sources).into_iter().filter(|_| tagged.is_empty()) {
                 if offered.contains(&tool) {
                     notes.push(format!("added {tool} for {}", titles.join("; ")));
                     sources.push(tool);
@@ -3878,7 +3889,7 @@ where
         // A general question to work out goes to the brain the person allowed, when there is one
         // they've said yes to: only the question goes, never a record.
         // "Could I squeeze a two-hour block in tomorrow" is about their day, not a sum.
-        let general = sources.is_empty() && !own_shape && !crate::personal_answer::says_mine(&goal_now) && crate::task_contract::calendar_days(&goal_now, chrono::Local::now().date_naive()).is_empty() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
+        let general = sources.is_empty() && task.apps.is_empty() && !own_shape && !crate::personal_answer::says_mine(&goal_now) && crate::task_contract::calendar_days(&goal_now, chrono::Local::now().date_naive()).is_empty() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
         flow.contract.own_sources = Some(sources);
         // What Rust works out itself (units, day counts, a word backwards) never leaves the Mac.
         let rust_knows = worked_answer(flow).is_some();
@@ -4714,6 +4725,8 @@ pub async fn run_task(
     if prompt.is_empty() || prompt.len() > 8000 {
         return Err("Enter a question of up to 8,000 characters.".into());
     }
+    // "/calendar what's on tomorrow": the person names the apps, and nothing guesses them.
+    let (apps, prompt) = crate::decision::tagged(&prompt);
     if !["auto", "files", "system", "web"].contains(&mode.as_str()) {
         return Err("Unknown task mode.".into());
     }
@@ -4744,6 +4757,7 @@ pub async fn run_task(
         handoff: None,
         action: None,
         choices: vec![],
+        apps,
     };
     // A brain that became usable while nothing was running takes over from this task on.
     crate::brain::settle_and_tell(&app).await;
@@ -5648,6 +5662,7 @@ for line in sys.stdin:
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         };
         assert_eq!(
             skill_history(&[previous.clone()], None, "current"),
@@ -5739,6 +5754,7 @@ for line in sys.stdin:
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         };
         let channel = Channel::new(|_| Ok(()));
         execute(
@@ -5810,6 +5826,7 @@ for line in sys.stdin:
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         };
         state.store.lock().unwrap().save_task(&task).unwrap();
         execute(
@@ -5891,6 +5908,7 @@ for line in sys.stdin:
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         };
         state.store.lock().unwrap().save_task(&task).unwrap();
         let events = Arc::new(Mutex::new(Vec::<Value>::new()));

@@ -507,7 +507,9 @@ fn text_work(goal: &str) -> Option<String> {
     // "21:45 in 12 hour time", "what's 9:45 pm in 24-hour time".
     let twelve = lower.contains("12 hour") || lower.contains("12-hour") || lower.contains("am/pm");
     let twenty_four = lower.contains("24 hour") || lower.contains("24-hour");
-    if twelve || twenty_four {
+    // "Tomorrow's calendar with am/pm times" is about their day; only a time written out is converted.
+    let theirs = ["my", "tomorrow", "today", "tomorrow's", "today's", "calendar", "meetings", "events"].iter().any(|word| words.iter().any(|seen| seen == word));
+    if (twelve || twenty_four) && !theirs {
         let times = crate::literals::times(goal);
         let [minutes] = times.as_slice() else { return None };
         let (hour, minute) = (minutes / 60, minutes % 60);
@@ -694,7 +696,7 @@ mod tests {
         assert_eq!(worked("21:45 in 12 hour time?"), "9:45 pm");
         assert_eq!(worked("what's 9:45 pm in 24-hour time"), "21:45");
         assert_eq!(worked("what's 00:30 in 12-hour time"), "12:30 am");
-        for other in ["what's on my calendar backwards compatible", "how many emails did I get", "what time is it", "write a note with commas"] {
+        for other in ["what's on my calendar backwards compatible", "how many emails did I get", "what time is it", "write a note with commas", "tomorrow's work calendar pls, with am/pm times, not 24h", "list my meetings at 9:30 in 12-hour time"] {
             assert_eq!(text_work(other), None, "{other}");
         }
     }

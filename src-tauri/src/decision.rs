@@ -43,6 +43,58 @@ pub struct Decision {
 }
 
 // ---------------------------------------------------------------------------------------
+// 0. Tags: the apps a message names itself
+
+/// The app a tag names: "/mail", "/calendar", "/reminders" and their short forms.
+fn tag_app(tag: &str) -> Option<&'static [&'static str]> {
+    Some(match tag.to_lowercase().as_str() {
+        "mail" | "email" | "emails" | "inbox" => &["read_mail"],
+        "calendar" | "cal" | "schedule" | "events" => &["read_calendar"],
+        "reminders" | "reminder" | "todo" | "todos" | "tasks" => &["read_reminders"],
+        "all" => &SOURCES,
+        _ => return None,
+    })
+}
+
+/// The apps a message names with tags at its start ("/calendar what's on tomorrow",
+/// "/mail /reminders: anything about the bank", "/mail+calendar …"), and the message
+/// without them. Only those apps are read for it, chosen by the person rather than guessed.
+/// A tag alone asks what's in that app.
+pub fn tagged(message: &str) -> (Vec<String>, String) {
+    let mut apps: Vec<String> = Vec::new();
+    let mut rest = message.trim_start();
+    while let Some(after) = rest.strip_prefix('/') {
+        let end = after.find(|c: char| c.is_whitespace() || c == ':' || c == ',').unwrap_or(after.len());
+        let named: Option<Vec<&str>> = after[..end].split('+').map(tag_app).collect::<Option<Vec<_>>>().map(|lists| lists.concat());
+        let Some(named) = named.filter(|named| !named.is_empty()) else { break };
+        for tool in named {
+            if !apps.iter().any(|seen| seen == tool) {
+                apps.push(tool.to_string());
+            }
+        }
+        rest = after[end..].trim_start().trim_start_matches([':', ',']).trim_start();
+    }
+    if apps.is_empty() {
+        return (apps, message.to_string());
+    }
+    apps.sort_by_key(|tool| SOURCES.iter().position(|source| source == tool));
+    let question = if rest.trim().is_empty() {
+        let asks: Vec<&str> = apps
+            .iter()
+            .map(|tool| match tool.as_str() {
+                "read_mail" => "what's in my inbox",
+                "read_calendar" => "what's on my calendar today",
+                _ => "what are my reminders",
+            })
+            .collect();
+        format!("{}?", asks.join(" and "))
+    } else {
+        rest.trim().to_string()
+    };
+    (apps, question)
+}
+
+// ---------------------------------------------------------------------------------------
 // 2. Small typed choices
 
 /// The words of a question that make it something to work out rather than look up, read by
@@ -1230,6 +1282,20 @@ mod tests {
         for one in ["where is the dentist, at 3?", "what's on my calendar tomorrow", "is the mockup review reminder due before or after the design crit"] {
             assert!(!asks_several(one), "{one}");
         }
+    }
+
+    #[test]
+    fn a_tag_names_the_apps_and_leaves_the_question() {
+        assert_eq!(tagged("/calendar what's on tomorrow"), (vec!["read_calendar".to_string()], "what's on tomorrow".to_string()));
+        assert_eq!(tagged("/calendar : is the dentist before lunch?"), (vec!["read_calendar".to_string()], "is the dentist before lunch?".to_string()));
+        assert_eq!(tagged("/reminders /mail anything about the bank"), (vec!["read_mail".to_string(), "read_reminders".to_string()], "anything about the bank".to_string()));
+        assert_eq!(tagged("/mail+calendar: when's the renewal call").0, ["read_mail", "read_calendar"]);
+        assert_eq!(tagged("/todo").1, "what are my reminders?");
+        assert_eq!(tagged("/all").0.len(), 3);
+        // Not a tag: left as it was.
+        assert_eq!(tagged("/weather in Paris"), (vec![], "/weather in Paris".to_string()));
+        assert_eq!(tagged("what's on my /calendar"), (vec![], "what's on my /calendar".to_string()));
+        assert_eq!(tagged("1/2 of 30"), (vec![], "1/2 of 30".to_string()));
     }
 
     #[test]

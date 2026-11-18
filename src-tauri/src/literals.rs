@@ -135,7 +135,8 @@ pub fn times(text: &str) -> Vec<u32> {
             continue;
         }
         let suffix = if suffix.is_empty() { tokens.get(at + 1).copied().filter(|next| ["am", "pm"].contains(next)).unwrap_or("") } else { suffix };
-        if !["", "am", "pm", "h"].contains(&suffix) {
+        // "24h" is a length, not a time of day.
+        if !["", "am", "pm"].contains(&suffix) {
             continue;
         }
         let (hour, minute) = number.split_once(':').unwrap_or((number, "0"));
@@ -333,6 +334,7 @@ mod tests {
         assert_eq!(times("am I free at 3:30 pm or 15:45?"), vec![15 * 60 + 30, 15 * 60 + 45]);
         assert_eq!(times("is it before noon"), vec![12 * 60]);
         assert!(times("I have 3 meetings on 12 Nov").is_empty());
+        assert!(times("with am/pm times, not 24h").is_empty());
         assert_eq!(durations("whats the earliest 90 minute slot"), vec![90]);
         assert_eq!(durations("a two-hour block, or half an hour"), vec![120, 30]);
         assert_eq!(durations("1h 30m"), vec![60, 30]);
