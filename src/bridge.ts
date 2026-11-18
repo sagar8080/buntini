@@ -9,7 +9,7 @@ const defaults: Settings = {
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
-  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
+  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], workoutBrains: [], workoutDeclined: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudUrl: '', cloudOnThisMac: false, cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
   ...streamDefaults,
 };

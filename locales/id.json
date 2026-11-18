@@ -1477,5 +1477,15 @@
   "watches.track": "Lacak harga",
   "watches.url": "URL halaman produk",
   "watches.viewHistory": "Lihat riwayat harga",
-  "watches.watching": "Memantau"
+  "watches.watching": "Memantau",
+  "chat.answer.notConfirmed": "Aku tidak bisa memastikan {what} dari catatanmu. Ini yang kutemukan:",
+  "chat.answer.notWorkedOut": "Aku tidak bisa menghitungnya dari catatanmu. Ini yang kutemukan:",
+  "chat.workOut.ask": "Hitung dengan {brain}?",
+  "chat.workOut.askWith": "Hitung dengan {brain}? Yang akan terlihat: {what}.",
+  "chat.workOut.mail": "email",
+  "chat.workOut.calendar": "kalender",
+  "chat.workOut.reminders": "pengingat",
+  "chat.workOut.allow": "Izinkan",
+  "chat.workOut.keep": "Tetap di Mac ini",
+  "settings.privacy.workOut": "Hitung pertanyaan dengan {brain}"
 }

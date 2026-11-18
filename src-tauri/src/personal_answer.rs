@@ -15,7 +15,7 @@ const LOOK_AHEAD_DAYS: i64 = 30;
 
 /// Whether the request asks for words written from the records (a translation, advice),
 /// which only a model can do. Everything else is answered from the records themselves.
-fn wants_writing(goal: &str) -> bool {
+pub(crate) fn wants_writing(goal: &str) -> bool {
     const WRITES: [&str; 18] = [
         "translate", "rewrite", "rephrase", "reword", "explain", "why", "draft", "write", "compose", "reply", "respond", "advise", "suggest", "recommend", "compare", "analyse", "analyze", "should",
     ];
@@ -24,6 +24,13 @@ fn wants_writing(goal: &str) -> bool {
     let first = words.iter().position(|word| !["hey", "hi", "buntini"].contains(word)).unwrap_or(0);
     let advice = words.windows(2).any(|pair| pair[0] == "do" && pair[1] == "about") || words.iter().any(|word| ["say", "reply", "respond", "answer", "tell", "write"].contains(word));
     words.get(first).is_some_and(|word| WRITES.contains(word)) || (words.contains(&"should") && advice)
+}
+
+/// A question, or the person's own records rewritten ("alphabetise my reminders", "my
+/// day in one sentence"): nothing to do and nothing to look up online.
+fn asks_about_records(goal: &str) -> bool {
+    let (actions, unsupported) = crate::completion::requested_actions(goal);
+    actions.is_empty() && !unsupported && !crate::search_intent::told_to_search(goal) && (!wants_writing(goal) || names_an_app(goal) || says_mine(goal))
 }
 
 /// Whether this is only a question: nothing to do, nothing to write, nothing to look up online.
@@ -39,24 +46,33 @@ fn only_asks(goal: &str) -> bool {
 /// app when asked, and a wrong read here would answer with unrelated real records.
 fn general_question(goal: &str) -> bool {
     let lower = goal.to_lowercase().replace('’', "'");
-    let sum = lower.chars().any(|c| c.is_ascii_digit()) && lower.chars().any(|c| "+*/=×÷".contains(c));
+    // A sum has an operator between numbers: "17*23", "2 + 2", not "am/pm" beside "12-hour".
+    let sum = {
+        let chars: Vec<char> = lower.chars().filter(|c| !c.is_whitespace()).collect();
+        chars.windows(3).any(|run| run[0].is_ascii_digit() && "+*/=×÷x-".contains(run[1]) && run[1] != 'x' && run[1] != '-' && run[2].is_ascii_digit())
+            || (lower.chars().any(|c| c.is_ascii_digit()) && lower.chars().any(|c| "+*=×÷".contains(c)))
+    };
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
     let opening = |phrase: &[&str]| words.starts_with(phrase);
     let definition = [["what", "is", "a"], ["what", "is", "an"], ["what's", "a", ""], ["what's", "an", ""], ["whats", "a", ""], ["whats", "an", ""]]
         .iter()
         .any(|phrase| opening(if phrase[2].is_empty() { &phrase[..2] } else { &phrase[..] }))
         || ["define", "meaning"].contains(words.first().unwrap_or(&""))
-        || lower.contains(" mean");
+        // "What does RSVP mean", not "the day I'm meant to call mum".
+        || words.iter().any(|word| ["mean", "means"].contains(word));
     let difference = words.contains(&"difference") && words.contains(&"between");
     let how_to = difference || opening(&["how", "do"]) || opening(&["how", "does"]) || opening(&["how", "to"]) || opening(&["how", "can"]) || opening(&["how", "should"]) || opening(&["how", "long", "should"]) || opening(&["why"]) || opening(&["who", "invented"]);
     let about_apps = words.iter().any(|word| ["app", "apps", "application", "applications", "software", "best", "recommend", "tip", "tips", "advice", "tutorial", "guide"].contains(word));
     // "Is email secure" is about email. Saying whose makes it the user's: "my", "any", "got",
     // or a day or a sender to look for.
     const TOPICS: [&str; 13] = ["email", "emails", "mail", "inbox", "calendar", "calendars", "meeting", "meetings", "reminder", "reminders", "appointment", "appointments", "schedule"];
-    const WHOSE: [&str; 22] = ["which", "there", "the", "my", "i", "me", "mine", "any", "anything", "new", "unread", "got", "from", "today", "tomorrow", "tonight", "yesterday", "week", "weekend", "next", "someone", "anyone"];
+    // "How many Work reminders are still open" counts someone's own, though it says no "my".
+    const WHOSE: [&str; 27] = ["which", "there", "the", "my", "i", "me", "mine", "any", "anything", "new", "unread", "got", "from", "today", "tomorrow", "tonight", "yesterday", "week", "weekend", "next", "someone", "anyone", "many", "still", "left", "overdue", "due"];
     // "Tomorrow's calendar" says whose as much as "tomorrow" does, and so does "Sam's email".
     let named_owner = goal.replace('’', "'").split_whitespace().any(|word| word.chars().next().is_some_and(char::is_uppercase) && word.trim_end_matches(|c: char| !c.is_alphanumeric()).ends_with("'s"));
-    let topic_only = words.iter().any(|word| TOPICS.contains(word)) && !named_owner && !words.iter().any(|word| WHOSE.contains(&word.strip_suffix("'s").unwrap_or(word)));
+    // "One for email, one for calendar, one for reminders" names their apps, not a topic.
+    let apps_named_here = ["email", "calendar", "reminder"].iter().filter(|topic| words.iter().any(|word| word.starts_with(*topic))).count();
+    let topic_only = words.iter().any(|word| TOPICS.contains(word)) && !named_owner && apps_named_here < 2 && !words.iter().any(|word| WHOSE.contains(&word.strip_suffix("'s").unwrap_or(word)));
     let a_book = opening(&["who", "wrote"]) && !words.iter().any(|word| ["me", "to", "back", "email", "mail", "about"].contains(word));
     let a_topic = opening(&["tell", "me", "about"]) && !words.iter().any(|word| ["my", "our", "that", "the"].contains(word));
     // "I just got back from the gym" tells; "sorry but what time does climbing start" still asks.
@@ -90,7 +106,9 @@ fn named_sources(clause: &str) -> Vec<&'static str> {
     if has(&["reminder", "reminders", "todo", "todos"]) {
         named.push("read_reminders");
     }
-    if has(&["calendar", "schedule", "agenda"]) {
+    // "Could I squeeze a two-hour block in tomorrow": a day and a window of time is the calendar.
+    let window = has(&["free", "busy", "available", "slot", "block", "squeeze", "fit", "clash", "clashes", "gap"]) && !crate::task_contract::calendar_days(clause, chrono::Local::now().date_naive()).is_empty();
+    if has(&["calendar", "schedule", "agenda"]) || window {
         named.push("read_calendar");
     }
     // "Sam's email" and "that Duolingo email" are someone's, so the user's own too.
@@ -117,7 +135,7 @@ pub fn about_own_things(goal: &str, contract: &TaskContract) -> bool {
 }
 
 /// Whether the question says it's about the user's own things: "my", "do I", "did I".
-fn says_mine(goal: &str) -> bool {
+pub(crate) fn says_mine(goal: &str) -> bool {
     let lower = goal.to_lowercase().replace('’', "'");
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
     words.iter().any(|word| ["my", "mine", "our", "i'm", "i've"].contains(word))
@@ -196,6 +214,8 @@ pub struct IndexHits {
     /// For each record holding any of the words: its app ("mail", "calendar", "reminders")
     /// and which of the words it holds.
     pub matches: Vec<(String, Vec<usize>)>,
+    /// Each match's title, in the same order, when the index gave them.
+    pub titles: Vec<String>,
 }
 
 impl IndexHits {
@@ -221,6 +241,42 @@ impl IndexHits {
         }
         found.sort_by_key(|tool| SOURCES.iter().position(|source| source == tool));
         found
+    }
+
+    /// Apps the question doesn't already read whose records hold one of its words that no
+    /// record of the apps it reads holds, each with the titles of those records. "Is the
+    /// mockup reminder before the design crit": only Calendar has "crit". "When is the reminder
+    /// to review Keziah's mockups": Mail has Keziah's mockups too, but so does that reminder.
+    pub fn other_apps(&self, chosen: &[String]) -> Vec<(String, Vec<String>)> {
+        let tool_of = |app: &str| match app {
+            "mail" => Some("read_mail"),
+            "calendar" => Some("read_calendar"),
+            "reminders" => Some("read_reminders"),
+            _ => None,
+        };
+        let covered: Vec<usize> = self.matches.iter().filter(|(app, _)| tool_of(app).is_some_and(|tool| chosen.iter().any(|seen| seen == tool))).flat_map(|(_, held)| held.iter().copied()).collect();
+        let mut found: Vec<(String, Vec<String>)> = Vec::new();
+        for (at, (app, held)) in self.matches.iter().enumerate() {
+            let Some(tool) = tool_of(app) else { continue };
+            // A name, or two words: the index matches word stems, so one plain word ("books" in
+            // "I'll book it") is too often there by chance.
+            let own: Vec<&(String, bool)> = held.iter().filter(|word| !covered.contains(word)).filter_map(|word| self.words.get(*word)).filter(|word| !WHEN.contains(&word.0.as_str())).collect();
+            if chosen.iter().any(|seen| seen == tool) || !(own.len() >= 2 || own.iter().any(|word| word.1)) {
+                continue;
+            }
+            let title = self.titles.get(at).cloned().unwrap_or_default();
+            match found.iter_mut().find(|(seen, _)| seen == tool) {
+                Some((_, titles)) => titles.push(title),
+                None => found.push((tool.to_string(), vec![title])),
+            }
+        }
+        found.sort_by_key(|(tool, _)| SOURCES.iter().position(|source| source == tool));
+        found
+    }
+
+    /// The apps of the records holding at least `least` of the question's words at once.
+    pub fn held_together(&self, least: usize) -> Vec<String> {
+        self.apps(|held| held.iter().filter(|at| self.words.get(**at).is_some_and(|word| !WHEN.contains(&word.0.as_str()))).count() >= least)
     }
 
     /// Whether no record holds any of the question's words. "What's on Saturday" says when,
@@ -255,15 +311,20 @@ pub fn guided_route(goal: &str, hits: &IndexHits, guesses: &[String], own_shape:
         let strong = hits.strong(goal, true);
         let held = hits.apps(|_| true);
         let on_a_day = !crate::task_contract::calendar_days(goal, chrono::Local::now().date_naive()).is_empty();
+        // A guess stays when its app holds any of the words: "how late am I on the train
+        // tickets, and how many days till the offsite" is in Reminders and on the calendar.
+        let kept: Vec<String> = guesses.iter().filter(|app| held.contains(app) || (held.is_empty() && strong.is_empty())).cloned().collect();
         let pool = if !strong.is_empty() { strong } else if !on_a_day { held } else { vec![] };
-        let kept: Vec<String> = guesses.iter().filter(|app| pool.is_empty() || pool.contains(app)).cloned().collect();
+        let kept: Vec<String> = if kept.is_empty() { guesses.iter().filter(|app| pool.is_empty() || pool.contains(app)).cloned().collect() } else { kept };
         return if kept.is_empty() { pool } else { kept };
     }
     // Told "general" about the user's own things, a small model makes up the answer.
     match own_shape {
         true if !hits.built => every_source(),
         true => hits.apps(|_| true),
-        false => vec![],
+        // "What's desmond's final price for the splashback": the model said general, but an
+        // email holds several of its words, so that's where the answer is.
+        false => hits.strong(goal, false),
     }
 }
 
@@ -623,9 +684,11 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
     let elsewhere = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && !outcome.accepted_tools.iter().any(|tool| SOURCES.contains(&tool.as_str()) || tool == "search_memory"));
     // Text after a colon is supplied ("is this a scam: …") unless it names the apps to look
     // in ("one detail from each app: the city in Mail, …").
-    let supplied = goal.split_once(": ").is_some_and(|(_, after)| !names_an_app(after));
+    // "Help me prep: when is it, what do I owe Ruairi" asks after the colon.
+    let asks_after = |after: &str| crate::intent::asks(after.split([',', ';']).next().unwrap_or(after));
+    let supplied = goal.split_once(": ").is_some_and(|(_, after)| !names_an_app(after) && !asks_after(after));
     let pasted = goal.chars().count() > 240 || supplied || goal.contains('\n') || goal.contains('"') || goal.contains('“');
-    if !only_asks(goal) || elsewhere || pasted {
+    if !asks_about_records(goal) || elsewhere || pasted {
         return (vec![], vec![]);
     }
     // "One detail from each app: the city in Mail, …" asks what follows the colon.
@@ -642,9 +705,15 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
         if general {
             continue;
         }
+        // Quoted words are text the question supplies: "spell 'calendar' backwards".
+        let clause = crate::completion::unquoted(&clause);
         let clause = clause.as_str();
         let mut named: Vec<&str> = named_sources(clause);
         named.extend(settled_source(clause));
+        // "Do any of my meetings clash", "the vet appointment": the kind of record says the app,
+        // but not in quotes ("spell 'calendar' backwards"), and email only when it's theirs.
+        let theirs = says_mine(goal) || beside || crate::skills::words(clause).split(' ').any(|word| ["emailed", "inbox", "me"].contains(&word));
+        named.extend(apps_named(&crate::completion::unquoted(clause)).into_iter().filter(|tool| *tool != "read_mail" || theirs));
         if recipes::asks_about_mail_thing(clause) || recipes::asks_if_someone_wrote(clause) || (beside && crate::skills::words(clause).split(' ').any(|word| word == "mail")) {
             named.push("read_mail");
         }
@@ -751,6 +820,21 @@ fn search_words(goal: &str) -> Vec<String> {
     chosen.into_iter().take(2).collect()
 }
 
+/// The words worth searching the inbox for (`search_words`), for the decision layer.
+pub fn names_in(goal: &str) -> Vec<String> {
+    search_words(goal)
+}
+
+/// Every word that says what a question is about (`question_words`).
+pub fn question_words_of(goal: &str) -> Vec<String> {
+    question_words(goal)
+}
+
+/// Whether `text` has `phrase` as whole words.
+pub fn has_phrase(text: &str, phrase: &str) -> bool {
+    has_words(text, phrase)
+}
+
 /// The reads a question needs from one app, set here and never by a model, which on a real
 /// Mac searched for the whole sentence and read the wrong day.
 fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDate) -> Vec<Value> {
@@ -776,7 +860,8 @@ fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDat
             let unread = new || asked.split(' ').any(|word| word == "unread") || asked.contains("haven't read") || asked.contains("not read") || asked.contains("haven't opened") || asked.contains("not opened") || asked.contains("haven't seen");
             // A day can go further back than the newest few.
             let on_a_day = !crate::task_contract::calendar_days(goal, today).is_empty();
-            let newest = json!({"limit":if on_a_day { 20 } else { 8 },"unread":unread});
+            let _ = on_a_day;
+            let newest = json!({"limit":crate::apps::MAIL_SHOWN,"unread":unread});
             let words = if recipes::asks_about_inbox(goal) { vec![] } else { search_words(goal) };
             if words.is_empty() {
                 return vec![newest];
@@ -785,7 +870,7 @@ fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDat
             // It only looks at senders and subjects, so with nothing found the newest emails'
             // openings are looked through too.
             // Mail matches inside words, so "priyas" and "receipts" look for less and miss nothing.
-            let mut plan: Vec<Value> = words.into_iter().map(|word| json!({"limit":8,"unread":unread,"query":if word.ends_with('s') && !word.ends_with("ss") && word.chars().count() > 3 { &word[..word.len() - 1] } else { word.as_str() }})).collect();
+            let mut plan: Vec<Value> = words.into_iter().map(|word| json!({"limit":crate::apps::MAIL_SHOWN,"unread":unread,"query":if word.ends_with('s') && !word.ends_with("ss") && word.chars().count() > 3 { &word[..word.len() - 1] } else { word.as_str() }})).collect();
             let searched = plan.iter().all(|read| steps.iter().any(|step| step.tool == "read_mail" && step.arguments.get("query") == read.get("query")));
             let found = steps.iter().any(|step| step.tool == "read_mail" && step.evidence.as_ref().is_some_and(|evidence| evidence["count"].as_u64().unwrap_or(0) > 0));
             if searched && !found {
@@ -1029,6 +1114,53 @@ pub fn reads<'a>(goal: &str, steps: &'a [Step]) -> Option<Vec<&'a Step>> {
     let only_reads = !finished.is_empty()
         && finished.iter().all(|step| !step.effect && SOURCES.contains(&step.tool.as_str()) && step.evidence.as_ref().is_some_and(|evidence| evidence["records"].is_array()));
     (only_reads && !wants_writing(goal)).then_some(finished)
+}
+
+/// The finished reads, when reading Mail, Calendar or Reminders is all that happened: what a
+/// worked-out answer (`decision.rs`) is built from, rewrites included.
+pub fn only_reads(steps: &[Step]) -> Option<Vec<&Step>> {
+    let finished: Vec<&Step> = steps.iter().filter(|step| step.state == "succeeded").collect();
+    let only_reads = !finished.is_empty()
+        && finished.iter().all(|step| !step.effect && SOURCES.contains(&step.tool.as_str()) && step.evidence.as_ref().is_some_and(|evidence| evidence["records"].is_array()));
+    only_reads.then_some(finished)
+}
+
+/// "No reminder mentions “library”": when none of the records read holds any of the words
+/// the question is about, which is a plain answer, never a nearby record offered as one.
+/// Only where the reads looked through everything that could hold them.
+pub fn not_there(goal: &str, reads: &[&Step]) -> Option<String> {
+    let goal = &crate::task_contract::spelled(goal);
+    // What a record has rather than what it's about: "which reminders don't have a due date".
+    const FIELDS: [&str; 26] = ["date", "dates", "time", "times", "day", "title", "titles", "name", "names", "location", "place", "where", "note", "notes", "number", "amount", "price", "cost", "link", "address", "sender", "subject", "length", "long", "order", "line"];
+    let words: Vec<String> = question_words(goal).into_iter().filter(|word| !WHEN.contains(&word.as_str()) && !FIELDS.contains(&word.as_str()) && apps_named(word).is_empty()).collect();
+    if words.is_empty() || reads.is_empty() || reads.iter().any(|step| step.tool != reads[0].tool) {
+        return None;
+    }
+    let records = numbered(reads);
+    if records.iter().any(|(_, record, _)| word_hits(&words, record, true) > 0) {
+        return None;
+    }
+    let tool = reads[0].tool.as_str();
+    // Mail's newest few aren't all of it; its own search, which looks back months, is.
+    let complete = match tool {
+        "read_mail" => reads.iter().any(|step| step.evidence.as_ref().is_some_and(|evidence| !evidence["scope"]["query"].as_str().unwrap_or_default().is_empty())),
+        _ => reads.iter().all(|step| step.evidence.as_ref().is_some_and(|evidence| evidence["complete"] != false)),
+    };
+    if !complete {
+        return None;
+    }
+    let thing = match tool {
+        "read_mail" => "No email",
+        "read_calendar" => "Nothing on your calendar",
+        _ => "No reminder",
+    };
+    let named = words.iter().take(3).map(|word| format!("“{}”", plain(word))).collect::<Vec<_>>().join(" or ");
+    let span = match tool {
+        "read_mail" => " from the last four months",
+        "read_calendar" => reads.iter().find_map(|step| step.evidence.as_ref()?["scope"]["until"].as_str()).map_or("", |_| " in the days I read"),
+        _ => "",
+    };
+    Some(format!("{thing}{span} mentions {named}."))
 }
 
 /// Whether the question wants everything it read, so no one needs to choose: "my inbox",
@@ -2096,7 +2228,7 @@ mod tests {
     }
 
     fn hits(goal: &str, matches: &[(&str, &[usize])]) -> IndexHits {
-        IndexHits { built: true, words: index_words(goal), matches: matches.iter().map(|(app, held)| (app.to_string(), held.to_vec())).collect() }
+        IndexHits { built: true, words: index_words(goal), matches: matches.iter().map(|(app, held)| (app.to_string(), held.to_vec())).collect(), titles: Vec::new() }
     }
 
     #[test]

@@ -11,7 +11,7 @@ import { parse, withoutTracking, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
 import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
 import { locale, t, tn } from './i18n.ts';
-import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
+import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate, WorkoutConsent } from './types';
 
 type Props = {
   turns: TaskRecord[]; live: TaskRecord | null; busy: boolean; activity: string;
@@ -20,12 +20,14 @@ type Props = {
   onOpen: (url: string) => void; onSpeak: (text: string) => void; onStopSpeaking: () => void;
   progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
   onFollowUp: (text: string) => void;
+  /** Saves the person's answer about a brain working questions out, then asks again. */
+  onConsent?: (consent: WorkoutConsent, prompt: string) => void;
   chatgptPlan?: ChatGptPlan; onAskChatGpt?: (question: string) => void; onOpenChatGpt?: (question: string) => void;
   onOpenPane?: (pane: string) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, onConsent, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
@@ -92,7 +94,7 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
           {item.state === 'error' && !working && <p className="bubble-error">{item.answer || t('chat.task.failed')}</p>}
         </div>
       </div>
-      {latest && !busy && !!item.choices?.length && <div className="reply-chips">{item.choices.map(choice => <button key={choice.label} onClick={() => onFollowUp(choice.prompt)}>{choice.label}</button>)}</div>}
+      {latest && !busy && !!item.choices?.length && <div className="reply-chips">{item.choices.map(choice => <button key={choice.label} onClick={() => choice.consent && onConsent ? onConsent(choice.consent, choice.prompt) : onFollowUp(choice.prompt)}>{choice.label}</button>)}</div>}
       {/* The follow-ups stay in English: Buntini reads them as requests. */}
       {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>{t('chat.followUp.moreLikeThis')}</button>}<button onClick={() => onFollowUp('Save that to a new note')}>{t('chat.followUp.saveToNotes')}</button></div>}
       {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? t('chat.askChatGpt') : <><ExternalLink size={12} /> {t('chat.openInChatGpt')}</>}</button></div>}

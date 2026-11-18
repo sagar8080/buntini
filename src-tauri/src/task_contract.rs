@@ -133,13 +133,34 @@ pub(crate) fn spelled(text: &str) -> String {
     text.split(' ')
         .map(|word| {
             let bare = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-            match USUAL.iter().find(|(typed, _)| *typed == bare) {
-                Some((_, meant)) => word.to_lowercase().replacen(&bare, meant, 1),
+            match USUAL.iter().find(|(typed, _)| *typed == bare).map(|(_, meant)| *meant).or_else(|| misspelled_app(&bare)) {
+                Some(meant) => word.to_lowercase().replacen(&bare, meant, 1),
                 None => word.to_string(),
             }
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// An app's word typed a letter off ("remidners", "meetins", "calandar"): one letter left out,
+/// added or swapped with the next. A word that is itself English is left alone, so only the
+/// long app words are tried, and a changed letter counts only in the longest.
+fn misspelled_app(word: &str) -> Option<&'static str> {
+    const WORDS: [&str; 10] = ["reminders", "reminder", "calendar", "meetings", "meeting", "appointment", "appointments", "schedule", "emails", "inbox"];
+    const ENGLISH: [&str; 13] = ["remainder", "remainders", "meting", "email", "emailed", "schedules", "scheduled", "scheduler", "meetup", "inboxes", "reminded", "reminds", "minder"];
+    if word.chars().count() < 5 || WORDS.contains(&word) || ENGLISH.contains(&word) || !word.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    WORDS.iter().copied().find(|target| {
+        let (a, b): (Vec<char>, Vec<char>) = (word.chars().collect(), target.chars().collect());
+        let swapped = a.len() == b.len() && {
+            let differ: Vec<usize> = (0..a.len()).filter(|at| a[*at] != b[*at]).collect();
+            differ.len() == 2 && differ[1] == differ[0] + 1 && a[differ[0]] == b[differ[1]] && a[differ[1]] == b[differ[0]]
+        };
+        let one_out = |long: &[char], short: &[char]| long.len() == short.len() + 1 && (0..long.len()).any(|skip| long.iter().enumerate().filter(|(at, _)| *at != skip).map(|(_, c)| *c).eq(short.iter().copied()));
+        let changed = a.len() == b.len() && b.len() >= 8 && (0..a.len()).filter(|at| a[*at] != b[*at]).count() == 1;
+        swapped || one_out(&a, &b) || one_out(&b, &a) || changed
+    })
 }
 
 /// The days a clause names, for calendar reads. Rust resolves them from the task's date, so
@@ -3723,3 +3744,16 @@ mod tests {
 #[path = "task_contract_eval_tests.rs"]
 mod eval_tests;
 
+
+#[cfg(test)]
+mod spelling_tests {
+    #[test]
+    fn an_app_word_a_letter_off_is_read_as_that_word() {
+        assert_eq!(super::spelled("whats due today on my remidners"), "whats due today on my reminders");
+        assert_eq!(super::spelled("do any of my meetins clash"), "do any of my meetings clash");
+        assert_eq!(super::spelled("my calandar"), "my calendar");
+        for word in ["melting", "meetup", "minders", "remainder", "email", "inbox", "boxes", "schedules"] {
+            assert_eq!(super::misspelled_app(word), None, "{word}");
+        }
+    }
+}

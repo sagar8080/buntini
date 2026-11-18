@@ -1499,5 +1499,15 @@
   "watches.track": "Fiyat takip et",
   "watches.url": "Ürün sayfası URL’si",
   "watches.viewHistory": "Fiyat geçmişini göster",
-  "watches.watching": "Takipte"
+  "watches.watching": "Takipte",
+  "chat.answer.notConfirmed": "{what} kayıtlarında doğrulanamadı. Bulduklarım:",
+  "chat.answer.notWorkedOut": "Bunu kayıtlarından hesaplayamadım. Bulduklarım:",
+  "chat.workOut.ask": "{brain} ile hesaplansın mı?",
+  "chat.workOut.askWith": "{brain} ile hesaplansın mı? Şunları görecek: {what}.",
+  "chat.workOut.mail": "e-postalar",
+  "chat.workOut.calendar": "takvim",
+  "chat.workOut.reminders": "anımsatıcılar",
+  "chat.workOut.allow": "İzin ver",
+  "chat.workOut.keep": "Bu Mac’te kalsın",
+  "settings.privacy.workOut": "Soruları {brain} ile hesapla"
 }

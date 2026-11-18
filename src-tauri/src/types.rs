@@ -72,6 +72,12 @@ pub struct Settings {
     pub ebay_marketplace: String,
     /// Local data categories an external model backend may receive. On-device models see everything.
     pub external_shares: Vec<String>,
+    /// Brains (`cloud_provider` ids) the person allowed, once each, to work out questions about
+    /// their own things while an on-device brain answers the rest. They get only what
+    /// `external_shares` allows.
+    pub workout_brains: Vec<String>,
+    /// Brains the person chose to keep those questions from, so they aren't asked again.
+    pub workout_declined: Vec<String>,
     /// Apps the user allowed Buntini to use (ids from `apps::APPS`). None until they choose.
     pub apps: Vec<String>,
     /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
@@ -148,6 +154,8 @@ impl Default for Settings {
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
             external_shares: Vec::new(),
+            workout_brains: Vec::new(),
+            workout_declined: Vec::new(),
             apps: Vec::new(),
             cloud_provider: "anthropic".into(),
             cloud_model: String::new(),
@@ -245,6 +253,14 @@ impl Settings {
             return Err("Choose a language from the list.".into());
         }
         crate::privacy::validate_shares(&self.external_shares)?;
+        for list in [&self.workout_brains, &self.workout_declined] {
+            if list.iter().enumerate().any(|(index, id)| crate::cloud::provider(id).is_none() || list[..index].contains(id)) {
+                return Err("Choose brains from the list in Settings → Brain.".into());
+            }
+        }
+        if self.workout_brains.iter().any(|id| self.workout_declined.contains(id)) {
+            return Err("Choose brains from the list in Settings → Brain.".into());
+        }
         for (index, id) in self.apps.iter().enumerate() {
             if crate::apps::app(id).is_none() || self.apps[..index].contains(id) {
                 return Err("Choose apps from the list in Settings → Apps.".into());
@@ -450,6 +466,18 @@ pub struct TaskRecord {
 pub struct Choice {
     pub label: String,
     pub prompt: String,
+    /// The person's answer about a brain working questions out, saved before the prompt is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<Consent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Consent {
+    pub brain: String,
+    pub allow: bool,
+    /// What the brain would see, switched on in Privacy when the person allows it.
+    pub shares: Vec<String>,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1543,5 +1543,15 @@
   "watches.track": "Отслеживать цену",
   "watches.url": "URL страницы товара",
   "watches.viewHistory": "Показать историю цен",
-  "watches.watching": "Отслеживается"
+  "watches.watching": "Отслеживается",
+  "chat.answer.notConfirmed": "Не удалось подтвердить {what} по вашим записям. Вот что я нашёл:",
+  "chat.answer.notWorkedOut": "Не удалось вычислить это по вашим записям. Вот что я нашёл:",
+  "chat.workOut.ask": "Посчитать с помощью {brain}?",
+  "chat.workOut.askWith": "Посчитать с помощью {brain}? Он увидит: {what}.",
+  "chat.workOut.mail": "почту",
+  "chat.workOut.calendar": "календарь",
+  "chat.workOut.reminders": "напоминания",
+  "chat.workOut.allow": "Разрешить",
+  "chat.workOut.keep": "Оставить на этом Mac",
+  "settings.privacy.workOut": "Считать ответы с помощью {brain}"
 }

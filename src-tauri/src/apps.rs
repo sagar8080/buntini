@@ -1877,7 +1877,7 @@ pub fn validate_evidence(
             return Err(invalid())
         }
         "mail" => {
-            let limit = args["limit"].as_u64().unwrap_or(5).clamp(1, 8);
+            let limit = args["limit"].as_u64().unwrap_or(5).clamp(1, MAIL_SHOWN as u64);
             let scanned = scope["metadataScanned"].as_u64().ok_or_else(invalid)?;
             if scope["query"] != query
                 || scope["unreadOnly"] != args["unread"].as_bool().unwrap_or(false)
@@ -2224,6 +2224,10 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Lau
     mail_evidence(query, unread, limit, found, openings.as_deref().ok())
 }
 
+/// The most emails one read shows with their openings, as `read_mail` offers. Every match is
+/// still counted by day beyond these.
+pub const MAIL_SHOWN: usize = 20;
+
 fn select_mail_rows(
     found: &CountedRows,
     unread: bool,
@@ -2238,7 +2242,7 @@ fn select_mail_rows(
     }
     let mut selected = found.rows.clone();
     selected.sort_by(|a, b| b[0].cmp(&a[0]));
-    selected.truncate(limit.clamp(1, 8));
+    selected.truncate(limit.clamp(1, MAIL_SHOWN));
     Ok(selected)
 }
 
@@ -2345,7 +2349,7 @@ fn mail_evidence(
     Ok(evidence(
         "mail",
         json!({"app":"mail","mailbox":"inbox","query":query,"unreadOnly":unread,"countsByDay":counts,
-        "lookbackDays":days,"limit":limit.clamp(1,8),"metadataScanLimit":300,"metadataScanned":found.rows.len(),
+        "lookbackDays":days,"limit":limit.clamp(1,MAIL_SHOWN),"metadataScanLimit":300,"metadataScanned":found.rows.len(),
         "order":if found.rows.len() == found.total { "newest_first" } else { "newest_in_scanned_prefix" },"excerptLimit":500}),
         records,
         Some(found.total),

@@ -15,10 +15,118 @@ struct Question {
     says: &'static [&'static str],
     /// None may be in the answer.
     never: &'static [&'static str],
+    /// One of each group must be in the answer (an exam's `checks`).
+    groups: Vec<Vec<String>>,
 }
 
 const fn q(asked: &'static str, reads: &'static [&'static str], says: &'static [&'static str], never: &'static [&'static str]) -> Question {
-    Question { asked, reads, says, never }
+    Question { asked, reads, says, never, groups: Vec::new() }
+}
+
+/// An exam's `checks`: groups split on commas, `/` between the forms a group accepts. A comma
+/// between a digit and exactly three digits is a thousands separator ("1,240").
+fn check_groups(checks: &str, today: chrono::NaiveDate) -> Vec<Vec<String>> {
+    let chars: Vec<char> = checks.chars().collect();
+    let mut groups = Vec::new();
+    let mut current = String::new();
+    for (at, c) in chars.iter().enumerate() {
+        let thousands = *c == ',' && current.ends_with(|c: char| c.is_ascii_digit()) && chars.len() > at + 3 && chars[at + 1..at + 4].iter().all(char::is_ascii_digit) && chars.get(at + 4).is_none_or(|c| !c.is_ascii_digit());
+        if *c == ',' && !thousands {
+            groups.push(std::mem::take(&mut current));
+        } else {
+            current.push(*c);
+        }
+    }
+    groups.push(current);
+    groups
+        .iter()
+        .map(|group| group.split('/').map(str::trim).filter(|form| !form.is_empty()).flat_map(|form| match weekday_in(form, today) {
+            Some((full, short)) => vec![full, short],
+            None => vec![form.to_string()],
+        }).collect::<Vec<String>>())
+        .filter(|group| !group.is_empty())
+        .collect()
+}
+
+/// `{weekday:+N}`: the English name of today + N days, whole and short.
+fn weekday_in(text: &str, today: chrono::NaiveDate) -> Option<(String, String)> {
+    let start = text.find("{weekday:")?;
+    let end = start + text[start..].find('}')?;
+    let ahead: i64 = text[start + 9..end].trim_start_matches('+').parse().ok()?;
+    let day = today + Duration::days(ahead);
+    let fill = |name: String| format!("{}{name}{}", &text[..start], &text[end + 1..]);
+    Some((fill(day.format("%A").to_string()), fill(day.format("%a").to_string())))
+}
+
+/// A made-up person's records from an exam's `world.json` (`BUNTINI_PERSONAL_WORLD`): days are
+/// offsets from today, and every reminder is open.
+struct World {
+    /// (received, read, sender, subject, body), newest first.
+    inbox: Vec<(String, bool, String, String, String)>,
+    events: Vec<Event>,
+    reminders: Vec<Reminder>,
+}
+
+fn load_world(path: &str, today: chrono::NaiveDate) -> World {
+    let world: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let date = |offset: &Value| (today + Duration::days(offset.as_i64().unwrap())).format("%Y-%m-%d").to_string();
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_string();
+    let mut inbox: Vec<(String, bool, String, String, String)> = world["mail"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|mail| (format!("{} {}", date(&mail["day"]), text(&mail["time"])), mail["unread"] != true, text(&mail["from"]), text(&mail["subject"]), text(&mail["body"])))
+        .collect();
+    inbox.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut events: Vec<Event> = world["calendar"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| {
+            let day = date(&event["day"]);
+            let all_day = event["all_day"] == true;
+            let (start, end) = if all_day { (format!("{day} 00:00"), format!("{day} 23:59")) } else { (format!("{day} {}", text(&event["start"])), format!("{day} {}", text(&event["end"]))) };
+            serde_json::from_value(json!({"id":text(&event["id"]),"calendarId":text(&event["calendar"]).to_lowercase(),"start":start,"end":end,"allDay":all_day,"title":text(&event["title"]),"location":text(&event["location"]),"calendar":text(&event["calendar"]),"attendees":event["attendees"].as_array().cloned().unwrap_or_default()})).unwrap()
+        })
+        .collect();
+    events.sort_by(|a, b| a.start.cmp(&b.start));
+    // Buntini reads only open reminders.
+    let reminders = world["reminders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|reminder| reminder["done"] != true)
+        .map(|reminder| {
+            let due = match (&reminder["due_day"], reminder["due_time"].as_str()) {
+                (Value::Null, _) => String::new(),
+                (day, Some(time)) => format!("{} {time}", date(day)),
+                (day, None) => date(day),
+            };
+            serde_json::from_value(json!({"id":text(&reminder["id"]),"calendarId":text(&reminder["list"]).to_lowercase(),"title":text(&reminder["title"]),"due":due,"list":text(&reminder["list"])})).unwrap()
+        })
+        .collect();
+    World { inbox, events, reminders }
+}
+
+impl World {
+    fn between(&self, from: chrono::NaiveDate, to: chrono::NaiveDate) -> Agenda<Event> {
+        let (from, to) = (from.format("%Y-%m-%d").to_string(), to.format("%Y-%m-%d").to_string());
+        let items: Vec<Event> = self.events.iter().filter(|event| event.start.get(..10).is_some_and(|day| from.as_str() <= day && day <= to.as_str())).cloned().collect();
+        let total = items.len();
+        Agenda { items, total }
+    }
+
+    fn seed(&self, state: &AppState, today: chrono::NaiveDate) {
+        use crate::{memory_index as index, privacy::Share};
+        let record = |source: &'static str, id: String, title: String, text: String, share: Share| index::Record { source, source_id: id, scope: String::new(), shares: vec![share], title, text, observed_at: today.to_string() };
+        let store = state.store.lock().unwrap();
+        let mail: Vec<index::Record> = self.inbox.iter().enumerate().map(|(at, row)| record("mail", format!("m{at}"), format!("{} {}", row.2, row.3), row.4.clone(), Share::Mail)).collect();
+        index::replace_source(&store.db, "mail", &mail).unwrap();
+        let calendar: Vec<index::Record> = self.events.iter().enumerate().map(|(at, event)| record("calendar", format!("c{at}"), event.title.clone(), event.location.clone(), Share::Calendar)).collect();
+        index::replace_source(&store.db, "calendar", &calendar).unwrap();
+        let reminders: Vec<index::Record> = self.reminders.iter().enumerate().map(|(at, reminder)| record("reminders", format!("r{at}"), reminder.title.clone(), reminder.list.clone(), Share::Calendar)).collect();
+        index::replace_source(&store.db, "reminders", &reminders).unwrap();
+    }
 }
 
 const MAIL: &[&str] = &["read_mail"];
@@ -387,8 +495,21 @@ async fn live_personal_answers() {
             Box::leak(items.into_boxed_slice())
         };
         let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-        rows.iter().map(|row| q(leak(row["asked"].as_str().unwrap()), list(&row["reads"]), list(&row["says"]), list(&row["never"]))).collect()
+        rows.iter()
+            .map(|row| {
+                let asked = row["asked"].as_str().unwrap();
+                let asked = weekday_in(asked, today).map_or(asked.to_string(), |(full, _)| full);
+                let mut question = q(leak(&asked), list(&row["reads"]), list(&row["says"]), list(&row["never"]));
+                question.groups = row["checks"].as_str().map(|checks| check_groups(checks, today)).unwrap_or_default();
+                question
+            })
+            .collect()
     }).unwrap_or_default();
+    // `BUNTINI_PERSONAL_WORLD`: an exam's own made-up records in place of the built-in ones.
+    let world = std::env::var("BUNTINI_PERSONAL_WORLD").ok().map(|path| load_world(&path, today));
+    // `BUNTINI_PERSONAL_ALLOW=codex`: Apple stays the brain, and the person has allowed that
+    // brain to work questions out.
+    let allow = std::env::var("BUNTINI_PERSONAL_ALLOW").ok().filter(|id| crate::cli::tool(id).is_some());
     // `BUNTINI_PERSONAL_BRAIN=chatgpt`: the same made-up records through a ChatGPT plan. It
     // signs in once in the browser, and the session lasts only as long as this run.
     let on_chatgpt = on_chatgpt().await;
@@ -406,6 +527,7 @@ async fn live_personal_answers() {
         let asked_text = if from_file.is_empty() && question.says.contains(&"Dentist") { question.asked.replace("Friday", &tomorrow) } else { question.asked.to_string() };
         let asked_text = asked_text.as_str();
         asked += 1;
+        let setup = std::time::Instant::now();
         let dir = tempfile::tempdir().unwrap();
         let state = live_state(dir.path());
         let mut settings = state.store.lock().unwrap().settings().unwrap();
@@ -420,8 +542,23 @@ async fn live_personal_answers() {
             use_chatgpt(&mut settings);
             settings.cloud_provider = id.clone();
         }
+        // `BUNTINI_PERSONAL_ASK=codex`: that brain is set up but the person hasn't been asked yet.
+        if let Ok(id) = std::env::var("BUNTINI_PERSONAL_ASK") {
+            settings.cloud_provider = id;
+            settings.cloud_model = String::new();
+        }
+        if let Some(id) = &allow {
+            settings.cloud_provider = id.clone();
+            settings.cloud_model = String::new();
+            settings.workout_brains = vec![id.clone()];
+            // Only the made-up records in these tests exist here, so all of them may go.
+            settings.external_shares = crate::privacy::Share::ALL.iter().map(|share| share.id().to_string()).collect();
+        }
         state.store.lock().unwrap().save_settings(&settings).unwrap();
-        seed_index(&state, &inbox, today);
+        match &world {
+            Some(world) => world.seed(&state, today),
+            None => seed_index(&state, &inbox, today),
+        }
         let mut task: TaskRecord = serde_json::from_value(json!({
             "id":uuid::Uuid::new_v4().to_string(), "prompt":asked_text, "answer":"",
             "state":"running", "createdAt":now(), "sources":[], "files":[], "backend":if on_chatgpt || on_cli.is_some() { "cloud" } else { "apple" }
@@ -431,7 +568,12 @@ async fn live_personal_answers() {
         let offered = chat_tools(&settings, state.models.locality(&settings), false, true);
         let messages = vec![json!({"role":"system","content":instructions(&state,&settings,true,"")}), json!({"role":"user","content":asked_text})];
         let mut flow = Workflow::new(&task, "auto", &settings, messages, None, &offered);
-        let rows: Vec<(&str, bool, &str, &str, &str)> = inbox.iter().map(|row| (row.0.as_str(), row.1, row.2, row.3, row.4)).collect();
+        let rows: Vec<(&str, bool, &str, &str, &str)> = match &world {
+            Some(world) => world.inbox.iter().map(|row| (row.0.as_str(), row.1, row.2.as_str(), row.3.as_str(), row.4.as_str())).collect(),
+            None => inbox.iter().map(|row| (row.0.as_str(), row.1, row.2, row.3, row.4)).collect(),
+        };
+        let world = world.as_ref();
+        let set_up = setup.elapsed().as_millis();
         let started = std::time::Instant::now();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(150),
@@ -441,7 +583,16 @@ async fn live_personal_answers() {
                     "read_calendar" => {
                         let asked = args.get("day").and_then(Value::as_str).unwrap_or_default();
                         let from = chrono::NaiveDate::parse_from_str(asked, "%Y-%m-%d").unwrap();
-                        match args.get("until").and_then(Value::as_str) {
+                        let until = args.get("until").and_then(Value::as_str);
+                        if let Some(world) = world {
+                            let to = until.map_or(from, |until| chrono::NaiveDate::parse_from_str(until, "%Y-%m-%d").unwrap());
+                            let found = world.between(from, to);
+                            return std::future::ready(Ok(match until {
+                                Some(until) => calendar_range_evidence(asked, until, found),
+                                None => calendar_evidence(asked, &found),
+                            }));
+                        }
+                        match until {
                             None => Ok(calendar_evidence(asked, &world_day(from, today))),
                             Some(until) => {
                                 let to = chrono::NaiveDate::parse_from_str(until, "%Y-%m-%d").unwrap();
@@ -451,14 +602,17 @@ async fn live_personal_answers() {
                             }
                         }
                     }
-                    "read_reminders" => Ok(reminder_evidence(&world_reminders(today))),
+                    "read_reminders" => Ok(reminder_evidence(&match world {
+                        Some(world) => Agenda { items: world.reminders.clone(), total: world.reminders.len() },
+                        None => world_reminders(today),
+                    })),
                     "find_contact" => {
                         let asked = args.get("name").and_then(Value::as_str).unwrap_or_default();
                         Ok(crate::apps::contact_evidence(asked, &world_contacts(asked)))
                     }
                     other => Err(format!("{other} isn't in this world")),
                 };
-                async move { found }
+                std::future::ready(found)
             }),
         )
         .await;
@@ -470,26 +624,30 @@ async fn live_personal_answers() {
         };
         let read: Vec<&str> = flow.steps.iter().filter(|step| step.state == "succeeded" && !step.effect).map(|step| step.tool.as_str()).collect();
         let needed = question.reads.iter().all(|tool| read.contains(tool)) && (!question.reads.is_empty() || read.is_empty());
-        let records = crate::personal_answer::reads(asked_text, &flow.steps).is_some();
+        let worked_out = flow.decision.as_ref().is_some_and(|decided| decided.work_out);
+        let records = crate::personal_answer::reads(asked_text, &flow.steps).is_some() || (worked_out && crate::personal_answer::only_reads(&flow.steps).is_some());
         let shown = error.clone().unwrap_or_else(|| task.answer.clone());
         // Reading it as a person would: a reply escapes what could become Markdown.
         let lower = shown.replace('\\', "").to_lowercase();
         let says = question.says.iter().all(|word| lower.contains(&word.to_lowercase()));
+        let says = says && question.groups.iter().all(|group| group.iter().any(|form| lower.contains(&form.replace('’', "'").to_lowercase()) || lower.replace('’', "'").contains(&form.to_lowercase())));
         let clean = !question.never.iter().any(|word| lower.contains(&word.to_lowercase()));
         let ok = error.is_none() && needed && says && clean && (question.reads.is_empty() || records);
         passed += usize::from(ok);
         let row = json!({
             "question": asked_text, "passed": ok, "needed": needed, "says": says, "clean": clean, "fromRecords": records,
-            "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state})).collect::<Vec<_>>(),
+            "read": read, "calls": flow.steps.iter().map(|step| json!({"tool":step.tool,"arguments":step.arguments,"state":step.state,"error":step.evidence.as_ref().map(|evidence| evidence["error"].clone())})).collect::<Vec<_>>(),
             "modelCalls": state.models.apple.model_calls(), "elapsedMs": elapsed, "error": error, "answer": shown, "choices": task.choices,
             "outcomes": flow.contract.outcomes.iter().map(|o| json!({"kind":o.kind,"tool":o.tool,"status":o.status,"accepted":o.accepted_tools,"required":o.required_arguments})).collect::<Vec<_>>(),
-            "ownSources": flow.contract.own_sources, "offered": flow.offered,
+            "ownSources": flow.contract.own_sources, "offered": flow.offered, "decision": flow.decision,
             "modelSaid": flow.messages.iter().rev().find(|message| message["role"] == "assistant").map(|message| message["content"].clone()),
         });
         writeln!(out, "{row}").unwrap();
         out.flush().unwrap();
         eprintln!("PERSONAL {} {} (read {read:?})", if ok { "pass" } else { "FAIL" }, asked_text);
+        let closing = std::time::Instant::now();
         state.models.shutdown().await;
+        eprintln!("PERSONAL took {set_up} ms to set up, {elapsed} ms to answer, {} ms to close", closing.elapsed().as_millis());
     }
     eprintln!("PERSONAL {passed} of {asked} passed");
 }
@@ -630,3 +788,21 @@ async fn live_real_apps() {
     state.models.shutdown().await;
 }
 
+
+/// The decision layer's typed choices on the real Apple model, for the questions in
+/// `BUNTINI_PROBE` (split on `|`): lookup or work-out, as the model replies.
+#[tokio::test]
+#[ignore = "uses the real Apple model; prints its choices for BUNTINI_PROBE"]
+async fn live_decision_choices() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = live_state(dir.path());
+    let settings = state.store.lock().unwrap().settings().unwrap();
+    for goal in std::env::var("BUNTINI_PROBE").unwrap_or_default().split('|').filter(|goal| !goal.is_empty()) {
+        let started = std::time::Instant::now();
+        let request = if std::env::var("BUNTINI_PROBE_GENERAL").is_ok() { crate::decision::general_work_request(goal) } else { crate::decision::work_request(goal) };
+        let turn = state.models.generate(&settings, request, Arc::new(AtomicBool::new(false)), |_| {}).await;
+        let said = turn.map(|turn| turn.text).unwrap_or_else(|error| error);
+        eprintln!("CHOICE {:?} {} ms | {goal} | {said}", crate::decision::worked_out(&said), started.elapsed().as_millis());
+    }
+    state.models.shutdown().await;
+}

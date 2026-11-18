@@ -1477,5 +1477,15 @@
   "watches.track": "価格を追跡",
   "watches.url": "商品ページのURL",
   "watches.viewHistory": "価格の履歴を表示",
-  "watches.watching": "監視中"
+  "watches.watching": "監視中",
+  "chat.answer.notConfirmed": "記録から{what}を確認できませんでした。見つかったもの:",
+  "chat.answer.notWorkedOut": "記録からは計算できませんでした。見つかったもの:",
+  "chat.workOut.ask": "{brain}で計算しますか?",
+  "chat.workOut.askWith": "{brain}で計算しますか? 見えるもの: {what}。",
+  "chat.workOut.mail": "メール",
+  "chat.workOut.calendar": "カレンダー",
+  "chat.workOut.reminders": "リマインダー",
+  "chat.workOut.allow": "許可",
+  "chat.workOut.keep": "このMacで処理",
+  "settings.privacy.workOut": "{brain}で質問を計算"
 }

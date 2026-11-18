@@ -1499,5 +1499,15 @@
   "watches.track": "Track a price",
   "watches.url": "Product page URL",
   "watches.viewHistory": "View price history",
-  "watches.watching": "Watching"
+  "watches.watching": "Watching",
+  "chat.answer.notConfirmed": "I couldn’t confirm {what} from your records. Here’s what I found:",
+  "chat.answer.notWorkedOut": "I couldn’t work that out from your records. Here’s what I found:",
+  "chat.workOut.ask": "Work this out with {brain}?",
+  "chat.workOut.askWith": "Work this out with {brain}? It would see your {what}.",
+  "chat.workOut.mail": "email",
+  "chat.workOut.calendar": "calendar",
+  "chat.workOut.reminders": "reminders",
+  "chat.workOut.allow": "Allow",
+  "chat.workOut.keep": "Keep on this Mac",
+  "settings.privacy.workOut": "Work out questions with {brain}"
 }

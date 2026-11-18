@@ -3613,8 +3613,80 @@ fn index_hits(state: &AppState, settings: &Settings, goal: &str) -> crate::perso
     let built = crate::memory_index::counts(&store.db).is_ok_and(|counts| counts.iter().any(|(source, count)| *count > 0 && apps(source)));
     let words = crate::personal_answer::index_words(goal);
     let plain: Vec<String> = words.iter().map(|(word, _)| word.clone()).collect();
-    let matches = crate::memory_index::word_matches(&store.db, &plain, apps).unwrap_or_default();
-    crate::personal_answer::IndexHits { built, words, matches }
+    let found = crate::memory_index::word_match_titles(&store.db, &plain, apps).unwrap_or_default();
+    let titles = found.iter().map(|(_, title, _)| title.clone()).collect();
+    let matches = found.into_iter().map(|(source, _, held)| (source, held)).collect();
+    crate::personal_answer::IndexHits { built, words, matches, titles }
+}
+
+/// One question put to the brain the person allowed to work questions out, with Rust's tools
+/// run here for it. What the tools return becomes known to the check. None when it failed.
+async fn ask_brain(state: &AppState, brain: &Settings, mut request: Value, known: &mut crate::decision::Known, notes: &mut Vec<String>, cancel: Arc<AtomicBool>) -> Result<Option<String>, String> {
+    for round in 0..=crate::decision::tool_rounds() {
+        let turn = state.models.generate(brain, request.clone(), cancel.clone(), |_| {}).await;
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Task cancelled.".into());
+        }
+        match turn {
+            Ok(turn) => match turn.tool {
+                Some(call) if round < crate::decision::tool_rounds() => {
+                    let name = call["name"].as_str().unwrap_or_default().to_string();
+                    let arguments = call["arguments"].clone();
+                    let result = crate::decision::run_tool(&name, &arguments, known);
+                    notes.push(format!("{name} {arguments} = {result}"));
+                    if let Some(messages) = request["messages"].as_array_mut() {
+                        messages.push(assistant_call(&turn.text, turn.raw, &name, &arguments));
+                        messages.push(json!({"role":"tool","content":result.to_string()}));
+                    }
+                }
+                Some(_) => return Ok(None),
+                None => {
+                    notes.push(format!("worked out by {}", brain.cloud_provider));
+                    return Ok(Some(turn.text));
+                }
+            },
+            Err(error) => {
+                notes.push(format!("{} failed: {error}", brain.cloud_provider));
+                return Ok(None);
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// A question about the person's own records worked out over them (`decision.rs`): by the
+/// brain they allowed when there is one, else by the on-device model, then checked by Rust.
+/// Returns what to show and how it was reached.
+#[allow(clippy::too_many_arguments)]
+async fn work_out(state: &AppState, settings: &Settings, channel: &Channel<TaskEvent>, task_id: &str, cancel: Arc<AtomicBool>, goal: &str, reads: &[&crate::workflows::Step], brain: Option<&str>, valid: impl Fn(&str) -> Result<String, String>) -> Result<(String, Vec<String>), String> {
+    let now = chrono::Local::now().naive_local();
+    let mut digest = crate::decision::digest(goal, reads, now);
+    let mut notes = Vec::new();
+    phase(channel, task_id, "thinking");
+    let mut reply: Option<String> = None;
+    if let Some(brain) = brain.and_then(|_| crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok())) {
+        reply = ask_brain(state, &brain, crate::decision::external_request(goal, &digest), &mut digest.known, &mut notes, cancel.clone()).await?;
+    }
+    if reply.is_none() {
+        let turn = state.models.generate(settings, crate::decision::on_device_request(goal, &digest), cancel.clone(), |_| {}).await;
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Task cancelled.".into());
+        }
+        match turn {
+            Ok(turn) => {
+                notes.push("worked out on this Mac".into());
+                reply = Some(turn.text);
+            }
+            Err(error) => notes.push(format!("on this Mac failed: {error}")),
+        }
+    }
+    // The same checks as any brain's answer: no action claimed, nothing it wasn't given.
+    let reply = reply.and_then(|text| valid(&text).map_err(|error| notes.push(format!("refused: {error}"))).ok());
+    let (answer, missing) = crate::decision::checked_answer(reply.as_deref().unwrap_or_default(), &digest, reads);
+    if !missing.is_empty() {
+        notes.push(format!("unconfirmed: {}", missing.join(", ")));
+    }
+    Ok((answer, notes))
 }
 
 async fn continue_workflow_using<F, Fut>(
@@ -3670,11 +3742,15 @@ where
         // look online and the index has that receipt in the user's mail: it's about their own things.
         let looked_up = flow.contract.outcomes.iter().filter(|outcome| outcome.kind == "read").all(|outcome| outcome.accepted_tools == ["look_up_online"])
             && flow.contract.outcomes.iter().any(|outcome| outcome.kind == "read")
-            && !crate::search_intent::told_to_search(&goal_now)
-            && crate::personal_answer::points_at_own_record(&goal_now);
+            && !crate::search_intent::told_to_search(&goal_now);
         if looked_up {
             let hits = index_hits(state, settings, &goal_now);
-            if let Some(found) = crate::personal_answer::index_route(&goal_now, &hits).filter(|found| !found.is_empty()) {
+            // "Desmond's final price for the kitchen splashback": one email holds three of its
+            // words, so it's that email's price. A newsletter holding "Arsenal" and "game" isn't
+            // enough to answer "who won the Arsenal game" from it.
+            let held = hits.held_together(3);
+            let own = crate::personal_answer::points_at_own_record(&goal_now) || !held.is_empty();
+            if let Some(found) = crate::personal_answer::index_route(&goal_now, &hits).filter(|found| own && !found.is_empty()).or_else(|| (!held.is_empty()).then_some(held)) {
                 flow.contract.answer_from_own_apps();
                 flow.contract.own_sources = Some(found);
             }
@@ -3744,7 +3820,80 @@ where
         if !sources.is_empty() {
             flow.contract.outcomes.retain(|outcome| !(outcome.kind == "read" && outcome.accepted_tools.iter().all(|tool| tool == "search_memory")));
         }
+        // The decision layer (`decision.rs`): the other apps holding what the question is
+        // about, then whether its answer is looked up or worked out, and by which brain.
+        if !sources.is_empty() && reads_apps {
+            let hits = if hits.built { hits } else { index_hits(state, settings, &goal_now) };
+            let mut notes = vec![format!("routed to {}", sources.join(", "))];
+            // Asked to judge this from the titles, Apple's model said yes to almost every app.
+            for (tool, titles) in hits.other_apps(&sources) {
+                if offered.contains(&tool) {
+                    notes.push(format!("added {tool} for {}", titles.join("; ")));
+                    sources.push(tool);
+                }
+            }
+            sources.sort_by_key(|tool| crate::personal_answer::every_source().iter().position(|source| source == tool));
+            let mut work_out = crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now);
+            if !work_out {
+                phase(channel, &task.id, "thinking");
+                let turn = state.models.generate(settings, crate::decision::work_request(&goal_now), cancel.clone(), |_| {}).await;
+                if cancel.load(Ordering::Relaxed) {
+                    return Err("Task cancelled.".into());
+                }
+                work_out = turn.ok().and_then(|turn| crate::decision::worked_out(&turn.text)).unwrap_or(false);
+            }
+            // With a brain the person allowed, a question that asks several things, or one across
+            // apps, is put together by it; on this Mac each part is looked up on its own.
+            let allowed = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider) && crate::decision::shareable(settings, &sources));
+            if !work_out && allowed.is_some() && (crate::decision::asks_several(&goal_now) || sources.len() > 1) {
+                notes.push("several asks for the allowed brain".into());
+                work_out = true;
+            }
+            let mut decided = crate::decision::Decision { work_out, notes, ..Default::default() };
+            if work_out {
+                if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()) {
+                    let id = brain.cloud_provider.clone();
+                    if crate::decision::undecided(settings, &id) {
+                        // Asked once per brain: nothing leaves this Mac before the person says so.
+                        let (question, choices) = crate::decision::consent_card(&goal_now, &id, &sources);
+                        task.choices = choices;
+                        flow.contract.own_sources = Some(vec![]);
+                        return finish_with(state, flow, task, channel, question);
+                    }
+                    if settings.workout_brains.contains(&id) && crate::decision::shareable(settings, &sources) {
+                        decided.brain = Some(id);
+                    }
+                }
+            }
+            flow.decision = Some(decided);
+        }
+        // A general question to work out goes to the brain the person allowed, when there is one
+        // they've said yes to: only the question goes, never a record.
+        // "Could I squeeze a two-hour block in tomorrow" is about their day, not a sum.
+        let general = sources.is_empty() && !own_shape && !crate::personal_answer::says_mine(&goal_now) && crate::task_contract::calendar_days(&goal_now, chrono::Local::now().date_naive()).is_empty() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
         flow.contract.own_sources = Some(sources);
+        if general && !small_talk(&goal_now, &settings.assistant_name) {
+            if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider)) {
+                let mut figures = crate::decision::states_figures(&goal_now);
+                if !figures {
+                    phase(channel, &task.id, "thinking");
+                    let turn = state.models.generate(settings, crate::decision::general_work_request(&goal_now), cancel.clone(), |_| {}).await;
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err("Task cancelled.".into());
+                    }
+                    figures = turn.ok().and_then(|turn| crate::decision::worked_out(&turn.text)).unwrap_or(false);
+                }
+                if figures {
+                    let mut notes = Vec::new();
+                    let mut known = crate::decision::Known::default();
+                    if let Some(answer) = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone()).await? {
+                        let answer = flow.contract.validate_large_brain_answer(&answer, &flow.steps)?;
+                        flow.decision = Some(crate::decision::Decision { work_out: true, brain: Some(brain.cloud_provider.clone()), notes });
+                        return finish_with(state, flow, task, channel, answer);
+                    }
+                }
+            }
+        }
     }
     // Nothing can do a read this needs, so say what would change that rather than ask the model.
     if flow.steps.is_empty() {
@@ -3842,16 +3991,37 @@ where
             return Err(nothing);
         }
         // Rust reads and answers for a small model. A large one does that itself.
+        let worked_out = flow.decision.as_ref().is_some_and(|decided| decided.work_out);
         let own_read = small
-            .then(|| crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today))
+            .then(|| match worked_out {
+                true => crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today),
+                false => crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today),
+            })
             .flatten()
             .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
+        if small && own_read.is_none() && worked_out && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
+            if let Some(reads) = crate::personal_answer::only_reads(&flow.steps) {
+                let goal = flow.contract.current_request.clone();
+                let brain = flow.decision.as_ref().and_then(|decided| decided.brain.clone());
+                let contract = flow.contract.clone();
+                let steps = flow.steps.clone();
+                let (answer, notes) = work_out(state, settings, channel, &task.id, cancel.clone(), &goal, &reads, brain.as_deref(), |text| contract.validate_large_brain_answer(text, &steps)).await?;
+                if let Some(decided) = flow.decision.as_mut() {
+                    decided.notes.extend(notes);
+                }
+                return finish_with(state, flow, task, channel, answer);
+            }
+        }
         if small && own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
-            if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps) {
+            if let Some(reads) = crate::personal_answer::reads(&flow.contract.current_request, &flow.steps).filter(|_| !crate::personal_answer::wants_writing(&flow.contract.current_request)) {
                 let now = chrono::Local::now().naive_local();
                 // A question across apps is answered app by app, each part from its own records.
                 let mut answers = Vec::new();
                 for (part, part_reads) in crate::personal_answer::parts(&flow.contract.current_request, &reads) {
+                    if let Some(answer) = crate::personal_answer::not_there(&part, &part_reads) {
+                        answers.push(answer);
+                        continue;
+                    }
                     if let Some(answer) = crate::personal_answer::direct_answer(&part, &part_reads, now) {
                         answers.push(answer);
                         continue;

@@ -77,6 +77,10 @@ export interface Settings {
   reducedMotion: boolean;
   ebayMarketplace: string;
   externalShares: string[];
+  /** Brains allowed, once each, to work out questions about the person's own things. */
+  workoutBrains: string[];
+  /** Brains the person kept those questions from. */
+  workoutDeclined: string[];
   /** Apps Buntini may use (Settings → Apps). */
   apps: string[];
   cloudProvider: CloudProvider;
@@ -117,7 +121,7 @@ export interface TaskRecord {
   prices?: PriceOffer[];
   cards?: ResultCard[];
   /** Answers to pick when Buntini asked something. Each sends its prompt. */
-  choices?: { label: string; prompt: string }[];
+  choices?: { label: string; prompt: string; consent?: WorkoutConsent }[];
   system?: Record<string, unknown>;
   glance?: MacGlance;
   backend?: string;
@@ -208,3 +212,6 @@ export interface MacGlance {
   apps: GlanceApp[];
   capturedAt: string;
 }
+
+/** The person's answer about a brain working questions out, saved before the question is asked again. */
+export interface WorkoutConsent { brain: string; allow: boolean; shares: string[] }

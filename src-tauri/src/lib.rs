@@ -58,6 +58,8 @@ mod notifications;
 mod nudges;
 mod overlay;
 mod personal_answer;
+mod decision;
+mod literals;
 mod pet;
 mod planning;
 mod pricing;

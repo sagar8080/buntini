@@ -1477,5 +1477,15 @@
   "watches.track": "가격 추적하기",
   "watches.url": "상품 페이지 URL",
   "watches.viewHistory": "가격 기록 보기",
-  "watches.watching": "추적 중"
+  "watches.watching": "추적 중",
+  "chat.answer.notConfirmed": "기록에서 {what}을(를) 확인할 수 없었습니다. 찾은 내용:",
+  "chat.answer.notWorkedOut": "기록으로 계산할 수 없었습니다. 찾은 내용:",
+  "chat.workOut.ask": "{brain}(으)로 계산할까요?",
+  "chat.workOut.askWith": "{brain}(으)로 계산할까요? {what}을(를) 보게 됩니다.",
+  "chat.workOut.mail": "이메일",
+  "chat.workOut.calendar": "캘린더",
+  "chat.workOut.reminders": "미리 알림",
+  "chat.workOut.allow": "허용",
+  "chat.workOut.keep": "이 Mac에서 처리",
+  "settings.privacy.workOut": "{brain}(으)로 질문 계산"
 }

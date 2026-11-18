@@ -41,7 +41,7 @@ import { addFiles, addWindow, brainKey, forBrain, removeAttached } from './attac
 import AttachedChips from './AttachedChips';
 import { follow, speak as speakLanguage, useLanguage } from './locales';
 import { locale, number, t, tn } from './i18n.ts';
-import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval } from './types';
+import type { AgentAnswer, AgentFinished, AgentRequest, Attached, Bootstrap, ConversationPage, ConversationList, ConversationSummary, BackgroundStatus, HeadsUp, TaskProgress, TaskFieldUpdate, KeyProvider, Mode, PendingApprovalSummary, PetState, SavedSearch, Settings, TaskRecord, WebApproval, WorkoutConsent } from './types';
 
 type Page = 'home' | 'history' | 'settings' | 'audit';
 type VoicePayload = { session: number; text?: string; level?: number };
@@ -1010,6 +1010,18 @@ export default function App() {
     finally { setAllowing(false); }
   }
   const need = needs && data ? shortcutNeeds(needs, data.settings.apps) : null;
+  /** The once-per-brain answer about working questions out, saved, then the question asked again. */
+  async function answerConsent(consent: WorkoutConsent, prompt: string) {
+    if (!data) return;
+    try {
+      const base = saver.current!.pending() ?? data.settings;
+      const others = (list: string[]) => list.filter(id => id !== consent.brain);
+      await saver.current!.saveNow(consent.allow
+        ? { ...base, workoutBrains: [...others(base.workoutBrains), consent.brain], workoutDeclined: others(base.workoutDeclined), externalShares: [...new Set([...base.externalShares, ...consent.shares])] }
+        : { ...base, workoutDeclined: [...others(base.workoutDeclined), consent.brain], workoutBrains: others(base.workoutBrains) });
+      void submit(prompt, 'auto');
+    } catch (e) { setError(errorMessage(e)); }
+  }
   async function allowApp(id: string) {
     if (!data) return;
     const base = saver.current!.pending() ?? data.settings;
@@ -1059,7 +1071,7 @@ export default function App() {
               {needs && need && <div className="welcome-allow" role="group" aria-label={need.allow}><p>{need.ask}</p><div><button type="button" className="text-button" onClick={() => setPage('settings', 'apps')}>{t('app.welcome.chooseApps')}</button><button type="button" className="primary-button" disabled={allowing || pending} onClick={() => void allowShortcut(needs)}>{allowing ? <LoaderCircle size={11} className="spin" /> : <Check size={11} />}{need.allow}</button></div></div>}</div> : <>
               <Conversation key={conversationId} turns={turns} live={live} busy={busy || switchingThread} activity={activity} settings={data?.settings} focusId={focusId} speaking={speaking} scroller={conversationRef} canLoadEarlier={!!turnCursor} onLoadEarlier={loadEarlier}
                 onOpen={url => { if (desktop) void safeAction(() => command('open_source', { url })); else window.open(url, '_blank', 'noreferrer'); }}
-                progress={progress} onFollowUp={text => void submit(text, 'auto')} onOpenPane={pane => void command('open_apple_settings', { pane }).catch(error => setError(errorMessage(error)))} chatgptPlan={data?.diagnostics.chatgptPlan} onAskChatGpt={question => void askChatGpt(question)} onOpenChatGpt={question => void openChatGpt(question)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
+                progress={progress} onFollowUp={text => void submit(text, 'auto')} onConsent={(consent, prompt) => void answerConsent(consent, prompt)} onOpenPane={pane => void command('open_apple_settings', { pane }).catch(error => setError(errorMessage(error)))} chatgptPlan={data?.diagnostics.chatgptPlan} onAskChatGpt={question => void askChatGpt(question)} onOpenChatGpt={question => void openChatGpt(question)} onContinue={reviewTask} onCancel={task => void stopSaved(task).catch(e => setError(errorMessage(e)))} onSpeak={text => void speak(text)} onStopSpeaking={() => void speechQueue.current?.cancel().catch(error => setError(errorMessage(error)))} />
             </>}
           </div>
           <div className="composer-area">

@@ -1477,5 +1477,15 @@
   "watches.track": "ติดตามราคา",
   "watches.url": "URL หน้าสินค้า",
   "watches.viewHistory": "ดูประวัติราคา",
-  "watches.watching": "กำลังติดตาม"
+  "watches.watching": "กำลังติดตาม",
+  "chat.answer.notConfirmed": "ยืนยัน {what} จากข้อมูลของคุณไม่ได้ นี่คือสิ่งที่พบ:",
+  "chat.answer.notWorkedOut": "คำนวณเรื่องนี้จากข้อมูลของคุณไม่ได้ นี่คือสิ่งที่พบ:",
+  "chat.workOut.ask": "ให้ {brain} คำนวณไหม",
+  "chat.workOut.askWith": "ให้ {brain} คำนวณไหม จะเห็น {what}",
+  "chat.workOut.mail": "อีเมล",
+  "chat.workOut.calendar": "ปฏิทิน",
+  "chat.workOut.reminders": "เตือนความจำ",
+  "chat.workOut.allow": "อนุญาต",
+  "chat.workOut.keep": "เก็บไว้ใน Mac นี้",
+  "settings.privacy.workOut": "ให้ {brain} คำนวณคำถาม"
 }

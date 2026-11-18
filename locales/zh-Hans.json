@@ -1477,5 +1477,15 @@
   "watches.track": "追踪价格",
   "watches.url": "商品页面 URL",
   "watches.viewHistory": "查看价格历史",
-  "watches.watching": "监控中"
+  "watches.watching": "监控中",
+  "chat.answer.notConfirmed": "无法从你的记录中确认{what}。我找到的是:",
+  "chat.answer.notWorkedOut": "无法根据你的记录算出来。我找到的是:",
+  "chat.workOut.ask": "用 {brain} 计算吗?",
+  "chat.workOut.askWith": "用 {brain} 计算吗?它会看到你的{what}。",
+  "chat.workOut.mail": "邮件",
+  "chat.workOut.calendar": "日历",
+  "chat.workOut.reminders": "提醒事项",
+  "chat.workOut.allow": "允许",
+  "chat.workOut.keep": "留在这台 Mac 上",
+  "settings.privacy.workOut": "用 {brain} 计算问题"
 }

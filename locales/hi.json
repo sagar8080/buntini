@@ -1499,5 +1499,15 @@
   "watches.track": "कीमत पर नज़र रखें",
   "watches.url": "प्रोडक्ट पेज का URL",
   "watches.viewHistory": "कीमत का इतिहास देखें",
-  "watches.watching": "नज़र है"
+  "watches.watching": "नज़र है",
+  "chat.answer.notConfirmed": "मैं आपके रिकॉर्ड से {what} की पुष्टि नहीं कर सका। मुझे यह मिला:",
+  "chat.answer.notWorkedOut": "मैं आपके रिकॉर्ड से इसका हिसाब नहीं लगा सका। मुझे यह मिला:",
+  "chat.workOut.ask": "{brain} से हिसाब लगाएँ?",
+  "chat.workOut.askWith": "{brain} से हिसाब लगाएँ? उसे यह दिखेगा: {what}।",
+  "chat.workOut.mail": "ईमेल",
+  "chat.workOut.calendar": "कैलेंडर",
+  "chat.workOut.reminders": "रिमाइंडर",
+  "chat.workOut.allow": "अनुमति दें",
+  "chat.workOut.keep": "इसी Mac पर रखें",
+  "settings.privacy.workOut": "{brain} से सवालों का हिसाब लगाएँ"
 }

@@ -3,6 +3,7 @@ import { ChevronRight, Folder, FolderPlus, ShieldCheck, X } from 'lucide-react';
 import Toggle from './Toggle';
 import MacUpdates from './MacUpdates';
 import { t } from './i18n.ts';
+import { cloudProviders } from './brain.ts';
 import type { Memory, Settings } from './types';
 
 const shares: { id: string; labelKey: string }[] = [
@@ -32,6 +33,13 @@ type Props = {
 /** The Privacy tab: what Buntini notices, which folders it can read, and what cloud models may see. */
 export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemoveFolder, onAudit, onError, children, memories, onForget, onPolicy }: Props) {
   const toggle = (id: string, on: boolean) => update('externalShares', on ? [...new Set([...draft.externalShares, id])] : draft.externalShares.filter(item => item !== id));
+  // The brains asked once whether they may work questions out: the answer, to change.
+  const asked = [...draft.workoutBrains, ...draft.workoutDeclined];
+  const workOut = (brain: string, on: boolean) => {
+    const others = (list: string[]) => list.filter(item => item !== brain);
+    update('workoutBrains', on ? [...others(draft.workoutBrains), brain] : others(draft.workoutBrains));
+    update('workoutDeclined', on ? others(draft.workoutDeclined) : [...others(draft.workoutDeclined), brain]);
+  };
   return <>
     <section className="settings-section">
       <Toggle label={t('settings.privacy.notice')} detail={t('settings.privacy.noticeDetail')} checked={draft.petAwareness} onChange={value => update('petAwareness', value)} />
@@ -50,6 +58,7 @@ export default function PrivacyTab({ draft, update, roots, onAddFolder, onRemove
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.privacy.cloudMaySee')}</h3></div>
       {shares.map(item => <Toggle key={item.id} label={t(item.labelKey)} checked={draft.externalShares.includes(item.id)} onChange={value => toggle(item.id, value)} />)}
+      {asked.map(brain => <Toggle key={`workout-${brain}`} label={t('settings.privacy.workOut', { brain: cloudProviders.find(item => item.id === brain)?.name ?? brain })} checked={draft.workoutBrains.includes(brain)} onChange={value => workOut(brain, value)} />)}
     </section>
     {children}
     <MacUpdates onError={onError} />

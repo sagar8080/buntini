@@ -1499,5 +1499,15 @@
   "watches.track": "Acompanhar um preço",
   "watches.url": "URL da página do produto",
   "watches.viewHistory": "Ver histórico de preços",
-  "watches.watching": "Monitorando"
+  "watches.watching": "Monitorando",
+  "chat.answer.notConfirmed": "Não consegui confirmar {what} nos seus registros. Veja o que encontrei:",
+  "chat.answer.notWorkedOut": "Não consegui calcular isso a partir dos seus registros. Veja o que encontrei:",
+  "chat.workOut.ask": "Calcular com {brain}?",
+  "chat.workOut.askWith": "Calcular com {brain}? Ele veria: {what}.",
+  "chat.workOut.mail": "e-mails",
+  "chat.workOut.calendar": "calendário",
+  "chat.workOut.reminders": "lembretes",
+  "chat.workOut.allow": "Permitir",
+  "chat.workOut.keep": "Manter neste Mac",
+  "settings.privacy.workOut": "Calcular perguntas com {brain}"
 }

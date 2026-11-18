@@ -80,7 +80,8 @@ func recordPickIDs(_ request: [String: Any]) throws -> [String]? {
     guard request["record_pick"] as? Bool == true else { return nil }
     guard let ids = request["record_ids"] as? [String], !ids.isEmpty, ids.count <= 64,
           Set(ids).count == ids.count,
-          ids.allSatisfy({ value in Int(value).map { $0 > 0 && String($0) == value } ?? (!value.isEmpty && value.allSatisfy { $0.isLowercase && $0.isLetter }) }),
+          // A number, or a short choice in lowercase words ("look up", "work out").
+          ids.allSatisfy({ value in Int(value).map { $0 > 0 && String($0) == value } ?? (!value.isEmpty && value.count <= 24 && value.first != " " && value.last != " " && !value.contains("  ") && value.allSatisfy { ($0.isLowercase && $0.isLetter) || $0 == " " }) }),
           (request["tools"] as? [Any] ?? []).isEmpty else {
         throw Failure(code: "invalid_request", message: "Picking records needs distinct record numbers and no executable tools.")
     }
@@ -841,7 +842,10 @@ func generate(_ id: String, _ request: [String: Any]) async {
         let transform = try contentTransform(request)
         let nextStep = request["next_step"] as? [String: Any]
         if let recordIDs = try recordPickIDs(request) {
-            let session = LanguageModelSession(model: .default, tools: [], transcript: transcript)
+            // A choice about how to answer a harmless question needn't pass the default
+            // guardrails, which refused about one in twenty ("split the invoice").
+            let permissive = request["record_permissive"] as? Bool == true
+            let session = LanguageModelSession(model: permissive ? SystemLanguageModel(guardrails: .permissiveContentTransformations) : .default, tools: [], transcript: transcript)
             emit(["id": id, "type": "model_call", "stage": "pick"])
             let quote = request["record_quote"] as? Bool == true
             let result = try await session.respond(to: prompt, schema: recordPickSchema(ids: recordIDs, most: request["record_most"] as? Int, quote: quote), options: GenerationOptions(temperature: 0))
@@ -1949,7 +1953,8 @@ func contractSelfTest() async -> Int32 {
         try require(try generatedArguments("{\"query\":\"lease\"}")["query"] as? String == "lease", "Valid arguments must survive parsing")
         try require(try recordPickIDs(["messages":[["content":"record_pick: true"]]]) == nil, "Prompt text must never opt into picking records")
         try require(try recordPickIDs(["record_pick":true, "record_ids":["1", "2"], "tools":[]]) == ["1", "2"], "A pick keeps the exact record numbers it was given")
-        for invalid: [String: Any] in [["record_pick":true], ["record_pick":true, "record_ids":["1", "1"]], ["record_pick":true, "record_ids":["01"]], ["record_pick":true, "record_ids":["1"], "tools":[["name":"create_note"]]]] {
+        try require(try recordPickIDs(["record_pick":true, "record_ids":["look up", "work out"], "tools":[]]) == ["look up", "work out"], "A short choice in lowercase words is a pick")
+        for invalid: [String: Any] in [["record_pick":true], ["record_pick":true, "record_ids":["1", "1"]], ["record_pick":true, "record_ids":["01"]], ["record_pick":true, "record_ids":[" look"]], ["record_pick":true, "record_ids":["look  up"]], ["record_pick":true, "record_ids":["Look up"]], ["record_pick":true, "record_ids":["1"], "tools":[["name":"create_note"]]]] {
             do {
                 _ = try recordPickIDs(invalid)
                 try require(false, "A malformed pick request must be rejected")
