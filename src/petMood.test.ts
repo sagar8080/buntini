@@ -8,8 +8,9 @@ import { actionDuration, catOnly, forCharacter, Hunter, nearness, nextDreamDelay
 const calm = (changes: Partial<Mood> = {}): Mood => ({ energy: .6, affection: .5, boredom: 0, annoyance: 0, excitement: 0, bond: 0, ...changes });
 const sequence = (...values: number[]) => () => values.shift() ?? 0;
 
-test('a cat is livelier in the morning than late at night, and a sleepy one less so', () => {
-  assert.ok(energyAt(8) > energyAt(15) && energyAt(15) > energyAt(20) && energyAt(20) > energyAt(2));
+test('a cat is liveliest at dawn and dusk and flags late at night, and a sleepy one less lively', () => {
+  // Liveliest at dawn and dusk, flagging in the early afternoon, lowest in the small hours.
+  assert.ok(energyAt(6) > energyAt(10) && energyAt(20) > energyAt(14) && energyAt(10) > energyAt(14) && energyAt(14) > energyAt(2));
   assert.ok(startingMood('sleepy', 10).energy < startingMood('calm', 10).energy);
   assert.ok(startingMood('playful', 10).energy > startingMood('calm', 10).energy);
 });

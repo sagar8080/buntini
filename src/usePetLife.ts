@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { command, desktop } from './bridge';
 import { actionDuration, ASK_GAP, forCharacter, gazeToward, Hunter, isToyAction, nearness, nextBlinkDelay, nextDreamDelay, nextEarSwivel, nextHabit, nextHabitDelay, nextSaccade, randomGlance, toyPlay, type PetAction } from './petLife';
 import { askPace, bandFor, drift, faceFor, feel, moodPace, Pokes, proudOrHappy, remembered, restored, startingMood, type Face, type Mood, type MoodEvent } from './petMood';
+import { Company, Curiosity, handsBusy, loseInterest, napAfter, napDue, napLength, Regard, settleRoutine, wakeRoutine } from './petDay';
 import { KEY_STROKE, Petting, tapsDue, tiltFor, zoneAt, type Favourite, type Zone } from './petTouch';
 import { PurrSound } from './purrSound';
 import type { PetMemory, PetMotion, PetState } from './types';
@@ -35,15 +37,25 @@ export const petFromKeyboard = () => window.dispatchEvent(new Event('buntini-pet
 export type PetFeeling = 'purring' | 'kneading';
 /** Less motion (Buntini's or the Mac's): the cat stays alive and calm, and makes no sudden
     moves: no hunting, no jump when clicked, no poses when petted. */
-const lessMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const lessMotion = () => document.documentElement.dataset.motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** What the desktop cat is up to, for its roaming (usePetWorld.ts): napping or settling down
+    for one, watching the pointer, wanting room or company (from `wantsAt`), how lively it
+    feels, and when it last woke and from how long a sleep. Times are performance.now().
+    Only the desktop cat writes it. */
+export const desktopCat = { napping: false, settlingUntil: 0, curious: false, wants: null as 'room' | 'company' | null, wantsAt: 0, energy: .6, excitement: 0, wokeAt: -Infinity, slept: 0 };
+/** How the cat woke: a nap that ran its course, or you waking it. */
+type Waking = 'natural' | 'woken';
 
 /* Gives a pet its small signs of life: randomized blinks, idle habits picked by its
    motion personality and its mood, eyes that follow the cursor, petting, clicks and task
    reactions. Gaze is written straight to CSS variables so cursor tracking never re-renders;
    the mood re-renders only when the face it shows changes. */
-/** `paused`: travelling, napping or being carried, when habits wait. `remember`: the
-    desktop cat, whose mood and bond carry over to the next launch. */
-export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state, paused = false, motion, cat, reaction, asleep = false, held = false, remember = false }: { alive: boolean; state: PetState; paused?: boolean; motion: PetMotion; cat: boolean; reaction?: PetReaction; asleep?: boolean; held?: boolean; remember?: boolean }) {
+/** `paused`: travelling, asleep or being carried, when habits wait. `asleep`: asleep while
+    you're away. `remember`: the desktop cat, whose mood and bond carry over to the next
+    launch, and who keeps its own hours: it naps of its own accord while `restful` (the
+    panel is closed). */
+export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state, paused = false, motion, cat, reaction, asleep = false, held = false, remember = false, restful = false }: { alive: boolean; state: PetState; paused?: boolean; motion: PetMotion; cat: boolean; reaction?: PetReaction; asleep?: boolean; held?: boolean; remember?: boolean; restful?: boolean }) {
   // Until the store answers, any mood an earlier version left in this browser.
   const [initialMood] = useState<Mood>(() => {
     const hour = new Date().getHours();
@@ -55,13 +67,31 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const [action, setAction] = useState<PetAction | null>(null);
   const [blinking, setBlinking] = useState(false);
   const [face, setFace] = useState<Face>(() => faceFor(initialMood));
+  // Its own naps, on top of sleeping while you're away.
+  const [napping, setNapping] = useState(false);
+  const sleeping = asleep || napping, halted = paused || napping;
   const current = useRef<PetAction | null>(null);
   const endTimer = useRef(0);
   const pointerGaze = useRef({ x: 0, y: 0 });
   const lastMove = useRef(0);
   const glance = useRef<{ x: number; y: number } | null>(null);
+  // Until when it's looking away from the pointer on purpose, or holding your gaze.
+  const averted = useRef(0);
+  const holding = useRef(0);
   const hunter = useRef(new Hunter());
   const lastTyping = useRef(0);
+  // When you last typed, in the panel or anywhere on the Mac (handsBusy).
+  const typedAt = useRef(-Infinity);
+  const typingTimer = useRef(0);
+  const curiosity = useRef(new Curiosity());
+  const regard = useRef(new Regard());
+  const company = useRef(new Company(performance.now()));
+  // When its next nap is due and, while it naps, when it wakes; and how it woke.
+  const nap = useRef({ dueAt: performance.now() + napAfter(new Date().getHours(), motion, initialMood.energy), endsAt: 0 });
+  const waking = useRef<Waking | null>(null);
+  // The rest of a routine under way, such as settling down for a nap: habits to play, and
+  // what to do once they're done.
+  const queue = useRef<(PetAction | (() => void))[]>([]);
   const lastStretch = useRef(performance.now());
   // The first request for a pet comes a few minutes in, not straight away.
   const lastAsk = useRef(performance.now() - ASK_GAP + 4 * 60_000);
@@ -71,8 +101,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const pending = useRef<{ kind: PetAction; at: number } | null>(null);
   // What it settles into after the slow blink that follows a good purr.
   const settleAfter = useRef<PetAction | null>(null);
-  const live = useRef({ state, paused, motion, cat, asleep, remember });
-  live.current = { state, paused, motion, cat, asleep, remember };
+  const live = useRef({ state, paused: halted, motion, cat, asleep: sleeping, away: asleep, remember, restful });
+  live.current = { state, paused: halted, motion, cat, asleep: sleeping, away: asleep, remember, restful };
 
   const moodTo = useCallback((event: MoodEvent) => {
     mood.current = feel(mood.current, event, live.current.motion);
@@ -83,15 +113,25 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const element = ref.current;
     if (!element) return;
     // While you type in the panel (up and to its left), the cat watches the words appear.
+    // Otherwise it watches the pointer only while the pointer interests it (petDay.ts).
     const now = performance.now();
-    const gaze = now - lastTyping.current < 1500 ? { x: -.9, y: -.75 } : now - lastMove.current < 3500 ? pointerGaze.current : glance.current ?? { x: 0, y: 0 };
+    const watching = (curiosity.current.watching(now) || now < holding.current) && now >= averted.current;
+    const gaze = now - lastTyping.current < 1500 ? { x: -.9, y: -.75 } : watching ? pointerGaze.current : glance.current ?? { x: 0, y: 0 };
     element.style.setProperty('--gx', gaze.x.toFixed(3));
     element.style.setProperty('--gy', gaze.y.toFixed(3));
-    element.style.setProperty('--near', now - lastMove.current < 3500 ? near.current.toFixed(2) : '0');
+    element.style.setProperty('--near', watching ? near.current.toFixed(2) : '0');
   }, [ref]);
+
+  // A look the other way from the pointer, for as long as the look lasts.
+  const lookAway = useCallback((y: number) => {
+    glance.current = { x: pointerGaze.current.x > 0 ? -.8 : .8, y };
+    averted.current = performance.now() + actionDuration.look;
+    applyGaze();
+  }, [applyGaze]);
 
   const stop = useCallback(() => {
     window.clearTimeout(endTimer.current);
+    queue.current = [];
     current.current = null;
     glance.current = null;
     setAction(null);
@@ -106,7 +146,9 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     return performance.now() - waiting.at < 6000 ? waiting.kind : null;
   };
 
-  const play = useCallback((wanted: PetAction) => {
+  /** `queued`: the next step of the routine under way. Anything else ends that routine. */
+  const play = useCallback((wanted: PetAction, queued = false) => {
+    if (!queued) queue.current = [];
     const next = forCharacter(wanted, live.current.cat);
     window.clearTimeout(endTimer.current);
     current.current = next;
@@ -126,6 +168,9 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const settle = next === 'slowblink' ? settleAfter.current : null;
     settleAfter.current = null;
     const then = next === 'askpet' ? () => play('ear') : next === 'startle' && mood.current.annoyance > .25 ? () => play('grumpy') : settle ? () => play(settle) : () => {
+      const after = queue.current.shift();
+      if (typeof after === 'function') { stop(); after(); return; }
+      if (after) { play(after, true); return; }
       const waiting = takePending();
       if (waiting) play(waiting); else stop();
     };
@@ -142,10 +187,54 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     play(kind);
   }, [play]);
   useEffect(() => {
-    if (!alive || paused || current.current) return;
+    if (!alive || halted || current.current) return;
     const waiting = takePending();
     if (waiting) play(waiting);
-  }, [alive, paused, play]);
+  }, [alive, halted, play]);
+
+  // Asleep of its own accord, until its nap ends or it's woken.
+  const fallAsleep = useCallback(() => {
+    nap.current.endsAt = performance.now() + napLength(new Date().getHours(), live.current.motion);
+    if (live.current.remember) desktopCat.napping = true;
+    setNapping(true);
+  }, []);
+  const wakeUp = useCallback((how: Waking | null) => {
+    if (!nap.current.endsAt) return;
+    nap.current.endsAt = 0;
+    waking.current = how;
+    if (live.current.remember) desktopCat.napping = false;
+    setNapping(false);
+  }, []);
+  // Settling down: it kneads its spot and turns round, then curls up. Disturbed on the
+  // way, it tries again in a few minutes.
+  const settle = useCallback(() => {
+    const now = performance.now();
+    nap.current.dueAt = now + 3 * 60_000;
+    const [first, ...rest] = settleRoutine(lessMotion() || !live.current.cat);
+    if (!first) return fallAsleep();
+    desktopCat.settlingUntil = now + rest.concat(first).reduce((sum, step) => sum + actionDuration[step], 400);
+    play(first);
+    queue.current = [...rest, fallAsleep];
+  }, [play, fallAsleep]);
+
+  // A click, a poke, or the start of a petting: enough of it in a short while and a cat that
+  // isn't close to you yet wanders off for some room, once the reaction has played.
+  const fussed = useCallback((now: number) => {
+    if (!live.current.remember) return;
+    company.current.fuss(now);
+    if (company.current.wantsRoom(now, bandFor(mood.current.bond))) { desktopCat.wants = 'room'; desktopCat.wantsAt = now + 1800; }
+  }, []);
+
+  // Typing, in the panel or anywhere on the Mac: the tail tip flicks while you do (styles.css).
+  const typing = useCallback((now: number) => {
+    const element = ref.current;
+    typedAt.current = now;
+    if (!element) return;
+    element.toggleAttribute('data-typing', true);
+    window.clearTimeout(typingTimer.current);
+    typingTimer.current = window.setTimeout(() => element.removeAttribute('data-typing'), 2500);
+  }, [ref]);
+  useEffect(() => () => { window.clearTimeout(typingTimer.current); if (remember) desktopCat.napping = false; }, [remember]);
 
   useEffect(() => () => window.clearTimeout(endTimer.current), []);
 
@@ -201,6 +290,23 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     return () => { cancelled = true; forgetters.delete(forget); };
   }, [remember, save]);
 
+  // Its own hours, for the desktop cat: a nap when one is due and nobody is fussing over it,
+  // waking once it has slept enough, and going to find you when it's been left alone too
+  // long while you work.
+  const keepHours = useCallback((now: number, around: boolean) => {
+    const { state: doing, paused: still, away, remember: desktopPet, restful: free } = live.current;
+    if (!desktopPet) return;
+    if (nap.current.endsAt) {
+      // A nap that ends while you're away runs on into that sleep.
+      if (now >= nap.current.endsAt) wakeUp(away ? null : 'natural');
+      return;
+    }
+    if (!free || doing !== 'idle' || still || current.current || document.hidden) return;
+    const hovering = curiosity.current.watching(now) ? near.current : 0;
+    if (napDue(now, nap.current.dueAt, company.current.lastTouched, hovering)) return settle();
+    if (company.current.wantsCompany(now, { boredom: mood.current.boredom, busy: around, band: bandFor(mood.current.bond) })) { desktopCat.wants = 'company'; desktopCat.wantsAt = now; }
+  }, [settle, wakeUp]);
+
   // Time passes: feelings drift back to the cat's usual self, and boredom creeps in while
   // you're around but busy with other things.
   useEffect(() => {
@@ -209,14 +315,18 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     const keep = () => void save().catch(() => { /* Saved next time. */ });
     let ticks = 0;
     const timer = window.setInterval(() => {
-      const { motion: personality, asleep: napping } = live.current;
-      mood.current = drift(mood.current, 5, { motion: personality, hour: new Date().getHours(), userAround: performance.now() - lastMove.current < 60_000, asleep: napping });
+      const { motion: personality, asleep: dozing, remember: desktopPet } = live.current;
+      const now = performance.now();
+      const around = now - lastMove.current < 60_000 || now - typedAt.current < 60_000;
+      mood.current = drift(mood.current, 5, { motion: personality, hour: new Date().getHours(), userAround: around, asleep: dozing });
       setFace(faceFor(mood.current));
+      if (desktopPet) { desktopCat.energy = mood.current.energy; desktopCat.excitement = mood.current.excitement; }
+      keepHours(now, around);
       if (++ticks % 6 === 0) keep();
     }, 5000);
     window.addEventListener('pagehide', keep);
     return () => { window.clearInterval(timer); window.removeEventListener('pagehide', keep); keep(); };
-  }, [alive, save]);
+  }, [alive, save, keepHours]);
 
   // Between habits: eyes that wander when nothing is moving, and ears that swivel to small
   // sounds. Both are CSS variables, so none of it re-renders.
@@ -250,7 +360,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
 
   // Asleep, it dreams: an ear flicks, a paw paddles, the tail twitches.
   useEffect(() => {
-    if (!alive || !asleep || !cat) return;
+    if (!alive || !sleeping || !cat) return;
     let timer = 0;
     const doze = () => {
       timer = window.setTimeout(() => {
@@ -260,11 +370,16 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     };
     doze();
     return () => window.clearTimeout(timer);
-  }, [alive, asleep, cat, play]);
+  }, [alive, sleeping, cat, play]);
+
+  // Talked to, picked up, or the panel opened: it wakes from its nap.
+  useEffect(() => {
+    if (state !== 'idle' || held || !restful) wakeUp('woken');
+  }, [state, held, restful, wakeUp]);
 
   useEffect(() => {
     if (!alive) return;
-    if (state !== 'idle' || paused) {
+    if (state !== 'idle' || halted) {
       // You're talking to it: that's company.
       if (state !== 'idle') moodTo('talk');
       if (current.current && !reactions.has(current.current)) stop();
@@ -279,7 +394,8 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
         played = null;
         if (!document.hidden && !current.current) {
           const now = performance.now();
-          played = nextHabit(motion, cat, { stretch: now - lastStretch.current, ask: (now - lastAsk.current) * askPace[bandFor(mood.current.bond)], userAround: now - lastMove.current < 60_000 }, Math.random, faceFor(mood.current));
+          const userAround = now - lastMove.current < 60_000 || now - typedAt.current < 60_000;
+          played = nextHabit(motion, cat, { stretch: now - lastStretch.current, ask: (now - lastAsk.current) * askPace[bandFor(mood.current.bond)], userAround }, Math.random, faceFor(mood.current));
           play(played);
         }
         schedule();
@@ -287,19 +403,33 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     };
     schedule();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [alive, state, paused, motion, cat, play, stop, moodTo]);
+  }, [alive, state, halted, motion, cat, play, stop, moodTo]);
 
   useEffect(() => {
     if (!alive) return;
-    const follow = (x: number, y: number) => {
+    // Bored of the pointer: it looks the other way, has a wash, or flicks an ear.
+    const bored = () => {
+      const { state: doing, paused: still, cat: isCat } = live.current;
+      if (current.current || doing !== 'idle' || still || document.hidden) return;
+      const how = isCat ? loseInterest() : 'look';
+      play(how);
+      if (how === 'look') lookAway(.1);
+    };
+    /** `moved`: the pointer itself moved, not only the cat (walking, or carried). */
+    const follow = (x: number, y: number, moved = true) => {
       const element = ref.current;
       if (!element) return;
       const rect = element.getBoundingClientRect();
       const dx = x - (rect.left + rect.width / 2), dy = y - (rect.top + rect.height * .45);
       pointerGaze.current = gazeToward(dx, dy);
       near.current = nearness(dx, dy);
-      lastMove.current = performance.now();
-      hunter.current.moved(dx, dy, lastMove.current);
+      if (moved) {
+        const now = performance.now(), distance = Math.hypot(dx, dy);
+        lastMove.current = now;
+        hunter.current.moved(dx, dy, now);
+        regard.current.moved(distance, now);
+        if (curiosity.current.moved(now, distance, faceFor(mood.current)) === 'bored') bored();
+      }
       applyGaze();
     };
     if (!desktop) {
@@ -312,7 +442,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     // Positions stay in this process; nothing is recorded.
     const appWindow = getCurrentWindow();
     let origin = { x: 0, y: 0 };
-    let previous = '';
+    let previous = '', pointer = '';
     void appWindow.outerPosition().then(position => { origin = position; }).catch(() => {});
     const unlisten = appWindow.onMoved(({ payload }) => { origin = payload; });
     const timer = window.setInterval(async () => {
@@ -322,21 +452,35 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
         const key = `${cursor.x},${cursor.y},${origin.x},${origin.y}`;
         if (key === previous) return applyGaze();
         previous = key;
-        const scale = window.devicePixelRatio || 1;
-        follow((cursor.x - origin.x) / scale, (cursor.y - origin.y) / scale);
+        const scale = window.devicePixelRatio || 1, spot = `${cursor.x},${cursor.y}`;
+        follow((cursor.x - origin.x) / scale, (cursor.y - origin.y) / scale, spot !== pointer);
+        pointer = spot;
       } catch { /* Cursor tracking is decorative; the pet simply looks ahead. */ }
     }, 150);
     return () => { window.clearInterval(timer); void unlisten.then(off => off()).catch(() => {}); };
-  }, [alive, ref, applyGaze]);
+  }, [alive, ref, applyGaze, play, lookAway]);
 
-  // Hunting: a pointer that darted about nearby and then froze gets stalked and pounced on;
-  // one darting about out of reach gets chattered at.
+  // Looking back: the pointer resting near it, as if you were looking at it, gets a slow
+  // blink (or, from a new cat, a look away). Hunting, while the pointer interests it: a
+  // pointer that darted about nearby and then froze gets stalked and pounced on; one
+  // darting about out of reach gets chattered at.
   useEffect(() => {
     if (!alive) return;
     const timer = window.setInterval(() => {
-      const { state: now, paused: away, motion: personality, cat: isCat } = live.current;
-      if (!isCat || now !== 'idle' || away || current.current || document.hidden || lessMotion()) return;
-      const at = performance.now();
+      const { state: now, paused: away, motion: personality, cat: isCat, remember: desktopPet } = live.current;
+      const at = performance.now(), eyes = curiosity.current;
+      if (desktopPet) desktopCat.curious = eyes.engaged(at) && eyes.watching(at);
+      if (now !== 'idle' || away || current.current || document.hidden) return;
+      if (eyes.watching(at)) {
+        const answer = regard.current.answer(at, bandFor(mood.current.bond), at - typedAt.current < 2000);
+        if (answer) {
+          play(answer);
+          if (answer === 'look') lookAway(.15);
+          else holding.current = at + actionDuration.slowblink;
+          return;
+        }
+      }
+      if (!isCat || lessMotion() || !eyes.engaged(at)) return;
       const side = hunter.current.ready(at, personality);
       if (!side) {
         if (hunter.current.chatters(at, personality)) { play('chatter'); moodTo('chase'); }
@@ -348,7 +492,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       window.setTimeout(() => { if (current.current === 'stalk' || current.current === null) play('hunt'); }, actionDuration.stalk);
     }, 200);
     return () => window.clearInterval(timer);
-  }, [alive, play, moodTo, ref]);
+  }, [alive, play, moodTo, ref, lookAway]);
 
   // Typing in the panel turns its eyes and ears to the words, with the odd ear twitch.
   useEffect(() => {
@@ -358,6 +502,7 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       const now = performance.now();
       const burst = now - lastTyping.current < 1500;
       lastTyping.current = now;
+      typing(now);
       applyGaze();
       if (!burst) moodTo('talk');
       if (burst && !current.current && live.current.cat && Math.random() < .04) play('ear');
@@ -365,7 +510,21 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     };
     window.addEventListener('keydown', typed);
     return () => window.removeEventListener('keydown', typed);
-  }, [alive, applyGaze, play, moodTo]);
+  }, [alive, applyGaze, play, moodTo, typing]);
+
+  // Typing anywhere on the Mac, as world.rs sees it once a second: input just now with the
+  // pointer still. Its tail flicks along, and now and then an ear turns to the clatter.
+  useEffect(() => {
+    if (!alive || !remember || !desktop) return;
+    const unlisten = listen<{ idleSeconds?: number | null }>('pet-world', ({ payload }) => {
+      const now = performance.now();
+      if (!handsBusy(payload.idleSeconds, now - lastMove.current)) return;
+      typing(now);
+      const { state: doing, paused: still, cat: isCat } = live.current;
+      if (isCat && doing === 'idle' && !still && !current.current && !document.hidden && Math.random() < .08) play('ear');
+    });
+    return () => void unlisten.then(off => off()).catch(() => {});
+  }, [alive, remember, typing, play]);
 
   useEffect(() => {
     const element = ref.current;
@@ -444,6 +603,9 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
     };
     const stroke = (zone: Zone, distance: number, point: { x: number; y: number; side: number }, angle: number) => {
       const now = performance.now();
+      // A hand on a napping cat wakes it, and it stretches before it enjoys any more.
+      if (nap.current.endsAt) { wakeUp('woken'); return; }
+      if (now - lastStroke > 1000) fussed(now);
       const touch = petting.stroke(zone, distance, now, context());
       lastStroke = now;
       if (!ticker) { lastTick = now; ticker = window.setInterval(tick, 100); }
@@ -515,10 +677,12 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       last = null;
     };
     const click = () => {
-      if (lessMotion()) return;
+      fussed(performance.now());
+      // With Less motion a click wakes a napping cat gently, with a stretch.
+      if (lessMotion()) { wakeUp('woken'); return; }
       const poked = pokes.click(performance.now()) === 'poke';
       // Woken by a click: a jump, and a grumble if it was cross already.
-      if (live.current.asleep || current.current === 'loaf') { moodTo('woken'); play('startle'); return; }
+      if (live.current.asleep || current.current === 'loaf') { wakeUp('woken'); moodTo('woken'); play('startle'); return; }
       if (poked) { moodTo('poke'); play(faceFor(mood.current) === 'grumpy' && live.current.cat ? 'swat' : 'grumpy'); return; }
       if (current.current === 'purr') return;
       moodTo('click');
@@ -556,24 +720,38 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
       element.removeEventListener('wheel', wheel);
       element.removeEventListener('click', click);
     };
-  }, [alive, ref, play, stop, moodTo]);
+  }, [alive, ref, play, stop, moodTo, fussed, wakeUp]);
 
-  // Waking from a nap: a long stretch, and it's pleased to see you.
-  // A cat close to you, back with you after an hour or more, rubs against you too.
-  const wasAsleep = useRef(asleep);
+  // Waking, when you're back or it's woken: a long stretch, and it's pleased to see you. A
+  // cat close to you, back with you after an hour or more, rubs against you too. From a
+  // nap that ran its course it stretches, yawns and has a wash. Already busy with a fright
+  // or a feeling, it skips all that.
+  const wasAsleep = useRef(sleeping);
   const asleepSince = useRef(0);
   useEffect(() => {
     let timer = 0;
-    if (asleep && !wasAsleep.current) asleepSince.current = performance.now();
-    if (alive && wasAsleep.current && !asleep && current.current !== 'startle') {
-      const missed = bandFor(mood.current.bond) === 'close' && performance.now() - asleepSince.current >= 3_600_000;
-      moodTo('userBack');
-      play('stretch');
-      if (missed && live.current.cat) timer = window.setTimeout(() => { if (!current.current) play('bunt'); }, actionDuration.stretch + 100);
+    const now = performance.now();
+    if (sleeping && !wasAsleep.current) asleepSince.current = now;
+    if (alive && wasAsleep.current && !sleeping) {
+      const how = waking.current;
+      waking.current = null;
+      if (remember) {
+        desktopCat.wokeAt = now;
+        desktopCat.slept = now - asleepSince.current;
+        nap.current.dueAt = now + napAfter(new Date().getHours(), live.current.motion, mood.current.energy);
+      }
+      if (!current.current || current.current === 'dream') {
+        const [first, ...rest] = wakeRoutine(how === 'natural');
+        const missed = how !== 'natural' && bandFor(mood.current.bond) === 'close' && now - asleepSince.current >= 3_600_000;
+        if (how !== 'natural') moodTo('userBack');
+        play(first);
+        queue.current = rest;
+        if (missed && live.current.cat) timer = window.setTimeout(() => { if (!current.current) play('bunt'); }, actionDuration.stretch + 100);
+      }
     }
-    wasAsleep.current = asleep;
+    wasAsleep.current = sleeping;
     return () => window.clearTimeout(timer);
-  }, [alive, asleep, play, moodTo]);
+  }, [alive, sleeping, play, moodTo, remember]);
 
   // Picked up and put down: a playful cat wants to go again, a cross one grumbles. The
   // feeling shows once it has landed.
@@ -595,10 +773,12 @@ export function usePetLife(ref: RefObject<HTMLDivElement | null>, { alive, state
   const reactionKind = reaction?.kind;
   useEffect(() => {
     if (!alive || !reactionKind) return;
+    // Something to tell you or feel about wakes it from a nap first.
+    wakeUp('woken');
     const feeling = reactionFeeling[reactionKind];
     if (feeling) moodTo(feeling);
     show(reactionKind === 'happy' ? proudOrHappy(mood.current) : reactionKind);
-  }, [alive, reactionId, reactionKind, show, moodTo]);
+  }, [alive, reactionId, reactionKind, show, moodTo, wakeUp]);
 
-  return { action, blinking, face };
+  return { action, blinking, face, napping };
 }

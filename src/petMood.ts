@@ -17,11 +17,14 @@ export type MoodEvent =
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
-/** How lively a cat is at this hour: up with the morning, flagging late at night. */
+/** How lively a cat is at this hour: liveliest at dawn and dusk, flagging in the early
+    afternoon, and lowest in the small hours. */
 export function energyAt(hour: number): number {
-  if (hour >= 6 && hour < 11) return .72;
-  if (hour >= 11 && hour < 18) return .62;
-  if (hour >= 18 && hour < 22) return .52;
+  if (hour >= 5 && hour < 8) return .74;
+  if (hour >= 8 && hour < 12) return .66;
+  if (hour >= 12 && hour < 16) return .55;
+  if (hour >= 16 && hour < 18) return .62;
+  if (hour >= 18 && hour < 22) return .7;
   return .28;
 }
 
