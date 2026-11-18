@@ -123,8 +123,8 @@ fn dates(text: &str) -> Vec<String> {
 /// How people type: "tmrw", "wht", "havent". Only for reading what a question asks, never
 /// for what gets written or sent.
 pub(crate) fn spelled(text: &str) -> String {
-    const USUAL: [(&str, &str); 30] = [
-        ("yesterdays", "yesterday"), ("todays", "today"), ("tomorrows", "tomorrow"),
+    const USUAL: [(&str, &str); 31] = [
+        ("yesterdays", "yesterday"), ("todays", "today"), ("tomorrows", "tomorrow"), ("tmrws", "tomorrow"),
         ("tmrw", "tomorrow"), ("tmr", "tomorrow"), ("tomorow", "tomorrow"), ("tommorow", "tomorrow"), ("tommorrow", "tomorrow"), ("2morrow", "tomorrow"), ("2day", "today"),
         ("tonite", "tonight"), ("wht", "what"), ("wat", "what"), ("whos", "who's"), ("hows", "how's"), ("wheres", "where's"), ("whens", "when's"), ("havent", "haven't"),
         ("dont", "don't"), ("didnt", "didn't"), ("doesnt", "doesn't"), ("cant", "can't"), ("isnt", "isn't"), ("cal", "calendar"), ("emial", "email"), ("calender", "calendar"),

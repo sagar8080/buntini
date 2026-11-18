@@ -4054,25 +4054,30 @@ where
             })
             .flatten()
             .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
-        // Worked out on this Mac, a question Rust answers exactly from the records ("am I free at
-        // 9 tomorrow") is answered by Rust: Apple's model gets times and sums wrong far more often.
-        let on_this_mac = flow.decision.as_ref().is_some_and(|decided| decided.brain.is_none());
-        let exact = small && own_read.is_none() && worked_out && on_this_mac && {
-            let now = chrono::Local::now().naive_local();
-            crate::personal_answer::reads(&flow.contract.current_request, &flow.steps).is_some_and(|reads| {
-                let parts = crate::personal_answer::parts(&flow.contract.current_request, &reads);
-                parts.len() == 1 && parts.iter().all(|(part, part_reads)| crate::personal_answer::direct_answer(part, part_reads, now).is_some())
-            })
-        };
-        if exact {
-            if let Some(decided) = flow.decision.as_mut() {
-                decided.notes.push("answered by Rust".into());
-            }
-        }
-        if small && own_read.is_none() && worked_out && !exact && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
+        if small && own_read.is_none() && worked_out && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::only_reads(&flow.steps) {
                 let goal = flow.contract.current_request.clone();
                 let brain = flow.decision.as_ref().and_then(|decided| decided.brain.clone());
+                // On this Mac, Rust works the answers out (`answers.rs`), and one is given only when
+                // its question is plainly the person's. Written by Apple's model, 6 of 34 were
+                // right, and asked to choose, it never said none fitted. With none, that's said.
+                if brain.is_none() {
+                    let now = chrono::Local::now().naive_local();
+                    let ranked = crate::answers::ranked(&goal, &crate::answers::candidates(&goal, &reads, now));
+                    let picked = crate::answers::confident(&ranked).cloned();
+                    let answer = match &picked {
+                        Some(candidate) => candidate.answer.clone(),
+                        None => format!("{}\n\n{}", crate::i18n::t("chat.answer.notWorkedOut"), crate::personal_answer::closest_records(&goal, &reads)),
+                    };
+                    if let Some(decided) = flow.decision.as_mut() {
+                        let nearest = ranked.iter().take(3).map(|(candidate, score)| format!("{} {score:.3}", candidate.asks)).collect::<Vec<_>>().join(" | ");
+                        decided.notes.push(match &picked {
+                            Some(_) => format!("answered by Rust; nearest {nearest}"),
+                            None => format!("not worked out on this Mac; nearest {nearest}"),
+                        });
+                    }
+                    return finish_with(state, flow, task, channel, answer);
+                }
                 let contract = flow.contract.clone();
                 let steps = flow.steps.clone();
                 let (answer, notes) = work_out(state, settings, channel, &task.id, cancel.clone(), &goal, &reads, brain.as_deref(), |text| contract.validate_large_brain_answer(text, &steps)).await?;
@@ -4088,7 +4093,10 @@ where
                 // A question across apps is answered app by app, each part from its own records.
                 let mut answers = Vec::new();
                 for (part, part_reads) in crate::personal_answer::parts(&flow.contract.current_request, &reads) {
-                    if let Some(answer) = crate::personal_answer::not_there(&part, &part_reads).or_else(|| crate::personal_answer::detail_missing(&part, &part_reads)) {
+                    // A question worked out ("how many are due, not counting today") isn't about a
+                    // thing that may be missing: an empty match is a count of none, which Rust gives.
+                    let absent = if worked_out { None } else { crate::personal_answer::not_there(&part, &part_reads, &index_hits(state, settings, &part)) };
+                    if let Some(answer) = absent.or_else(|| crate::personal_answer::detail_missing(&part, &part_reads)) {
                         answers.push(answer);
                         continue;
                     }

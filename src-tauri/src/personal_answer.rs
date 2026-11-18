@@ -1218,8 +1218,10 @@ pub fn detail_missing(goal: &str, reads: &[&Step]) -> Option<String> {
 
 /// "No reminder mentions “library”": when none of the records read holds any of the words
 /// the question is about, which is a plain answer, never a nearby record offered as one.
-/// Only where the reads looked through everything that could hold them.
-pub fn not_there(goal: &str, reads: &[&Step]) -> Option<String> {
+/// Only where the reads looked through everything that could hold them. Mail's own search
+/// looks at senders and subjects alone, so for an email `index` (the local index, which holds
+/// every body) must find none of the question's words in Mail either.
+pub fn not_there(goal: &str, reads: &[&Step], index: &IndexHits) -> Option<String> {
     let goal = &crate::task_contract::spelled(goal);
     // What a record has rather than what it's about: "which reminders don't have a due date".
     const FIELDS: [&str; 26] = ["date", "dates", "time", "times", "day", "title", "titles", "name", "names", "location", "place", "where", "note", "notes", "number", "amount", "price", "cost", "link", "address", "sender", "subject", "length", "long", "order", "line"];
@@ -1232,9 +1234,13 @@ pub fn not_there(goal: &str, reads: &[&Step]) -> Option<String> {
         return None;
     }
     let tool = reads[0].tool.as_str();
-    // Mail's newest few aren't all of it; its own search, which looks back months, is.
+    // Mail's newest few aren't all of it, and its own search, which looks back months, sees no
+    // bodies: "No email mentions “wexmoor”" was said of a train booking whose body named it.
     let complete = match tool {
-        "read_mail" => reads.iter().any(|step| step.evidence.as_ref().is_some_and(|evidence| !evidence["scope"]["query"].as_str().unwrap_or_default().is_empty())),
+        "read_mail" => {
+            let searched = reads.iter().any(|step| step.evidence.as_ref().is_some_and(|evidence| !evidence["scope"]["query"].as_str().unwrap_or_default().is_empty()));
+            searched && index.built && !index.matches.iter().any(|(app, _)| app == "mail")
+        }
         _ => reads.iter().all(|step| step.evidence.as_ref().is_some_and(|evidence| evidence["complete"] != false)),
     };
     if !complete {
@@ -1717,6 +1723,12 @@ fn partly_read(reads: &[&Step]) -> Option<String> {
     let shown = evidence["count"].as_u64()?;
     let total = evidence["total"].as_u64()?;
     Some(format!("I only read the first {shown} of {total}."))
+}
+
+/// The records nearest the question, for an answer that couldn't be worked out from them.
+pub fn closest_records(goal: &str, reads: &[&Step]) -> String {
+    let numbers: Vec<String> = pointable(goal, reads).into_iter().map(|(number, ..)| number).collect();
+    picked(reads, &numbers)
 }
 
 /// The records the model chose. An email it chose shows its opening, since that's what the
@@ -2324,6 +2336,21 @@ mod tests {
         assert!(!general_question("sorry dumb q but what time does climbing start next week"));
         assert!(general_question("i just got back from the gym"));
         assert!(general_question("is email secure") && !general_question("What kind of restaurant opened, according to Sam's email?"));
+    }
+
+    #[test]
+    fn no_email_is_said_to_be_missing_while_the_index_holds_its_words() {
+        // Mail's search sees senders and subjects; the booking names Wexmoor only in its body.
+        let rows = [("2026-11-10 09:00", true, "Coastline Rail <tickets@coastline.example>", "Your booking", "Your train to Wexmoor leaves at 07:40.")];
+        let searched = step("read_mail", crate::apps::inbox_world("wexmoor", false, 20, &rows));
+        let goal = "whats my seat number on the train to wexmoor";
+        let index = |built: bool, matches: Vec<(String, Vec<usize>)>| IndexHits { built, words: index_words(goal), matches, titles: vec![] };
+        assert!(not_there(goal, &[&searched], &index(true, vec![("mail".into(), vec![1, 2])])).is_none());
+        assert!(not_there(goal, &[&searched], &index(false, vec![])).is_none(), "with no index, a subject search proves nothing");
+        assert!(not_there(goal, &[&searched], &index(true, vec![])).is_some_and(|said| said.starts_with("No email from the last four months mentions")));
+        // Reminders are read whole, so the index isn't needed for them.
+        let list = reminders(vec![reminder("Renew Pilot's pet insurance", "2026-11-16")]);
+        assert_eq!(not_there("do i have a reminder about my passport", &[&list], &IndexHits::default()).as_deref(), Some("No reminder mentions “passport”."));
     }
 
     #[test]
