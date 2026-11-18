@@ -13,7 +13,9 @@
   "new reminder pick up kids at 4",
   "can you remind me to text jo in an hour",
   "add a reminder to pay the council tax on the 15th",
-  "remind me to water the garden tomorrow evening"
+  "remind me to water the garden tomorrow evening",
+  "put a reminder on my list to ring the dentist",
+  "stick a reminder on my to do list to pay the rent"
  ],
  "add_calendar_event": [
   "add a meeting with tom on tuesday at 10",
@@ -51,6 +53,9 @@
  "complete_reminder": [
   "mark pay the bill as done",
   "tick off get stamps",
+  "tick off the laundry reminder",
+  "tick the bins reminder off",
+  "check off the dentist reminder",
   "i called the vet, mark it done",
   "cross off book the vet",
   "done with the laundry reminder",

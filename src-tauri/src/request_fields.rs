@@ -273,7 +273,11 @@ const REMINDER_OPENINGS: &[&str] = &[
     "add a reminder ", "set a reminder to ", "set a reminder for ", "set a reminder about ", "set a reminder: ",
     "set a reminder ", "create a reminder to ", "create a reminder for ", "create a reminder: ", "create a reminder ",
     "make a reminder to ", "new reminder: ", "new reminder ", "reminder to ", "reminder for ", "reminder: ",
-    "make a todo to ", "make a to do to ", "add a todo to ", "add a todo: ", "add ", "put ",
+    "make a todo to ", "make a to do to ", "add a todo to ", "add a todo: ",
+    // "Put a reminder on my list to call the bank": the list is where, the rest is what.
+    "put a reminder on my list to ", "put a reminder on my to do list to ", "put a reminder on my to-do list to ",
+    "add a reminder on my list to ", "stick a reminder on my list to ", "stick a reminder on my to do list to ",
+    "put a reminder to ", "stick a reminder to ", "add ", "put ",
 ];
 const LIST_ENDINGS: &[&str] = &[
     " to my reminders", " to reminders", " to my reminder list", " to my to do list", " to my to-do list",
@@ -490,6 +494,7 @@ mod tests {
     fn reminders_keep_the_task_and_its_time_apart() {
         assert_eq!(read("add_reminder", "remind me to pick up the dry cleaning tomorrow at 5pm"), json!({"title":"Pick up the dry cleaning","due":"2026-11-08 17:00"}));
         assert_eq!(read("add_reminder", "add a reminder to pay rent on the 1st"), json!({"title":"Pay rent","due":"2026-12-01 09:00"}));
+        assert_eq!(read("add_reminder", "put a reminder on my list to call the bank"), json!({"title":"Call the bank"}));
         assert_eq!(read("add_reminder", "remind me to call the plumber monday morning"), json!({"title":"Call the plumber","due":"2026-11-09 09:00"}));
         assert_eq!(read("add_reminder", "remind me to water the plants this evening"), json!({"title":"Water the plants","due":"2026-11-07 18:00"}));
         assert_eq!(read("add_reminder", "add eggs and bread to my reminders"), json!({"title":"Eggs and bread"}));

@@ -67,14 +67,16 @@ const ASKING: &[&str] = &[
 
 /// Whether the request is phrased as a question rather than asking for something done.
 pub(crate) fn asks(text: &str) -> bool {
-    let lower = text.trim().to_lowercase();
+    let lower = text.trim().to_lowercase().replace('’', "'");
     if lower.ends_with('?') {
         return true;
     }
-    let words: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '’')).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '\'')).filter(|w| !w.is_empty()).collect();
     match words.as_slice() {
         [] => true,
         ["can" | "could" | "would" | "will", "you" | "u", ..] => false,
+        // "Don't let me forget to water the plants" tells; it doesn't ask.
+        ["don't" | "dont", "let" | "forget", ..] | ["do", "not", "let" | "forget", ..] | ["never", "let", "me", ..] => false,
         // "Give me the start and end of the dentist appointment" asks to be told something.
         ["give" | "tell" | "show", "me", ..] => true,
         [first, ..] => ASKING.contains(&first.replace('’', "'").as_str()),
@@ -195,7 +197,7 @@ mod tests {
         for question in ["what's on tomorrow", "did Ana write back", "free at 11?", "can I freeze milk", "is wifi on", "any emails", "give me the start and end of the dentist appointment", "tell me the first appointment tomorrow"] {
             assert!(asks(question), "{question}");
         }
-        for request in ["timer 25 min", "can you call mum", "brightness to 50%", "quit Spotify", "could you add eggs to my reminders"] {
+        for request in ["timer 25 min", "can you call mum", "brightness to 50%", "quit Spotify", "could you add eggs to my reminders", "don't let me forget to water the plants on sunday", "Don’t forget to remind me about the bins", "do not let me forget the parcel"] {
             assert!(!asks(request), "{request}");
         }
     }
@@ -279,6 +281,9 @@ mod tests {
             ("add bread and butter to my reminders", "add_reminder"),
             ("move my 3pm meeting to thursday", "update_calendar_event"),
             ("set a timer for 10 minutes", "set_timer"),
+            ("put a reminder on my list to call the bank", "add_reminder"),
+            ("don't let me forget to water the plants on sunday", "add_reminder"),
+            ("tick off the gym reminder", "complete_reminder"),
         ] {
             if read(request) != Some(Intent::Action(tool)) {
                 wrong.push(format!("{request} -> {:?}, wanted {tool}", read(request)));

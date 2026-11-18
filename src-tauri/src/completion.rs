@@ -104,9 +104,11 @@ pub(crate) fn non_action(clause: &str) -> bool {
     is_explanation(clause)
         // "Remind me what I was supposed to buy" asks; "remind me to buy milk" doesn't.
         || ["remind me what", "remind me who", "remind me when", "remind me where", "remind me which", "remind me whether", "remind me if"].iter().any(|s| clause.starts_with(s))
-        || ["don't ", "do not ", "never ", "no need to "]
+        || (["don't ", "do not ", "never ", "no need to "]
             .iter()
             .any(|s| clause.starts_with(s))
+            // "Don't let me forget to water the plants" asks for a reminder.
+            && !["don't let me forget", "do not let me forget", "never let me forget", "don't forget to", "do not forget to", "don't let me miss"].iter().any(|s| clause.replace('’', "'").starts_with(s)))
 }
 
 /// Words after "reply to this" that make it a question for Buntini to answer in chat
