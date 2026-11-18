@@ -1,0 +1,1547 @@
+[
+ {
+  "q": "kenji's booking code?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "kenji's payout works out to what per night roughly",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when is the hydro bill actually due",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what size did i order the talon edges in",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when are my new shoes arriving now",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is the annual report proofreading worth",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the window for the internet technician",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "till what time did astrid want to leave her suitcase",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much longer am i off full crimps",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's my ATL member number",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "studio pivot wants it before noon pacific, what's that in montreal time",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how many strings in the last studio pivot batch",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did studio pivot pay INV-0712",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much was astrid's payout",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "eye exam fee?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "kenji said he's allergic to something, what was it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time does check-in open for the comp",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is my bloc nord membership a month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did maman ask me to bring",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which seat am i in on the train back",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "batch 2 at tomás's rate comes to how much",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the lexiane annual report still due when hélène first said",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many words is lexiane expecting in Q1",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "if daniel stays six months at what he offered, what's the total",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which buzzer at ines and karims",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much will lucía's usual 2 hours cost once her rate goes up",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how far behind the leaders are we in league",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did fatima want",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what would fatima's leaflet job pay me",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which bus goes to the clinique",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my calendar today",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's league round 5",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many climbing things have i got in the next 2 weeks",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time is physio on monday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when does kenji check out",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many nights is kenji here going by check in and check out",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's going to the co-op meetup",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "check my reminders for what time the eye exam is",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time's my train to trois-saules",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long is the train each way",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how long will i actually get at mamie's lunch",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything on friday evening?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "am i free tuesday afternoon next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "give me my work deadlines in order",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many days till the comp",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's coming to see the room",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the interpreting gig",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did i do sunday morning",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my sunday after next in 12-hour time pls",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on monday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "is the rafael call by phone or video",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much time between kenji checking out and my proofreading block",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where is mamie's lunch",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which day next week is busiest",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's doing the lead refresher with me",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's dinner on friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did i have yoga yesterday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many evenings next week have i got something on",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where's the comp",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "does the eye exam fall on the same day as the borealis deadline",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on my errands list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything overdue?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when did i say i'd pay hydro",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "room to-dos",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what do i have to do today",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my work list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time's my finger exercises reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which to-dos have no date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "next thing due on the work list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how overdue is the borealis invoice",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sort my climbing list by due date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the tax instalment reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's due before the weekend",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the bread reminder for friday",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time do i need to change the lockbox battery",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till the ATL renewal reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's my last reminder due",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i make a reminder about the photo album",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many things due this week",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "e-transfer marcus, when was that due",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "do i need to buy chalk",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what am i meant to send rafael, and by when",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything on my list about the long term tenant",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many reminders are overdue and how many have a time set",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what reminders have i got for next week",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time is the borealis glossary call now",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "kenji's flight is delayed, will he get here before i leave for league",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my proofreading block before lexiane's new deadline",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i be home for the internet tech on friday or have i got something on",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will my new climbing shoes arrive before the comp",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i allowed full crimps again by comp day",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "studio pivot's noon pacific deadline - anything else that friday i need to fit around",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the cave open during league on thursday",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "rafael wants my expense summary before our call, how many days have i got",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the hydro bill due before or after my trip to trois-saules",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "ines said 7:30, does my calendar match, and which buzzer is it",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "maman says oncle bao will pick me up at the station, what time does my train get in",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list my deadlines for the next 10 days with the times the clients gave",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "simone said she'd reassess at my follow-up, when's that",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "lucía comes today - what time, and what did she ask me to get",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "marcus booked the lead refresher, how much do i owe him and what day is it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "nidshare pays out 24h after check-in, so which day does kenji's payout land going by my calendar",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many words is batch 2 and how many days till its due",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "astrid wanted to leave her bag till 4 on monday, did i have anything that afternoon",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "fatima's leaflet would be due monday, what else have i got monday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did i send marcus the money for the lead course yet",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "is my hydro reminder before the bill's actually due",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will my ATL reminder go off before the membership lapses",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the tax instalment and is my reminder before the due date",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "lucía's laundry pods, have i got them yet",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what am i sending kenji tonight and how did nidshare say to share the lockbox code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what does hélène need to know and when did i plan to reply",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did rafael ask me to send, and is my reminder for it early enough",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the photo album reminder, who wanted it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "the bread on my list, was that ines's idea",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "lockbox battery reminder, will it be done before kenji actually turns up",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "tape and chalk on my list - did zoé say she's bringing tape",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the bed reminder before kenji's check in on my calendar",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i have time for my finger exercises tonight after the glossary call",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the birthday card for mamie due before her lunch",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "photo album reminder vs the train, will i have it in time",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "rate sheet reminder - is it before the co-op meetup",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "bread reminder, how long before dinner at ines's",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on tommorow, to-dos too",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "the day my hydro reminder is due, what's in my calendar",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have a viewing booked before i decide about the long term tenant",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "expense summary reminder vs the year end call, how many days apart",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the day kenji checks out, what else is on, to-dos included",
+  "apps": [
+   "reminders",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "lockbox battery at 10 tomorrow, am i home then",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "kenji tomorrow: when's he actually getting here, what's left for me to do, and what does my calendar say",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "everything about friday - deadlines, deliveries, dinner, to-dos",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "mamie's 85th: train times, what maman asked me to bring, and is that on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "comp prep: when is it, check-in time, will my shoes be here, anything on my climbing list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "money stuff this week - what i owe people, what's coming in, and when",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the lead refresher - when, what do i bring, and have i paid marcus",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "rafael stuff: when's the call, what does he want, and what's on my list for him",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "lucía's clean today - what time, what did she ask for, and did i get it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the lockbox code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much did borealis batch 1 pay",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my next hangboard session",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "where's kenji flying in from",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what wifi password did i give astrid",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my dentist",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "which store did i want to get chalk from",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my reminder to water the plants",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days till my spring climbing trip",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "how much have i made from nidshare this year in total",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what's the address of physio côte-jolie",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time are the comp finals",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many reminders did i complete this week",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "is my grocery list longer than my errands list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "did daniel mention a deposit amount",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many hours of yoga have i got booked next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "how much more are the new shoes than my old pair",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's my passport renewal reminder and how many days away is it",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "how do you say deadline in quebec french",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's 26500 words at 17 cents a word",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "my fingers ache after bouldering, should I ice or heat them",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "I'm 36, about how many weeks old is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "-18 C in fahrenheit",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "difference between a translator and an interpreter?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i get candle wax out of my rug",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "riddle: the more you take, the more you leave behind. what am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what's a V4 in font grades",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many km is 5 miles",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "tips for biking in the snow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how should I price a 2000 word translation job",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "write a short friendly house rules note for a room guest",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "plural of chef-d'oeuvre?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how long does it usually take to learn to lead climb",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "my sourdough tastes too sour, how do I fix it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "add 14.975% tax to 189.99",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what does beta mean in climbing",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is it rude to ask guests to take their shoes off",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "I sit at my desk 9 hours a day, best stretches for my neck?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many hours is 26,500 words at 450 words an hour",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "capital of vietnam",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "riddle: what word is spelled wrong in every dictionary",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "give me five faux amis between french and english",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do I tie a figure eight follow through",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how much should I charge a lodger for utilities",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if i rent a room at $850 a month whats that a year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "good name for a bouldering team",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "hey, how's your day going",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if it's noon pacific what time is it in eastern",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what should i eat before a climbing comp",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i say happy 85th birthday in vietnamese",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "should I write colour or color in canadian english",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "affect vs effect, quick",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "my pothos leaves are going yellow, am I overwatering",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many minutes is 3 h 15",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "convert EU shoe size 38.5 to US women's",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do I deal with a guest who's too noisy at night",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "tell me a climbing pun",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how long should I rest a finger pulley strain",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "15% tip on $120?",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what's a lockbox",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "merci, c'est tout",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i stop my glasses fogging up when i come in from the cold",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "a train leaves at 08:05 and takes 3h15, when does it get in",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ }
+]

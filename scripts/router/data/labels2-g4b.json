@@ -1,0 +1,1573 @@
+[
+ {
+  "q": "how much is the dj quote",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what flavours are we trying at the cake tasting",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the hotel group code for guests",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much per night is the room block",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "honeymoon flight booking ref?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which seats did we get on the honeymoon flight",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the balance owing on corvina sands",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much have we paid for the honeymoon so far, flights plus resort",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what are the names of tomas's mum's cousins",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many people did khala rsvp for",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list the dietary stuff guests have told me about so far",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is zain coming to the wedding",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's the per head catering price for 130",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "roughly what will catering come to for 130 guests once you add tax and service",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the alteration balance and when do i pay it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did erin want",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the water getting shut off in the building",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many invites are we printing and what does that cost",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the actual deadline to approve the invite proof",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many spin classes have i got left",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where did the veil end up",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much were the table runners",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many pd hours am i short",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "shuttle time for the offsite?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "credit card balance and minimum payment",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "even at the low end of the florist's range how far over tomas's flower cap are we",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much of the budget is left according to tomás",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did jae-won ask me",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "kindly tell me the dress code for tomas's party",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when does kofi's hold on our date run out",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the cake tasting",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time is the florist",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the engagement shoot",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on tmrw",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "am i at the client site on friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many wedding appointments have i got in the next two weeks",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's coming to the catering tasting",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time is the officiant call",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's my next spin class",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have anything saturday afternoon",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long is the hair and makeup trial",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the offsite all day",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my agenda for the 28th",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till the engagement shoot",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's my 1:1 with gordon",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "do the cake tasting and my 1:1 clash",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much free time between the cake tasting ending and my 1:1",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's at the dress fitting with me",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "physio next week when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's happening sunday the 22nd",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list my wedding stuff this week in order",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i free monday night",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when was my last spin class",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the year end offsite",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "does anything clash with the florist consult",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time does the venue walkthrough start",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "check my reminders for when the dress fitting is",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's my first appointment next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's in the pinecrest review",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many evenings next week have i got something on",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on my wedding to-do list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything overdue",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when did i say i'd decide on the dj",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my work list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which to-dos dont have a due date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's my reminder to pay the credit card",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what do i have to do today",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many wedding reminders have i got",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "next thing on my to-do?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time is the veil pick-up reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "sort my home list by date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many days overdue is the dry cleaning",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is there a reminder about the marriage licence",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the hydro bill reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many reminders are due before the weekend",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time did i give myself to finish the northgate revenue testing",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "do i have anything to buy",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's benefits enrolment on my to-do",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which comes first on my list, the hydro bill or the credit card",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's due on saturday",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days until the juniper hall deposit reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's the wine reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list all the payments on my to-dos",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i make a reminder to reply to jae-won",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on my home list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "erin moved the pinecrest review, does the new time clash with anything today",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time is the pinecrest review today",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "have i got enough spin classes left in my pack for the ones i've booked",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will my physio coverage stretch to the sessions i have booked",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "if I log the ifrs webinar how many pd hours will I still be short",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "fire alarm testing thursday, will i even be home",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does the water shutoff next tuesday get in the way of anything",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i bring to the dress fitting and what time is it",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need to bring to the walkthrough and what time does it start",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where do we go for the engagement shoot if it rains, and what time does it start",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does the dj hold run out before or after our venue walkthrough",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the dress code for tomas's party and where is it",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the cake tasting and who's coming with me",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the glow studio trial and how long have i blocked out for it",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's the offsite shuttle and which day is that",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "celeste changed something about friday, what was it and what time do we see her",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the table runners come monday, am i around or out all day",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when is leila's bridal shower and does it clash with anything",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "gordon wants the revenue testing by friday noon, how many days on site do i get before then",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "marco said something about parking, what was it and what time's dinner",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i approve the invitation proof in time if i go by my reminder",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does my dj reminder come before kofi's hold runs out",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i going to be late paying the photographer",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my reminder for the juniper hall deposit before it's actually due",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "hydro bill - how much and is my reminder before the due date",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "credit card reminder vs the real due date, am i ok",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is benefits enrolment on my list before it closes",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did jae-won ask and how overdue is my reply",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much do the payments on my wedding list add up to",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "priyanka's recs, when did she need them by and when's my reminder",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many pd hours do i still need to log, and have i got a reminder for it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the alteration balance, and is paying it on my to-do list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i have shoes before the dress fitting",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the wine reminder before dinner at leila's",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i at the client site when the revenue testing is due",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i pick up the veil after physio tonight",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on today, meetings and to-dos",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything on saturday, calendar or reminders",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the benefits enrolment reminder on the same day as the cake tasting",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "my dj decision reminder goes off tomorrow night, will i be busy then",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many days between my hydro reminder and the engagement shoot",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which day next week has the most going on, to-dos included",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the credit card reminder the same day as the officiant call",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my juniper hall deposit reminder on the offsite day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "invitation proof: when does inkwell need it, when's my reminder, and am i free that evening",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "dress fitting prep - when is it, what do i bring, whats the balance, and is the shoe reminder in time",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "dj: how much, when does the hold end, when's my reminder, and am i free then",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "rundown for saturday incl dinner, what to bring and my to-dos",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "photographer: when's the shoot, how much is the second instalment, and is my payment reminder late",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "catering tasting sunday - who's coming, what's ravi's per head price, and is the dietary list on my to-do",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "friday: work, the venue, what celeste changed, and whats due",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "juniper hall - when's the walkthrough, how much is the deposit, and when's my reminder to pay it",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's 13% HST on $1850",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i word a polite no plus-ones line for a wedding invite",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "difference between IFRS and ASPE",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "roughly how many weeks are in 7 months",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "my engagement ring looks cloudy, how do I clean it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "who traditionally pays for the rehearsal dinner",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i get candle wax off a linen tablecloth",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what does accrual mean",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if 130 guests each have 3 glasses of wine and a bottle pours 5 glasses, how many bottles",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "convert 21c to fahrenheit for me",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "riddle: what gets wetter the more it dries",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do I stop my hands shaking when I give a speech",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "synonyms for beautiful i can use in my vows",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how long should i wear in new heels before a big day",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "capital of portugal",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is it rude to ask for cash instead of gifts",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's 18% of 15340",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "whats the difference between a tux and a suit",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i stop my lips cracking in a toronto winter",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "best stretches after a spin class",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "I'm 31, how many months old is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "explain amortization like i'm five",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's an easy dance style to learn for a first dance",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "tell me a joke about accountants",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many days between 1 march and 30 june",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what's a groom's cake",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what rhymes with forever",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do you say thank you in portuguese",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "my sister's nervous about her maid of honour speech, give me tips to pass on",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if I put away $600 a month, how long to save $9,000",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "time difference between toronto and lisbon?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how much protein do i get from two eggs",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "good morning! how are you",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i fix static in my hair",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's a depreciation tax shield",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's 7.5% of 45000",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how many tables of 10 for 130 people",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i store a wedding dress long term",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what does RSVP stand for",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "word for a fear of commitment",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do I make my curls last all day",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "which weighs more, a pound of feathers or a pound of bricks",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how long do cut roses last out of water",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is an 18% service charge normal for wedding catering",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "can I freeze leftover wedding cake",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's the cancellation policy at the juniper hall",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "did the dj send over a contract",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "whats the bag weight limit on our atlantica booking",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much is marguerite charging us",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much is the florist deposit",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much did the veil cost",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much have we spent on the dress altogether",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's the rehearsal dinner",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my next dentist appointment",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time does northgate fieldwork start each day",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days till our dance lessons start",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's tomas's suit fitting",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "which room is the year end offsite in",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time did i set the marriage licence reminder for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my reminder to book honeymoon travel insurance",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "which store did i want to get the fitting shoes from",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what's on my groceries list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days until my reminder to order the cake",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ }
+]

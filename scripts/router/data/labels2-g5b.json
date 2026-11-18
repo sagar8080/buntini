@@ -1,0 +1,1558 @@
+[
+ {
+  "q": "what did dr osei-bonsu change after mums review",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what do i need to bring to mum's cardiology appt",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much weight has mum put on according to rohan",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the podiatry home visit fee",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "if rohan pays half the podiatry how much is that",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much will mum's morning carer visits go up by",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the % of omitted doses in tomasz's audit",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many supervised hours have i got and how many more do i need",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what room is study day 4 in",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time does the study day start",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the mot fee",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when does my mot certificate run out",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the dress code for shreya's party",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's my train seat for manchester on the way there",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's my poster board number",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when do badges open at the conference and when's our poster slot",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the dispensary door code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "on call bleep number?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is the water bill and how many days have i got left to pay it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what book are we reading for book club",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time is efua picking me up",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much did i take home last month without the on call bit",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time is mum's carer coming tonight",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "was mum's transport to cardiology approved",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many FY1s at friday's teaching and what did ben want me to cover",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when is the registration renewal actually due",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what size batteries does mum's hearing aid take",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "set menu price at bar ostra for 2",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the greengate delivery to mum's and how much",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when will mum's updated blister packs be ready",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on tomorrow",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's mum's cardiology appt",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's mum's eye screening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything on saturday night",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when is mum's blood test",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time is book club tuesday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many of mum's appointments are there in the next 2 weeks",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "list mum's appointments in order",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's my next on call",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i working friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how long is the conference day",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's my train back from manchester",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "do i have anything the evening after the study day",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's at the heart failure nurse review",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till the conference",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the mot",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on saturday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "free time between mum's cardiology and my afternoon ward shift tmrw",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where's the podiatry visit",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's coming to the care plan review",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the study day",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "is the mot before or after the conference",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where was i on call sunday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did mum have on tuesday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "am i free monday evening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's my earliest start next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when is shreya's party",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which days next week am i on the work calendar",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does mum's podiatry clash with anything of mine",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where's the conference",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my mum list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "overdue stuff?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what have i got to do today",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did i set a reminder for mum's flu jab",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the water bill reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many things on my work list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's the reminder to pick up the gold dress",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which reminders have times on them",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sort my home list by date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats due this weekend",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many days till i need to renew my registration, going by my reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is defrosting the freezer on there anywhere",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when am i calling brightdale",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "next thing due on my mum list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's due tomorrow and friday",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything undated on my lists",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the oldest overdue thing",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the reminder to check my portfolio log",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many reminders do i have in total",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i put compression socks on a list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when was the audit slides reminder due",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list my to-dos for next week",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which list is the library books reminder on",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many mum to-dos are overdue",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what to-dos have i got before saturday",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time is my call with rohan on sunday",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where's the safety committee today",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did mum email about this morning, and when's the thing she's on about",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much will parking be for mum's cardiology",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will my train get me to the conference before badge collection opens",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have to leave the conference early for my train back, when does our poster slot end",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long between efua's pickup and book club starting",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will the mot be done in time for anything else i've got that thursday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the podiatry visit time in my calendar the same as what they said",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will femi's friday hours clash with the fy1 teaching",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i do femi's monday block, what's on monday",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many hours between my train getting into manchester and the poster slot",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much weight did rohan say mum's put on, and when's her next heart appointment",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did the patient transport come through for mum's cardiology, and if not am i free to drive her",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's mum's carer tonight, and will i be out of yoga by then",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when does mum's new furosemide dose start, before or after her cardiology appt",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i be at mum's for the greengate delivery",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what room is the study day in and what else is on that day",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will mum's hearing aid arrive before her cardiology appt",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the on call daniel swapped me into the one on my calendar for sunday week",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my water bill reminder before it's actually due",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my dietary needs reminder early enough for the conference",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the christmas rota reminder in time",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my blister pack pickup today still right or did thornhill say something",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much do i tell rohan for podiatry, and when's my reminder to send it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "registration renewal: how much is it and is my reminder before the deadline",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the med list for cardiology on my to-do, what else did the clinic want me to bring",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's the customer number for the bill i've got a reminder to pay",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "mum's flu jab is overdue on my list, did the surgery email anything about it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "my reminder to call brightdale, what was the visit change they emailed about",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did shreya say about presents, and is getting her a card still on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "yoga: how many classes left and have i got a reminder to buy more",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i fit the brightdale call in between mum's clinic and my shift tmrw",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's due the day before shreya's party",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i still be at work when my dress pickup reminder goes off",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what to-dos fall on days i'm on the ward",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything due on the study day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the portfolio check reminder before the study day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "friday: shifts and to-dos together",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i have renewed my registration before the conference, going by my reminder",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's due the weekend i'm on call",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the reminder for mum's med list, is it before her cardiology",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have any reminders on the day of mum's blood test",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "everything for mum this week, appts and to-dos",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "mum's cardiology tomorrow: what time, what to bring, and have i done the med list yet",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "conference rundown: trains, badge time, poster slot, and the dietary thing on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when can i actually pick up mum's packs, given my shifts, thornhill's hours and my reminder",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "podiatry: time, cost, and when's my reminder to tell rohan",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "friday: what's on, what's due, and what's arriving at mum's",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "shreya's party: when, the dress code, and is the dress pickup on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "study day: what day is it in my calendar, which room, and is the portfolio check on my list before it",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the water bill reminder on a day i'm free, and how much is the bill",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did the eye clinic say to bring to mum's screening",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "whats the gp surgery phone number",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's mum's next dentist appointment",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days until mum's flu jab appointment",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "which tailor has my gold dress",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much is the gold dress alteration costing",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "bar ostra set menu plus drinks for both of us, what's the total",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what yoga classes have i got next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "wifi password at the rivington exchange",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how long till my own gp appointment",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "is there a reminder to reorder mum's repeat before her packs run out",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's the conference dinner and how long after the poster slot is it",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what did dr haddad say at mum's last clinic",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time is my mot reminder set for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days till mum's physio",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's my independent prescribing exam and how many days away is it",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what time is my water bill reminder for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "add up mum's taxi fares this month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what's the difference between a generic and a branded medicine",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "my mum keeps forgetting her tablets, any tips",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i get turmeric stains off my worktop",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "i'm 37, roughly how many weeks old am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "convert 70 kg to stone and pounds",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what's 2.5mg times 28",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how many ml in a teaspoon",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "riddle: the more you take, the more you leave behind",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "capital of ghana?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i stop my back aching after a long shift on my feet",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is it ok to drink coffee if i'm on lates all week",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "quick dinner i can make in 15 mins with whats usually in the fridge",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "explain heart failure in simple words for a 78 year old",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i talk to my brother about sharing care costs without it turning into a row",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what does HbA1c measure",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how long does it take to drive from leeds to manchester",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "15% of £212",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "write a funny 40th birthday message for a friend who loves gold",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "synonym for reliable",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's 23 divided by 312 as a percentage",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i keep my hands from cracking with all the hand gel",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many hours of sleep do i actually need",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do you pronounce apixaban",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "convert 38.5 c to fahrenheit",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "tell me a pharmacist joke",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i make a proper yorkshire pudding",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's the time in lagos if it's 9am in leeds",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "anagram of listen",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "roughly how many working days in a 4 week month",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "my car squeaks when i brake, is that serious",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "whats the difference between a direct debit and a standing order",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "good stretches for my neck after hunching over a screen all day",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "morning! how are you today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "i walk about 9,000 steps a day, how many km is that roughly",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how should insulin be stored when travelling",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "plural of syllabus",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "help me write a short thank you note for a carer, nothing specific",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many tablets for 3 a day over 4 weeks",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "whats a fortnight in hours",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i tell if an egg's still fresh",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "why do my ankles swell on long shifts",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's the rule of 72 in savings",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if i save £150 a month how much is that after 2 years",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "is leeds bigger than manchester",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "good book club pick for people who like twisty novels",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ }
+]

@@ -1,0 +1,1570 @@
+[
+ {
+  "q": "how much was the golden comb order all up",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the gate code at ray's",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the power bill due",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is the electricity bill this quarter",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much solar credit did I get",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats the van lockbox code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "club shed code for the swarm boxes?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who do i ask for at riverbend primary",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is the extractor all up with the bond",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when did the club say the extractor has to be back",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did hamid want",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much will hamid's order come to",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "tracking number for the honey jars",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the blood test and do i need to fast for it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did sophie say about the bee suit",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my volunteer number?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many households did the pantry feed this month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did lucas offer me",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "two of lucas's queens would cost me what",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the ute's rego",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "worst case, what's the ute service going to cost if it needs pads",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's wrong with nadia's power",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did i spend at the hardware shop",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's the speaker at the bee club",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "stall number and fee for the market?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when is sophie arriving now",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "show me what i havent read",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the power going off",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "look in my reminders for the price hamid and i agreed",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did mia want",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on tonight",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything on tmrw",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's pantry sorting next",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's theo's party",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many pantry things have i got in the next fortnight",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i free monday arvo",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's coming to theo's party",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time am i moving the hives",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till the farmers market",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on this saturday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long have i blocked out for honey extraction",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on the weekend after this one",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's lorraine's eye surgery",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "have i double booked myself saturday week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's my next hive inspection",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i free thursday morning",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on the bees calendar next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "agenda for tuesday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's lorraine having her surgery",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's lawn bowls",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "gap between sorting and the gp on tuesday?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the market before or after dianne's 70th",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on wednesday week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which calendar is theo's party in",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on the sunday after the party",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "first thing monday?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything clashing next week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "list my home calendar stuff for the next 7 days",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much free time between the hearing test and the refresher on thursday week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the last thing on today",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on my bees list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything overdue",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when did i set the cake pickup reminder for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on my to-do for this weekend",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "any reminders with no date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time's the reminder to return the extractor",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many things are on my home list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what was i meant to do with hive 3",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the reminder to pay the council rates",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "sort my bees list by due date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on the pantry list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's due tomorrow",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did i put a reminder in to renew the apiary rego",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "next thing due on the bees list?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which list is the smoke alarm battery on",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till the varroa test reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats due the friday after next",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "remind me whats on my list about the van run",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "number my home to-dos for me",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is there a reminder for theo's candle",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's due next week",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything on today's list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time's the fasting reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the power bill reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which of my reminders is due last",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sophie changed when they're coming, will i be home when they get here",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the van run got moved for hamper day, does the new time clash with anything",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will the ute be back in time for moving the hives",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have to get the extractor back before or after my hearing test",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when can i fit the blood test in on monday",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the power's off thursday week, am i even home for it",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time do i have to set up at the market, and does my van run clash",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who do i ask for at the school pickup and what else is on that day",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "greg's lunch, how much is it and is it in my calendar",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is tomorrow's club meeting the one with the varroa talk",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "nadia said any evening but one, is the night i booked to look at her switch ok",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need to take to my appointments on thursday week",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does the extractor pickup time work after the school food drive",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sophie's arrival in my calendar, is that still right",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which events coming up has someone emailed me a change about",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i be home when the jars get delivered today",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the power cut on the same day as my food safety refresher",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i still on swarm call-out during theo's party",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which refresher session did mereana put me in, and does my calendar match",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "bluegum booking: what's the estimate and how long have i blocked out for the drop-off",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i going to be late paying the power bill",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my council rates reminder before it's actually due",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i get to the library hold before they give it away",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i miss lucas's deadline on the queens going by my reminder",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my extractor return reminder at the time the club wants it back",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "hamid's jars: what's he paying me and when's my drop-off reminder",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my cake pickup reminder after the cake's ready",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my fasting reminder right for what the doctor's rooms said",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i put in a reminder for the thing mereana asked me to bring to the school",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which of the things lorraine asked for are on my lists",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "bills in my inbox, and have i got reminders to pay them",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will the jars be here before my reminder to fill them",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i drop hamid's jars after steve's lunch at the time i set",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i still need to sort before the party",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my extractor return reminder clashing with anything",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will the honey jars be labelled before market day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything due on the day i move the hives back",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's tomorrow look like, to-dos included",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "my van run cover reminder, which day's van run is the clash with the market",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does the varroa test reminder line up with a hive inspection",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "fasting starts sunday night, is my reminder after the party finishes",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the trolley reminder on the same day as the school pickup",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "this saturday: events and whats due",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the power bill reminder on a busy day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "party sunday: when's the cake ready, when's my pickup reminder, and what time do people turn up",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "thursday week: what's on, what's due, and what have people emailed me about that day",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "monday plan: the ute, the blood test, the hives and anything due",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "market day: stall details, are the jars here yet, what have i still got to do, and what else is on",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "hamid's order: how much, when am i dropping it off, and am i free then",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sophie and the kids: when do they really get here, whats on that weekend, and what's left to do for theo",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the extractor: when do i pick it up, when's my return reminder, and does anything clash either end",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "power bill: due date, my reminder, and what i'm doing on the reminder day",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the address of the copper kettle",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time does riverbend primary's office close",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my dentist",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time's the bowls club christmas dinner",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "which shop was i getting the smoke alarm battery from",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much is the hearing test going to cost",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time did i set the varroa test reminder for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what seat am i in on the flight to see sophie",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days until the swarm workshop",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what flavour is theo's cake",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's the next club meeting after tomorrow's",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "how much did the ute's last service cost",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "which list is my gutter cleaning reminder on",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when's my next physio",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "did mereana say what goes in the hampers",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how long till theo's soccer final",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "whats the due time on my council rates reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "where's the blood test collection centre",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how do i stop my bees swarming in spring",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what is varroa",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "bee got me on the hand and it's swollen, what do i do",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "500 g in ounces",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "i've got 250 jars, sell 24 to a café and 60 at a market, how many are left",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "whats the difference between an rcd and a circuit breaker",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "why does my safety switch trip when it rains",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how long does raw honey keep",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "riddle: i have a head and a tail but no body, what am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "12 x 24?",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "$35 a week over a year is how much",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "my knees ache after standing all morning, any tips",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do you make creamed honey",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "write a short thank-you poem for food bank volunteers",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many litres in a gallon",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "whats the capital of canada",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "im 68, roughly how many days old am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what rhymes with honey",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "tell us a dad joke",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "g'day, how ya going",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i keep ants out of my hives",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what voltage is household power in australia",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "remind me what ohm's law is",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "a 2400 w heater on 240 v draws how many amps",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i get propolis off my fingers",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what's a queen excluder for",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i keep a cream cake overnight if the fridge is full",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many minutes in two and a half hours",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "best time of day to move a beehive?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i explain to my grandson how bees make honey",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "whats 15% off $378",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "spell apiarist backwards",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "is honey that's gone solid still ok to eat",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how much protein should a bloke my age eat a day, i'm 68",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what do you call a group of bees",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how can i bring my blood pressure down without pills",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is it ok to run a heater off an extension lead",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "40 boxes at 12 kg each, how many tonnes is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how long do you usually have to fast before a blood test",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "give me some name ideas for a small honey label",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how are you today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how fast should i spin a hand extractor so the comb doesn't break",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "fewer vs less?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "petrol's 2.10 a litre and my ute does 11 l per 100 km, what does a 60 km round trip cost",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how should i lift heavy boxes without wrecking my back",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ }
+]

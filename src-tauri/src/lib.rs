@@ -59,6 +59,7 @@ mod nudges;
 mod overlay;
 mod personal_answer;
 mod decision;
+mod router;
 mod literals;
 mod pet;
 mod planning;

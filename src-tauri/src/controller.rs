@@ -3772,12 +3772,26 @@ where
         }
         let (mut sources, asked) = if tagged.is_empty() { crate::personal_answer::source_requests(&goal_now, earlier, &flow.contract) } else { (tagged.clone(), vec![]) };
         let own_shape = crate::personal_answer::about_own_things(&goal_now, &flow.contract);
+        let reads_apps = offered.iter().any(|tool| crate::personal_answer::every_source().contains(tool));
+        // Untagged, the router trained on written questions (`router.rs`) says from the question's
+        // meaning which apps hold the answer, beside any its words name. One it takes for a
+        // general question is left to the rules when an app is named or it's about their things.
+        let route = if tagged.is_empty() && !writes && reads_apps && !crate::personal_answer::reads_elsewhere(&flow.contract) { crate::router::route(&goal_now) } else { None };
+        // "That github sign-in alert, what kind of computer was it" reads like a general question,
+        // but one email holds its words: the index knows the person has it.
+        let held = route.as_ref().is_some_and(|route| route.is_general()) && sources.is_empty() && !own_shape && !index_hits(state, settings, &goal_now).held_together(2).is_empty();
+        let by_meaning = route.as_ref().filter(|route| !route.is_general() || (sources.is_empty() && !own_shape && !held));
+        let (sure, likely) = by_meaning.map(|route| route.sure_and_likely()).unwrap_or_default();
+        for tool in sure {
+            if offered.contains(&tool) && !sources.contains(&tool) {
+                sources.push(tool);
+            }
+        }
         // No app named: the local index says where the question's words are, and that nothing
         // has them, before any model guesses. A word nothing holds isn't read for.
-        let unsettled = sources.is_empty() && (!asked.is_empty() || own_shape);
+        let unsettled = by_meaning.is_none() && sources.is_empty() && (!asked.is_empty() || own_shape);
         let hits = if unsettled { index_hits(state, settings, &goal_now) } else { crate::personal_answer::IndexHits::default() };
         let routed = crate::personal_answer::index_route(&goal_now, &hits).filter(|_| unsettled);
-        let reads_apps = offered.iter().any(|tool| crate::personal_answer::every_source().contains(tool));
         let mut known = None;
         match routed {
             // Nothing of the user's own has the question's words, so nothing is read for it.
@@ -3786,7 +3800,7 @@ where
             found => {
                 // The model says whether it's about the user's own things at all; the index has
                 // already said where any of it is.
-                if found.is_none() {
+                if found.is_none() && unsettled {
                     let mut guesses: Vec<String> = Vec::new();
                     for request in asked.iter().cloned() {
                         phase(channel, &task.id, "thinking");
@@ -3800,14 +3814,13 @@ where
                             }
                         }
                     }
-                    if unsettled {
-                        sources = crate::personal_answer::guided_route(&goal_now, &hits, &guesses, own_shape);
-                    }
+                    sources = crate::personal_answer::guided_route(&goal_now, &hits, &guesses, own_shape);
                 }
                 // Not about the user's own things: a small model asked for a detail nobody has
                 // given makes one up, so it's asked first whether there is one to give. With no
                 // words to say what thing, it's chat ("how are you").
-                if sources.is_empty() && !asked.is_empty() && !own_shape && !hits.words.is_empty() {
+                let words = if by_meaning.is_some() { crate::personal_answer::index_words(&goal_now) } else { hits.words.clone() };
+                if sources.is_empty() && !asked.is_empty() && !own_shape && !words.is_empty() {
                     phase(channel, &task.id, "thinking");
                     let turn = state.models.generate(settings, crate::personal_answer::not_given_request(&goal_now), cancel.clone(), |_| {}).await;
                     if cancel.load(Ordering::Relaxed) {
@@ -3836,8 +3849,25 @@ where
         if !sources.is_empty() && reads_apps {
             let hits = if hits.built { hits } else { index_hits(state, settings, &goal_now) };
             let mut notes = vec![format!("{} {}", if tagged.is_empty() { "routed to" } else { "tagged" }, sources.join(", "))];
+            if let Some(route) = &route {
+                notes.push(route.note());
+            }
+            // A likely app is read when the index finds the question's own words in it that the
+            // other apps don't hold, or when there's no index to ask.
+            let backed = hits.other_apps(&sources);
+            for tool in likely {
+                if !offered.contains(&tool) || sources.contains(&tool) {
+                    continue;
+                }
+                if !hits.built || backed.iter().any(|(seen, _)| *seen == tool) {
+                    notes.push(format!("router added {tool}"));
+                    sources.push(tool);
+                } else {
+                    notes.push(format!("router left out {tool}"));
+                }
+            }
             // Asked to judge this from the titles, Apple's model said yes to almost every app.
-            for (tool, titles) in hits.other_apps(&sources).into_iter().filter(|_| tagged.is_empty()) {
+            for (tool, titles) in hits.other_apps(&sources).into_iter().filter(|_| tagged.is_empty() && by_meaning.is_none()) {
                 if offered.contains(&tool) {
                     notes.push(format!("added {tool} for {}", titles.join("; ")));
                     sources.push(tool);
@@ -3849,12 +3879,16 @@ where
             // A whole app as it is ("any new emails") is listed by Rust, never worked out.
             let whole = crate::personal_answer::asks_for_whole_apps(&goal_now) && !crate::decision::asks_for_a_rewrite(&goal_now);
             let allowed = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider) && crate::decision::shareable(settings, &sources));
-            let margin = crate::decision::work_out_margin(&goal_now);
+            // The router knows a work-out from its training; without it, or for a question it took
+            // for a general one that the rules routed, the written examples' margin does, and
+            // Apple's model can still add one.
+            let margin = if by_meaning.is_some() { None } else { crate::decision::work_out_margin(&goal_now) };
             if let Some(margin) = margin {
                 notes.push(format!("meaning {margin:.3}"));
             }
-            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || margin.is_some_and(|margin| margin > crate::decision::work_out_threshold(allowed.is_some())));
-            if !work_out && !whole {
+            let by_examples = margin.is_some_and(|margin| margin > crate::decision::work_out_threshold(allowed.is_some()));
+            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || by_meaning.map_or(by_examples, |route| route.worked_out()));
+            if !work_out && !whole && by_meaning.is_none() {
                 phase(channel, &task.id, "thinking");
                 let turn = state.models.generate(settings, crate::decision::work_request(&goal_now), cancel.clone(), |_| {}).await;
                 if cancel.load(Ordering::Relaxed) {
@@ -4020,7 +4054,22 @@ where
             })
             .flatten()
             .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
-        if small && own_read.is_none() && worked_out && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
+        // Worked out on this Mac, a question Rust answers exactly from the records ("am I free at
+        // 9 tomorrow") is answered by Rust: Apple's model gets times and sums wrong far more often.
+        let on_this_mac = flow.decision.as_ref().is_some_and(|decided| decided.brain.is_none());
+        let exact = small && own_read.is_none() && worked_out && on_this_mac && {
+            let now = chrono::Local::now().naive_local();
+            crate::personal_answer::reads(&flow.contract.current_request, &flow.steps).is_some_and(|reads| {
+                let parts = crate::personal_answer::parts(&flow.contract.current_request, &reads);
+                parts.len() == 1 && parts.iter().all(|(part, part_reads)| crate::personal_answer::direct_answer(part, part_reads, now).is_some())
+            })
+        };
+        if exact {
+            if let Some(decided) = flow.decision.as_mut() {
+                decided.notes.push("answered by Rust".into());
+            }
+        }
+        if small && own_read.is_none() && worked_out && !exact && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
             if let Some(reads) = crate::personal_answer::only_reads(&flow.steps) {
                 let goal = flow.contract.current_request.clone();
                 let brain = flow.decision.as_ref().and_then(|decided| decided.brain.clone());

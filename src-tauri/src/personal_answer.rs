@@ -673,6 +673,13 @@ pub fn every_source() -> Vec<String> {
     SOURCES.iter().map(|source| source.to_string()).collect()
 }
 
+/// Whether the request reads somewhere other than the person's apps or what Buntini remembers:
+/// the web, a page. "Did Sam ask about lunch" could be in Mail as easily as in memory, so that
+/// isn't elsewhere.
+pub fn reads_elsewhere(contract: &TaskContract) -> bool {
+    contract.outcomes.iter().any(|outcome| outcome.kind == "read" && !outcome.accepted_tools.iter().any(|tool| SOURCES.contains(&tool.as_str()) || tool == "search_memory"))
+}
+
 /// What a local model is asked first: for each part of the message whose words don't settle
 /// it, which of the user's own apps it needs, with "none" as a real choice (an empty one
 /// was never made on a real Mac). The model can only name an app, and a wrong one only costs
@@ -683,8 +690,7 @@ pub fn source_requests(goal: &str, earlier: Option<&str>, contract: &TaskContrac
         return (vec![], vec![]);
     }
     let goal = &crate::task_contract::spelled(goal);
-    // "Did Sam ask about lunch" could be in Mail as easily as in memory, so it's still asked.
-    let elsewhere = contract.outcomes.iter().any(|outcome| outcome.kind == "read" && !outcome.accepted_tools.iter().any(|tool| SOURCES.contains(&tool.as_str()) || tool == "search_memory"));
+    let elsewhere = reads_elsewhere(contract);
     // Text after a colon is supplied ("is this a scam: …") unless it names the apps to look
     // in ("one detail from each app: the city in Mail, …").
     // "Help me prep: when is it, what do I owe Ruairi" asks after the colon.

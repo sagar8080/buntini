@@ -1,0 +1,18 @@
+{
+ "model": "bge-small-en-v1.5@5c38ec7",
+ "heads": [
+  "general",
+  "mail",
+  "calendar",
+  "reminders",
+  "work_out"
+ ],
+ "inputs": 384,
+ "hidden": 192,
+ "trained_on": 4274,
+ "thresholds": {
+  "general": 0.5,
+  "app": 0.5,
+  "work_out": 0.5
+ }
+}

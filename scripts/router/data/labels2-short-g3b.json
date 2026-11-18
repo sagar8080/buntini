@@ -1,0 +1,854 @@
+[
+ {
+  "q": "anything from niamh",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did kofi message me",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did hana say",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats new in my inbox",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "any unread",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "summarise my inbox",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much is rent this month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's rent going out",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much do i owe ellie for energy",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did my jacket ship",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "tracking for my cairn order",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "has the bursary come in yet",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats my balance",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "society account balance?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many ppl paid for glen ardach",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many still owe for the trip",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "bunkhouse balance how much",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i pack for glen ardach",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "essay word limit",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "lab report word count?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my exam seats",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "train home ref",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which coach am i on the train",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whens dads party",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything from the library",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is my library fine so far",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything from callum",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the door float kept",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "ceilidh tickets left?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did flicksy take the money",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "phone bill this month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the flat inspection",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "internship deadline",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need for the internship app",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what does ellie want for her bday",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "minibus driver rules",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when can i do the driver assessment",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "can hana drive the minibus",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "su grant amount",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did diego book a room",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did galbraith say re extension",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what have i got tomorrow",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my schedule friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "am i free sat afternoon",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats on today",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my shifts this wk",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many hours am i working this week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "gp when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "dentist?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the committee meeting",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when do we head off to glen ardach",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "next lecture",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything monday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "climbing w ellie when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many hours is the ben corrach hike",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "uni stuff next week",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "gap between lab and tutor meeting next wed",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "latte art training when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my to do list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything due today",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats overdue",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "shopping list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "society tasks",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "uni to-dos",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "do i need anything from the shop tonight",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many things on my list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "reminders with no date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did i return the library book",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "have i forgotten anything",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats due this weekend",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the lab report due on my list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on my plate today",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i owe anyone anything",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need to do before glen ardach",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i take kofi's friday shift",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whens my essay due",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything from hana and is saturday dinner in my calendar",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is hanas dinner ok with everything else sat",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "staff meeting when and anything else that morning",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "gp appt details",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "have i paid the bunkhouse yet",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "lab group – any news and when do we meet",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i have time for the driver assessment",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "flat inspection tmrw – am i even in",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need to do for dads 50th",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sleeping bag liner before the trip?",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my discussion bit due before the group meet",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "ellies birthday stuff",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "ceilidh everything i need to know",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the bunkhouse balance on my list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "my week",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything from the landlord about the boiler",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "bunkhouse door code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "when are my exams",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "where does the hike start",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "my yoga class",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "where's monday's lecture",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "whats the cupboard code",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "did freya send her intro",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "council tax letter?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "where's dad's party",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "driving lesson when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "reminder to book the dentist?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days till my exams",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ }
+]
