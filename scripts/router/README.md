@@ -38,3 +38,5 @@ python3 scripts/router/train.py score q.json   # [{q, reads}] scored by the save
 Vectors come from `router::tests::dump_router_vectors` (through `embed.py`), so training sees exactly what the app computes. `cargo test --lib router::` checks the weights load and fit the search model.
 
 Leaving each person out in turn, the router picks exactly the right apps for 82% of the agreed questions (3,499 of 4,274) and gets the work-out right for 88%. A score on a spent exam means little; only a fresh, blind exam counts.
+
+On the fresh exam 5 (2026-11-18, `/Users/sagar/projects/buntini-exam-5/SCORED.md`), the same build got the right apps for 59 of 80 with the router and 59 without it. The router and the rules each got 8 questions right that the other missed. With the router, Apple's model was asked 62 times instead of 108, and the median answer took 1.4 s instead of 1.7 s.
