@@ -285,6 +285,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} ราคา €{price} (รวมค่าประกอบ)",
   "chat.answer.quoteCheaper": "{vendor} ถูกกว่า €{difference}",
   "chat.answer.quotePriceTie": "ใบเสนอราคาทั้งสองราคาเท่ากัน",
+  "chat.answer.splitNotGiven": "ฉันแบ่งไม่ได้ เพราะไม่มีการให้ “{value}” ไว้",
   "chat.evidence.summary.other": "ตรวจดูหลักฐานที่ดึงมา · {count} หน้า",
   "chat.fileSize.bytes": "{size} B",
   "chat.fileSize.kilobytes": "{size} KB",

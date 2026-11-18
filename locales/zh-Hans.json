@@ -285,6 +285,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} 报价 €{price}（含组装）。",
   "chat.answer.quoteCheaper": "{vendor} 便宜 €{difference}。",
   "chat.answer.quotePriceTie": "两份报价价格相同。",
+  "chat.answer.splitNotGiven": "我无法分摊：没有给出“{value}”。",
   "chat.evidence.summary.other": "查看检索到的依据 · {count} 页",
   "chat.fileSize.bytes": "{size} B",
   "chat.fileSize.kilobytes": "{size} KB",

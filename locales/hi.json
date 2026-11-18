@@ -288,6 +288,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} की कीमत €{price} है (असेंबली सहित)।",
   "chat.answer.quoteCheaper": "{vendor} €{difference} सस्ता है।",
   "chat.answer.quotePriceTie": "दोनों कोटेशन की कीमत एक है।",
+  "chat.answer.splitNotGiven": "मैं इसे बाँट नहीं सकता: “{value}” दिया ही नहीं गया है।",
   "chat.evidence.summary.one": "मिले सबूत जाँचें · {count} पेज",
   "chat.evidence.summary.other": "मिले सबूत जाँचें · {count} पेज",
   "chat.fileSize.bytes": "{size} B",

@@ -285,6 +285,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor}의 가격은 €{price}입니다(조립 포함).",
   "chat.answer.quoteCheaper": "{vendor}가 €{difference} 더 저렴합니다.",
   "chat.answer.quotePriceTie": "두 견적의 가격이 같습니다.",
+  "chat.answer.splitNotGiven": "나눌 수 없어요. “{value}”은(는) 주어지지 않았어요.",
   "chat.evidence.summary.other": "가져온 근거 살펴보기 · {count}페이지",
   "chat.fileSize.bytes": "{size}B",
   "chat.fileSize.kilobytes": "{size}KB",

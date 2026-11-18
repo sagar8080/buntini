@@ -108,6 +108,14 @@ fn searching_calendar(outcome: Option<&Outcome>) -> bool {
     outcome.is_some_and(|o| o.kind == "write" && o.tool.as_deref() == Some("update_calendar_event"))
 }
 
+/// Whether the request asks for arithmetic by its words: "calculate", "split", "how much do I
+/// save". Quoted words are text it supplies, not what it asks.
+pub(crate) fn asks_arithmetic(goal: &str) -> bool {
+    let plain = completion::unquoted(goal);
+    tokens(&plain).iter().any(|word| ["calculate", "compute", "split", "scale", "arithmetic"].contains(word))
+        || plain.contains("how much less") || plain.contains("how much i save") || plain.contains("how much do i save")
+}
+
 fn tokens(text: &str) -> Vec<&str> {
     text.split(|c: char| !c.is_alphanumeric() && c != '-')
         .filter(|s| !s.is_empty())
@@ -1136,15 +1144,22 @@ impl TaskContract {
         let (writes, unsupported) = completion::requested_actions(goal);
         let plain = completion::unquoted(goal);
         let words = tokens(&plain);
-        let arithmetic = words.iter().any(|word| ["calculate", "compute", "split", "scale", "arithmetic"].contains(word))
-            || plain.contains("how much less") || plain.contains("how much i save") || plain.contains("how much do i save");
+        let arithmetic = asks_arithmetic(goal);
         if writes.is_empty() && !unsupported && arithmetic {
             let tool = if words.contains(&"split") { "split_costs" }
                 else if words.contains(&"scale") { "scale_quantities" }
                 else if words.contains(&"subscriptions") && words.contains(&"unused") { "sum_by_status" }
                 else if words.contains(&"offers") && plain.contains("at least") { "compare_options" }
                 else { "calculate" };
-            self.push_outcome("read", "Compute the requested result from supplied quantities, labels and constraints using the fixed operation", vec![tool.into()], json!({}), vec![]);
+            // A table operation works on figures: the request's own, or those of a source it
+            // reads. "Split the Acme invoice evenly between two of us" gives neither, so its
+            // amount is in the person's records, which are found and read first. Sent straight
+            // to the operation, the model filled it with the tool's example rows. A sum may
+            // still use figures everyone knows ("seconds in a day": 24*60*60).
+            let figures = crate::decision::states_figures(&plain) || self.outcomes.iter().any(|outcome| outcome.kind == "read");
+            if figures || tool == "calculate" {
+                self.push_outcome("read", "Compute the requested result from supplied quantities, labels and constraints using the fixed operation", vec![tool.into()], json!({}), vec![]);
+            }
         }
         if !completion::receipt_only_goal(goal) {
             let mut accepted = Vec::new();
@@ -3112,6 +3127,27 @@ mod tests {
         let calculation = TaskContract::from_request("Split 210 plus 90 equally among three people.");
         assert_eq!(calculation.next_outcome().unwrap().accepted_tools,vec!["split_costs"]);
         assert!(calculation.validate_proposal("split_costs",&json!({"participants":["A","B","C"],"charges":["Room|210|*","Food|90|*"]}),&[]).is_ok());
+    }
+
+    #[test]
+    fn a_split_with_no_figures_of_its_own_is_not_sent_to_the_operation_before_a_read() {
+        // Its amount is in the person's email. Sent straight to split_costs, the model filled the
+        // tool's example rows and "Aria owes 65.5" was the answer.
+        let goal = "Split the Acme invoice evenly between two of us. What's each share?";
+        assert!(asks_arithmetic(goal));
+        let contract = TaskContract::from_request(goal);
+        assert!(contract.outcomes.iter().all(|outcome| outcome.kind == "answer"), "{:?}", contract.outcomes);
+        // The figures in the question itself, or a source it reads, still go to the operation.
+        for (goal, tool) in [
+            ("Split 90 lodging and 27 food between Aria, Bo and Cy.", "split_costs"),
+            ("Split $90 three ways.", "split_costs"),
+            ("Scale this recipe from 3 servings to 9: 100g rice.", "scale_quantities"),
+            ("Calculate how many seconds are in a day", "calculate"),
+        ] {
+            assert_eq!(TaskContract::from_request(goal).next_outcome().unwrap().accepted_tools, vec![tool], "{goal}");
+        }
+        let read_first = TaskContract::from_request("Compare my Alder vendor quotes and calculate the difference.");
+        assert!(read_first.outcomes.iter().any(|outcome| outcome.accepted_tools == vec!["calculate"]));
     }
 
     #[test]

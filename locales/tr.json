@@ -288,6 +288,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} €{price} tutuyor (montaj dahil).",
   "chat.answer.quoteCheaper": "{vendor} €{difference} daha ucuz.",
   "chat.answer.quotePriceTie": "İki teklifin fiyatı aynı.",
+  "chat.answer.splitNotGiven": "Bunu bölemem: “{value}” verilmemiş.",
   "chat.evidence.summary.one": "Bulunan kanıtları incele · {count} sayfa",
   "chat.evidence.summary.other": "Bulunan kanıtları incele · {count} sayfa",
   "chat.fileSize.bytes": "{size} B",

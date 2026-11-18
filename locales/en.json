@@ -288,6 +288,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} costs €{price} (assembly included).",
   "chat.answer.quoteCheaper": "{vendor} is €{difference} cheaper.",
   "chat.answer.quotePriceTie": "The two quotes have the same price.",
+  "chat.answer.splitNotGiven": "I can’t split that: “{value}” hasn’t been given.",
   "chat.evidence.summary.one": "Inspect retrieved evidence · {count} pages",
   "chat.evidence.summary.other": "Inspect retrieved evidence · {count} pages",
   "chat.fileSize.bytes": "{size} B",

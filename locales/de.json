@@ -288,6 +288,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor} kostet {price} € (inklusive Montage).",
   "chat.answer.quoteCheaper": "{vendor} ist {difference} € günstiger.",
   "chat.answer.quotePriceTie": "Beide Angebote haben denselben Preis.",
+  "chat.answer.splitNotGiven": "Das kann ich nicht aufteilen: „{value}“ wurde nicht angegeben.",
   "chat.evidence.summary.one": "Abgerufene Belege prüfen · {count} Seite",
   "chat.evidence.summary.other": "Abgerufene Belege prüfen · {count} Seiten",
   "chat.fileSize.bytes": "{size} B",
