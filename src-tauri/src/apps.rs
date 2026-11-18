@@ -3335,7 +3335,9 @@ pub(crate) fn inbox_world(query: &str, unread: bool, limit: usize, inbox: &[(&st
         .collect();
     let mut output: Vec<String> = found.iter().map(|(at, row)| format!("{}\tm{at}\t{}\t{}\t{}\t{at}", row.0, row.1, row.2, row.3)).collect();
     output.push(format!("__buntini_summary__\t{0}\t{0}\ttrue", found.len()));
-    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", row.4, row.4.len())).collect();
+    // As `MAIL_TEXT` gives them: the first 500 characters, tabs and line breaks as spaces.
+    let opening = |body: &str| body.chars().take(500).map(|c| if matches!(c, '\t' | '\r' | '\n') { ' ' } else { c }).collect::<String>();
+    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", opening(row.4), row.4.chars().count())).collect();
     mail_evidence(query, unread, limit, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some(&openings.join("\n"))).unwrap()
 }
 
@@ -3603,6 +3605,13 @@ mod tests {
         // Everything shown: nothing more to count.
         let few = inbox_world("", false, 8, &rows[..3]);
         assert!(!few["text"].as_str().unwrap().contains("by day"));
+    }
+
+    #[test]
+    fn a_made_up_email_body_over_several_lines_comes_through_whole() {
+        let rows = [("2026-11-17 09:00", false, "Gus <gus@example.com>", "Rent review", "Hi,\n\nYour rent goes from $1,350 to $1,420.\tThanks")];
+        let text = inbox_world("", false, 8, &rows)["text"].as_str().unwrap().to_string();
+        assert!(text.contains("Your rent goes from $1,350 to $1,420.") && text.contains("Thanks"), "{text}");
     }
 
     #[test]
