@@ -3837,7 +3837,12 @@ where
             // steadily than a small model's one-word choice; that choice can still add a work-out.
             // A whole app as it is ("any new emails") is listed by Rust, never worked out.
             let whole = crate::personal_answer::asks_for_whole_apps(&goal_now) && !crate::decision::asks_for_a_rewrite(&goal_now);
-            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || crate::decision::worked_out_by_meaning(&goal_now) == Some(true));
+            let allowed = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider) && crate::decision::shareable(settings, &sources));
+            let margin = crate::decision::work_out_margin(&goal_now);
+            if let Some(margin) = margin {
+                notes.push(format!("meaning {margin:.3}"));
+            }
+            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || margin.is_some_and(|margin| margin > crate::decision::work_out_threshold(allowed.is_some())));
             if !work_out && !whole {
                 phase(channel, &task.id, "thinking");
                 let turn = state.models.generate(settings, crate::decision::work_request(&goal_now), cancel.clone(), |_| {}).await;
@@ -3848,7 +3853,6 @@ where
             }
             // With a brain the person allowed, a question that asks several things, or one across
             // apps, is put together by it; on this Mac each part is looked up on its own.
-            let allowed = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider) && crate::decision::shareable(settings, &sources));
             if !work_out && allowed.is_some() && (crate::decision::asks_several(&goal_now) || sources.len() > 1) {
                 notes.push("several asks for the allowed brain".into());
                 work_out = true;
@@ -3876,7 +3880,9 @@ where
         // "Could I squeeze a two-hour block in tomorrow" is about their day, not a sum.
         let general = sources.is_empty() && !own_shape && !crate::personal_answer::says_mine(&goal_now) && crate::task_contract::calendar_days(&goal_now, chrono::Local::now().date_naive()).is_empty() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
         flow.contract.own_sources = Some(sources);
-        if general && !small_talk(&goal_now, &settings.assistant_name) {
+        // What Rust works out itself (units, day counts, a word backwards) never leaves the Mac.
+        let rust_knows = worked_answer(flow).is_some();
+        if general && !rust_knows && !small_talk(&goal_now, &settings.assistant_name) {
             if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()).filter(|brain| settings.workout_brains.contains(&brain.cloud_provider)) {
                 let mut figures = crate::decision::states_figures(&goal_now);
                 if !figures {
@@ -4022,7 +4028,7 @@ where
                 // A question across apps is answered app by app, each part from its own records.
                 let mut answers = Vec::new();
                 for (part, part_reads) in crate::personal_answer::parts(&flow.contract.current_request, &reads) {
-                    if let Some(answer) = crate::personal_answer::not_there(&part, &part_reads) {
+                    if let Some(answer) = crate::personal_answer::not_there(&part, &part_reads).or_else(|| crate::personal_answer::detail_missing(&part, &part_reads)) {
                         answers.push(answer);
                         continue;
                     }

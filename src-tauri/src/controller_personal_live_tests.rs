@@ -828,7 +828,7 @@ async fn live_decision_choices() {
         let said = turn.map(|turn| turn.text).unwrap_or_else(|error| error);
         let worked = crate::decision::worked_out(&said).or_else(|| (said.to_lowercase().contains("calculate") || crate::decision::said_yes_text(&said)).then_some(true));
         if std::env::var("BUNTINI_PROBE_MEANING").is_ok() {
-            eprintln!("MEANING {:?} | {goal}", crate::decision::worked_out_by_meaning(goal));
+            eprintln!("MEANING {:.3} | {goal}", crate::decision::work_out_margin(goal).unwrap_or(f32::NAN));
             continue;
         }
         eprintln!("CHOICE {worked:?} {} ms | {goal} | {}", started.elapsed().as_millis(), said.replace('\n', " "));

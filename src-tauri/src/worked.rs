@@ -448,6 +448,97 @@ pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
         .or_else(|| assignments(goal, steps))
         .or_else(|| conversion(goal))
         .or_else(|| countdown(goal, today))
+        .or_else(|| text_work(goal))
+}
+
+/// Text the question itself gives, worked on as asked, which Apple's model got wrong on two
+/// macOS versions: a word spelled backwards, words in title case, a letter counted, a number
+/// with thousands separators, a clock time in the other format.
+fn text_work(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['’', '‘'], "'");
+    let quoted = quoted_text(goal);
+    let words: Vec<String> = lower.split(|c: char| c.is_whitespace()).map(|word| word.trim_matches(|c: char| ",.?!:;\"“”".contains(c)).to_string()).filter(|word| !word.is_empty()).collect();
+    let at = |word: &str| words.iter().position(|seen| seen == word);
+    // "spell accommodate backwards", "spell 'calendar' backwards", "reverse the word lemon".
+    if lower.contains("backwards") || lower.contains("backward") || words.first().is_some_and(|word| word == "reverse") {
+        let target = quoted.clone().or_else(|| {
+            let start = at("spell").or_else(|| at("reverse"))? + 1;
+            let end = words.iter().position(|word| word.starts_with("backward")).unwrap_or(words.len());
+            let picked: Vec<&String> = words.get(start..end)?.iter().filter(|word| !["the", "word", "name"].contains(&word.as_str())).collect();
+            (picked.len() == 1).then(|| picked[0].trim_matches('\'').to_string())
+        })?;
+        let reversed: String = target.chars().rev().collect();
+        return Some(format!("“{target}” backwards is **{reversed}**."));
+    }
+    // "Put 'the quick brown fox' into title case."
+    if lower.contains("title case") {
+        let target = quoted?;
+        let titled: Vec<String> = target.split(' ').map(|word| {
+            let mut chars = word.chars();
+            chars.next().map(|first| first.to_uppercase().chain(chars.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
+        }).collect();
+        return Some(format!("**{}**", titled.join(" ")));
+    }
+    // "how many e's are in tennessee", "how many times does r appear in strawberry".
+    if let Some(many) = words.windows(2).position(|pair| pair[0] == "how" && pair[1] == "many") {
+        let letter = words.get(many + 2).and_then(|word| {
+            let bare = word.trim_end_matches("'s").trim_end_matches('s');
+            (bare.chars().count() == 1 && bare.chars().all(char::is_alphabetic)).then(|| bare.chars().next()).flatten()
+        }).or_else(|| (words.get(many + 2).map(String::as_str) == Some("times")).then(|| words.iter().position(|word| word == "letter").and_then(|at| words.get(at + 1)).and_then(|word| word.chars().next())).flatten());
+        let target = quoted.clone().or_else(|| words.iter().rposition(|word| word == "in").and_then(|at| words.get(at + 1)).filter(|word| word.chars().all(char::is_alphabetic)).cloned());
+        if let (Some(letter), Some(target)) = (letter, target) {
+            let count = target.to_lowercase().chars().filter(|c| *c == letter).count();
+            return Some(format!("There {} **{count}** {letter}’s in “{target}”.", if count == 1 { "is" } else { "are" }));
+        }
+    }
+    // "Write 1234567 with commas as thousands separators."
+    if lower.contains("comma") || lower.contains("thousands") {
+        let number = words.iter().find(|word| word.len() >= 4 && word.chars().all(|c| c.is_ascii_digit()))?;
+        let digits: Vec<char> = number.chars().collect();
+        let mut grouped = String::new();
+        for (at, digit) in digits.iter().enumerate() {
+            if at > 0 && (digits.len() - at) % 3 == 0 {
+                grouped.push(',');
+            }
+            grouped.push(*digit);
+        }
+        return Some(format!("**{grouped}**"));
+    }
+    // "21:45 in 12 hour time", "what's 9:45 pm in 24-hour time".
+    let twelve = lower.contains("12 hour") || lower.contains("12-hour") || lower.contains("am/pm");
+    let twenty_four = lower.contains("24 hour") || lower.contains("24-hour");
+    if twelve || twenty_four {
+        let times = crate::literals::times(goal);
+        let [minutes] = times.as_slice() else { return None };
+        let (hour, minute) = (minutes / 60, minutes % 60);
+        return Some(if twelve {
+            let half = if hour < 12 { "am" } else { "pm" };
+            let shown = match hour % 12 { 0 => 12, other => other };
+            format!("**{shown}:{minute:02} {half}**")
+        } else {
+            format!("**{hour:02}:{minute:02}**")
+        });
+    }
+    None
+}
+
+/// The text a question puts in quotes: 'calendar', "the quick brown fox", “fox”. A quote mark
+/// inside a word ("what's") opens nothing.
+fn quoted_text(goal: &str) -> Option<String> {
+    for (open, close) in [('"', '"'), ('“', '”'), ('‘', '’'), ('\'', '\'')] {
+        for (start, _) in goal.match_indices(open) {
+            if goal[..start].chars().last().is_some_and(char::is_alphanumeric) {
+                continue;
+            }
+            let rest = &goal[start + open.len_utf8()..];
+            let Some(end) = rest.find(close) else { continue };
+            let text = rest[..end].trim();
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// A unit, its kind and how many of the kind's base unit it is. Cups, pints, quarts and
@@ -591,6 +682,23 @@ fn countdown(goal: &str, today: NaiveDate) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn text_the_question_gives_is_worked_on_by_rust() {
+        let worked = |goal: &str| text_work(goal).unwrap_or_default().replace("**", "");
+        assert_eq!(worked("Spell 'calendar' backwards."), "“calendar” backwards is radnelac.");
+        assert_eq!(worked("spell accommodate backwards"), "“accommodate” backwards is etadommocca.");
+        assert_eq!(worked("Put 'the quick brown fox' into title case."), "The Quick Brown Fox");
+        assert_eq!(worked("how many e's are in tennessee"), "There are 4 e’s in “tennessee”.");
+        assert_eq!(worked("how many r's in strawberry?"), "There are 3 r’s in “strawberry”.");
+        assert_eq!(worked("Write 1234567 with commas as thousands separators."), "1,234,567");
+        assert_eq!(worked("21:45 in 12 hour time?"), "9:45 pm");
+        assert_eq!(worked("what's 9:45 pm in 24-hour time"), "21:45");
+        assert_eq!(worked("what's 00:30 in 12-hour time"), "12:30 am");
+        for other in ["what's on my calendar backwards compatible", "how many emails did I get", "what time is it", "write a note with commas"] {
+            assert_eq!(text_work(other), None, "{other}");
+        }
+    }
+
     use serde_json::json;
 
     #[test]

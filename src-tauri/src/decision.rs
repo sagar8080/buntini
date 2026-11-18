@@ -169,9 +169,22 @@ fn unit(vector: &[i8]) -> Vec<f32> {
     vector.iter().map(|value| f32::from(*value) / length).collect()
 }
 
-/// Whether a question is nearer the work-out examples than the lookups, by meaning, with the
-/// search model bundled for the memory index. None when that model can't say now.
-pub fn worked_out_by_meaning(goal: &str) -> Option<bool> {
+/// How near the work-out examples a question must be, against the lookups, to be worked out.
+/// A brain the person allowed takes the close calls, since it answers lookups well too and a
+/// list of records doesn't answer "will it be done before 4"; on Apple alone only the clear
+/// ones leave Rust's own lookup answers.
+pub fn work_out_threshold(allowed: bool) -> f32 {
+    #[cfg(test)]
+    if let Some(set) = std::env::var(if allowed { "BUNTINI_ALLOWED_MARGIN" } else { "BUNTINI_ON_DEVICE_MARGIN" }).ok().and_then(|value| value.parse().ok()) {
+        return set;
+    }
+    if allowed { -0.02 } else { 0.0 }
+}
+
+/// How much nearer a question is to the work-out examples than to the lookups, by meaning,
+/// with the search model bundled for the memory index: above 0 leans to working it out.
+/// None when that model can't say now.
+pub fn work_out_margin(goal: &str) -> Option<f32> {
     let wait = std::time::Duration::from_secs(2);
     let examples = EXAMPLES
         .get_or_init(|| {
@@ -186,7 +199,7 @@ pub fn worked_out_by_meaning(goal: &str) -> Option<bool> {
         near.sort_by(|a, b| b.total_cmp(a));
         near.iter().take(3).sum::<f32>() / 3.0
     };
-    Some(score(true) > score(false))
+    Some(score(true) - score(false))
 }
 
 /// Whether the model said the question has to be worked out. None when its reply isn't a choice.
@@ -777,7 +790,12 @@ fn dates_in(text: &str, base: NaiveDate) -> Vec<NaiveDate> {
 
 /// Words that would be names: written with a capital inside a sentence.
 fn name_words(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’').filter(|word| word.chars().count() >= 2).map(|word| word.trim_end_matches("'s").trim_end_matches("’s").to_lowercase()).collect()
+    // "'The Overstory'": the quote marks around a title aren't part of its words.
+    text.split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’')
+        .map(|word| word.trim_matches(['\'', '’', '‘']))
+        .filter(|word| word.chars().count() >= 2)
+        .map(|word| word.trim_end_matches("'s").trim_end_matches("’s").to_lowercase())
+        .collect()
 }
 
 /// Every figure, date and name the answer states that Rust can't vouch for, as written.
@@ -836,13 +854,33 @@ pub fn unconfirmed(answer: &str, known: &Known) -> Vec<String> {
     // Names: a capitalised word inside a sentence that no record or the question holds.
     for word in capitalised(&plain) {
         // "Wheel-throwing" is the record's two words.
-        let parts: Vec<String> = word.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|part| part.chars().count() >= 2).map(str::to_lowercase).collect();
+        let parts: Vec<String> = word.split(|c: char| !c.is_alphanumeric() && c != '\'').map(|part| part.trim_matches(['\'', '’', '‘'])).filter(|part| part.chars().count() >= 2).map(str::to_lowercase).collect();
         if parts.iter().any(|part| !known.words.contains(part) && !ORDINARY.contains(&part.as_str())) {
             say(word);
         }
     }
+    // A sentence that shares no word with the records, the facts or the question is the
+    // brain's own ("There is a new message from your boss about a project deadline").
+    for sentence in plain.split(['.', '!', '?', '\n']) {
+        let content: Vec<String> = sentence
+            .split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’')
+            .map(|word| word.trim_matches(['\'', '’', '‘']).trim_end_matches("'s").trim_end_matches("’s").to_lowercase())
+            .filter(|word| word.chars().count() >= 4 && word.chars().all(char::is_alphabetic) && !GLUE.contains(&word.as_str()) && !ORDINARY.contains(&word.as_str()))
+            .collect();
+        let known_word = |word: &String| known.words.contains(word) || word.strip_suffix('s').is_some_and(|single| known.words.contains(single)) || known.words.contains(&format!("{word}s"));
+        // Saying something isn't there invents nothing ("No reminder shows whether you ticked it off").
+        let absent = sentence.to_lowercase().replace('’', "'").split(|c: char| !c.is_alphanumeric() && c != '\'').any(|word| ["no", "not", "none", "nothing", "doesn't", "don't", "isn't", "aren't", "didn't", "hasn't", "haven't", "can't", "cannot", "couldn't", "there's"].contains(&word));
+        if content.len() >= 3 && !absent && !content.iter().any(known_word) {
+            say(sentence.trim().to_string());
+        }
+    }
     missing
 }
+
+/// Words of four letters or more that carry no fact of their own.
+const GLUE: &[&str] = &[
+    "record", "records", "about", "above", "after", "again", "also", "been", "before", "being", "below", "between", "both", "could", "does", "doing", "down", "during", "each", "even", "every", "have", "having", "here", "into", "just", "like", "many", "more", "most", "much", "must", "need", "only", "other", "over", "same", "should", "some", "such", "than", "that", "their", "them", "then", "there", "these", "they", "this", "those", "through", "under", "until", "very", "want", "were", "what", "when", "where", "which", "while", "will", "with", "would", "your", "yours", "yourself", "cannot", "can't", "don't", "doesn't", "isn't", "aren't", "won't", "there's", "it's", "you're", "you've", "you'll",
+];
 
 /// Capitalised words that are just English, never a name the answer could make up.
 const ORDINARY: &[&str] = &[
@@ -1147,13 +1185,18 @@ mod tests {
         assert_eq!(unconfirmed("The Dentist is at 16:00 on Friday.", &digest.known), vec!["16:00", "Friday"]);
         assert_eq!(unconfirmed("You're seeing Marco at 11:00.", &digest.known), vec!["Marco"]);
         assert_eq!(unconfirmed("**Call mum** — You could fit it in from 11:30 to 15:00.", &digest.known), Vec::<String>::new());
+        // A sentence about nothing that was read is the brain's own.
+        assert_eq!(unconfirmed("Call mum is due tomorrow. There is a new message from your boss about a project deadline.", &digest.known), vec!["There is a new message from your boss about a project deadline"]);
+        assert_eq!(unconfirmed("Your Dentist appointment at Harley Street lasts 45 minutes.", &digest.known), Vec::<String>::new());
+        assert_eq!(unconfirmed("There’s no reminder in the records that shows whether you ticked it off.", &digest.known), Vec::<String>::new());
         assert_eq!(unconfirmed("You have 17 reminders.", &digest.known), vec!["17"]);
     }
 
     #[test]
     fn amounts_may_be_added_split_or_compared_but_not_made_up() {
         let mut known = Known { today: Some(now().date()), ..Known::default() };
-        known.take_in("Uber $18.40. iCloud $2.99 a month. Invoice $1,240. Lunch for 4.", now().date());
+        known.take_in("Uber $18.40. iCloud $2.99 a month. Invoice $1,240. Lunch for 4. 'The Overstory' is due back.", now().date());
+        assert_eq!(unconfirmed("Both say 'The Overstory' is due back.", &known), Vec::<String>::new());
         for fine in ["$21.39 in all", "The Uber ride costs $15.41 more", "$310 each", "$35.88 a year over 12 months"] {
             let missing = unconfirmed(fine, &known);
             assert!(missing.is_empty() || fine.contains("12 months"), "{fine}: {missing:?}");

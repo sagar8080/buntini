@@ -258,13 +258,16 @@ impl IndexHits {
         let mut found: Vec<(String, Vec<String>)> = Vec::new();
         for (at, (app, held)) in self.matches.iter().enumerate() {
             let Some(tool) = tool_of(app) else { continue };
-            // A name, or two words: the index matches word stems, so one plain word ("books" in
-            // "I'll book it") is too often there by chance.
+            // A name, two words, or a word of the record's title ("climbing" for "Climbing with
+            // Sam"): the index matches word stems, so one plain word somewhere in an email's
+            // text ("books" in "I'll book it") is too often there by chance.
+            let title = self.titles.get(at).cloned().unwrap_or_default();
+            let titled = title.to_lowercase().split(|c: char| !c.is_alphanumeric()).map(str::to_string).collect::<Vec<_>>();
+            let in_title = |word: &str| titled.iter().any(|seen| seen == word || seen.strip_suffix('s') == Some(word) || word.strip_suffix('s') == Some(seen.as_str()));
             let own: Vec<&(String, bool)> = held.iter().filter(|word| !covered.contains(word)).filter_map(|word| self.words.get(*word)).filter(|word| !WHEN.contains(&word.0.as_str())).collect();
-            if chosen.iter().any(|seen| seen == tool) || !(own.len() >= 2 || own.iter().any(|word| word.1)) {
+            if chosen.iter().any(|seen| seen == tool) || !(own.len() >= 2 || own.iter().any(|word| word.1 || in_title(&word.0))) {
                 continue;
             }
-            let title = self.titles.get(at).cloned().unwrap_or_default();
             match found.iter_mut().find(|(seen, _)| seen == tool) {
                 Some((_, titles)) => titles.push(title),
                 None => found.push((tool.to_string(), vec![title])),
@@ -1123,6 +1126,88 @@ pub fn only_reads(steps: &[Step]) -> Option<Vec<&Step>> {
     let only_reads = !finished.is_empty()
         && finished.iter().all(|step| !step.effect && SOURCES.contains(&step.tool.as_str()) && step.evidence.as_ref().is_some_and(|evidence| evidence["records"].is_array()));
     only_reads.then_some(finished)
+}
+
+/// A kind of detail a question asks for by name, and whether a record's text shows one.
+fn asked_detail(goal: &str) -> Option<(String, fn(&str, &str) -> bool)> {
+    let lower = goal.to_lowercase().replace(['’', '‘'], "'");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).collect();
+    let has = |word: &str| words.contains(&word);
+    fn link(text: &str, _: &str) -> bool {
+        let text = text.to_lowercase();
+        ["http://", "https://", "www.", "zoom.us/", "meet.google.com", "teams.microsoft"].iter().any(|mark| text.contains(mark))
+    }
+    fn phone(text: &str, _: &str) -> bool {
+        // Seven or more digits in one run of digits, spaces, dashes, dots and brackets.
+        let mut digits = 0;
+        for c in text.chars() {
+            if c.is_ascii_digit() {
+                digits += 1;
+                if digits >= 7 {
+                    return true;
+                }
+            } else if !" -.()+".contains(c) {
+                digits = 0;
+            }
+        }
+        false
+    }
+    fn labelled(text: &str, label: &str) -> bool {
+        let lower = text.to_lowercase();
+        lower.split(|c: char| !c.is_alphanumeric()).any(|word| word == label) && lower.split(|c: char| c.is_whitespace() || ",;:()".contains(c)).any(|token| token.chars().filter(char::is_ascii_digit).count() >= 3)
+    }
+    fn weight(text: &str, _: &str) -> bool {
+        let lower = text.to_lowercase();
+        lower.split(|c: char| !c.is_alphanumeric()).any(|word| ["kg", "kgs", "lb", "lbs", "pounds", "kilos", "kilograms", "grams", "stone"].contains(&word) || word.ends_with("kg") && word.chars().next().is_some_and(|c| c.is_ascii_digit()))
+    }
+    if has("link") || has("url") {
+        return Some(("a link".into(), link));
+    }
+    if has("phone") || (has("number") && (has("call") || has("ring") || has("mobile"))) {
+        return Some(("a phone number".into(), phone));
+    }
+    if has("weigh") || has("weight") || has("weighs") {
+        return Some(("a weight".into(), weight));
+    }
+    for label in ["tracking", "order", "confirmation", "reference", "booking", "account", "flight", "seat"] {
+        let at = words.iter().position(|word| *word == label);
+        if at.is_some_and(|at| words.get(at + 1).is_some_and(|next| ["number", "code", "no", "id", "ref"].contains(next))) {
+            return Some((format!("{} {label} number", if label == "order" { "an" } else { "a" }), labelled));
+        }
+    }
+    None
+}
+
+/// "The email from Apple doesn't give an order number": a detail the question asks for by its
+/// kind (a link, a phone number, a tracking number, a weight) that none of the records it's
+/// about shows, said plainly with those records, rather than the records alone as if they
+/// answered.
+pub fn detail_missing(goal: &str, reads: &[&Step]) -> Option<String> {
+    let goal = &crate::task_contract::spelled(goal);
+    let (detail, shows) = asked_detail(goal)?;
+    let label = detail.split_whitespace().nth(1).unwrap_or_default().to_string();
+    let records = numbered(reads);
+    let about = holding_words(goal, &records);
+    if about.is_empty() || about.len() > 3 {
+        return None;
+    }
+    let chosen: Vec<&(String, &Value, &Step)> = records.iter().filter(|(number, ..)| about.contains(number)).collect();
+    let text = |record: &Value| ["title", "location", "subject", "sender", "excerpt", "list", "notes"].iter().filter_map(|field| record[*field].as_str()).collect::<Vec<_>>().join(" ");
+    if chosen.iter().any(|(_, record, _)| shows(&text(record), &label)) {
+        return None;
+    }
+    let lead = match chosen.as_slice() {
+        [(_, record, step)] => {
+            let what = match step.tool.as_str() {
+                "read_mail" => format!("The email from {}", sender_name(record["sender"].as_str().unwrap_or_default())),
+                "read_calendar" => format!("“{}”", one_line(record["title"].as_str().unwrap_or_default())),
+                _ => format!("The reminder “{}”", one_line(record["title"].as_str().unwrap_or_default())),
+            };
+            format!("{} doesn’t give {detail}.", plain(&what))
+        }
+        _ => format!("None of these give {detail}."),
+    };
+    Some(format!("{lead}\n\n{}", picked(reads, &about)))
 }
 
 /// "No reminder mentions “library”": when none of the records read holds any of the words
@@ -2233,6 +2318,35 @@ mod tests {
         assert!(!general_question("sorry dumb q but what time does climbing start next week"));
         assert!(general_question("i just got back from the gym"));
         assert!(general_question("is email secure") && !general_question("What kind of restaurant opened, according to Sam's email?"));
+    }
+
+    #[test]
+    fn a_detail_no_record_shows_is_said_to_be_missing() {
+        let mail = step("read_mail", sample_inbox(false));
+        // The sample's emails are Bob's invoice and Ana's lease: neither has a link or a number.
+        assert_eq!(detail_missing("what's the order number on Bob's invoice", &[&mail]).unwrap().lines().next(), Some("The email from Bob doesn’t give an order number."));
+        assert!(detail_missing("what's the zoom link in Ana's lease email", &[&mail]).unwrap().starts_with("The email from Ana doesn’t give a link"));
+        assert!(detail_missing("what did Ana say about the lease", &[&mail]).is_none());
+        let reminders = reminders(vec![reminder("Call the vet on 020 7946 0018", "2026-11-05")]);
+        assert!(detail_missing("what's the vet's phone number", &[&reminders]).is_none());
+        assert!(asked_detail("whats the tracking number for my fernhill order").is_some_and(|(detail, shows)| detail == "a tracking number" && shows("Order FG-31102 delivered", "tracking") == false && shows("Tracking number SP 4471", "tracking")));
+        assert!(asked_detail("whats the newest verification code").is_none());
+    }
+
+    #[test]
+    fn another_app_is_read_for_what_only_it_holds() {
+        let hits = |goal: &str, found: &[(&str, &str, &[usize])]| IndexHits { built: true, words: index_words(goal), matches: found.iter().map(|(app, _, held)| (app.to_string(), held.to_vec())).collect(), titles: found.iter().map(|(_, title, _)| title.to_string()).collect() };
+        // "climbing" is the event's own title, which no email holds.
+        let sooner = hits("Which is sooner, the Acme invoice due date or my climbing session?", &[("mail", "Acme Billing Invoice 4821 for October", &[1, 2]), ("calendar", "Climbing with Sam", &[4])]);
+        assert_eq!(sooner.words.iter().map(|(word, _)| word.as_str()).collect::<Vec<_>>(), ["sooner", "acme", "invoice", "date", "climbing", "session"]);
+        assert_eq!(sooner.other_apps(&["read_mail".into()]).into_iter().map(|(tool, _)| tool).collect::<Vec<_>>(), ["read_calendar"]);
+        // "books" only sits in an email's text ("I'll book tomorrow").
+        let library = hits("Is there a reminder to return my library books?", &[("mail", "Ana Ruiz Re: Lisbon flights", &[2])]);
+        assert_eq!(library.words[2].0, "books");
+        assert!(library.other_apps(&["read_reminders".into()]).is_empty());
+        // Keziah's mockups are in the reminder asked about, so an email about them isn't needed.
+        let mockups = hits("when exactly is the reminder to review keziah's mockups due", &[("reminders", "Review Keziah's mockups", &[1, 2, 3]), ("mail", "Keziah Mbeki Dispatch board mockups v3", &[2, 3])]);
+        assert!(mockups.other_apps(&["read_reminders".into()]).is_empty());
     }
 
     fn hits(goal: &str, matches: &[(&str, &[usize])]) -> IndexHits {
