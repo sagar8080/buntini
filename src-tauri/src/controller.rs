@@ -3794,8 +3794,24 @@ where
         let route = if tagged.is_empty() && !writes && reads_apps && !crate::personal_answer::reads_elsewhere(&flow.contract) { crate::router::route(&goal_now) } else { None };
         // "That github sign-in alert, what kind of computer was it" reads like a general question,
         // but one email holds its words: the index knows the person has it.
-        let held = route.as_ref().is_some_and(|route| route.is_general()) && sources.is_empty() && !own_shape && !index_hits(state, settings, &goal_now).held_together(2).is_empty();
-        let by_meaning = route.as_ref().filter(|route| !route.is_general() || (sources.is_empty() && !own_shape && !held));
+        let general_call = route.as_ref().is_some_and(|route| route.is_general()) && sources.is_empty() && !own_shape;
+        let held_hits = if general_call { index_hits(state, settings, &goal_now) } else { crate::personal_answer::IndexHits::default() };
+        let held = general_call && !held_hits.held_together(2).is_empty();
+        // "Put my groceries list in alphabetical order", "tmrw between 9 and 5 whats my longest
+        // free stretch": taken for general questions, and answered with a made-up list and day.
+        // Said to be theirs, about a day or about words their records hold, they're read for.
+        let today_now = chrono::Local::now().date_naive();
+        let theirs = general_call && !held && crate::personal_answer::says_mine(&goal_now) && {
+            let days = !crate::task_contract::calendar_days(&goal_now, today_now).is_empty();
+            let apps: Vec<String> = if days { vec!["read_calendar".to_string()] } else { held_hits.held_together(1) };
+            for tool in apps.into_iter().filter(|tool| offered.contains(tool)) {
+                if !sources.contains(&tool) {
+                    sources.push(tool);
+                }
+            }
+            !sources.is_empty()
+        };
+        let by_meaning = route.as_ref().filter(|route| !route.is_general() || (sources.is_empty() && !own_shape && !held && !theirs));
         let (sure, likely) = by_meaning.map(|route| route.sure_and_likely()).unwrap_or_default();
         for tool in sure {
             if offered.contains(&tool) && !sources.contains(&tool) {
@@ -3917,7 +3933,22 @@ where
                 notes.push("several asks for the allowed brain".into());
                 work_out = true;
             }
-            let mut decided = crate::decision::Decision { work_out, notes, ..Default::default() };
+            // Mail's own search sees senders and subjects alone: it's searched for the question's
+            // words the index finds there ("pantry", not "add" and "ive"), names first.
+            let mut search: Vec<(bool, String)> = hits
+                .words
+                .iter()
+                .enumerate()
+                .filter(|(at, (word, _))| hits.matches.iter().zip(&hits.titles).any(|((app, held), title)| app == "mail" && held.contains(at) && title.to_lowercase().contains(&word.to_lowercase())))
+                .map(|(_, (word, name))| (!*name, word.to_lowercase()))
+                .collect();
+            search.sort_by_key(|(plain, _)| *plain);
+            search.dedup_by(|a, b| a.1 == b.1);
+            let search: Vec<String> = search.into_iter().map(|(_, word)| word).take(2).collect();
+            if !search.is_empty() {
+                notes.push(format!("mail searched for {}", search.join(", ")));
+            }
+            let mut decided = crate::decision::Decision { work_out, notes, search, ..Default::default() };
             if work_out {
                 if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()) {
                     let id = brain.cloud_provider.clone();
@@ -3958,7 +3989,7 @@ where
                     let mut known = crate::decision::Known::default();
                     if let Some(answer) = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone(), &[], &mut None).await? {
                         let answer = flow.contract.validate_large_brain_answer(&answer, &flow.steps)?;
-                        flow.decision = Some(crate::decision::Decision { work_out: true, brain: Some(brain.cloud_provider.clone()), notes });
+                        flow.decision = Some(crate::decision::Decision { work_out: true, brain: Some(brain.cloud_provider.clone()), notes, ..Default::default() });
                         return finish_with(state, flow, task, channel, answer);
                     }
                 }
@@ -4062,10 +4093,11 @@ where
         }
         // Rust reads and answers for a small model. A large one does that itself.
         let worked_out = flow.decision.as_ref().is_some_and(|decided| decided.work_out);
+        let search: Vec<String> = flow.decision.as_ref().map(|decided| decided.search.clone()).unwrap_or_default();
         let mut own_read = small
             .then(|| match worked_out {
-                true => crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today),
-                false => crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today),
+                true => crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today, &search),
+                false => crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today, &search),
             })
             .flatten()
             .or_else(|| crate::personal_answer::source_read(&flow.contract.current_request, &flow.steps));
@@ -4112,7 +4144,7 @@ where
                         let sources = flow.contract.own_sources.get_or_insert_with(Vec::new);
                         sources.push(tool);
                         sources.sort_by_key(|tool| crate::personal_answer::every_source().iter().position(|source| source == tool));
-                        own_read = crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today);
+                        own_read = crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today, &search);
                         if own_read.is_none() {
                             return finish_with(state, flow, task, channel, crate::i18n::t("chat.answer.notWorkedOut"));
                         }

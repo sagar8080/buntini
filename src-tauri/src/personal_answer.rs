@@ -847,7 +847,7 @@ pub fn has_phrase(text: &str, phrase: &str) -> bool {
 
 /// The reads a question needs from one app, set here and never by a model, which on a real
 /// Mac searched for the whole sentence and read the wrong day.
-fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDate) -> Vec<Value> {
+fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDate, search: &[String]) -> Vec<Value> {
     match tool {
         "read_calendar" => {
             let days = crate::task_contract::calendar_days(goal, today);
@@ -872,7 +872,7 @@ fn planned_reads(tool: &str, goal: &str, steps: &[Step], today: chrono::NaiveDat
             let on_a_day = !crate::task_contract::calendar_days(goal, today).is_empty();
             let _ = on_a_day;
             let newest = json!({"limit":crate::apps::MAIL_SHOWN,"unread":unread});
-            let words = if recipes::asks_about_inbox(goal) { vec![] } else { search_words(goal) };
+            let words = if recipes::asks_about_inbox(goal) { vec![] } else if search.is_empty() { search_words(goal) } else { search.to_vec() };
             if words.is_empty() {
                 return vec![newest];
             }
@@ -970,7 +970,7 @@ fn word_hits(words: &[String], record: &Value, loose: bool) -> usize {
 }
 
 /// The next read this question needs, when it's only a question about the user's own apps.
-pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chrono::NaiveDate) -> Option<(&'static str, Value)> {
+pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chrono::NaiveDate, search: &[String]) -> Option<(&'static str, Value)> {
     let goal = &crate::task_contract::spelled(goal);
     if !only_asks(goal) || steps.iter().any(|step| step.state != "succeeded" || !SOURCES.contains(&step.tool.as_str())) {
         return None;
@@ -991,7 +991,7 @@ pub fn next_read(goal: &str, contract: &TaskContract, steps: &[Step], today: chr
         }
         seen.push(tool);
         let tool = *SOURCES.iter().find(|source| **source == tool)?;
-        for read in planned_reads(tool, goal, steps, today) {
+        for read in planned_reads(tool, goal, steps, today, search) {
             let done = steps.iter().any(|step| {
                 step.tool == tool && read.as_object().is_some_and(|fields| fields.iter().all(|(key, value)| step.arguments.get(key) == Some(value)) && (fields.contains_key("query") || step.arguments.get("query").is_none()))
             });
@@ -2004,17 +2004,17 @@ mod tests {
         let mut with_mail = contract.clone();
         with_mail.own_sources = Some(vec!["read_mail".into()]);
         let today = morning().date();
-        assert_eq!(next_read(goal, &contract, &[], today), None);
-        let (tool, first) = next_read(goal, &with_mail, &[], today).unwrap();
+        assert_eq!(next_read(goal, &contract, &[], today, &[]), None);
+        let (tool, first) = next_read(goal, &with_mail, &[], today, &[]).unwrap();
         assert_eq!((tool, first["query"].as_str()), ("read_mail", Some("Ana")));
         let mut searched = step("read_mail", crate::apps::mail_fixture("Ana", &[], 0));
         searched.arguments = first;
-        let (tool, newest) = next_read(goal, &with_mail, std::slice::from_ref(&searched), today).unwrap();
+        let (tool, newest) = next_read(goal, &with_mail, std::slice::from_ref(&searched), today, &[]).unwrap();
         assert_eq!((tool, newest.get("query")), ("read_mail", None));
         let mut opened = step("read_mail", crate::apps::mail_fixture("", &[], 0));
         opened.arguments = newest;
         let both = [searched.clone(), opened.clone()];
-        assert_eq!(next_read(goal, &with_mail, &both, today), None, "Mail is where someone writes, so no other app is read");
+        assert_eq!(next_read(goal, &with_mail, &both, today, &[]), None, "Mail is where someone writes, so no other app is read");
         assert_eq!(direct_answer(goal, &[&searched, &opened], morning()).unwrap(), "No email in your inbox from the last four months has “Ana” in its sender or subject.");
     }
 
@@ -2026,7 +2026,7 @@ mod tests {
         let today = morning().date();
         let mut day = calendar("2026-11-07", vec![event("Climbing", "2026-11-07 10:00", "2026-11-07 12:00", "")]);
         day.arguments = json!({"day":"2026-11-07"});
-        assert_eq!(next_read(goal, &contract, std::slice::from_ref(&day), today), None);
+        assert_eq!(next_read(goal, &contract, std::slice::from_ref(&day), today, &[]), None);
         assert!(direct_answer(goal, &[&day], morning()).unwrap().contains("Climbing"));
     }
 
@@ -2060,12 +2060,12 @@ mod tests {
         let today = morning().date();
         let goal = "what do I have on Saturday";
         let contract = TaskContract::from_request(goal);
-        let (tool, read) = next_read(goal, &contract, &[], today).unwrap();
+        let (tool, read) = next_read(goal, &contract, &[], today, &[]).unwrap();
         assert_eq!((tool, read["day"].as_str()), ("read_calendar", Some("2026-11-07")));
         let goal = "when's my dentist appointment";
         let mut contract = TaskContract::from_request(goal);
         contract.own_sources = Some(vec!["read_calendar".into()]);
-        let (_, read) = next_read(goal, &contract, &[], today).unwrap();
+        let (_, read) = next_read(goal, &contract, &[], today, &[]).unwrap();
         assert_eq!((read["day"].as_str(), read["until"].as_str()), (Some("2026-11-05"), Some("2026-12-05")));
     }
 
@@ -2570,8 +2570,8 @@ mod tests {
     #[test]
     fn a_hyphenated_new_is_not_unread() {
         let today = morning().date();
-        assert_eq!(planned_reads("read_mail", "any new emails", &[], today)[0]["unread"], true);
-        assert!(planned_reads("read_mail", "Which city was named in the GitHub new-device notice?", &[], today).iter().all(|read| read["unread"] == false));
+        assert_eq!(planned_reads("read_mail", "any new emails", &[], today, &[])[0]["unread"], true);
+        assert!(planned_reads("read_mail", "Which city was named in the GitHub new-device notice?", &[], today, &[]).iter().all(|read| read["unread"] == false));
     }
 
     #[test]

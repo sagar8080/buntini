@@ -40,6 +40,10 @@ pub struct Decision {
     /// What answered and how it was checked, for the record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// What Mail is searched for: the question's words the index finds in a sender or subject,
+    /// which is all Mail's own search looks at. Empty: the question's own words.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -305,7 +309,7 @@ pub fn asks_for_a_rewrite(goal: &str) -> bool {
 /// The complete reads a worked-out answer needs from one app, set here and never by a model:
 /// whole days or a run of days, every open reminder, and enough mail that counts and totals
 /// don't rest on the newest few.
-pub fn planned_reads(tool: &str, goal: &str, today: NaiveDate) -> Vec<Value> {
+pub fn planned_reads(tool: &str, goal: &str, today: NaiveDate, search: &[String]) -> Vec<Value> {
     let said = literals::read(goal, today);
     let stamp = |day: NaiveDate| day.format("%Y-%m-%d").to_string();
     match tool {
@@ -331,7 +335,8 @@ pub fn planned_reads(tool: &str, goal: &str, today: NaiveDate) -> Vec<Value> {
             let unread = ["unread", "haven't read", "not read", "havent read", "haven't opened"].iter().any(|said| lower.contains(said));
             let mut reads = vec![json!({"limit":MAIL_READ,"unread":unread})];
             // Mail's own search looks back months, by sender and subject.
-            for word in crate::personal_answer::names_in(goal).into_iter().take(2) {
+            let words = if search.is_empty() { crate::personal_answer::names_in(goal) } else { search.to_vec() };
+            for word in words.into_iter().take(2) {
                 reads.push(json!({"limit":MAIL_READ,"unread":unread,"query":word}));
             }
             reads
@@ -341,10 +346,10 @@ pub fn planned_reads(tool: &str, goal: &str, today: NaiveDate) -> Vec<Value> {
 }
 
 /// The next read a worked-out answer still needs, from the apps chosen.
-pub fn next_read(goal: &str, apps: &[String], steps: &[Step], today: NaiveDate) -> Option<(&'static str, Value)> {
+pub fn next_read(goal: &str, apps: &[String], steps: &[Step], today: NaiveDate, search: &[String]) -> Option<(&'static str, Value)> {
     for app in apps {
         let tool = *SOURCES.iter().find(|source| *source == app)?;
-        for read in planned_reads(tool, goal, today) {
+        for read in planned_reads(tool, goal, today, search) {
             // A read's limit can come back bounded, so a read is the same one by what it asked.
             let done = steps.iter().any(|step| step.tool == tool && ["day", "until", "query", "unread"].iter().all(|key| step.arguments.get(*key).filter(|value| **value != Value::Bool(false)) == read.get(*key).filter(|value| **value != Value::Bool(false))));
             if !done {
@@ -1335,11 +1340,11 @@ mod tests {
     #[test]
     fn a_worked_out_calendar_read_covers_the_days_named_or_the_month_ahead() {
         let today = now().date();
-        assert_eq!(planned_reads("read_calendar", "how many choir rehearsals are left in the next two weeks", today), vec![json!({"day":"2026-11-17","until":"2026-11-30"})]);
-        assert_eq!(planned_reads("read_calendar", "how long are my meetings tomorrow all together", today), vec![json!({"day":"2026-11-18"})]);
-        assert_eq!(planned_reads("read_calendar", "is the dentist before the climbing", today), vec![json!({"day":"2026-11-17","until":"2026-12-17"})]);
+        assert_eq!(planned_reads("read_calendar", "how many choir rehearsals are left in the next two weeks", today, &[]), vec![json!({"day":"2026-11-17","until":"2026-11-30"})]);
+        assert_eq!(planned_reads("read_calendar", "how long are my meetings tomorrow all together", today, &[]), vec![json!({"day":"2026-11-18"})]);
+        assert_eq!(planned_reads("read_calendar", "is the dentist before the climbing", today, &[]), vec![json!({"day":"2026-11-17","until":"2026-12-17"})]);
         let steps = [step("read_calendar", json!({"day":"2026-11-18"}), json!({}))];
-        assert_eq!(next_read("how long are my meetings tomorrow", &["read_calendar".to_string(), "read_reminders".to_string()], &steps, today), Some(("read_reminders", json!({}))));
+        assert_eq!(next_read("how long are my meetings tomorrow", &["read_calendar".to_string(), "read_reminders".to_string()], &steps, today, &[]), Some(("read_reminders", json!({}))));
     }
 
     #[test]
