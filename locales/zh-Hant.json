@@ -1480,6 +1480,7 @@
   "watches.watching": "追蹤中",
   "chat.answer.notConfirmed": "無法從你的記錄中確認{what}。我找到的是:",
   "chat.answer.notWorkedOut": "無法根據你的記錄算出來。我找到的是:",
+  "chat.answer.noSafetyGuess": "健康和安全的問題我不做猜測。請諮詢獸醫、醫師或藥師；如果情況可能緊急，請撥打當地急救電話。",
   "chat.workOut.ask": "用 {brain} 計算嗎?",
   "chat.workOut.askWith": "用 {brain} 計算嗎?它會看到你的{what}。",
   "chat.workOut.mail": "郵件",

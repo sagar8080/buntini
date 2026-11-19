@@ -1502,6 +1502,7 @@
   "watches.watching": "Watching",
   "chat.answer.notConfirmed": "I couldn’t confirm {what} from your records. Here’s what I found:",
   "chat.answer.notWorkedOut": "I couldn’t work that out from your records. Here’s what I found:",
+  "chat.answer.noSafetyGuess": "I won’t guess about health or safety. Please ask a vet, doctor or pharmacist, or call your local emergency number if it could be urgent.",
   "chat.workOut.ask": "Work this out with {brain}?",
   "chat.workOut.askWith": "Work this out with {brain}? It would see your {what}.",
   "chat.workOut.mail": "email",

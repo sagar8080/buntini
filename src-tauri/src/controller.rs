@@ -3802,6 +3802,35 @@ where
                 sources.push(tool);
             }
         }
+        // Health, medicines, pets, poisons and dangers: with nothing of theirs to read, the model
+        // would answer from what it knows, and Apple's model said a cat chewing a lily leaf was
+        // nothing to worry about. "My cat…" and "should I" sound like their own things, so this
+        // doesn't wait for a general question. The brain the person allowed answers; else nothing
+        // guesses. Only the question goes, never a record.
+        let unread = sources.is_empty() && task.apps.is_empty() && !held && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
+        if unread && worked_answer(flow).is_none() && crate::decision::safety_matter(&goal_now) {
+            flow.contract.own_sources = Some(vec![]);
+            let mut notes = vec!["safety".to_string()];
+            if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()) {
+                let id = brain.cloud_provider.clone();
+                if crate::decision::undecided(settings, &id) {
+                    // Asked once per brain, as for working out: it would see the question alone.
+                    let (question, choices) = crate::decision::consent_card(&goal_now, &id, &[]);
+                    task.choices = choices;
+                    return finish_with(state, flow, task, channel, question);
+                }
+                if settings.workout_brains.contains(&id) {
+                    let mut known = crate::decision::Known::default();
+                    let answer = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone(), &[], &mut None).await?;
+                    if let Some(answer) = answer.and_then(|answer| flow.contract.validate_large_brain_answer(&answer, &flow.steps).ok()) {
+                        flow.decision = Some(crate::decision::Decision { work_out: false, brain: Some(id), notes });
+                        return finish_with(state, flow, task, channel, answer);
+                    }
+                }
+            }
+            flow.decision = Some(crate::decision::Decision { work_out: false, brain: None, notes });
+            return finish_with(state, flow, task, channel, crate::i18n::t("chat.answer.noSafetyGuess"));
+        }
         // No app named: the local index says where the question's words are, and that nothing
         // has them, before any model guesses. A word nothing holds isn't read for.
         let unsettled = by_meaning.is_none() && sources.is_empty() && (!asked.is_empty() || own_shape);

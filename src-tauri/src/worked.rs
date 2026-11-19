@@ -447,6 +447,8 @@ pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
         .or_else(|| rule_choice(goal, steps, today))
         .or_else(|| assignments(goal, steps))
         .or_else(|| conversion(goal))
+        .or_else(|| leap_year(goal, today))
+        .or_else(|| clock_span(goal))
         .or_else(|| countdown(goal, today))
         .or_else(|| text_work(goal))
 }
@@ -595,6 +597,18 @@ fn shown(value: f64) -> String {
 /// Pounds that become dollars are money, not weight, and aren't answered here.
 fn conversion(goal: &str) -> Option<String> {
     let lower = goal.to_lowercase().replace(['?', '!'], " ").replace("°", " ").replace("degrees", " ").replace("fl oz", "floz");
+    // "22c in fahrenheit", "5km to miles": a unit written against its number.
+    let apart: Vec<String> = lower
+        .split_whitespace()
+        .map(|word| {
+            let at = word.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | ',' | '-'))).unwrap_or(word.len());
+            match word.split_at(at) {
+                (number, rest) if amount(number).is_some() && unit(rest).is_some() => format!("{number} {rest}"),
+                _ => word.to_string(),
+            }
+        })
+        .collect();
+    let lower = apart.join(" ");
     let words: Vec<&str> = lower.split_whitespace().collect();
     // From and to: "N from in|to to", or "how many to in|are in N from".
     let (value, from, to) = if let Some(at) = words.iter().position(|word| *word == "many") {
@@ -638,6 +652,74 @@ fn conversion(goal: &str) -> Option<String> {
     let (from_name, to_name) = (named(value, from.2), named(result, to.2));
     let joiner = if from.0 == "temperature" { "" } else { " " };
     Some(format!("{}{joiner}{from_name} is {}{joiner}{to_name}.", shown(value), shown(result)))
+}
+
+/// "is 2028 a leap yr", "was 1900 a leap year", "is this year a leap year", "when's the next
+/// leap year": by the Gregorian rule, which Apple's model turned round ("2028 is not a century
+/// year, so it is not a leap year"). Counting leap years over a span is left alone.
+fn leap_year(goal: &str, today: NaiveDate) -> Option<String> {
+    let leap = |year: i32| year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let lower = goal.to_lowercase().replace(['?', '!', ',', '.', '’', '\''], " ").replace("leap-year", "leap year").replace("leapyear", "leap year");
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let at = words.windows(2).position(|pair| pair[0] == "leap" && ["year", "yr", "years", "yrs"].contains(&pair[1]))?;
+    if words.iter().any(|word| ["how", "between", "since", "until", "till", "from", "count", "many"].contains(word)) {
+        return None;
+    }
+    let mut years: Vec<i32> = words.iter().filter(|word| word.len() == 4).filter_map(|word| word.parse().ok()).collect();
+    years.dedup();
+    if years.iter().any(|year| !(1583..=9999).contains(year)) {
+        return None;
+    }
+    let now = today.year();
+    // "the next leap year", "the next leap year after 2030", "when was the last leap year".
+    let from = match years.as_slice() {
+        [] => Some(now),
+        [year] => Some(*year),
+        _ => None,
+    };
+    match (at.checked_sub(1).and_then(|before| words.get(before)), from) {
+        (Some(&"next"), Some(from)) => return (from + 1..).find(|year| leap(*year)).map(|year| format!("The next leap year is {year}.")),
+        (Some(&"last") | Some(&"previous"), Some(from)) => return (1583..from).rev().find(|year| leap(*year)).map(|year| format!("The last leap year was {year}.")),
+        (Some(&"next") | Some(&"last") | Some(&"previous"), None) => return None,
+        _ => {}
+    }
+    if years.is_empty() {
+        // "is this year a leap year", "will next year be one".
+        let named = words.windows(2).find(|pair| pair[1] == "year" && ["this", "next", "last"].contains(&pair[0]))?;
+        years.push(match named[0] { "this" => now, "next" => now + 1, _ => now - 1 });
+    }
+    let said: Vec<String> = years
+        .iter()
+        .map(|year| if leap(*year) { format!("Yes, {year} is a leap year: February has 29 days.") } else { format!("No, {year} isn’t a leap year: February has 28 days.") })
+        .collect();
+    Some(said.join("\n"))
+}
+
+/// "if i fall asleep at 23:40 and wake up at 6:15 how long did i sleep", "how many hours from
+/// 9am to 5:30pm": the two clock times the question gives, past midnight when the second is
+/// earlier. Times on their calendar ("my 2pm and 4pm meetings") are theirs to read, not this.
+fn clock_span(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['’', '‘'], "'");
+    let asks = ["how long", "how many hours", "how many minutes", "how much time"].iter().any(|cue| lower.contains(cue));
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
+    const THEIRS: [&str; 13] = ["my", "our", "meeting", "meetings", "calendar", "event", "events", "appointment", "appointments", "today", "tomorrow", "today's", "tomorrow's"];
+    // A flight's times are local to two places, so their difference isn't its length.
+    const AWAY: [&str; 12] = ["flight", "flights", "fly", "flying", "lands", "land", "arrives", "arrive", "departs", "depart", "local", "zone"];
+    if !asks || words.iter().any(|word| THEIRS.contains(word) || AWAY.contains(word)) {
+        return None;
+    }
+    let [from, to] = crate::literals::times(goal)[..] else { return None };
+    let minutes = (to + 24 * 60 - from) % (24 * 60);
+    if minutes == 0 {
+        return None;
+    }
+    let (hours, minutes) = (minutes / 60, minutes % 60);
+    let length = match (hours, minutes) {
+        (0, m) => format!("{m} minute{}", if m == 1 { "" } else { "s" }),
+        (h, 0) => format!("{h} hour{}", if h == 1 { "" } else { "s" }),
+        (h, m) => format!("{h} hour{} and {m} minute{}", if h == 1 { "" } else { "s" }, if m == 1 { "" } else { "s" }),
+    };
+    Some(format!("From {} to {} is {length}.", hhmm(from), hhmm(to)))
 }
 
 /// "how many days until christmas", "how long till friday": counted from today.
@@ -715,6 +797,47 @@ mod tests {
         assert_eq!(countdown("how many days until christmas", saturday).as_deref(), Some("48 days until Christmas, Friday 25 December."));
         assert_eq!(countdown("how long until friday?", saturday).as_deref(), Some("6 days, until Friday 13 November."));
         assert_eq!(countdown("how many days until my birthday", saturday), None);
+    }
+
+    #[test]
+    fn a_unit_written_against_its_number_is_still_converted() {
+        assert_eq!(conversion("22c in fahrenheit?").as_deref(), Some("22°C is 71.6°F."));
+        assert_eq!(conversion("5km to miles").as_deref(), Some("5 km is 3.11 miles."));
+        assert_eq!(conversion("-40f in c").as_deref(), Some("-40°F is -40°C."));
+        assert_eq!(conversion("2.5kg in lbs").as_deref(), Some("2.5 kg is 5.51 pounds."));
+        // Ordinals and times aren't units.
+        assert_eq!(conversion("who came 1st in the race"), None);
+        assert_eq!(conversion("is 30c hot"), None);
+    }
+
+    #[test]
+    fn leap_years_follow_the_gregorian_rule() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        assert_eq!(leap_year("is 2028 a leap yr", today).as_deref(), Some("Yes, 2028 is a leap year: February has 29 days."));
+        assert_eq!(leap_year("was 1900 a leap year?", today).as_deref(), Some("No, 1900 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("Is 2000 a leap-year", today).as_deref(), Some("Yes, 2000 is a leap year: February has 29 days."));
+        assert_eq!(leap_year("is this year a leap year", today).as_deref(), Some("No, 2026 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("will next year be a leap year", today).as_deref(), Some("No, 2027 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("when's the next leap year", today).as_deref(), Some("The next leap year is 2028."));
+        assert_eq!(leap_year("next leap year after 2028?", today).as_deref(), Some("The next leap year is 2032."));
+        assert_eq!(leap_year("when was the last leap year", today).as_deref(), Some("The last leap year was 2024."));
+        assert_eq!(leap_year("are 2024 and 2100 leap years", today).as_deref(), Some("Yes, 2024 is a leap year: February has 29 days.\nNo, 2100 isn’t a leap year: February has 28 days."));
+        // Counting over a span, or a day of their own, isn't this.
+        assert_eq!(leap_year("how many leap years between 2000 and 2100", today), None);
+        assert_eq!(leap_year("is my anniversary in a leap year", today), None);
+        assert_eq!(leap_year("what's a leap year", today), None);
+    }
+
+    #[test]
+    fn the_length_between_two_given_clock_times_is_worked_out() {
+        assert_eq!(clock_span("if i fall asleep at 23:40 and wake up at 6:15 how long did i sleep").as_deref(), Some("From 23:40 to 06:15 is 6 hours and 35 minutes."));
+        assert_eq!(clock_span("how many hours from 9am to 5:30pm?").as_deref(), Some("From 09:00 to 17:30 is 8 hours and 30 minutes."));
+        assert_eq!(clock_span("went to bed at 11pm and got up at 7am, how long is that").as_deref(), Some("From 23:00 to 07:00 is 8 hours."));
+        // Their own day is read, not worked out from the words.
+        assert_eq!(clock_span("how long between my 2pm and 4pm meetings"), None);
+        assert_eq!(clock_span("how many hours between 9:15 and 17:00").as_deref(), Some("From 09:15 to 17:00 is 7 hours and 45 minutes."));
+        assert_eq!(clock_span("how long is the walk at 3pm"), None);
+        assert_eq!(clock_span("the flight leaves at 9:40 and lands at 13:05, how long is it"), None);
     }
 
     fn note(body: &str) -> Vec<Step> {

@@ -149,12 +149,267 @@ pub fn states_figures(goal: &str) -> bool {
 pub fn general_request(goal: &str) -> Value {
     json!({
         "messages": [
-            {"role":"system","content":"Answer the user's general question correctly and briefly, in the format asked. For arithmetic, use the calculate tool rather than working it out in your head. It is not about their emails, calendar or reminders, and you see none of them."},
+            {"role":"system","content":"Answer the user's general question correctly and briefly, in the format asked. For arithmetic, use the calculate tool rather than working it out in your head. Where health, medicine, an animal's safety or a danger is involved, say plainly how serious it is and when to contact a vet, doctor, poison line or emergency services. It is not about their emails, calendar or reminders, and you see none of them."},
             {"role":"user","content":goal},
         ],
         "tools": [tools()[0].clone()],
         "max_tokens": 800,
     })
+}
+
+/// Questions where a confident wrong answer could hurt someone or an animal: health,
+/// medicines, symptoms, pets, poisons, food safety and dangers at home or outdoors. Apple's
+/// model told someone a cat chewing a lily leaf was nothing to worry about. Written for this,
+/// not taken from any exam.
+const SAFETY_EXAMPLES: [&str; 88] = [
+    "my cat licked some antifreeze off the garage floor",
+    "the dog got into the bin and ate chicken bones",
+    "is it okay to give my puppy a painkiller meant for people",
+    "my kitten nibbled a poinsettia, will she be ok",
+    "can rabbits have rhubarb leaves",
+    "which human foods are poisonous to dogs",
+    "my cat keeps going to the litter box but nothing comes out",
+    "the dog swallowed a sock an hour ago",
+    "is tea tree oil safe to put on a cat",
+    "my budgie breathed in fumes from a burnt nonstick pan",
+    "the dog mouthed a toad and is foaming at the mouth",
+    "how much antihistamine can a 30 pound dog have",
+    "my cat got some of the dog's flea treatment on her",
+    "can hamsters eat onion",
+    "is it safe to take ibuprofen and paracetamol together",
+    "i accidentally took my blood pressure pill twice today",
+    "how many hours apart should i take codeine",
+    "can i have a beer while on metronidazole",
+    "is melatonin safe while pregnant",
+    "right dose of children's ibuprofen for a 4 year old",
+    "i missed two birth control pills in a row",
+    "can i take cold medicine with blood thinners",
+    "is too much vitamin a dangerous",
+    "what happens if i stop sertraline suddenly",
+    "can i take my antibiotics with milk",
+    "my toddler hit his head and now he's vomiting",
+    "my chest feels tight and i can't catch my breath",
+    "my newborn feels hot and won't feed",
+    "my lips are swelling after eating shrimp",
+    "deep cut on my finger won't stop bleeding",
+    "how to tell if someone is having a stroke",
+    "what do i do if someone is choking",
+    "my friend passed out after drinking and is hard to wake",
+    "i've been feeling like i want to end my life",
+    "sudden numbness in my face and arm",
+    "my child swallowed a coin",
+    "high fever and a stiff neck",
+    "is this mole something to worry about",
+    "is it dangerous to mix two drain cleaners",
+    "the carbon monoxide alarm keeps going off but i feel fine",
+    "my toddler bit into a laundry pod",
+    "my kid swallowed a button battery",
+    "can i run a gas heater indoors with the windows shut",
+    "is it safe to touch a frayed wire if the lights are off",
+    "there's a burning smell coming from the fuse box",
+    "are spray paint fumes harmful indoors",
+    "chicken was left out overnight, can i still cook it",
+    "are the mushrooms i picked in the woods safe to eat",
+    "can i eat bread if i cut off the mould",
+    "is slightly pink pork safe",
+    "leftover takeaway from four days ago still ok to eat",
+    "can i eat sushi when i'm pregnant",
+    "is homemade garlic in oil risky",
+    "milk smells a bit off, will it make me sick",
+    "a tick has been on me for two days",
+    "how do i know if someone has hypothermia",
+    "what do i do for a jellyfish sting",
+    "my friend is dizzy and stopped sweating in the heat",
+    "is the ice on the pond thick enough to walk on",
+    "a bat bit me while camping",
+    "is it safe to hike in a lightning storm",
+    "my kid ate a berry from the hedge",
+    "should i be worried about this rash",
+    "can i give my baby water at 2 months",
+    "the oil in my frying pan caught fire",
+    "can i put out a kitchen fire with flour",
+    "is it safe to go jogging at minus 15",
+    "how long can someone last in freezing water",
+    "is it ok to warm the car up in a closed garage",
+    "what temperature does chicken need to reach to be safe",
+    "my fish is lying on the bottom of the tank barely moving",
+    "my rabbit hasn't eaten anything since yesterday",
+    "when should i use an epipen",
+    "can i drive after two glasses of wine",
+    "i've been awake 30 hours, is it ok to drive home",
+    "is it safe to use my phone on the charger in the bath",
+    "my dog's paws look burnt from the hot pavement",
+    "bumped my head yesterday and still feel dizzy",
+    "can i take antibiotics that expired last year",
+    "how much aspirin is too much",
+    "is it dangerous to lift something heavy with a bad back",
+    "altitude sickness symptoms on a hike",
+    "my baby rolled off the bed",
+    "can i leave a candle burning overnight",
+    "my laptop charger is sparking",
+    "there's a burning smell coming from my laptop",
+    "my phone got really hot and puffed up while charging",
+    "the hair dryer fell into the bath water",
+];
+
+/// General questions with nothing at stake, many in the same words as the ones above (pets,
+/// cooking, medicine as a subject, their Mac's health) or told about the person's own day, as
+/// most of the safety ones are ("my train is at 8:10"), for telling the two apart.
+const EVERYDAY_EXAMPLES: [&str; 114] = [
+    "what's the capital of canada",
+    "translate see you tomorrow into german",
+    "write a short poem about autumn",
+    "what does serendipity mean",
+    "who painted the mona lisa",
+    "how far away is the moon",
+    "how do i poach an egg",
+    "recipe for banana bread",
+    "how long do you roast a whole chicken for",
+    "how many teaspoons in a tablespoon",
+    "which dog breed is the biggest",
+    "why do cats knead blankets",
+    "fun facts about octopuses",
+    "names for a black cat",
+    "how do birds know where to migrate",
+    "who discovered insulin",
+    "what does the liver do",
+    "what is a placebo",
+    "history of aspirin",
+    "what does chronic mean",
+    "how many bones are in the human body",
+    "make this email sound more polite",
+    "a good name for a bakery",
+    "tell me a joke",
+    "good morning",
+    "how do i change my wallpaper on a mac",
+    "how do i reset my router",
+    "best way to learn spanish",
+    "how many players on a rugby team",
+    "who won wimbledon in 2019",
+    "explain photosynthesis simply",
+    "tallest mountain in africa",
+    "how do i plant garlic",
+    "when should i prune roses",
+    "beginner running plan for a 5k",
+    "how many calories does walking burn",
+    "how do i make cold brew coffee",
+    "what wine goes with salmon",
+    "how do you say cheers in japanese",
+    "plot of jurassic park",
+    "convert 30 degrees celsius to fahrenheit",
+    "what's 15 percent of 80",
+    "what year did the titanic sink",
+    "difference between weather and climate",
+    "how does a microwave heat food",
+    "recommend a sci-fi book",
+    "how to get a red wine stain out of carpet",
+    "how to unclog a sink without chemicals",
+    "keeping houseplants alive in winter",
+    "what is a nurse practitioner",
+    "how do vaccines train the immune system",
+    "why do we get goosebumps",
+    "how do i teach my dog to sit",
+    "what's the best age to get a kitten",
+    "how long do goldfish live",
+    "how do i knead pizza dough",
+    "what's the healthiest breakfast cereal",
+    "how many hours of sleep do teenagers need",
+    "who wrote pride and prejudice",
+    "what's a good stretch for tight hamstrings",
+    "how to make a paper airplane",
+    "is it going to be a cold winter this year",
+    "spell necessary for me",
+    "what are you",
+    "how long is a flight from paris to tokyo",
+    "why does bread rise",
+    "why do dogs tilt their heads",
+    "i went to bed at 11 and woke at 7, how many hours is that",
+    "how loud is a jet engine in decibels",
+    "hottest temperature ever recorded",
+    "how many minutes to cook pasta",
+    "who invented the thermometer",
+    "how many steps are in a mile",
+    "how cold is it at the top of everest",
+    "best exercises for stronger legs",
+    "how do whales sleep",
+    "lifespan of a parrot",
+    "how do i get my cat to use a scratching post",
+    "how deep is the ocean",
+    "who was florence nightingale",
+    "how far can a car go on a full tank",
+    "what colour are flamingo chicks",
+    "what does the word acute mean in maths",
+    "what toys do rabbits like",
+    "my train is at 8:10 and takes 50 minutes, when do i arrive",
+    "i'm 34, how many months is that",
+    "my rent is 950 a month, how much is that a year",
+    "i ran 10k in 52 minutes, what's my pace per km",
+    "my laptop won't connect to the printer",
+    "i want to learn to knit, where do i start",
+    "my phone battery drains really fast, any tips",
+    "my essay is 1800 words, how many pages is that",
+    "i have 3 weeks off, how many working days is that",
+    "my sister's birthday is in 40 days, how many weeks is that",
+    "my sourdough didn't rise much, what went wrong",
+    "i'm painting a 4 by 3 metre wall, how much paint do i need",
+    "my cat keeps knocking things off the table, why",
+    "my dog pulls on the lead, how do i train him",
+    "is my mac's battery in good shape",
+    "how full is my disk",
+    "is my network connection secure",
+    "should i update macos now",
+    "is my macbook running hot",
+    "do macs need antivirus software",
+    "a website says my computer is infected, is that real",
+    "is it bad to keep my laptop plugged in all the time",
+    "is it safe to clear my browser cache",
+    "is my mac due an update",
+    "how healthy is my ssd",
+    "my mac is slow, what's using the cpu",
+    "is filevault turned on",
+    "can i delete old iphone backups",
+    "is my mac protected",
+    "is my password strong enough",
+];
+
+type Examples = std::sync::Mutex<Option<Vec<(bool, Vec<f32>)>>>;
+
+static SAFETY: Examples = std::sync::Mutex::new(None);
+
+/// How much nearer a question is, by meaning, to the first examples than to the second, with
+/// the search model bundled for the memory index: the mean of the three nearest of each. None
+/// when that model can't say now; the examples are tried again next time.
+fn nearer(cache: &'static Examples, first: &[&str], second: &[&str], goal: &str) -> Option<f32> {
+    let wait = std::time::Duration::from_secs(2);
+    let mut cached = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if cached.is_none() {
+        let texts: Vec<String> = first.iter().chain(second).map(|text| text.to_string()).collect();
+        let vectors = crate::embedding::embed_within(&texts, false, wait).ok()?;
+        *cached = Some(vectors.into_iter().enumerate().filter_map(|(at, vector)| Some((at < first.len(), unit(&vector?)))).collect());
+    }
+    let examples = cached.as_ref()?;
+    let asked = unit(&crate::embedding::embed_within(&[goal.to_string()], false, wait).ok()?.pop()??);
+    let score = |kind: bool| {
+        let mut near: Vec<f32> = examples.iter().filter(|(of, _)| *of == kind).map(|(_, vector)| vector.iter().zip(&asked).map(|(a, b)| a * b).sum()).collect();
+        near.sort_by(|a, b| b.total_cmp(a));
+        near.iter().take(3).sum::<f32>() / 3.0
+    };
+    Some(score(true) - score(false))
+}
+
+/// How much nearer a general question is to the safety examples than to the everyday ones.
+pub fn safety_margin(goal: &str) -> Option<f32> {
+    nearer(&SAFETY, &SAFETY_EXAMPLES, &EVERYDAY_EXAMPLES, goal)
+}
+
+/// How near the safety examples a question must be to be one. Missing one costs a dangerous
+/// guess; taking an everyday question for one costs an honest "ask someone", so this errs low.
+const SAFETY_THRESHOLD: f32 = -0.01;
+
+/// Whether a general question is one where a confident wrong answer could hurt someone or an
+/// animal, so an on-device model doesn't answer it from what it knows.
+pub fn safety_matter(goal: &str) -> bool {
+    safety_margin(goal).is_some_and(|margin| margin > SAFETY_THRESHOLD)
 }
 
 /// Example questions of each kind, for telling them apart by meaning on this Mac with the
@@ -214,7 +469,7 @@ const LOOK_UP_EXAMPLES: [&str; 24] = [
     "what did I write on my passport reminder",
 ];
 
-static EXAMPLES: std::sync::OnceLock<Option<Vec<(bool, Vec<f32>)>>> = std::sync::OnceLock::new();
+static EXAMPLES: Examples = std::sync::Mutex::new(None);
 
 fn unit(vector: &[i8]) -> Vec<f32> {
     let length = vector.iter().map(|value| f32::from(*value).powi(2)).sum::<f32>().sqrt().max(1.0);
@@ -237,21 +492,7 @@ pub fn work_out_threshold(allowed: bool) -> f32 {
 /// with the search model bundled for the memory index: above 0 leans to working it out.
 /// None when that model can't say now.
 pub fn work_out_margin(goal: &str) -> Option<f32> {
-    let wait = std::time::Duration::from_secs(2);
-    let examples = EXAMPLES
-        .get_or_init(|| {
-            let texts: Vec<String> = WORK_OUT_EXAMPLES.iter().chain(LOOK_UP_EXAMPLES.iter()).map(|text| text.to_string()).collect();
-            let vectors = crate::embedding::embed_within(&texts, false, wait).ok()?;
-            Some(vectors.into_iter().enumerate().filter_map(|(at, vector)| Some((at < WORK_OUT_EXAMPLES.len(), unit(&vector?)))).collect())
-        })
-        .as_ref()?;
-    let asked = unit(&crate::embedding::embed_within(&[goal.to_string()], false, wait).ok()?.pop()??);
-    let score = |work: bool| {
-        let mut near: Vec<f32> = examples.iter().filter(|(kind, _)| *kind == work).map(|(_, vector)| vector.iter().zip(&asked).map(|(a, b)| a * b).sum()).collect();
-        near.sort_by(|a, b| b.total_cmp(a));
-        near.iter().take(3).sum::<f32>() / 3.0
-    };
-    Some(score(true) - score(false))
+    nearer(&EXAMPLES, &WORK_OUT_EXAMPLES, &LOOK_UP_EXAMPLES, goal)
 }
 
 /// Whether the model said the question has to be worked out. None when its reply isn't a choice.
@@ -1393,5 +1634,33 @@ mod probe {
             contract.refresh(goal, &[]);
             println!("PROBE {goal}: actions {:?} outcomes {:?} sources {:?} own {}", crate::completion::requested_actions(goal), contract.outcomes.iter().map(|o| (o.kind.clone(), o.tool.clone(), o.accepted_tools.clone())).collect::<Vec<_>>(), crate::personal_answer::source_requests(goal, None, &contract).0, crate::personal_answer::about_own_things(goal, &contract));
         }
+    }
+}
+
+#[cfg(test)]
+mod safety_probe {
+    /// `BUNTINI_SAFETY_FILE=<questions.json>` (rows `{"asked", "safety"}`): each question's
+    /// margin and what the threshold makes of it, with the bundled search model.
+    #[test]
+    #[ignore = "reads the bundled search model; run with BUNTINI_SAFETY_FILE=<file>"]
+    fn safety_margins() {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        let file = std::env::var("BUNTINI_SAFETY_FILE").expect("BUNTINI_SAFETY_FILE");
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let (mut caught, mut missed, mut wrongly, mut clear) = (0, 0, 0, 0);
+        for row in rows {
+            let asked = row["asked"].as_str().unwrap();
+            let margin = super::safety_margin(asked).expect("search model");
+            let said = super::safety_matter(asked);
+            let truth = row["safety"].as_bool().unwrap();
+            match (truth, said) {
+                (true, true) => caught += 1,
+                (true, false) => missed += 1,
+                (false, true) => wrongly += 1,
+                (false, false) => clear += 1,
+            }
+            println!("SAFETY {margin:+.3} {} {} | {asked}", if truth { "S" } else { "-" }, if truth == said { "ok" } else { "XX" });
+        }
+        println!("SAFETY caught {caught}, missed {missed}, everyday taken for safety {wrongly}, everyday clear {clear}");
     }
 }
