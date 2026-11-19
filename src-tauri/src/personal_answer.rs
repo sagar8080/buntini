@@ -542,7 +542,8 @@ fn pointable<'a>(goal: &str, reads: &[&'a Step]) -> Vec<(String, &'a Value, &'a 
     }
     if records.len() > POINTABLE {
         let words = question_words(goal);
-        let mut ranked: Vec<(usize, usize)> = records.iter().enumerate().map(|(at, (_, record, _))| (word_hits(&words, record, true), at)).collect();
+        // A word's stem counts too: "dry cleaning" is the reminder for the cleaners.
+        let mut ranked: Vec<(usize, usize)> = records.iter().enumerate().map(|(at, (_, record, _))| (word_hits(&words, record, true) * 2 + usize::from(shares_a_stem(&words, record)), at)).collect();
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut keep: Vec<usize> = ranked.into_iter().take(POINTABLE).map(|(_, at)| at).collect();
         keep.sort_unstable();
@@ -931,6 +932,27 @@ fn question_words(goal: &str) -> Vec<String> {
 
 /// How many of the words a record has. `loose` also takes plurals, for once a question is
 /// known to be about this app. A sender's name counts with an "s" either way ("priyas").
+/// A word without its ending: "cleaning" and "cleaners" are both "clean".
+fn stem(word: &str) -> &str {
+    for ending in ["ings", "ing", "ers", "er", "ed", "es", "s"] {
+        if let Some(rest) = word.strip_suffix(ending) {
+            if rest.chars().count() >= 4 {
+                return rest;
+            }
+        }
+    }
+    word
+}
+
+/// Whether a record has one of the question's words, a part of a hyphenated one ("stand" of
+/// "stand-up"), or a word with the same stem.
+fn shares_a_stem(words: &[String], record: &Value) -> bool {
+    let field = |name: &str| record[name].as_str().unwrap_or_default().to_lowercase();
+    let text = ["title", "location", "subject", "sender", "list", "excerpt"].iter().map(|name| field(name)).collect::<Vec<_>>().join(" ");
+    let stems: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).filter(|token| token.chars().count() >= 3).map(stem).collect();
+    words.iter().flat_map(|word| word.split(|c: char| !c.is_alphanumeric())).filter(|part| part.chars().count() >= 3).any(|part| stems.contains(&stem(part)))
+}
+
 fn word_hits(words: &[String], record: &Value, loose: bool) -> usize {
     let field = |name: &str| record[name].as_str().unwrap_or_default().to_lowercase();
     let text = ["title", "location", "subject", "sender", "list", "excerpt"].iter().map(|name| field(name)).collect::<Vec<_>>().join(" ");
@@ -1230,7 +1252,9 @@ pub fn not_there(goal: &str, reads: &[&Step], index: &IndexHits) -> Option<Strin
         return None;
     }
     let records = numbered(reads);
-    if records.iter().any(|(_, record, _)| word_hits(&words, record, true) > 0) {
+    // "Nothing mentions “stand-up”" was said beside Team stand-up, and "no reminder mentions
+    // “cleaning”" beside one for the cleaners: a word's parts and its stem count too.
+    if records.iter().any(|(_, record, _)| word_hits(&words, record, true) > 0 || shares_a_stem(&words, record)) {
         return None;
     }
     let tool = reads[0].tool.as_str();
@@ -2349,8 +2373,11 @@ mod tests {
         assert!(not_there(goal, &[&searched], &index(false, vec![])).is_none(), "with no index, a subject search proves nothing");
         assert!(not_there(goal, &[&searched], &index(true, vec![])).is_some_and(|said| said.starts_with("No email from the last four months mentions")));
         // Reminders are read whole, so the index isn't needed for them.
-        let list = reminders(vec![reminder("Renew Pilot's pet insurance", "2026-11-16")]);
+        let list = reminders(vec![reminder("Renew Pilot's pet insurance", "2026-11-16"), reminder("Collect concert dress from cleaners", "2026-11-29")]);
         assert_eq!(not_there("do i have a reminder about my passport", &[&list], &IndexHits::default()).as_deref(), Some("No reminder mentions “passport”."));
+        assert!(not_there("what time is the dry cleaning reminder set for", &[&list], &IndexHits::default()).is_none(), "cleaners is cleaning");
+        let day = calendar("2026-11-19", vec![event("Team stand-up", "2026-11-19 09:15", "2026-11-19 09:30", "")]);
+        assert!(not_there("where's tomorrows stand-up", &[&day], &IndexHits::default()).is_none(), "stand-up is there");
     }
 
     #[test]

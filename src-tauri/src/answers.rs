@@ -167,6 +167,10 @@ fn plural(count: usize, one: &str, many: &str) -> String {
 /// Whether `word` (from the question) is one of `text`'s words, allowing for plurals and
 /// endings: "climb" in "Bouldering and climbing", "insurance" in "Renew pet insurance".
 fn holds(text: &str, word: &str) -> bool {
+    // "stand-up" is held by "Team stand-up": each part of a hyphenated word.
+    if word.contains(|c: char| !c.is_alphanumeric()) {
+        return word.split(|c: char| !c.is_alphanumeric()).filter(|part| part.chars().count() >= 3).any(|part| holds(text, part));
+    }
     let word = word.to_lowercase();
     text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|token| !token.is_empty()).any(|token| {
         token == word
@@ -326,6 +330,11 @@ pub fn candidates(goal: &str, reads: &[&Step], now: NaiveDateTime) -> Vec<Candid
                 _ => format!("After today, the next reminders are due {}: {}.", day_words(day, today), then.iter().map(|reminder| reminder_line(reminder, today)).collect::<Vec<_>>().join("; ")),
             });
         }
+        let timed: Vec<Reminder> = by_due(&all.iter().copied().filter(|reminder| reminder.at.is_some() && reminder.due.zip(reminder.at).is_some_and(|(day, time)| day.and_time(time) >= now)).collect::<Vec<_>>());
+        add("when's my next reminder that has a time set".into(), match timed.first() {
+            Some(next) => format!("Your next reminder with a time is {}, due {} at {}.", next.title, day_words(next.due.unwrap_or(today), today), next.at.map(|time| time.format("%H:%M").to_string()).unwrap_or_default()),
+            None => "None of your coming reminders has a time set.".into(),
+        });
         let undated: Vec<&Reminder> = all.iter().copied().filter(|reminder| reminder.due.is_none()).collect();
         add("which reminders have no due date".into(), match undated.len() {
             0 => "Every reminder has a due date.".into(),
@@ -716,6 +725,7 @@ mod tests {
         assert!(says(&found, "how many things are on my Home list, and what").starts_with("Your Home list has 3 reminders"));
         assert_eq!(says(&found, "my Groceries list in alphabetical order"), "Your Groceries list, A to Z:\n- Dog treats\n- Oat milk");
         assert!(says(&found, "what's my next reminder after today's").contains("Buy Imogen's birthday present, due Tuesday 24 November, in 6 days"));
+        assert_eq!(says(&found, "when's my next reminder that has a time set"), "Your next reminder with a time is Water the balcony herbs, due today (Wednesday 18 November) at 18:00.");
         let found = candidates("what time is the imogen present reminder set for", &[&list], now());
         assert_eq!(says(&found, "what time is the reminder to buy imogen's birthday present set for"), "“Buy Imogen's birthday present” has no time set; it's due Tuesday 24 November, in 6 days.");
     }

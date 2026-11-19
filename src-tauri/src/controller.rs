@@ -3625,7 +3625,7 @@ fn index_hits(state: &AppState, settings: &Settings, goal: &str) -> crate::perso
 
 /// One question put to the brain the person allowed to work questions out, with Rust's tools
 /// run here for it. What the tools return becomes known to the check. None when it failed.
-async fn ask_brain(state: &AppState, brain: &Settings, mut request: Value, known: &mut crate::decision::Known, notes: &mut Vec<String>, cancel: Arc<AtomicBool>) -> Result<Option<String>, String> {
+async fn ask_brain(state: &AppState, brain: &Settings, mut request: Value, known: &mut crate::decision::Known, notes: &mut Vec<String>, cancel: Arc<AtomicBool>, more: &[String], wanted: &mut Option<String>) -> Result<Option<String>, String> {
     for round in 0..=crate::decision::tool_rounds() {
         let turn = state.models.generate(brain, request.clone(), cancel.clone(), |_| {}).await;
         if cancel.load(Ordering::Relaxed) {
@@ -3636,6 +3636,14 @@ async fn ask_brain(state: &AppState, brain: &Settings, mut request: Value, known
                 Some(call) if round < crate::decision::tool_rounds() => {
                     let name = call["name"].as_str().unwrap_or_default().to_string();
                     let arguments = call["arguments"].clone();
+                    // Another app it may see: read it first, then ask again with everything.
+                    if name == "read_app" {
+                        if let Some(tool) = crate::decision::wanted_app(&arguments, more) {
+                            notes.push(format!("{} asked to read {tool}", brain.cloud_provider));
+                            *wanted = Some(tool);
+                            return Ok(None);
+                        }
+                    }
                     let result = crate::decision::run_tool(&name, &arguments, known);
                     notes.push(format!("{name} {arguments} = {result}"));
                     if let Some(messages) = request["messages"].as_array_mut() {
@@ -3662,14 +3670,21 @@ async fn ask_brain(state: &AppState, brain: &Settings, mut request: Value, known
 /// brain they allowed when there is one, else by the on-device model, then checked by Rust.
 /// Returns what to show and how it was reached.
 #[allow(clippy::too_many_arguments)]
-async fn work_out(state: &AppState, settings: &Settings, channel: &Channel<TaskEvent>, task_id: &str, cancel: Arc<AtomicBool>, goal: &str, reads: &[&crate::workflows::Step], brain: Option<&str>, valid: impl Fn(&str) -> Result<String, String>) -> Result<(String, Vec<String>), String> {
+/// Works a question out on the brain the person allowed. `read` are the apps read for it and
+/// `more` the others that brain may see; the app it asks for instead of answering comes back.
+#[allow(clippy::too_many_arguments)]
+async fn work_out(state: &AppState, settings: &Settings, channel: &Channel<TaskEvent>, task_id: &str, cancel: Arc<AtomicBool>, goal: &str, reads: &[&crate::workflows::Step], brain: Option<&str>, read: &[String], more: &[String], valid: impl Fn(&str) -> Result<String, String>) -> Result<(String, Vec<String>, Option<String>), String> {
     let now = chrono::Local::now().naive_local();
     let mut digest = crate::decision::digest(goal, reads, now);
     let mut notes = Vec::new();
     phase(channel, task_id, "thinking");
     let mut reply: Option<String> = None;
+    let mut wanted = None;
     if let Some(brain) = brain.and_then(|_| crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok())) {
-        reply = ask_brain(state, &brain, crate::decision::external_request(goal, &digest), &mut digest.known, &mut notes, cancel.clone()).await?;
+        reply = ask_brain(state, &brain, crate::decision::external_request(goal, &digest, read, more), &mut digest.known, &mut notes, cancel.clone(), more, &mut wanted).await?;
+        if wanted.is_some() {
+            return Ok((String::new(), notes, wanted));
+        }
     }
     if reply.is_none() {
         let turn = state.models.generate(settings, crate::decision::on_device_request(goal, &digest), cancel.clone(), |_| {}).await;
@@ -3690,7 +3705,7 @@ async fn work_out(state: &AppState, settings: &Settings, channel: &Channel<TaskE
     if !missing.is_empty() {
         notes.push(format!("unconfirmed: {}", missing.join(", ")));
     }
-    Ok((answer, notes))
+    Ok((answer, notes, None))
 }
 
 async fn continue_workflow_using<F, Fut>(
@@ -3941,7 +3956,7 @@ where
                 if figures {
                     let mut notes = Vec::new();
                     let mut known = crate::decision::Known::default();
-                    if let Some(answer) = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone()).await? {
+                    if let Some(answer) = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone(), &[], &mut None).await? {
                         let answer = flow.contract.validate_large_brain_answer(&answer, &flow.steps)?;
                         flow.decision = Some(crate::decision::Decision { work_out: true, brain: Some(brain.cloud_provider.clone()), notes });
                         return finish_with(state, flow, task, channel, answer);
@@ -4047,7 +4062,7 @@ where
         }
         // Rust reads and answers for a small model. A large one does that itself.
         let worked_out = flow.decision.as_ref().is_some_and(|decided| decided.work_out);
-        let own_read = small
+        let mut own_read = small
             .then(|| match worked_out {
                 true => crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today),
                 false => crate::personal_answer::next_read(&flow.contract.current_request, &flow.contract, &flow.steps, today),
@@ -4080,11 +4095,30 @@ where
                 }
                 let contract = flow.contract.clone();
                 let steps = flow.steps.clone();
-                let (answer, notes) = work_out(state, settings, channel, &task.id, cancel.clone(), &goal, &reads, brain.as_deref(), |text| contract.validate_large_brain_answer(text, &steps)).await?;
+                // The apps read, and the others it may ask for: offered, allowed to leave this Mac
+                // for that brain, and not read yet.
+                let read: Vec<String> = flow.contract.own_sources.clone().unwrap_or_default();
+                let more: Vec<String> = crate::personal_answer::every_source()
+                    .into_iter()
+                    .filter(|tool| !read.contains(tool) && task.apps.is_empty() && crate::decision::shareable(settings, std::slice::from_ref(tool)) && offered.contains(tool))
+                    .collect();
+                let (answer, notes, wanted) = work_out(state, settings, channel, &task.id, cancel.clone(), &goal, &reads, brain.as_deref(), &read, &more, |text| contract.validate_large_brain_answer(text, &steps)).await?;
                 if let Some(decided) = flow.decision.as_mut() {
                     decided.notes.extend(notes);
                 }
-                return finish_with(state, flow, task, channel, answer);
+                match wanted {
+                    // It asked for another app: read it, and it's asked again with that too.
+                    Some(tool) => {
+                        let sources = flow.contract.own_sources.get_or_insert_with(Vec::new);
+                        sources.push(tool);
+                        sources.sort_by_key(|tool| crate::personal_answer::every_source().iter().position(|source| source == tool));
+                        own_read = crate::decision::next_read(&flow.contract.current_request, flow.contract.own_sources.as_deref().unwrap_or_default(), &flow.steps, today);
+                        if own_read.is_none() {
+                            return finish_with(state, flow, task, channel, crate::i18n::t("chat.answer.notWorkedOut"));
+                        }
+                    }
+                    None => return finish_with(state, flow, task, channel, answer),
+                }
             }
         }
         if small && own_read.is_none() && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer" || outcome.status == "complete") {
