@@ -1480,6 +1480,7 @@
   "watches.watching": "Memantau",
   "chat.answer.notConfirmed": "Aku tidak bisa memastikan {what} dari catatanmu. Ini yang kutemukan:",
   "chat.answer.notWorkedOut": "Aku tidak bisa menghitungnya dari catatanmu. Ini yang kutemukan:",
+  "chat.answer.noSafetyGuess": "Aku tidak akan menebak soal kesehatan atau keselamatan. Tanyakan ke dokter hewan, dokter, atau apoteker, atau hubungi nomor darurat jika mungkin mendesak.",
   "chat.workOut.ask": "Hitung dengan {brain}?",
   "chat.workOut.askWith": "Hitung dengan {brain}? Yang akan terlihat: {what}.",
   "chat.workOut.mail": "email",

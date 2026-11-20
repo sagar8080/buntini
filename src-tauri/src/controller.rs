@@ -3801,7 +3801,11 @@ where
         // free stretch": taken for general questions, and answered with a made-up list and day.
         // Said to be theirs, about a day or about words their records hold, they're read for.
         let today_now = chrono::Local::now().date_naive();
-        let theirs = general_call && !held && crate::personal_answer::says_mine(&goal_now) && {
+        // "My cat chewed a lily leaf" says it's theirs too, but a health or safety question is
+        // checked for first (below), never made a question about their records by "my".
+        let mine = general_call && !held && crate::personal_answer::says_mine(&goal_now);
+        let safety = (mine && worked_answer(flow).is_none()).then(|| crate::decision::safety_matter(&goal_now));
+        let theirs = mine && safety != Some(true) && {
             let days = !crate::task_contract::calendar_days(&goal_now, today_now).is_empty();
             let apps: Vec<String> = if days { vec!["read_calendar".to_string()] } else { held_hits.held_together(1) };
             for tool in apps.into_iter().filter(|tool| offered.contains(tool)) {
@@ -3817,6 +3821,35 @@ where
             if offered.contains(&tool) && !sources.contains(&tool) {
                 sources.push(tool);
             }
+        }
+        // Health, medicines, pets, poisons and dangers: with nothing of theirs to read, the model
+        // would answer from what it knows, and Apple's model said a cat chewing a lily leaf was
+        // nothing to worry about. "My cat…" and "should I" sound like their own things, so this
+        // doesn't wait for a general question. The brain the person allowed answers; else nothing
+        // guesses. Only the question goes, never a record.
+        let unread = sources.is_empty() && task.apps.is_empty() && !held && flow.contract.outcomes.iter().all(|outcome| outcome.kind == "answer");
+        if unread && worked_answer(flow).is_none() && safety.unwrap_or_else(|| crate::decision::safety_matter(&goal_now)) {
+            flow.contract.own_sources = Some(vec![]);
+            let mut notes = vec!["safety".to_string()];
+            if let Some(brain) = crate::decision::escalation(settings, |brain| state.models.ready(brain).is_ok()) {
+                let id = brain.cloud_provider.clone();
+                if crate::decision::undecided(settings, &id) {
+                    // Asked once per brain, as for working out: it would see the question alone.
+                    let (question, choices) = crate::decision::consent_card(&goal_now, &id, &[]);
+                    task.choices = choices;
+                    return finish_with(state, flow, task, channel, question);
+                }
+                if settings.workout_brains.contains(&id) {
+                    let mut known = crate::decision::Known::default();
+                    let answer = ask_brain(state, &brain, crate::decision::general_request(&goal_now), &mut known, &mut notes, cancel.clone(), &[], &mut None).await?;
+                    if let Some(answer) = answer.and_then(|answer| flow.contract.validate_large_brain_answer(&answer, &flow.steps).ok()) {
+                        flow.decision = Some(crate::decision::Decision { work_out: false, brain: Some(id), notes, ..Default::default() });
+                        return finish_with(state, flow, task, channel, answer);
+                    }
+                }
+            }
+            flow.decision = Some(crate::decision::Decision { work_out: false, brain: None, notes, ..Default::default() });
+            return finish_with(state, flow, task, channel, crate::i18n::t("chat.answer.noSafetyGuess"));
         }
         // No app named: the local index says where the question's words are, and that nothing
         // has them, before any model guesses. A word nothing holds isn't read for.

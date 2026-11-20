@@ -1480,6 +1480,7 @@
   "watches.watching": "추적 중",
   "chat.answer.notConfirmed": "기록에서 {what}을(를) 확인할 수 없었습니다. 찾은 내용:",
   "chat.answer.notWorkedOut": "기록으로 계산할 수 없었습니다. 찾은 내용:",
+  "chat.answer.noSafetyGuess": "건강이나 안전에 관한 일은 추측으로 답하지 않습니다. 수의사, 의사 또는 약사에게 문의하시고, 급할 수 있다면 응급 번호로 연락하세요.",
   "chat.workOut.ask": "{brain}(으)로 계산할까요?",
   "chat.workOut.askWith": "{brain}(으)로 계산할까요? {what}을(를) 보게 됩니다.",
   "chat.workOut.mail": "이메일",

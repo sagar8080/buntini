@@ -1502,6 +1502,7 @@
   "watches.watching": "Monitorando",
   "chat.answer.notConfirmed": "Não consegui confirmar {what} nos seus registros. Veja o que encontrei:",
   "chat.answer.notWorkedOut": "Não consegui calcular isso a partir dos seus registros. Veja o que encontrei:",
+  "chat.answer.noSafetyGuess": "Não vou adivinhar sobre saúde ou segurança. Pergunte a um veterinário, médico ou farmacêutico, ou ligue para o número de emergência se puder ser urgente.",
   "chat.workOut.ask": "Calcular com {brain}?",
   "chat.workOut.askWith": "Calcular com {brain}? Ele veria: {what}.",
   "chat.workOut.mail": "e-mails",

@@ -1502,6 +1502,7 @@
   "watches.watching": "Takipte",
   "chat.answer.notConfirmed": "{what} kayıtlarında doğrulanamadı. Bulduklarım:",
   "chat.answer.notWorkedOut": "Bunu kayıtlarından hesaplayamadım. Bulduklarım:",
+  "chat.answer.noSafetyGuess": "Sağlık ve güvenlik konusunda tahmin yürütmem. Lütfen bir veterinere, doktora ya da eczacıya sor; acil olabilirse acil yardım numarasını ara.",
   "chat.workOut.ask": "{brain} ile hesaplansın mı?",
   "chat.workOut.askWith": "{brain} ile hesaplansın mı? Şunları görecek: {what}.",
   "chat.workOut.mail": "e-postalar",

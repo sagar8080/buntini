@@ -1480,6 +1480,7 @@
   "watches.watching": "กำลังติดตาม",
   "chat.answer.notConfirmed": "ยืนยัน {what} จากข้อมูลของคุณไม่ได้ นี่คือสิ่งที่พบ:",
   "chat.answer.notWorkedOut": "คำนวณเรื่องนี้จากข้อมูลของคุณไม่ได้ นี่คือสิ่งที่พบ:",
+  "chat.answer.noSafetyGuess": "เรื่องสุขภาพหรือความปลอดภัย ฉันจะไม่เดา โปรดสอบถามสัตวแพทย์ แพทย์ หรือเภสัชกร หรือโทรหาหมายเลขฉุกเฉินหากอาจเป็นเรื่องเร่งด่วน",
   "chat.workOut.ask": "ให้ {brain} คำนวณไหม",
   "chat.workOut.askWith": "ให้ {brain} คำนวณไหม จะเห็น {what}",
   "chat.workOut.mail": "อีเมล",

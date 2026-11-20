@@ -1590,6 +1590,7 @@
   "watches.watching": "قيد المراقبة",
   "chat.answer.notConfirmed": "لم أتمكن من تأكيد {what} من سجلاتك. هذا ما وجدته:",
   "chat.answer.notWorkedOut": "لم أتمكن من حساب ذلك من سجلاتك. هذا ما وجدته:",
+  "chat.answer.noSafetyGuess": "لن أخمّن في أمور الصحة أو السلامة. يُرجى سؤال طبيب بيطري أو طبيب أو صيدلي، أو الاتصال برقم الطوارئ المحلي إذا كان الأمر عاجلًا.",
   "chat.workOut.ask": "هل تريد حساب ذلك باستخدام {brain}؟",
   "chat.workOut.askWith": "هل تريد حساب ذلك باستخدام {brain}؟ سيرى: {what}.",
   "chat.workOut.mail": "البريد",

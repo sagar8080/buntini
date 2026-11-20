@@ -1502,6 +1502,7 @@
   "watches.watching": "Wird beobachtet",
   "chat.answer.notConfirmed": "Ich konnte {what} in deinen Einträgen nicht bestätigen. Das habe ich gefunden:",
   "chat.answer.notWorkedOut": "Ich konnte das aus deinen Einträgen nicht ermitteln. Das habe ich gefunden:",
+  "chat.answer.noSafetyGuess": "Bei Gesundheit und Sicherheit rate ich nicht. Frag bitte in einer Tierarztpraxis, Arztpraxis oder Apotheke nach, oder ruf den Notruf an, wenn es dringend sein könnte.",
   "chat.workOut.ask": "Mit {brain} ausrechnen?",
   "chat.workOut.askWith": "Mit {brain} ausrechnen? Dabei sichtbar: {what}.",
   "chat.workOut.mail": "E-Mails",

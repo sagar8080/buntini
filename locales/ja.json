@@ -1480,6 +1480,7 @@
   "watches.watching": "監視中",
   "chat.answer.notConfirmed": "記録から{what}を確認できませんでした。見つかったもの:",
   "chat.answer.notWorkedOut": "記録からは計算できませんでした。見つかったもの:",
+  "chat.answer.noSafetyGuess": "健康や安全のことは推測でお答えしません。獣医、医師、薬剤師に相談してください。急を要するかもしれない場合は、すぐに救急番号に連絡してください。",
   "chat.workOut.ask": "{brain}で計算しますか?",
   "chat.workOut.askWith": "{brain}で計算しますか? 見えるもの: {what}。",
   "chat.workOut.mail": "メール",
