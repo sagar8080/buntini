@@ -294,6 +294,7 @@
   "chat.answer.quoteAssemblyIncluded": "Цена у {vendor} — {price} € (сборка включена).",
   "chat.answer.quoteCheaper": "У {vendor} дешевле на {difference} €.",
   "chat.answer.quotePriceTie": "Цены в обоих предложениях совпадают.",
+  "chat.answer.splitNotGiven": "Не могу это разделить: «{value}» нигде не приведено.",
   "chat.evidence.summary.few": "Посмотреть найденные материалы · {count} страницы",
   "chat.evidence.summary.many": "Посмотреть найденные материалы · {count} страниц",
   "chat.evidence.summary.one": "Посмотреть найденные материалы · {count} страница",

@@ -630,6 +630,8 @@ impl Known {
         self.minutes.extend(literals::durations_whole(text));
         self.amounts.extend(literals::amounts(text));
         self.numbers.extend(integers(&scrubbed(text)));
+        // "Between two of us", "three ways": counts written as words.
+        self.numbers.extend(text.to_lowercase().split(|c: char| !c.is_alphabetic()).filter(|word| *word != "fortnight").filter_map(literals::count).filter(|count| *count >= 2));
         self.dates.extend(dates_in(text, base));
         self.settle();
         for word in name_words(text) {
@@ -919,6 +921,20 @@ pub fn digest(goal: &str, reads: &[&Step], now: NaiveDateTime) -> Digest {
             by_due.iter().map(|reminder| reminder.1.clone()).collect::<Vec<_>>().join("; ")
         ));
     }
+    // "Split the Acme invoice between two of us": the amounts of the records the question is
+    // about, shared out here, so no model divides them.
+    let splitting = crate::skills::words(goal).split(' ').any(|word| ["split", "divide", "share", "halve"].contains(&word));
+    if let Some(people) = crate::structured_math::sharers(goal).filter(|_| splitting) {
+        let about = crate::personal_answer::question_words_of(goal);
+        let shares = records
+            .iter()
+            .filter(|record| about.iter().any(|word| record.line.to_lowercase().contains(word.as_str())))
+            .flat_map(|record| money_in(&record.line).into_iter().map(move |(written, symbol, amount)| (record.number, written, symbol, amount)))
+            .take(4)
+            .map(|(number, written, symbol, amount)| format!("Split evenly between {people}: {written} [{number}] is {} each.", money(symbol, amount / people as f64)))
+            .collect::<Vec<_>>();
+        facts.extend(shares);
+    }
     for fact in &facts {
         known.take_in(fact, today);
     }
@@ -926,6 +942,40 @@ pub fn digest(goal: &str, reads: &[&Step], now: NaiveDateTime) -> Digest {
     let text = format!("It is now {}.\n\nRecords:\n{}\n\nWorked out by Buntini from all of them:\n{}", now.format("%A %-d %B %Y, %H:%M"), if lines.is_empty() { "(none)".to_string() } else { lines.join("\n") }, facts.iter().map(|fact| format!("- {fact}")).collect::<Vec<_>>().join("\n"));
     let _ = numbers.len();
     Digest { text, known, numbers }
+}
+
+/// Amounts of money as a record writes them ("$1,240"), with their sign and value.
+pub(crate) fn money_in(text: &str) -> Vec<(String, char, f64)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut found = Vec::new();
+    for (at, sign) in chars.iter().enumerate().filter(|(_, c)| ['$', '£', '€'].contains(*c)) {
+        let mut end = at + 1;
+        while end < chars.len() && (chars[end].is_ascii_digit() || (matches!(chars[end], ',' | '.') && chars.get(end + 1).is_some_and(char::is_ascii_digit))) {
+            end += 1;
+        }
+        let written: String = chars[at..end].iter().collect();
+        if let Ok(value) = written[sign.len_utf8()..].replace(',', "").parse::<f64>() {
+            found.push((written, *sign, value));
+        }
+    }
+    found
+}
+
+/// An amount the way records write it: "$620", "$9.20", "$1,240.50".
+pub(crate) fn money(sign: char, amount: f64) -> String {
+    let cents = (amount * 100.0).round() as i64;
+    let whole = (cents / 100).to_string();
+    let mut grouped = String::new();
+    for (at, digit) in whole.chars().enumerate() {
+        if at > 0 && (whole.len() - at) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    match cents % 100 {
+        0 => format!("{sign}{grouped}"),
+        part => format!("{sign}{grouped}.{part:02}"),
+    }
 }
 
 /// The digest cut to fit Apple's small window: every fact, and the records sharing most
@@ -1526,6 +1576,34 @@ mod tests {
             assert!(missing.is_empty() || fine.contains("12 months"), "{fine}: {missing:?}");
         }
         assert_eq!(unconfirmed("It came to $25.00.", &known), vec!["25.00"]);
+    }
+
+    #[test]
+    fn a_split_of_a_record_is_divided_by_rust_for_the_people_the_question_counts_or_names() {
+        let inbox = [
+            ("2026-11-16 16:40", true, "Acme Billing <billing@acme.example>", "Invoice 4821 for October", "Your invoice of $1,240 is due on 20 November."),
+            ("2026-11-17 04:00", true, "Uber Receipts <uber@uber.example>", "Your Tuesday evening trip", "Thanks for riding. Your total was $18.40."),
+        ];
+        let mail = step("read_mail", json!({"limit":20}), crate::apps::inbox_world("", false, 20, &inbox));
+        let acme = digest("Split the Acme invoice evenly between two of us. What's each share?", &[&mail], now());
+        assert!(acme.text.contains("- Split evenly between 2: $1,240 [2] is $620 each."), "{}", acme.text);
+        assert!(!acme.text.contains("$9.20"), "{}", acme.text);
+        let uber = digest("Split my Uber ride between Sam and me", &[&mail], now());
+        assert!(uber.text.contains("- Split evenly between 2: $18.40 [1] is $9.20 each."), "{}", uber.text);
+        assert_eq!(unconfirmed("You and Sam each pay $9.20.", &uber.known), Vec::<String>::new());
+        assert!(!digest("What's the Acme invoice between now and Friday?", &[&mail], now()).text.contains("Split evenly"));
+        assert_eq!(money('$', 1240.5), "$1,240.50");
+    }
+
+    #[test]
+    fn a_share_counted_in_words_is_confirmed_on_any_day() {
+        // The Acme invoice is due in 3 days here, so no 2 comes from its dates.
+        let mut known = Known { today: Some(now().date()), ..Known::default() };
+        known.take_in("Your invoice of $1,240 is due on 20 November.", now().date());
+        assert_eq!(unconfirmed("You each owe $620.", &known).len(), 1);
+        known.take_in("Split the Acme invoice evenly between two of us. What's each share?", now().date());
+        assert_eq!(unconfirmed("You each owe $620.", &known), Vec::<String>::new());
+        assert_eq!(unconfirmed("You each owe $600.", &known).len(), 1);
     }
 
     #[test]

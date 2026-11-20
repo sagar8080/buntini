@@ -3549,6 +3549,29 @@ async fn continue_workflow(
     .await
 }
 
+/// What a split may name: the person's own words in this conversation, and every record read
+/// for it. A result Rust worked out from a model's figures is not a record.
+fn split_given(flow: &Workflow) -> crate::structured_math::Given {
+    fn strings(value: &Value, into: &mut Vec<String>) {
+        match value {
+            Value::String(text) => into.push(text.clone()),
+            Value::Number(number) => into.push(number.to_string()),
+            Value::Array(items) => items.iter().for_each(|item| strings(item, into)),
+            Value::Object(fields) => fields.values().for_each(|field| strings(field, into)),
+            _ => {}
+        }
+    }
+    let said = flow.messages.iter().filter(|message| message["role"] == "user").filter_map(|message| message["content"].as_str());
+    let request = said.chain([flow.goal.as_str(), flow.contract.current_request.as_str()]).collect::<Vec<_>>().join("\n");
+    let mut records = Vec::new();
+    for step in flow.steps.iter().filter(|step| step.state == "succeeded" && !step.effect && step.tool != "calculate" && !crate::structured_math::TOOLS.contains(&step.tool.as_str())) {
+        if let Some(evidence) = &step.evidence {
+            strings(evidence, &mut records);
+        }
+    }
+    crate::structured_math::Given::new(&request, records.iter().map(String::as_str))
+}
+
 fn structured_math_answer(flow: &Workflow) -> Option<String> {
     if flow.contract.next_outcome()?.kind != "answer" { return None; }
     let plain = crate::completion::unquoted(&flow.goal);
@@ -3951,7 +3974,9 @@ where
                 notes.push(format!("meaning {margin:.3}"));
             }
             let by_examples = margin.is_some_and(|margin| margin > crate::decision::work_out_threshold(allowed.is_some()));
-            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || by_meaning.map_or(by_examples, |route| route.worked_out()));
+            // "Split the Acme invoice between two of us": arithmetic on a record is worked out,
+            // as its words say; looked up, it would only show the invoice.
+            let mut work_out = !whole && (crate::decision::asks_for_a_rewrite(&goal_now) || crate::personal_answer::wants_writing(&goal_now) || crate::task_contract::asks_arithmetic(&goal_now) || by_meaning.map_or(by_examples, |route| route.worked_out()));
             if !work_out && !whole && by_meaning.is_none() {
                 phase(channel, &task.id, "thinking");
                 let turn = state.models.generate(settings, crate::decision::work_request(&goal_now), cancel.clone(), |_| {}).await;
@@ -4521,6 +4546,9 @@ where
             call["arguments"]=fields.clone();
         }
         let (name, mut args) = validate_tool(&call, &flow.mode, &task.prompt)?;
+        if name == "split_costs" {
+            args = crate::structured_math::grounded_split(&args, &split_given(flow))?;
+        }
         if !rust_read && !definitions
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == name))

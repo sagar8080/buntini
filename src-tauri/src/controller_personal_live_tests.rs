@@ -332,6 +332,8 @@ const QUESTIONS: &[Question] = &[
     q("what's the news from Priya", MAIL, &["Contract"], &["LinkedIn"]),
     q("did my dad email", MAIL, &["“dad” in its sender or subject"], &["Priya"]),
     q("was there anything about energy use", MAIL, &["Nest"], &["Priya"]),
+    // Its amount is only in the Acme email. It was once split from the tool's example rows.
+    q("Split the Acme invoice evenly between two of us. What's each share?", MAIL, &["620"], &["Aria", "Lodging", "65.5"]),
     q("what's on tomorrow afternoon", DAY, &["Dentist"], &[]),
     q("am I doing anything tonight", DAY, &["Design review"], &[]),
     q("what's my day like tomorrow", DAY, &["Dentist"], &[]),

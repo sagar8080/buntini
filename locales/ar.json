@@ -300,6 +300,7 @@
   "chat.answer.quoteAssemblyIncluded": "سعر {vendor} هو {price} € ويشمل التركيب.",
   "chat.answer.quoteCheaper": "سعر {vendor} أقل بمقدار {difference} €.",
   "chat.answer.quotePriceTie": "للعرضين السعر نفسه.",
+  "chat.answer.splitNotGiven": "لا أستطيع تقسيم ذلك: «{value}» لم يُذكر.",
   "chat.evidence.summary.few": "فحص الأدلة المسترجعة · {count} صفحات",
   "chat.evidence.summary.many": "فحص الأدلة المسترجعة · {count} صفحة",
   "chat.evidence.summary.one": "فحص الأدلة المسترجعة · صفحة واحدة",

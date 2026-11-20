@@ -579,6 +579,17 @@ pub fn candidates(goal: &str, reads: &[&Step], now: NaiveDateTime) -> Vec<Candid
         let from_named: Vec<&Mail> = found.mail.iter().filter(|mail| words.iter().any(|word| holds(&mail.sender, word))).collect();
         let whole = from_named.iter().all(|mail| in_full(&mail.sender));
         let summed = if from_named.is_empty() { named.clone() } else if whole { from_named } else { vec![] };
+        // "Split the Acme invoice evenly between two of us": the amount in the email the question
+        // names, shared out by Rust between the people it counts or names. Asked in so many
+        // words, so it's the answer when only one email holds an amount.
+        let splitting = crate::skills::words(goal).split(' ').any(|word| ["split", "divide", "share", "halve"].contains(&word));
+        if let Some(people) = crate::structured_math::sharers(goal).filter(|people| splitting && *people > 0) {
+            let shares: Vec<(&Mail, String, char, f64)> = named.iter().filter_map(|mail| crate::decision::money_in(&format!("{} {}", mail.subject, mail.body)).into_iter().next().map(|(written, sign, amount)| (*mail, written, sign, amount))).collect();
+            for (mail, written, sign, amount) in &shares {
+                let asks = if shares.len() == 1 { crate::task_contract::spelled(goal) } else { format!("split “{}” evenly between {people}", mail.subject.to_lowercase()) };
+                add(asks, format!("Split evenly between {people}: {written} (“{}”, {}) is {} each.", mail.subject, mail.sender, crate::decision::money(*sign, amount / people as f64)));
+            }
+        }
         let priced: Vec<(&Mail, f64)> = summed.iter().filter_map(|mail| crate::literals::amounts(&format!("{} {}", mail.subject, mail.body)).first().map(|amount| (*mail, *amount))).collect();
         if priced.len() > 1 {
             let total: f64 = priced.iter().map(|(_, amount)| amount).sum();
@@ -805,6 +816,10 @@ mod tests {
         let found = candidates("how many emails has fen sent me", &[&inbox], now());
         let said = says(&found, "how many emails has Fen Abara sent me");
         assert!(said.starts_with("2 emails from Fen Abara"), "{said}");
+        let bill = step("read_mail", json!({"records":[{"sender":"Acme Billing <billing@acme.example>","subject":"Invoice 4821 for October","excerpt":"Your invoice of $1,240 is due on 20 November.","receivedLocal":"2026-11-16 16:40","read":true}]}));
+        let goal = "Split the Acme invoice evenly between two of us. What's each share?";
+        let found = candidates(goal, &[&bill], now());
+        assert_eq!(says(&found, &crate::task_contract::spelled(goal)), "Split evenly between 2: $1,240 (“Invoice 4821 for October”, Acme Billing) is $620 each.");
         let found = candidates("is my bike ready to pick up yet", &[&inbox], now());
         assert_eq!(says(&found, "what date is “in 7 days” in Spoke & Sprocket's email about your bike"), "Spoke & Sprocket's email “Your bike” was sent Mon 16 Nov, so “in 7 days” means Monday 23 November, in 5 days.");
     }

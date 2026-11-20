@@ -288,6 +288,7 @@
   "chat.answer.quoteAssemblyIncluded": "{vendor}-এর দাম €{price} (সংযোজনসহ)।",
   "chat.answer.quoteCheaper": "{vendor}-এর দাম €{difference} কম।",
   "chat.answer.quotePriceTie": "দুটি মূল্যপ্রস্তাবের দাম একই।",
+  "chat.answer.splitNotGiven": "আমি এটা ভাগ করতে পারছি না: “{value}” দেওয়া হয়নি।",
   "chat.evidence.summary.one": "পাওয়া প্রমাণ দেখুন · {count}টি পেজ",
   "chat.evidence.summary.other": "পাওয়া প্রমাণ দেখুন · {count}টি পেজ",
   "chat.fileSize.bytes": "{size} B",

@@ -285,6 +285,7 @@
   "chat.answer.quoteAssemblyIncluded": "Harga {vendor} €{price} (termasuk perakitan).",
   "chat.answer.quoteCheaper": "{vendor} lebih murah €{difference}.",
   "chat.answer.quotePriceTie": "Kedua penawaran memiliki harga yang sama.",
+  "chat.answer.splitNotGiven": "Saya tidak bisa membaginya: “{value}” tidak diberikan.",
   "chat.evidence.summary.other": "Periksa bukti yang ditemukan · {count} halaman",
   "chat.fileSize.bytes": "{size} B",
   "chat.fileSize.kilobytes": "{size} KB",
