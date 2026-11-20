@@ -1,6 +1,25 @@
 # Production readiness and release runbook
 
-v0.2.1 fixes the eight Apple workflow scenarios that still failed in v0.2.0, and the two answers whose wording or checks failed on November 1. Its tag is built, signed and notarized by CI as a draft. v0.2.0, built from `e88c603` and published on November 1, 2026, is the latest published release until the draft is published. **Still open: acceptance of the v0.2.1 artifact on a fresh Mac, macOS 13 and the keyed/cloud providers.** No device acceptance of v0.2.0 or v0.2.1 is recorded yet. Source review, dependency audits and automated fixtures provide bounded evidence. They do not establish that every model, macOS permission flow or integration works in the shipped app.
+v0.3.0 answers questions about your own mail, calendar and reminders more reliably and more honestly:
+- A router trained on written questions picks which apps to read.
+- Rust works out counts, dates, gaps and totals on this Mac, and says plainly when it can't.
+- A brain you allow, such as Codex, works out the rest after Buntini asks you once. It can ask for an app it wasn't given rather than guess.
+
+It also adds:
+- the island's second round;
+- a check that keeps health and safety questions from being answered from Apple's own knowledge;
+- cost splits worked out from the record itself;
+- the desktop cat's daily life.
+
+On fresh, blind 80-question exams (November 18–19), Apple's model alone scored 22, Apple with Codex allowed 48–49, and Codex as the whole brain 49–50.
+
+Its tag is built, signed and notarized by CI as a draft. v0.2.1 is the latest published release until that draft is published.
+
+**Still open:**
+- The 38-workflow Apple acceptance suite hasn't been run on v0.3.0.
+- The artifact needs acceptance on a fresh Mac, on macOS 13, and with the keyed and cloud providers.
+
+Source review, dependency audits and automated fixtures provide bounded evidence. They do not establish that every model, macOS permission flow or integration works in the shipped app.
 
 ## Current rollout status
 
