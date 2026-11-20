@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { chooseMove, ground, landing, NudgeRules, standingOn, windowTop, type World } from './petWorld.ts';
+import { approach, chooseMove, ground, landing, NudgeRules, standingOn, walkAway, windowTop, zoomies, type World } from './petWorld.ts';
 
 const MINUTE = 60_000;
 const area = { x: 0, y: 25, width: 1440, height: 850 };
@@ -121,10 +121,50 @@ test('focus timers end with a nudge and pause break reminders', () => {
   assert.equal(rules.update(coding, 55 * MINUTE, 10), null, "the island's timer says when it ends");
 });
 
-test('only a playful cat gets the zoomies, and they cover real ground', () => {
-  const dashes = (motion: 'calm' | 'playful' | 'sleepy') => Array.from({ length: 400 }, () => chooseMove(world(), 1, motion)).filter(move => move?.dash);
-  const playful = dashes('playful');
-  assert.ok(playful.length > 0);
-  assert.ok(playful.every(move => Math.abs(move!.x - world().pet.x) > 100), 'a sprint, not a shuffle');
-  assert.equal(dashes('calm').length + dashes('sleepy').length, 0);
+test('ordinary roaming never sprints: zoomies come in their own bursts', () => {
+  for (const motion of ['calm', 'playful', 'sleepy'] as const) {
+    for (let index = 0; index < 300; index++) assert.ok(!chooseMove(world(), 1, motion, Math.random, 900)?.dash, motion);
+  }
+});
+
+test('zoomies sprint to the far end and most of the way back, on the surface it stands on', () => {
+  const [there, back] = zoomies(world(), 1, sequence(.5, .5));
+  assert.deepEqual(there, { kind: 'walk', x: 1312, y: 755, perch: undefined, dash: true });
+  assert.ok(back.dash && back.x < 1312 && back.x > 600 && back.y === 755, JSON.stringify(back));
+  const perched = zoomies(world({ perched: true, pet: { x: 300, y: 180, width: 128, height: 136 } }), 1, sequence(.5, .5));
+  assert.ok(perched.every(move => move.y === 180 && move.perch === 7 && move.x >= 160 && move.x <= 1012), JSON.stringify(perched));
+  assert.deepEqual(zoomies(world({ pet: { x: 600, y: 400, width: 128, height: 136 } }), 1), [], 'not in mid-air');
+  const narrow = world({ workArea: { x: 0, y: 25, width: 300, height: 850 }, pet: { x: 100, y: 755, width: 128, height: 136 }, frontWindow: null });
+  assert.deepEqual(zoomies(narrow, 1), [], 'no room for a sprint');
+});
+
+test('fussed over, the cat walks off away from the pointer, or the other way when cornered', () => {
+  const off = walkAway(world(), 1, 900, sequence(.5))!;
+  assert.equal(off.kind, 'walk');
+  assert.ok(off.x < 600 - 150, `away from a pointer on its right: ${off.x}`);
+  assert.ok(walkAway(world(), 1, 100, sequence(.5))!.x > 750, 'away from a pointer on its left');
+  const cornered = walkAway(world({ pet: { x: 0, y: 755, width: 128, height: 136 } }), 1, 900, sequence(.5))!;
+  assert.ok(cornered.x > 150, `cornered on the left, it goes right: ${cornered.x}`);
+  assert.equal(walkAway(world({ pet: { x: 600, y: 400, width: 128, height: 136 } }), 1, 900), null, 'not in mid-air');
+});
+
+test('coming over, the cat walks under your window, hops up and sits below the pointer', () => {
+  // The window spans pet positions 160 to 1012; the pointer is at x 900.
+  const under = approach(world({ pet: { x: 100, y: 755, width: 128, height: 136 } }), 1, 900)!;
+  assert.deepEqual(under, { kind: 'walk', x: 836, y: 755 });
+  const up = approach(world({ pet: { x: 836, y: 755, width: 128, height: 136 } }), 1, 900)!;
+  assert.deepEqual(up, { kind: 'jump', x: 836, y: 180, perch: 7 });
+  assert.equal(approach(world({ perched: true, pet: { x: 836, y: 180, width: 128, height: 136 } }), 1, 900), null, 'there');
+  const along = approach(world({ perched: true, pet: { x: 300, y: 180, width: 128, height: 136 } }), 1, 900)!;
+  assert.deepEqual(along, { kind: 'walk', x: 836, y: 180, perch: 7 });
+  // A pointer past the window's end: the nearest end of the window.
+  assert.equal(approach(world({ perched: true, pet: { x: 300, y: 180, width: 128, height: 136 } }), 1, 1400)!.x, 1012);
+  // Still perched on a window that's gone behind another: down to the floor first.
+  const behind = world({ perched: true, pet: { x: 300, y: 420, width: 128, height: 136 } });
+  assert.deepEqual(approach(behind, 1, 900), { kind: 'jump', x: 300, y: 755 });
+  assert.deepEqual(zoomies(behind, 1), [], 'no sprint along a window it can’t see the ends of');
+  assert.equal(walkAway(behind, 1, 900), null);
+  // No window to sit on: the floor below the pointer.
+  assert.deepEqual(approach(world({ frontWindow: null }), 1, 200), { kind: 'walk', x: 136, y: 755 });
+  assert.equal(approach(world({ frontWindow: null, pet: { x: 140, y: 755, width: 128, height: 136 } }), 1, 200), null);
 });

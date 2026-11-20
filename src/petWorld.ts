@@ -71,13 +71,26 @@ export function nextRoamDelay(motion: PetMotion, random = Math.random) {
 
 const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high);
 
-/** Picks the pet's next move, or null to stay put. `cursorX` lets a playful pet chase the pointer. */
+/** What the pet stands on now: the window it's perched on, or the floor. */
+function underfoot(world: World, scale: number, place: 'ground' | 'window'): Surface {
+  const top = windowTop(world, scale);
+  return place === 'window' && top ? top : ground(world, scale);
+}
+
+/** Perched on a window that is no longer the one in front, whose edges it can't see. */
+const strandedOn = (world: World, scale: number, place: 'ground' | 'window') => {
+  const top = windowTop(world, scale);
+  return place === 'window' && !(top && Math.abs(world.pet.y - top.y) < 6);
+};
+
+/** Picks the pet's next move, or null to stay put. `cursorX` lets a playful pet chase the
+    pointer it's watching. */
 export function chooseMove(world: World, scale: number, motion: PetMotion, random = Math.random, cursorX?: number): Move | null {
   const place = standingOn(world, scale);
   if (place === 'air') return landing(world, scale);
   const floor = ground(world, scale);
   const top = windowTop(world, scale);
-  const surface = place === 'window' && top ? top : floor;
+  const surface = underfoot(world, scale, place);
   const userActive = (world.idleSeconds ?? 0) < 60;
   const options: [weight: number, move: () => Move | null][] = [
     [motion === 'calm' ? 5 : motion === 'sleepy' ? 7 : 3, () => null],
@@ -93,11 +106,6 @@ export function chooseMove(world: World, scale: number, motion: PetMotion, rando
     return Math.abs(x - world.pet.x) > 40 ? { kind: 'walk', x, y: floor.y } : { kind: 'jump', x, y: top.y, perch: top.perch };
   }]);
   if (place === 'window') options.push([1.5, () => ({ kind: 'jump', x: clamp(world.pet.x + (random() < .5 ? -120 : 120), floor.minX, floor.maxX), y: floor.y })]);
-  // Zoomies: now and then a playful cat sprints the length of where it stands.
-  if (motion === 'playful') options.push([.7, () => {
-    const far = world.pet.x - surface.minX > surface.maxX - world.pet.x ? surface.minX : surface.maxX;
-    return { kind: 'walk', x: clamp(far + (random() - .5) * 80, surface.minX, surface.maxX), y: surface.y, perch: surface.perch, dash: true };
-  }]);
   if (motion === 'playful' && cursorX !== undefined) options.push([2, () => ({ kind: 'walk', x: clamp(cursorX - world.pet.width / 2, surface.minX, surface.maxX), y: surface.y, perch: surface.perch })]);
   const total = options.reduce((sum, [weight]) => sum + weight, 0);
   let roll = random() * total;
@@ -109,6 +117,56 @@ export function chooseMove(world: World, scale: number, motion: PetMotion, rando
     }
   }
   return null;
+}
+
+/** A burst of zoomies along where it stands (petDay.ts decides when): a sprint to the far
+    end, then most of the way back. */
+export function zoomies(world: World, scale: number, random = Math.random): Move[] {
+  const place = standingOn(world, scale);
+  if (place === 'air' || strandedOn(world, scale, place)) return [];
+  const surface = underfoot(world, scale, place);
+  const far = world.pet.x - surface.minX > surface.maxX - world.pet.x ? surface.minX : surface.maxX;
+  const there = clamp(far + (random() - .5) * 60, surface.minX, surface.maxX);
+  const back = clamp(there + (world.pet.x - there) * (.5 + random() * .4), surface.minX, surface.maxX);
+  if (Math.abs(there - world.pet.x) < 120) return [];
+  return [there, back].map((x): Move => ({ kind: 'walk', x, y: surface.y, perch: surface.perch, dash: true }));
+}
+
+/** A few steps off from you, when it's had enough fuss: 160 to 300 px away from the pointer
+    (`pointerX`, the screen x) along where it stands, or the other way when cornered. */
+export function walkAway(world: World, scale: number, pointerX?: number, random = Math.random): Move | null {
+  const place = standingOn(world, scale);
+  if (place === 'air' || strandedOn(world, scale, place)) return null;
+  const surface = underfoot(world, scale, place);
+  const centre = world.pet.x + world.pet.width / 2;
+  const away = pointerX === undefined ? (random() < .5 ? -1 : 1) : pointerX > centre ? -1 : 1;
+  const step = 160 + random() * 140;
+  let x = clamp(world.pet.x + away * step, surface.minX, surface.maxX);
+  if (Math.abs(x - world.pet.x) < 60) x = clamp(world.pet.x - away * step, surface.minX, surface.maxX);
+  return Math.abs(x - world.pet.x) < 60 ? null : { kind: 'walk', x, y: surface.y, perch: surface.perch };
+}
+
+/** The next step toward sitting by you after a long while alone: under the window you're
+    working in, up onto it, and along it to just below the pointer; on the floor below the
+    pointer when there's no window to sit on. Null once it's there. */
+export function approach(world: World, scale: number, pointerX: number): Move | null {
+  const place = standingOn(world, scale);
+  if (place === 'air') return landing(world, scale);
+  const floor = ground(world, scale);
+  const top = windowTop(world, scale);
+  const below = (surface: Surface) => clamp(pointerX - world.pet.width / 2, surface.minX, surface.maxX);
+  // On some other window: down to the floor first.
+  if (strandedOn(world, scale, place)) return { kind: 'jump', x: clamp(world.pet.x, floor.minX, floor.maxX), y: floor.y };
+  if (place === 'window' && top) {
+    const x = below(top);
+    return Math.abs(x - world.pet.x) < 30 ? null : { kind: 'walk', x, y: top.y, perch: top.perch };
+  }
+  if (top) {
+    const x = clamp(below(top), floor.minX, floor.maxX);
+    return Math.abs(x - world.pet.x) > 40 ? { kind: 'walk', x, y: floor.y } : { kind: 'jump', x: clamp(world.pet.x, top.minX, top.maxX), y: top.y, perch: top.perch };
+  }
+  const x = below(floor);
+  return Math.abs(x - world.pet.x) < 30 ? null : { kind: 'walk', x, y: floor.y };
 }
 
 export type NudgeAction = 'checkMac' | 'lookUp' | 'findFile' | 'focus' | 'snooze' | 'remindLate' | 'dismiss';

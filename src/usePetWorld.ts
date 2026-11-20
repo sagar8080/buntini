@@ -3,11 +3,17 @@ import { listen } from '@tauri-apps/api/event';
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window';
 import { command, desktop } from './bridge';
 import { t } from './i18n.ts';
-import { chooseMove, landing, nextRoamDelay, NudgeRules, speeds, type Move, type Nudge, type NudgeAction, type World } from './petWorld';
-import type { PetAction } from './petLife';
+import { zoomiesChance } from './petDay';
+import { approach, chooseMove, landing, nextRoamDelay, NudgeRules, speeds, walkAway, zoomies, type Move, type Nudge, type NudgeAction, type World } from './petWorld';
+import { actionDuration, type PetAction } from './petLife';
+import { desktopCat, lessMotion } from './usePetLife';
 import type { PetMotion, PetState } from './types';
 
 type Moving = Move['kind'] | null;
+/** A few moves under way (zoomies, walking off, coming over), and what the cat does once
+    they're done. `next` works out each further step from where the cat is by then, up to
+    `left` more; the plan is dropped if it's still going at `until` (Date.now()). */
+type Plan = { steps: Move[]; next?: (world: World) => Move | null; then?: PetAction; pause: number; left: number; until: number };
 /** A window the cat was let go over, read and kept by attach.rs. */
 export type DroppedWindow = { id: string; app: string; title: string };
 const ASK_EVERY = 15 * 60_000;
@@ -50,6 +56,8 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
 
   // Our own position updates can still arrive just after a move ends; they are not drags.
   const echoUntil = useRef(0);
+  const plan = useRef<Plan | null>(null);
+  const lastZoomies = useRef(-Infinity);
   const fresh = useCallback(async () => {
     const sampled = await command<World | null>('pet_sample').catch(() => null);
     if (sampled) world.current = sampled;
@@ -69,12 +77,33 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
       setMoving(move.kind);
       await new Promise(resolve => window.setTimeout(resolve, 220));
     }
-    if (!movingRef.current || live.current.expanded) { setMoving(null); movingRef.current = false; return; }
+    if (!movingRef.current || live.current.expanded) { setMoving(null); movingRef.current = false; plan.current = null; return; }
     const speed = speeds[live.current.motion] * (move.dash ? 3 : 1);
     setSpeed(speed);
     try { await command('pet_move', { x: move.x, y: move.y, kind: move.kind, speed }); }
-    catch { movingRef.current = false; setMoving(null); }
+    catch { movingRef.current = false; setMoving(null); plan.current = null; }
   }, []);
+  // The next step of the plan, or once it's done, what the cat does then.
+  const advance = useCallback(async () => {
+    const current = plan.current;
+    if (!current || movingRef.current) return;
+    if (live.current.expanded || live.current.held || desktopCat.napping) { plan.current = null; return; }
+    // Where it is now, so it faces the right way for the next step.
+    const sampled = await fresh();
+    let move = current.steps.shift() ?? null;
+    if (!move && current.next && current.left-- > 0) move = sampled ? current.next(sampled) : null;
+    if (plan.current !== current) return;
+    if (move) { void go(move); return; }
+    plan.current = null;
+    if (current.then) live.current.react(current.then);
+  }, [fresh, go]);
+  /** `lead`: a habit played first, before the first move. */
+  const begin = useCallback((next: Plan, lead?: PetAction) => {
+    plan.current = next;
+    if (!lead) return void advance();
+    live.current.react(lead);
+    window.setTimeout(() => void advance(), actionDuration[lead]);
+  }, [advance]);
   const land = useCallback(async () => {
     if (!live.current.roam || live.current.expanded || movingRef.current) return;
     const current = await fresh();
@@ -118,11 +147,14 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
         if (phase === 'end') {
           if (kind !== 'walk') { setLanding(true); window.setTimeout(() => setLanding(false), 380); }
           const number = pendingPerch.current;
-          if (number !== undefined) void command('pet_perch', { number }).then(() => { perched.current = true; perchedOn.current = number; }).catch(() => void land());
-        }
+          const carryOn = () => { if (plan.current) window.setTimeout(() => void advance(), plan.current.pause); };
+          if (number !== undefined) void command('pet_perch', { number }).then(() => { perched.current = true; perchedOn.current = number; carryOn(); }).catch(() => { plan.current = null; void land(); });
+          else carryOn();
+        } else plan.current = null;
         pendingPerch.current = undefined;
       }),
-      listen('pet-perch-lost', () => { perched.current = false; perchedOn.current = null; setAsk(null); void land(); }),
+      // The window it was asleep on went away: it wakes with a start as it drops.
+      listen('pet-perch-lost', () => { perched.current = false; perchedOn.current = null; setAsk(null); if (desktopCat.napping) live.current.react('startle'); void land(); }),
     ];
     // A move we did not make (a drag, or the window settling after collapsing) ends in a landing.
     let settle = 0;
@@ -133,15 +165,18 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
       settle = window.setTimeout(() => void land(), 900);
     });
     return () => { window.clearTimeout(settle); window.clearTimeout(heldTimer.current); for (const subscription of [...subscriptions, moved]) void subscription.then(off => off()); };
-  }, [enabled, land, putDown]);
+  }, [enabled, land, putDown, advance]);
 
-  // Roaming loop: pause while open, busy, asleep, quiet, talking or already moving.
+  // Roaming loop: pause while open, busy, asleep or napping, quiet, talking, already moving
+  // or in the middle of a plan.
   useEffect(() => {
     if (!enabled || !roam) return;
     let timer = 0;
     const tick = async () => {
       const state = live.current;
-      if (world.current && !state.expanded && !state.quiet && !state.asleep && !state.nudge && !state.ask && state.petState === 'idle' && !movingRef.current && !document.hidden) {
+      if (plan.current && Date.now() > plan.current.until) plan.current = null;
+      const resting = desktopCat.napping || performance.now() < desktopCat.settlingUntil;
+      if (world.current && !state.expanded && !state.quiet && !state.asleep && !resting && !plan.current && !state.nudge && !state.ask && state.petState === 'idle' && !movingRef.current && !document.hidden) {
         const number = perchedOn.current;
         if (number !== null && state.motion !== 'sleepy' && Date.now() - lastAsk.current > ASK_EVERY && Math.random() < (state.motion === 'playful' ? .3 : .12)) {
           lastAsk.current = Date.now();
@@ -150,19 +185,53 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
           return;
         }
         const current = await fresh();
-        let cursorX: number | undefined;
-        if (state.motion === 'playful') cursorX = await cursorPosition().then(point => point.x / (window.devicePixelRatio || 1)).catch(() => undefined);
-        if (current && !movingRef.current) void go(chooseMove(current, state.scale, state.motion, Math.random, cursorX));
+        // Zoomies at odd hours (petDay.ts): a wiggle, a sprint there and back, and a wash as
+        // if nothing happened.
+        const now = performance.now();
+        const burst = current && !movingRef.current && Math.random() < zoomiesChance({ hour: new Date().getHours(), motion: state.motion, energy: desktopCat.energy, excitement: desktopCat.excitement, sinceWake: now - desktopCat.wokeAt, slept: desktopCat.slept, sinceLast: now - lastZoomies.current, still: lessMotion() }) ? zoomies(current, state.scale) : [];
+        if (burst.length) {
+          lastZoomies.current = now;
+          begin({ steps: burst, then: 'groom', pause: 120, left: 0, until: Date.now() + 60_000 }, 'wiggle');
+        } else {
+          // A playful cat goes after the pointer only while the pointer interests it.
+          let cursorX: number | undefined;
+          if (state.motion === 'playful' && desktopCat.curious) cursorX = await cursorPosition().then(point => point.x / (window.devicePixelRatio || 1)).catch(() => undefined);
+          if (current && !movingRef.current) void go(chooseMove(current, state.scale, state.motion, Math.random, cursorX));
+        }
       }
       timer = window.setTimeout(tick, nextRoamDelay(live.current.motion));
     };
     timer = window.setTimeout(tick, 2500);
     return () => window.clearTimeout(timer);
-  }, [enabled, roam, go, fresh]);
+  }, [enabled, roam, go, fresh, begin]);
+
+  // What the cat wants (usePetLife.ts): some room after too much fuss, or your company
+  // after a long while alone. It goes off the idea if no chance comes within a minute.
+  useEffect(() => {
+    if (!enabled || !roam) return;
+    const timer = window.setInterval(async () => {
+      const wants = desktopCat.wants, now = performance.now();
+      if (!wants || now < desktopCat.wantsAt) return;
+      if (now - desktopCat.wantsAt > 60_000) { desktopCat.wants = null; return; }
+      const state = live.current;
+      if (!world.current || state.expanded || state.quiet || state.asleep || state.held || state.nudge || state.ask || state.petState !== 'idle' || movingRef.current || plan.current || desktopCat.napping || document.hidden) return;
+      desktopCat.wants = null;
+      const pointerX = await cursorPosition().then(point => point.x / (window.devicePixelRatio || 1)).catch(() => undefined);
+      const current = await fresh();
+      if (!current || movingRef.current || plan.current) return;
+      if (wants === 'room') {
+        const move = walkAway(current, state.scale, pointerX);
+        if (move) begin({ steps: [move], then: 'groom', pause: 0, left: 0, until: Date.now() + 60_000 });
+      } else if (pointerX !== undefined) {
+        begin({ steps: [], next: here => approach(here, state.scale, pointerX), then: 'askpet', pause: 300, left: 5, until: Date.now() + 90_000 });
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [enabled, roam, fresh, begin]);
 
   useEffect(() => {
     if (!enabled) return;
-    if (expanded) { movingRef.current = false; perched.current = false; perchedOn.current = null; void command('pet_stop').catch(() => {}); setNudge(null); setAsk(null); }
+    if (expanded) { movingRef.current = false; perched.current = false; perchedOn.current = null; plan.current = null; void command('pet_stop').catch(() => {}); setNudge(null); setAsk(null); }
   }, [enabled, expanded]);
 
   // Invisible and click-through while the user presents, meets or works full screen.
@@ -210,6 +279,7 @@ export function usePetWorld({ enabled, roam, aware, nudges, motion, scale, expan
   }, []);
   const beforeDrag = useCallback(() => {
     movingRef.current = false;
+    plan.current = null;
     perched.current = false;
     perchedOn.current = null;
     setAsk(null);

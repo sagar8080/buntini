@@ -1,0 +1,9 @@
+[
+  {
+    "advisory": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "range": "<=4.0.7",
+    "until": "2026-12-17",
+    "reason": "No fixed picomatch exists yet (4.0.7 is the newest). It is a development dependency, reached only through Vite and its globbing, which match the project's own build patterns, never outside input; none of it ships in the app."
+  }
+]
