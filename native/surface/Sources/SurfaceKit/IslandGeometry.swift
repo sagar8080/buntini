@@ -51,19 +51,24 @@ public enum IslandGeometry {
         return shown > 0 ? min(shown, 40) : screen.statusBar
     }
 
-    /// The island's size in each mode. `openHeight` is the card's height below the top edge.
-    public static func size(_ mode: IslandMode, screen: ScreenShape, openHeight: CGFloat) -> CGSize {
+    /// Widest a wing grows to hold what it shows.
+    public static let widestWing: CGFloat = 150
+
+    /// The island's size in each mode. `openHeight` is the card's height below the top edge;
+    /// `wings` the room each side of the notch, wider while there is more to show.
+    public static func size(_ mode: IslandMode, screen: ScreenShape, openHeight: CGFloat, wings: CGFloat = peekWings) -> CGSize {
+        let wings = min(max(wings, peekWings), widestWing)
         if let notch = notch(screen) {
             switch mode {
             case .hidden: return notch
-            case .peek: return CGSize(width: notch.width + 2 * peekWings, height: notch.height)
-            case .open: return CGSize(width: max(openWidth, notch.width + 2 * peekWings), height: notch.height + openHeight)
+            case .peek: return CGSize(width: notch.width + 2 * wings, height: notch.height)
+            case .open: return CGSize(width: max(openWidth, notch.width + 2 * wings), height: notch.height + openHeight)
             }
         }
         let bar = menuBar(screen)
         switch mode {
         case .hidden: return CGSize(width: 0, height: 0)
-        case .peek: return CGSize(width: 200, height: bar)
+        case .peek: return CGSize(width: 40 + 2 * wings, height: bar)
         case .open: return CGSize(width: openWidth, height: bar + openHeight)
         }
     }
@@ -99,5 +104,77 @@ public enum IslandGeometry {
         let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
         let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
         return hypot(dx, dy)
+    }
+}
+
+// MARK: - Corners
+
+extension IslandGeometry {
+    /// The tile the cat rests in when the island sits in a corner.
+    public static let tile = CGSize(width: 56, height: 56)
+    /// Space between a corner island and the screen's edges.
+    public static let cornerMargin: CGFloat = 12
+    /// How close to a corner a dropped cat has to land to settle there.
+    public static let cornerReach: CGFloat = 180
+
+    /// The panel's frame for a placement: centred at the top, or with its corner on the
+    /// matching corner of the visible screen (clear of the menu bar and the Dock).
+    public static func panelFrame(_ screen: ScreenShape, placement: Placement) -> CGRect {
+        let visible = screen.visibleFrame
+        switch placement {
+        case .auto: return panelFrame(screen)
+        case .topLeft: return CGRect(x: visible.minX, y: visible.maxY - panel.height, width: panel.width, height: panel.height)
+        case .topRight: return CGRect(x: visible.maxX - panel.width, y: visible.maxY - panel.height, width: panel.width, height: panel.height)
+        case .bottomLeft: return CGRect(x: visible.minX, y: visible.minY, width: panel.width, height: panel.height)
+        case .bottomRight: return CGRect(x: visible.maxX - panel.width, y: visible.minY, width: panel.width, height: panel.height)
+        }
+    }
+
+    /// The island's size in a corner: the tile at rest, the tile and its pills when peeking,
+    /// the card when open.
+    public static func cornerSize(_ mode: IslandMode, openHeight: CGFloat, pills: Int, glance: CGFloat? = nil) -> CGSize {
+        switch mode {
+        case .hidden: return tile
+        case .peek:
+            if let glance { return CGSize(width: tile.width + (glance > 0 ? 14 + glance : 0), height: tile.height) }
+            return CGSize(width: tile.width + (pills > 0 ? 18 + 13 * CGFloat(min(pills, 4)) : 0), height: tile.height)
+        case .open: return CGSize(width: openWidth, height: 20 + openHeight)
+        }
+    }
+
+    /// Where the island sits inside the panel, top-left origin (SwiftUI's), for a placement.
+    public static func localRect(size: CGSize, placement: Placement) -> CGRect {
+        let m = cornerMargin
+        switch placement {
+        case .auto: return CGRect(x: (panel.width - size.width) / 2, y: 0, width: size.width, height: size.height)
+        case .topLeft: return CGRect(x: m, y: m, width: size.width, height: size.height)
+        case .topRight: return CGRect(x: panel.width - m - size.width, y: m, width: size.width, height: size.height)
+        case .bottomLeft: return CGRect(x: m, y: panel.height - m - size.height, width: size.width, height: size.height)
+        case .bottomRight: return CGRect(x: panel.width - m - size.width, y: panel.height - m - size.height, width: size.width, height: size.height)
+        }
+    }
+
+    /// The same rectangle on screen (AppKit's bottom-left origin).
+    public static func screenRect(panel frame: CGRect, size: CGSize, placement: Placement) -> CGRect {
+        let local = localRect(size: size, placement: placement)
+        return CGRect(x: frame.minX + local.minX, y: frame.maxY - local.maxY, width: local.width, height: local.height)
+    }
+
+    /// Where a cat dropped at `point` asks the island to go: a corner it landed near, the top
+    /// centre, or nowhere new.
+    public static func placement(dropAt point: CGPoint, screen: ScreenShape) -> Placement? {
+        let visible = screen.visibleFrame
+        let corners: [(Placement, CGPoint)] = [
+            (.topLeft, CGPoint(x: visible.minX, y: visible.maxY)), (.topRight, CGPoint(x: visible.maxX, y: visible.maxY)),
+            (.bottomLeft, CGPoint(x: visible.minX, y: visible.minY)), (.bottomRight, CGPoint(x: visible.maxX, y: visible.minY)),
+        ]
+        if let near = corners.min(by: { hypot(point.x - $0.1.x, point.y - $0.1.y) < hypot(point.x - $1.1.x, point.y - $1.1.y) }),
+           hypot(point.x - near.1.x, point.y - near.1.y) <= cornerReach {
+            return near.0
+        }
+        if abs(point.x - screen.frame.midX) <= 200 && screen.frame.maxY - point.y <= 140 {
+            return .auto
+        }
+        return nil
     }
 }

@@ -67,14 +67,18 @@ const ASKING: &[&str] = &[
 
 /// Whether the request is phrased as a question rather than asking for something done.
 pub(crate) fn asks(text: &str) -> bool {
-    let lower = text.trim().to_lowercase();
+    let lower = text.trim().to_lowercase().replace('’', "'");
     if lower.ends_with('?') {
         return true;
     }
-    let words: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '’')).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '\'')).filter(|w| !w.is_empty()).collect();
     match words.as_slice() {
         [] => true,
         ["can" | "could" | "would" | "will", "you" | "u", ..] => false,
+        // "Don't let me forget to water the plants" tells; it doesn't ask.
+        ["don't" | "dont", "let" | "forget", ..] | ["do", "not", "let" | "forget", ..] | ["never", "let", "me", ..] => false,
+        // "Give me the start and end of the dentist appointment" asks to be told something.
+        ["give" | "tell" | "show", "me", ..] => true,
         [first, ..] => ASKING.contains(&first.replace('’', "'").as_str()),
     }
 }
@@ -124,9 +128,21 @@ pub enum Intent {
     LookUp,
 }
 
+/// Whether the request says which of the user's apps to read from: "from my email give the
+/// Nest energy change and from my reminders the car task" asks to be told, not to add anything.
+fn reads_from_an_app(request: &str) -> bool {
+    const APPS: [&str; 8] = ["mail", "email", "emails", "inbox", "calendar", "reminders", "notes", "messages"];
+    let words: Vec<String> = request.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect();
+    words.windows(2).any(|pair| pair[0] == "from" && APPS.contains(&pair[1].as_str()))
+        || words.windows(3).any(|run| run[0] == "from" && ["my", "the"].contains(&run[1].as_str()) && APPS.contains(&run[2].as_str()))
+}
+
 /// What a request asks for by meaning. A question can only be a look online; a model's
 /// own answer to "will it rain tomorrow" is made up.
 pub fn read(request: &str) -> Option<Intent> {
+    if ENABLED.load(Ordering::SeqCst) && reads_from_an_app(request) {
+        return None;
+    }
     let question = asks(request);
     // "Remind me what the code was" asks; it isn't a reminder. A question can still be a look.
     if !ENABLED.load(Ordering::SeqCst) || (!question && crate::completion::non_action(&request.trim().to_lowercase())) {
@@ -178,10 +194,10 @@ mod tests {
 
     #[test]
     fn questions_are_told_from_requests() {
-        for question in ["what's on tomorrow", "did Ana write back", "free at 11?", "can I freeze milk", "is wifi on", "any emails"] {
+        for question in ["what's on tomorrow", "did Ana write back", "free at 11?", "can I freeze milk", "is wifi on", "any emails", "give me the start and end of the dentist appointment", "tell me the first appointment tomorrow"] {
             assert!(asks(question), "{question}");
         }
-        for request in ["timer 25 min", "can you call mum", "brightness to 50%", "quit Spotify", "could you add eggs to my reminders"] {
+        for request in ["timer 25 min", "can you call mum", "brightness to 50%", "quit Spotify", "could you add eggs to my reminders", "don't let me forget to water the plants on sunday", "Don’t forget to remind me about the bins", "do not let me forget the parcel"] {
             assert!(!asks(request), "{request}");
         }
     }
@@ -214,7 +230,91 @@ mod tests {
     }
 
     #[test]
+    fn naming_an_app_to_read_from_asks_rather_than_acts() {
+        assert!(reads_from_an_app("From my email give the Nest energy change and from my reminders the car task."));
+        assert!(reads_from_an_app("From Mail give the amount of the ride receipt"));
+        assert!(!reads_from_an_app("add milk to my reminders"));
+        assert!(!reads_from_an_app("put lunch with Ana in my calendar"));
+    }
+
+    #[test]
     fn off_unless_enabled() {
         assert_eq!(read("set a timer for 5 minutes"), None);
+    }
+
+    /// With the bundled meaning model: asking to be shown one's own things in some order or
+    /// form is no action, while asking for something added or changed still is one.
+    #[test]
+    #[ignore = "loads the bundled meaning model; run with --ignored"]
+    fn live_showing_is_not_changing() {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        enable();
+        let mut wrong = Vec::new();
+        for request in [
+            "Sort my reminders by due date, soonest first, with undated ones last.",
+            "Alphabetise my reminder titles, one per line.",
+            "Turn my reminders into one short sentence I could read aloud.",
+            "order my tasks by when they're due",
+            "list my to-dos from oldest to newest",
+            "give me a quick rundown of my day in two sentences",
+            "put this week's meetings in a numbered list",
+            "show yesterday's unread emails",
+            "read my reminders back to me",
+            "summarise my inbox in three bullets",
+            "arrange my events for saturday by start time",
+            "count the meetings I have this week",
+        ] {
+            if let Some(intent) = read(request) {
+                wrong.push(format!("{request} -> {intent:?}"));
+            }
+        }
+        for (request, tool) in [
+            ("remind me to buy milk tomorrow", "add_reminder"),
+            ("add eggs to my reminders", "add_reminder"),
+            ("put lunch with Ana in my calendar on friday at 1", "add_calendar_event"),
+            ("book a dentist appointment on my calendar for next tuesday at 3", "add_calendar_event"),
+            ("mark the laundry reminder as done", "complete_reminder"),
+            ("push the call mum reminder to thursday", "reschedule_reminder"),
+            ("move my dentist appointment to 4pm", "update_calendar_event"),
+            ("create a note called packing list", "create_note"),
+            ("remind me to call the plumber at 5", "add_reminder"),
+            ("add bread and butter to my reminders", "add_reminder"),
+            ("move my 3pm meeting to thursday", "update_calendar_event"),
+            ("set a timer for 10 minutes", "set_timer"),
+            ("put a reminder on my list to call the bank", "add_reminder"),
+            ("don't let me forget to water the plants on sunday", "add_reminder"),
+            ("tick off the gym reminder", "complete_reminder"),
+        ] {
+            if read(request) != Some(Intent::Action(tool)) {
+                wrong.push(format!("{request} -> {:?}, wanted {tool}", read(request)));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// The kinds nearest a request, best first, with their scores. For tuning the examples.
+    #[test]
+    #[ignore = "loads the bundled meaning model; prints scores for BUNTINI_INTENT_PROBE"]
+    fn live_probe_scores() {
+        crate::embedding::set_model_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../models/bge-small-en-v1.5"));
+        let examples = examples().unwrap();
+        for request in std::env::var("BUNTINI_INTENT_PROBE").unwrap_or_default().split('|').filter(|r| !r.is_empty()) {
+            let vector = unit(&crate::embedding::embed_within(&[instruction(request).to_string()], false, WAIT).unwrap().pop().unwrap().unwrap());
+            let mut scores: Vec<(&str, Vec<f32>)> = Vec::new();
+            for (kind, example) in examples {
+                let similarity: f32 = vector.iter().zip(example).map(|(a, b)| a * b).sum();
+                match scores.iter_mut().find(|(name, _)| name == kind) {
+                    Some((_, list)) => list.push(similarity),
+                    None => scores.push((kind.as_str(), vec![similarity])),
+                }
+            }
+            let mut ranked: Vec<(&str, f32)> = scores.into_iter().map(|(kind, mut list)| {
+                list.sort_by(|a, b| b.total_cmp(a));
+                let top = &list[..list.len().min(NEAREST)];
+                (kind, top.iter().sum::<f32>() / top.len() as f32)
+            }).collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+            println!("PROBE {request}: {:?}", &ranked[..3]);
+        }
     }
 }

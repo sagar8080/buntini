@@ -631,6 +631,16 @@ pub fn without_filler(goal: &str, answer: &str, assistant_name: &str) -> String 
         }
         lines.push(kept.trim_end().to_string());
     }
+    // "Here is the requested answer:" before the answer only introduces it.
+    let opening = lines.iter().position(|line| !line.trim().is_empty());
+    if let Some(at) = opening {
+        let first = lines[at].trim().to_lowercase().replace('’', "'");
+        const INTRODUCES: [&str; 7] = ["here is", "here's", "here are", "sure", "certainly", "of course", "okay"];
+        let more = lines[at + 1..].iter().any(|line| line.chars().any(char::is_alphanumeric));
+        if more && first.ends_with(':') && INTRODUCES.iter().any(|opener| first.starts_with(opener)) {
+            lines.drain(..=at);
+        }
+    }
     let joined = lines.join("\n");
     let trimmed = joined.trim();
     if trimmed.chars().any(char::is_alphabetic) { trimmed.to_string() } else { answer.trim().to_string() }
@@ -647,5 +657,15 @@ mod filler_tests {
         assert_eq!(without_filler("hi", "That's all for now! Feel free to ask.", "Buntini"), "That's all for now! Feel free to ask.", "nothing else left: keep it");
         let draft = "Hi Ana,\n\nLet me know if Friday works.\n\nBest,\nSagar";
         assert_eq!(without_filler("draft an email to Ana asking if Friday works", draft, "Buntini"), draft);
+    }
+
+    #[test]
+    fn a_line_that_only_introduces_the_answer_goes() {
+        let ask = "Alphabetize the tokens 'cobalt, amber, jade' and write them in one comma-separated line.";
+        assert_eq!(without_filler(ask, "Here is the requested answer:\n\namber, cobalt, jade", "Buntini"), "amber, cobalt, jade");
+        assert_eq!(without_filler(ask, "Sure! Here's the list:\namber, cobalt, jade", "Buntini"), "amber, cobalt, jade");
+        // A heading that says what follows stays, and so does an introduction with nothing after it.
+        assert_eq!(without_filler("list the steps", "Steps:\n1. Boil water", "Buntini"), "Steps:\n1. Boil water");
+        assert_eq!(without_filler("hi", "Here's the thing:", "Buntini"), "Here's the thing:");
     }
 }

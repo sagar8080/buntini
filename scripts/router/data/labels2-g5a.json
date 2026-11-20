@@ -1,0 +1,1568 @@
+[
+ {
+  "q": "what did joana say about reel 4",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how much is the amp repair costing me",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "is my amp fixed yet",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "tracking number for the strings?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats 2 more sets of those bass strings gonna cost at the same price",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "gaivota fee + drinks tab, total?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "festival fee split 4 ways = ?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time do we actually go on at gaivota",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whens soundcheck at gaivota",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's on the gaivota guest list so far and how many spots have we got left",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did benedita ask something about a bike",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "if foley runs 2 hours over how much extra is that",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "multibanco ref for the electricity pls",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what seat am i in on the train up to porto",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where do i collect my accreditation for douro curto",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did mum want me to bring sunday",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when exactly is the boiler technician coming",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much do i owe for the van if we split it like yuki said",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats the late fee on the van",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what budget did priya give for sal e pedra and what's that per day",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many visits left on my climbing pass",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "would the €48 unlimited be cheaper than the 10 pass if i climb 8 times a month",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "has sal grosso paid my october invoice",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which room is cave 9 putting us in",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "parcel delivery window today?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's jorge want from us",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "give me caetano's setlist as a numbered list",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what does rafael need from me before the mix starts",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's driving the van",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "did ngozi ask to be on a guest list",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on tmrw",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything on thursday evening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "dentist when",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's rehearsal tmrw",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how long is foley on friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when does the final mix start",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many mix days are booked",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i free tuesday evening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's in the sal e pedra spotting session",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "the spotting session, is that during a mix day?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "where is the porto screening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many band things have i got in the next two weeks",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "next rehearsal after tomorrow's?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "lunch at mums is what time",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "physio sunday week, what time",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days until the festival",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long's the train back from porto",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what have i got the weekend after next",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "who's coming to dinner on friday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's on saturday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time's the van pickup",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list my work stuff next week in order",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when was the dialogue lock",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what did i have on sunday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the deliverables check",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "stand up time today?",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "where's the final mix happening",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "show me my band calendar for the next fortnight",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many nights am i away in porto",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's on monday",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "whats on my to-do list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "anything overdue?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's due today",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when do i need to print the setlists",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "show me my band list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many reminders on the home list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i put in a reminder to book the porto hotel",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "which of my reminders dont have a date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what do i need to buy",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "when's the yuki present reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what's next on my work list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sort my band reminders by due date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many to-dos are due in the next 3 days",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the nas backup due",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "what time did i set the amp pickup for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "list everything due before saturday",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when do i have to invoice sal grosso",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many days till my guest list reminder",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats due tmrw",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "overdue band stuff?",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "did i ever make a to do for renewing cave 9",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "how many open reminders have i got altogether",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the physio follow up reminder, has it got a date",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": false
+ },
+ {
+  "q": "earliest due thing on my home list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "give me thursday and friday's to-dos as one list",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i be in for the strings delivery today",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long have i got between adr and climbing now",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does the boiler visit clash with anything",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time should i get to the dentist tomorrow",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when does rafael need the predubs by, and what else is on that day",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i pick up my porto accreditation between the train getting in and the screening",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when will joana leave the adr session",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time does henrique want us in for the playback and what else is on that day",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "kofi wants me in early friday, how long's my day at the studio then",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what does benedita want before friday's foley and what time does it start",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did joana want redone, and who'll be at that adr session",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what did tiago suggest for after the q&a, and is my train back that night",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "gaivota fee per person, how many of us are playing according to my calendar",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "amadou has to get to gaivota early, how much earlier than my calendar time",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many free lunches am i getting on the mix stage",
+  "apps": [
+   "mail"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the playback henrique mentioned in my calendar at the time he said",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does sunday lunch in my diary match the time mum said",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what time's dinner friday and whose name is the booking under",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the van due back before my physio on sunday",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the spotting session priya asked for, is it in my calendar at the time she wanted",
+  "apps": [
+   "mail",
+   "calendar"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "am i going to be late paying the electricity",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does my van return reminder come before the late fees start",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how much money goes out for the stuff on my list friday",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the amp place open at the time my reminder says to collect it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my cue list reminder set for when kofi actually wanted it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "who's asked to be on the festival guest list, and when's my reminder to send it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "the DI box thing on my list, who suggested asking bruno",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how many sessions are left on the cave 9 block and have i got a to-do to renew it",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's the payment reference for the bill i've got to pay on friday",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "physio cost, and is booking a follow up on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "do i need to renew climbing, is it on my list anywhere",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's the october money from sal grosso landing and when do i invoice for november",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "anything due on gig day",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "can i do the nas backup before climbing tonight",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "does my van return reminder clash with anything in my calendar",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "which to-dos land on mix days",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is the yuki present reminder before the festival rehearsal",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "what's left on my work list before i go to porto",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when's my porto hotel reminder vs when i actually travel",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "friday: meetings and to-dos together pls",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "how long between my setlist printing reminder and when the gig starts in my calendar",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "is my invoice reminder on a day i'm at the studio anyway",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "when can i fit in the dry cleaning tomorrow",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "will i be on the mix stage when my guest list reminder goes off",
+  "apps": [
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "my amp pickup reminder friday, will foley be done and the shop still open by then",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "if i return the van when my reminder says, will i make physio, and is it before the late fee",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "saturday rundown: gig times and anything i need to do beforehand",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "everything about the festival: when, our set time, and what's left on my list for it",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "porto trip: train times, where to get accreditation, and is the hotel sorted",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "friday: whats on, whats due, and roughly how much money goes out",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "sunday lunch at mum's: what time, what do i bring, and is calling her still on my list",
+  "apps": [
+   "mail",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "nas backup tonight, does it clash with anything, and did sofia change climbing",
+  "apps": [
+   "mail",
+   "calendar",
+   "reminders"
+  ],
+  "kind": "personal",
+  "work_out": true
+ },
+ {
+  "q": "whats my hotel in porto",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "van number plate?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "is the band photo shoot before or after the gig",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "gate code for sal grosso parking",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how long till my next bass lesson",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "which shop did i say to get the gaffer tape from",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how much will the porto hotel cost for the night",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "who's doing sound at ruído do rio",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "festival parking cost plus the van rental, total?",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's my physio follow-up appointment",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "is my rent reminder before or after the boiler visit",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what time does the festival soundcheck start",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how long is my flight to porto",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "what time does jorge need the stage plot by",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "what time did i set the yuki present reminder for",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "how many days until my climbing pass renewal date",
+  "apps": [
+   "mail"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "did i make a reminder to buy mum flowers, and how many days till then",
+  "apps": [
+   "reminders"
+  ],
+  "kind": "unavailable",
+  "work_out": true
+ },
+ {
+  "q": "when's yuki's birthday party",
+  "apps": [
+   "calendar"
+  ],
+  "kind": "unavailable",
+  "work_out": false
+ },
+ {
+  "q": "my bass strings sound dead after a month, why",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i get candle wax off my jeans",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "im 31, roughly how many days old am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i stop getting blisters on my fingers from playing bass",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "24 vs 25 fps, why does it matter for sound sync",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many audio samples per frame at 48khz and 25fps",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "bytes per second for 48k 24-bit stereo?",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what does M&E mean in film sound",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "whats the difference between adr and foley",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "translate 'obrigada pelo convite' to english",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "riddle: what has keys but can't open locks",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "15% tip on €48?",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "roughly how far is lisbon to porto by road",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "good warm up for my lower back before a gig?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "is it bad if i sleep in my contact lenses once",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "give me words that rhyme with harbour",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "write a 3 sentence bio for an indie band from lisbon, moody and a bit funny",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i clean a rosewood fretboard",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "capital of cape verde",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many minutes is 2h50",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "what's -6 dB as an amplitude ratio",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how do i make pastéis de nata at home",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "my sourdough starter smells like nail polish, is it dead",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "best way to carry a bass on a train without annoying people",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "180 euros in pounds at 0.86?",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "help me word a polite msg to a landlord about a broken boiler",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "hey how's it going",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "tell me a drummer joke",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what does LUFS stand for",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what loudness do cinema mixes usually sit at compared to streaming",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "if i practise 40 min a day for 30 days how many hours is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "i get headaches after long mix days, any tips",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "time difference between lisbon and são paulo rn",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "good stretch for my wrists after a long edit",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "a 4-beat loop is 2.5 seconds long, what bpm is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "spell rehearsal backwards",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "how long does it take to walk 5km",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "can i drive a 9 seater minibus on a normal car licence in europe",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "di box vs preamp, whats the difference",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i get to sleep early before a 7am train",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how many seconds in a day",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "if my rent is 780 a month whats that per year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true
+ },
+ {
+  "q": "explain sidechain compression like i'm 10",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "what wine goes with bacalhau",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ },
+ {
+  "q": "how do i fix a crackly volume knob on my amp",
+  "apps": [],
+  "kind": "general",
+  "work_out": false
+ }
+]

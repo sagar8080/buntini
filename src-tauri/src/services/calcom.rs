@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::fetch::{Failure, Net};
 use super::snapshot::{self, is_today, short, text, time, when, Row, Snapshot};
 use super::Kind;
+use crate::i18n::t;
 use crate::surface::PillState;
 
 pub const HOST: &str = "api.cal.com";
@@ -37,15 +38,15 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>) -> Result<Snapshot, Fail
         let who = text(booking, "/attendees/0/name");
         let uid = text(booking, "/uid").unwrap_or_default();
         rows.push(
-            Row::new(format!("booking-{uid}"), text(booking, "/title").unwrap_or_else(|| "Booking".into()))
-                .detail([Some(when(start, now)), who, (state == PillState::Waiting).then(|| "Unconfirmed".into())])
+            Row::new(format!("booking-{uid}"), text(booking, "/title").unwrap_or_else(|| t("services.calcom.booking")))
+                .detail([Some(when(start, now)), who, (state == PillState::Waiting).then(|| t("services.status.unconfirmed"))])
                 .state(Some(state))
                 .url((!uid.is_empty()).then(|| format!("https://app.cal.com/booking/{uid}"))),
         );
     }
     let title = match rows.first() {
         Some(next) => format!("{} · {}", next.title, next.detail.as_deref().and_then(|detail| detail.split(" · ").next()).unwrap_or_default()),
-        None => "No upcoming bookings".into(),
+        None => t("services.calcom.noBookings"),
     };
     rows.truncate(snapshot::MAX_ROWS);
     Ok(Snapshot { title, badge: (today > 0).then(|| short(today)), rows, graph: None, busy: false })

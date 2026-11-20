@@ -60,7 +60,9 @@ jobs:
         with:
           toolchain: '1.99.1'
       - name: Audit npm, including the build toolchain
-        run: npm audit --audit-level=high
+        # Fails on any high or critical advisory but those reviewed in
+        # scripts/npm-audit-exceptions.json, each only until its date or a change to it.
+        run: node scripts/npm_audit.mjs
       - name: Audit Rust crates
         run: |
           cargo install cargo-audit --version 0.22.1 --locked

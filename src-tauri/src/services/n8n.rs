@@ -5,8 +5,9 @@ use chrono::{DateTime, FixedOffset};
 use serde_json::Value;
 
 use super::fetch::{Failure, Net};
-use super::snapshot::{self, flag, is_today, list, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, flag, is_today, list, short, text, time, when, Row, Snapshot};
 use super::{Kind, Memo};
+use crate::i18n::{t, tf, tn};
 use crate::surface::PillState;
 
 pub const CAP: usize = 512 * 1024;
@@ -35,17 +36,17 @@ pub fn names(value: &Value) -> HashMap<String, String> {
     list(value, "/data").iter().filter_map(|workflow| Some((text(workflow, "/id")?, text(workflow, "/name")?))).collect()
 }
 
-fn state(run: &Value) -> (PillState, &'static str) {
+fn state(run: &Value) -> (PillState, String) {
     match text(run, "/status").as_deref() {
-        Some("success") => (PillState::Done, "Succeeded"),
-        Some("error" | "crashed") => (PillState::Error, "Failed"),
-        Some("running" | "new") => (PillState::Working, "Running"),
-        Some("waiting") => (PillState::Idle, "Waiting"),
-        Some("canceled") => (PillState::Idle, "Canceled"),
+        Some("success") => (PillState::Done, t("services.status.succeeded")),
+        Some("error" | "crashed") => (PillState::Error, t("services.status.failed")),
+        Some("running" | "new") => (PillState::Working, t("services.status.running")),
+        Some("waiting") => (PillState::Idle, t("services.status.waiting")),
+        Some("canceled") => (PillState::Idle, t("services.status.canceled")),
         // Versions before `status`: finished, stopped without finishing, or still going.
-        _ if flag(run, "/finished") => (PillState::Done, "Succeeded"),
-        _ if run.get("stoppedAt").is_some_and(|at| !at.is_null()) => (PillState::Error, "Failed"),
-        _ => (PillState::Working, "Running"),
+        _ if flag(run, "/finished") => (PillState::Done, t("services.status.succeeded")),
+        _ if run.get("stoppedAt").is_some_and(|at| !at.is_null()) => (PillState::Error, t("services.status.failed")),
+        _ => (PillState::Working, t("services.status.running")),
     }
 }
 
@@ -57,7 +58,7 @@ pub fn parse(value: &Value, names: &HashMap<String, String>, base: &str, now: Da
     for run in runs.iter().filter(|run| run.get("id").is_some()) {
         let (pill, label) = state(run);
         let workflow = text(run, "/workflowId").unwrap_or_default();
-        let name = names.get(&workflow).cloned().unwrap_or_else(|| format!("Workflow {workflow}"));
+        let name = names.get(&workflow).cloned().unwrap_or_else(|| tf("services.n8n.workflow", &[("id", &workflow)]));
         let started = time(run, "/startedAt");
         if started.is_some_and(|at| is_today(at, now)) {
             ran_today += 1;
@@ -71,19 +72,19 @@ pub fn parse(value: &Value, names: &HashMap<String, String>, base: &str, now: Da
         let id = text(run, "/id").unwrap_or_default();
         rows.push(
             Row::new(format!("run-{id}"), name)
-                .detail([Some(label.into()), started.map(|at| when(at, now))])
+                .detail([Some(label), started.map(|at| when(at, now))])
                 .state(Some(pill))
                 .url(Some(format!("{base}/workflow/{workflow}/executions/{id}"))),
         );
     }
     let title = if failed_today > 0 {
-        format!("{} today", plural(failed_today, "failed run", "failed runs"))
+        tn("services.n8n.failedRunsToday", failed_today as u64, &[])
     } else if let Some(name) = &running {
-        format!("Running {name}")
+        tf("services.n8n.runningWorkflow", &[("name", name)])
     } else if ran_today > 0 {
-        format!("{} today", plural(ran_today, "run", "runs"))
+        tn("services.n8n.runsToday", ran_today as u64, &[])
     } else {
-        "No runs today".into()
+        t("services.n8n.noRuns")
     };
     rows.truncate(snapshot::MAX_ROWS);
     Ok(Snapshot { title, badge: (failed_today > 0).then(|| short(failed_today)), rows, graph: None, busy: running.is_some() })

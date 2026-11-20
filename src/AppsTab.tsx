@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Toggle from './Toggle';
 import MailSection from './mail/MailSection';
 import { command, errorMessage } from './bridge';
+import { number, t } from './i18n.ts';
 import type { AppList, Settings } from './types';
 import AgentsSection from './agents/AgentsSection';
 
@@ -28,12 +29,12 @@ export default function AppsTab({ draft, update, onError }: Props) {
     try { const note = await command<string>('check_app', { id }); setNotes(previous => ({ ...previous, [id]: note })); }
     catch (error) { setNotes(previous => ({ ...previous, [id]: errorMessage(error) })); }
   }
-  if (!list) return <section className="settings-section"><p className="field-help">Loading…</p></section>;
+  if (!list) return <section className="settings-section"><p className="field-help">{t('common.loading')}</p></section>;
   return <>
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Apps Buntini can use</h3></div>
+      <div className="settings-section-heading"><h3>{t('settings.apps.title')}</h3></div>
       {list.apps.map(app => <div key={app.id} className="app-permission">
-        <Toggle label={app.name} detail={app.installed ? app.can.join(' · ') : 'Not on this Mac'} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
+        <Toggle label={app.name} detail={app.installed ? app.can.join(' · ') : t('settings.apps.notOnMac')} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
         {app.note && app.installed && <p className="field-help app-note">{app.note}</p>}
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
@@ -41,12 +42,12 @@ export default function AppsTab({ draft, update, onError }: Props) {
     {draft.apps.includes('mail') && <MailSection value={draft.mail} onChange={mail => update('mail', mail)} onError={onError} />}
     <AgentsSection onError={onError} />
     <section className="settings-section">
-      <div className="settings-section-heading"><h3>Accessibility</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>
-      <p className="field-help">{assisting ? 'Allowed' : 'Spotify, browser pages, screen lock'}</p>
-      {!assisting && <button type="button" className="secondary-button" onClick={() => void command<boolean>('accessibility', { ask: true }).then(setAssisting)}>Allow in System Settings…</button>}
+      <div className="settings-section-heading"><h3>{t('settings.apps.accessibility')}</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>
+      <p className="field-help">{assisting ? t('settings.apps.allowed') : t('settings.apps.accessibilityDetail')}</p>
+      {!assisting && <button type="button" className="secondary-button" onClick={() => void command<boolean>('accessibility', { ask: true }).then(setAssisting)}>{t('settings.apps.allowInSettings')}</button>}
     </section>
     {list.others.length > 0 && <section className="settings-section">
-      <details className="disclosure"><summary>Other apps ({list.others.length})</summary>
+      <details className="disclosure"><summary>{t('settings.apps.others', { number: number(list.others.length) })}</summary>
         <p className="other-apps">{list.others.join(' · ')}</p>
       </details>
     </section>}

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronRight, LoaderCircle, Mail, X } from 'lucide-react';
 import { command, errorMessage } from './bridge';
 import { connectPane, connectRows, type ConnectRow } from './setupSteps';
+import { t } from './i18n.ts';
 import type { AppConnection, AppList, AppStatus } from './types';
 
 const DISMISSED = 'buntini-connect-dismissed';
 const icons: Record<string, typeof Mail> = { mail: Mail, calendar: CalendarDays };
-const detail = (row: ConnectRow) => row.state === 'ready' ? 'Connected' : row.state === 'noAccount' ? 'Add an account' : row.state === 'denied' ? 'Allow in System Settings' : row.can.join(' · ');
+const detail = (row: ConnectRow) => row.state === 'ready' ? t('setup.connect.connected') : row.state === 'noAccount' ? t('setup.connect.addAccount') : row.state === 'denied' ? t('setup.connect.allowInSettings') : row.can.join(' · ');
 
 function wasDismissed() {
   try { return localStorage.getItem(DISMISSED) === '1'; } catch { return false; }
@@ -59,8 +60,8 @@ export default function ConnectApps({ allowed, disabled, onAllow, onConnected, o
     setDismissed(true);
     try { localStorage.setItem(DISMISSED, '1'); } catch { /* It comes back next time. */ }
   }
-  return <section className="connect-apps" aria-label="Connect your apps">
-    <header><h2>Connect your apps</h2><button type="button" aria-label="Dismiss" onClick={dismiss}><X size={13} /></button></header>
+  return <section className="connect-apps" aria-label={t('setup.connect.title')}>
+    <header><h2>{t('setup.connect.title')}</h2><button type="button" aria-label={t('common.dismiss')} onClick={dismiss}><X size={13} /></button></header>
     {rows.map(row => {
       const Icon = icons[row.id] ?? Mail, pane = connectPane(row), busy = working === row.id;
       return <button type="button" key={row.id} aria-busy={busy} disabled={row.state === 'ready' || busy || (disabled && !pane)} onClick={() => { if (pane) onPane(pane); else void connect(row.id); }}>

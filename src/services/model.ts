@@ -1,4 +1,5 @@
 // Shared shapes for developer services (stream D). No bridge import, so the bridge can use them.
+import { t } from '../i18n.ts';
 
 /** Saved under `settings.services`; mirrors `services::Settings` in Rust. Keys live in the
     Keychain, never here. */
@@ -24,22 +25,24 @@ export type ServiceStatus = {
 export type ServicesOp =
   | { op: 'ping' }
   | { op: 'status' }
-  | { op: 'saveKey'; service: ServiceId; key: string }
+  | { op: 'unwatch' }
+  | { op: 'saveKey'; service: ServiceId; key: string; host?: string }
   | { op: 'show'; service: ServiceId };
 
-export type ServiceInfo = { id: ServiceId; name: string; detail: string; placeholder: string; host?: keyof ServicesSettings; hostPlaceholder?: string };
+export type ServiceInfo = { id: ServiceId; name: string; readonly detail: string; readonly placeholder: string; host?: keyof ServicesSettings; hostPlaceholder?: string };
 
-/** Every service, in the order Settings lists them. */
+/** Every service, in the order Settings lists them. Details and worded placeholders are read in
+    the language spoken when shown. */
 export const services: ServiceInfo[] = [
-  { id: 'github', name: 'GitHub', detail: 'Pull requests · reviews · CI', placeholder: 'github_pat_…' },
-  { id: 'gitlab', name: 'GitLab', detail: 'Merge requests · reviews · pipelines', placeholder: 'glpat-…', host: 'gitlabHost', hostPlaceholder: 'gitlab.com' },
-  { id: 'gitea', name: 'Gitea', detail: 'Pull requests · reviews · CI', placeholder: 'Access token', host: 'giteaHost', hostPlaceholder: 'git.example.com' },
-  { id: 'vercel', name: 'Vercel', detail: 'Deployments', placeholder: 'Access token' },
-  { id: 'stripe', name: 'Stripe', detail: 'Payments today · read only', placeholder: 'rk_live_…' },
-  { id: 'n8n', name: 'n8n', detail: 'Workflow runs', placeholder: 'API key', host: 'n8nHost', hostPlaceholder: 'n8n.example.com' },
-  { id: 'notion', name: 'Notion', detail: 'Pages changed', placeholder: 'ntn_…' },
-  { id: 'calcom', name: 'Cal.com', detail: 'Upcoming bookings', placeholder: 'cal_live_…' },
-  { id: 'resend', name: 'Resend', detail: 'Sent and bounced mail', placeholder: 're_…' },
+  { id: 'github', name: 'GitHub', get detail() { return t('settings.services.detail.pullRequests'); }, placeholder: 'github_pat_…' },
+  { id: 'gitlab', name: 'GitLab', get detail() { return t('settings.services.detail.mergeRequests'); }, placeholder: 'glpat-…', host: 'gitlabHost', hostPlaceholder: 'gitlab.com' },
+  { id: 'gitea', name: 'Gitea', get detail() { return t('settings.services.detail.pullRequests'); }, get placeholder() { return t('settings.services.accessToken'); }, host: 'giteaHost', hostPlaceholder: 'git.example.com' },
+  { id: 'vercel', name: 'Vercel', get detail() { return t('settings.services.detail.deployments'); }, get placeholder() { return t('settings.services.accessToken'); } },
+  { id: 'stripe', name: 'Stripe', get detail() { return t('settings.services.detail.payments'); }, placeholder: 'rk_live_…' },
+  { id: 'n8n', name: 'n8n', get detail() { return t('settings.services.detail.workflowRuns'); }, get placeholder() { return t('settings.apiKey'); }, host: 'n8nHost', hostPlaceholder: 'n8n.example.com' },
+  { id: 'notion', name: 'Notion', get detail() { return t('settings.services.detail.pagesChanged'); }, placeholder: 'ntn_…' },
+  { id: 'calcom', name: 'Cal.com', get detail() { return t('settings.services.detail.bookings'); }, placeholder: 'cal_live_…' },
+  { id: 'resend', name: 'Resend', get detail() { return t('settings.services.detail.mail'); }, placeholder: 're_…' },
 ];
 
 /** `https://Git.Example.com:8443/path` → `git.example.com:8443`. Null for anything that isn't an
@@ -57,16 +60,30 @@ export function normalizeHost(input: string): string | null {
   }
 }
 
+/** What Save sends for a service: the typed key, and the host when it changed. A key is bound to
+    its host, so a connected service needs its key again for a new host. Null while there is
+    nothing to save; an Error for an address that isn't https. */
+export function saveRequest(info: ServiceInfo, key: string, typedHost: string, savedHost: string, connected: boolean): { key: string; host?: string } | Error | null {
+  const trimmed = key.trim();
+  const hostChanged = !!info.host && typedHost.trim() !== savedHost;
+  if (!hostChanged) return trimmed ? { key: trimmed } : null;
+  const host = normalizeHost(typedHost);
+  if (host === null) return new Error(t('settings.services.httpsAddress'));
+  if (host === savedHost) return trimmed ? { key: trimmed } : null;
+  if (connected && !trimmed) return null;
+  return { key: trimmed, host };
+}
+
 /** The line under a service's name: what it shows now, or why it doesn't. */
 export function statusLine(info: ServiceInfo, status: ServiceStatus | undefined): string {
   if (!status?.configured) return info.detail;
-  if (status.hidden) return 'Hidden from the island';
+  if (status.hidden) return t('settings.services.hidden');
   switch (status.health) {
     case 'ok': return status.title ?? info.detail;
-    case 'rejected': return 'Key refused';
-    case 'limited': return `${info.name} asked to wait`;
-    case 'budget': return 'Today’s allowance used';
-    case 'failing': return 'Can’t reach it right now';
+    case 'rejected': return t('settings.services.keyRefused');
+    case 'limited': return t('settings.services.limited', { service: info.name });
+    case 'budget': return t('settings.services.budget');
+    case 'failing': return t('settings.services.failing');
     default: return info.detail;
   }
 }
@@ -74,8 +91,9 @@ export function statusLine(info: ServiceInfo, status: ServiceStatus | undefined)
 /** What the browser preview answers for `services_call`. */
 export function preview(op: ServicesOp): unknown {
   if (op.op === 'ping') return true;
+  if (op.op === 'unwatch') return null;
   if (op.op === 'status') {
     return services.map((service): ServiceStatus => ({ id: service.id, name: service.name, configured: false, hidden: false, health: 'waiting', title: null, message: null, checkedAt: null }));
   }
-  throw new Error('Open the desktop app to use this.');
+  throw new Error(t('common.desktopOnly'));
 }

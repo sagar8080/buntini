@@ -1,6 +1,7 @@
 //! The audio helper in service mode: one long-lived `buntini-audio --service` speaking JSON
 //! lines. Rust sends `{"op": …}` commands; the helper answers with `{"event": …}` lines.
 //! Voice bands go straight to the pill; every other event goes to whoever listens.
+use crate::i18n::t;
 use serde_json::Value;
 use std::{path::PathBuf, process::Stdio};
 use tokio::{
@@ -41,6 +42,15 @@ impl Service {
 
     /// Sends one command, starting the helper first when it isn't running.
     pub async fn send(&self, command: Value) -> Result<(), String> {
+        self.write(command, true).await
+    }
+
+    /// Sends one command to the helper that is running; none is started for it.
+    pub async fn send_running(&self, command: Value) -> Result<(), String> {
+        self.write(command, false).await
+    }
+
+    async fn write(&self, command: Value, start: bool) -> Result<(), String> {
         let mut running = self.running.lock().await;
         if let Some(service) = running.as_mut() {
             if !matches!(service.child.try_wait(), Ok(None)) {
@@ -48,14 +58,17 @@ impl Service {
             }
         }
         if running.is_none() {
+            if !start {
+                return Err(t("flow.error.helperStopped"));
+            }
             *running = Some(self.spawn()?);
         }
         let service = running.as_mut().expect("just started");
-        let mut line = serde_json::to_vec(&command).map_err(|_| "Buntini couldn’t talk to its audio helper.".to_string())?;
+        let mut line = serde_json::to_vec(&command).map_err(|_| t("flow.error.helperTalk"))?;
         line.push(b'\n');
         if service.input.write_all(&line).await.is_err() || service.input.flush().await.is_err() {
             *running = None;
-            return Err("The audio helper stopped. Try again.".into());
+            return Err(t("flow.error.helperStopped"));
         }
         Ok(())
     }
@@ -74,7 +87,7 @@ impl Service {
 
     fn spawn(&self) -> Result<Running, String> {
         if !self.helper.is_file() {
-            return Err("The local audio helper is missing. Reinstall Buntini to use dictation.".into());
+            return Err(t("flow.error.helperMissing"));
         }
         let mut child = Command::new(&self.helper)
             .arg("--service")
@@ -85,9 +98,9 @@ impl Service {
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|_| "The local audio helper could not start.".to_string())?;
-        let input = child.stdin.take().ok_or("Cannot open the audio helper.")?;
-        let output = child.stdout.take().ok_or("Cannot read the audio helper.")?;
+            .map_err(|_| t("flow.error.helperStart"))?;
+        let input = child.stdin.take().ok_or_else(|| t("flow.error.helperInput"))?;
+        let output = child.stdout.take().ok_or_else(|| t("flow.error.helperOutput"))?;
         let events = self.events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::with_capacity(1 << 16, output).lines();
@@ -189,6 +202,9 @@ for line in sys.stdin:
         assert!(service.running().await);
         service.stop().await;
         assert_eq!(name(&next(&mut events).await), "exited");
+        assert!(!service.running().await);
+        // Some commands mustn't start a helper just for themselves.
+        assert!(service.send_running(json!({"op": "unmute", "devices": []})).await.is_err());
         assert!(!service.running().await);
     }
 

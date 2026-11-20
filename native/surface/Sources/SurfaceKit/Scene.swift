@@ -4,7 +4,7 @@
 import Foundation
 
 /// Bumped whenever a change on one side would break the other.
-public let surfaceContract: UInt32 = 1
+public let surfaceContract: UInt32 = 2
 
 /// Which part of Buntini a pill, card or action belongs to.
 public enum Source: String, Codable, CaseIterable, Sendable {
@@ -35,6 +35,11 @@ public struct Pill: Codable, Equatable, Identifiable, Sendable {
     public let badge: String?
     /// 0…1 when the pill shows progress.
     public let progress: Double?
+    /// The id of the card that goes with this pill, when it isn't the pill's own id.
+    public let card: String?
+
+    /// The id of the card that goes with this pill.
+    public var cardID: String { card ?? id }
 }
 
 public enum Mood: String, Codable, Sendable {
@@ -70,6 +75,8 @@ public struct SurfaceScene: Codable, Equatable, Sendable {
     public let overflow: [String]
     /// The card in front, if any.
     public let card: Card?
+    /// What else can be looked at once the island is opened, newest first. Left out when none.
+    public let shelf: [Card]?
     /// Something waits on the person: the island stays open.
     public let held: Bool
     /// The card in front asks for attention, so the island opens by itself. Otherwise it
@@ -81,6 +88,27 @@ public struct SurfaceScene: Codable, Equatable, Sendable {
     public let flow: FlowPill?
     public let overlay: Overlay?
     public let sound: Sound?
+    /// One line about the Mac under the island while the pointer is on it. Left out when none.
+    public let line: String?
+    /// The surfaces' own words in the person's language. Sent with the first scene and when
+    /// the language changes; the surfaces keep the last they were given.
+    public let words: Words?
+}
+
+/// The words the surfaces draw: every `surface.*` key of `locales/<language>.json`, from Rust
+/// (src-tauri/src/i18n.rs).
+public struct Words: Codable, Equatable, Sendable {
+    /// A language such as `de` or `zh-Hant`.
+    public let language: String
+    /// Written right to left.
+    public let rtl: Bool
+    public let labels: [String: String]
+
+    public init(language: String, rtl: Bool, labels: [String: String]) {
+        self.language = language
+        self.rtl = rtl
+        self.labels = labels
+    }
 }
 
 /// What the person did, sent back to Rust.

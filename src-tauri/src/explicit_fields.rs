@@ -15,7 +15,7 @@ fn quote_end(ch: char, preceding: Option<char>) -> Option<char> {
 }
 
 /// Byte positions outside quotation marks, without interpreting quoted commands.
-fn outside(text: &str) -> Result<Vec<usize>, String> {
+pub(crate) fn outside(text: &str) -> Result<Vec<usize>, String> {
     let mut positions = Vec::new();
     let mut quote = None;
     let mut preceding = None;
@@ -169,7 +169,7 @@ fn begins_request(text: &str) -> bool {
 
 /// Keep quoted fields intact, and scope negation/explanation over coordinated
 /// clauses. Only the original user goal enters this parser, never tool text.
-fn literal_sentences(goal: &str) -> Option<Vec<&str>> {
+pub(crate) fn literal_sentences(goal: &str) -> Option<Vec<&str>> {
     let mut sentences = Vec::new();
     let mut begin = 0;
     for index in outside(goal).ok()? {

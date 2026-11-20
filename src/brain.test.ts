@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 // @ts-ignore Node 24 supplies this built-in module; browser typings may omit it.
 import test from 'node:test';
-import { appleSettingsPane, appleStatus, folderName, friendlyStatus, offersChatGPT, setupLines } from './brain.ts';
+import { appleSettingsPane, appleStatus, cloudProviders, folderName, friendlyStatus, offeredProviders, offersChatGPT, setupLines } from './brain.ts';
 
 test('chosen folders read as names, not paths', () => {
   assert.equal(folderName('/Users/sam/buntini-mlx/bin/python'), 'buntini-mlx');
@@ -49,4 +49,15 @@ test('a download that never finishes says what to check, with the pane that fixe
 test('ChatGPT is offered once Apple Intelligence is known not to answer here', () => {
   for (const reason of ['modelNotReady', 'modelStuck', 'appleIntelligenceNotEnabled', 'languageNotSupported', 'deviceNotEligible', 'unsupported', 'missing']) assert.equal(offersChatGPT(reason), true, reason);
   for (const reason of ['available', 'checking', undefined]) assert.equal(offersChatGPT(reason), false, String(reason));
+});
+
+test('command-line tools are offered only when installed, and a chosen one stays', () => {
+  const ids = (installed: string[] | undefined, chosen: Parameters<typeof offeredProviders>[1]) => offeredProviders(installed, chosen).map(item => item.id as string);
+  const tools = (list: string[]) => list.filter(id => cloudProviders.find(item => item.id === id)?.kind === 'tool');
+  assert.deepEqual(tools(ids(undefined, 'anthropic')), []);
+  assert.deepEqual(tools(ids(['codex', 'copilot'], 'anthropic')), ['codex', 'copilot']);
+  assert.ok(ids([], 'gemini-cli').includes('gemini-cli'), 'a tool already chosen can still be seen and changed');
+  assert.ok(ids(['cursor'], 'anthropic').includes('cursor'), 'Cursor is offered when its SDK is installed');
+  assert.ok(!ids([], 'anthropic').includes('cursor'), 'Cursor requires its SDK');
+  for (const id of ['deepseek', 'qwen', 'moonshot', 'lmstudio']) assert.ok(ids([], 'anthropic').includes(id), id);
 });

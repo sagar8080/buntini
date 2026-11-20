@@ -4,6 +4,7 @@ import ModelAdvisor from './ModelAdvisor';
 import LocalSetup from './LocalSetup';
 import { command, errorMessage } from './bridge';
 import { folderName, setupLines, type SetupReport } from './brain.ts';
+import { t } from './i18n.ts';
 import type { Settings } from './types';
 
 // `testable` is off in first-run setup: the check reads saved settings, and setup saves at the end.
@@ -32,26 +33,26 @@ export default function LocalModel({ draft, update, onError, testable = true, on
   const row = (label: string, hint: string, value: string, kind: 'environment' | 'model') => <div className="local-choice">
     <FolderOpen size={16} />
     <span><strong>{label}</strong><small title={value || undefined}>{value ? folderName(value) : hint}</small></span>
-    <button type="button" className="secondary-button" onClick={() => void choose(kind)}>{value ? 'Change…' : 'Choose…'}</button>
+    <button type="button" className="secondary-button" onClick={() => void choose(kind)}>{value ? t('settings.local.change') : t('settings.local.choose')}</button>
   </div>;
   const setup = <LocalSetup removable={testable} onStart={onStart} onStop={onStop} onError={onError}
     onReady={(python, model) => { if (draft.pythonPath !== python) update('pythonPath', python); if (draft.modelPath !== model) update('modelPath', model); }}
     onRemoved={() => { update('pythonPath', ''); update('modelPath', ''); }} />;
   if (!byHand && !folders) return <>
     {setup}
-    <button type="button" className="text-button" onClick={() => setFolders(true)}>Use a model I already have</button>
+    <button type="button" className="text-button" onClick={() => setFolders(true)}>{t('settings.local.useExisting')}</button>
   </>;
   return <>
     {!chosen && <ModelAdvisor draft={draft} update={update} />}
     <div className="local-choices">
-      {row('Python environment', 'Not chosen', draft.pythonPath, 'environment')}
-      {row('Model', 'Not chosen', draft.modelPath, 'model')}
+      {row(t('settings.local.python'), t('settings.local.notChosen'), draft.pythonPath, 'environment')}
+      {row(t('settings.brain.model'), t('settings.local.notChosen'), draft.modelPath, 'model')}
     </div>
-    {chosen && testable && <div className="row-actions"><button type="button" className="secondary-button" disabled={testing} onClick={() => void test()}>{testing ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{testing ? 'Testing…' : 'Test setup'}</button></div>}
+    {chosen && testable && <div className="row-actions"><button type="button" className="secondary-button" disabled={testing} onClick={() => void test()}>{testing ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{testing ? t('settings.local.testing') : t('settings.local.test')}</button></div>}
     {lines && <ul className="setup-report">{lines.map(line => <li key={line.label} className={line.ok ? 'ok' : 'problem'}>{line.ok ? <Check size={14} /> : <CircleAlert size={14} />}<span><strong>{line.label}</strong> {line.detail}</span></li>)}</ul>}
-    <details className="disclosure"><summary>Edit paths</summary>
+    <details className="disclosure"><summary>{t('settings.local.editPaths')}</summary>
       <label className="field">Python<input value={draft.pythonPath} onChange={event => update('pythonPath', event.target.value)} placeholder="/path/to/venv/bin/python" spellCheck={false} /></label>
-      <label className="field">Model folder<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
+      <label className="field">{t('settings.local.modelFolder')}<input value={draft.modelPath} onChange={event => update('modelPath', event.target.value)} placeholder="/path/to/model" spellCheck={false} /></label>
     </details>
   </>;
 }

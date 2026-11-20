@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn a_split_names_only_what_the_person_said_or_a_record_read_for_it_holds() {
+    let goal = "Split the Acme invoice evenly between two of us. What's each share?";
+    let task: TaskRecord = serde_json::from_value(json!({"id":"split-unit","prompt":goal,"answer":"","state":"running","createdAt":now(),"sources":[],"files":[],"backend":"apple"})).unwrap();
+    let messages = vec![json!({"role":"system","content":"Example arguments: Lodging|90|*"}), json!({"role":"user","content":goal})];
+    let mut flow = Workflow::new(&task, "auto", &Settings::default(), messages, None, &["read_mail", "split_costs"]);
+    // The exact call Apple's model made before any read, from the tool's example.
+    let copied = json!({"participants":["Aria","Bo"],"charges":["Lodging|90|*","Food|27|*","Parking|14|Aria,Bo"]});
+    assert!(crate::structured_math::grounded_split(&copied, &split_given(&flow)).is_err());
+    let inbox = [("2026-11-17 16:40", true, "Acme Billing <billing@acme.example>", "Invoice 4821 for October", "Your invoice of $1,240 is due on 20 November.")];
+    flow.begin("read_mail", json!({"query":"Acme","limit":20,"unread":false}), json!({"role":"assistant","content":""}), false, false).unwrap();
+    flow.finish_step("succeeded", crate::apps::inbox_world("Acme", false, 20, &inbox)).unwrap();
+    // Read, the email still doesn't hold the example's figures; it holds the invoice's.
+    assert!(crate::structured_math::grounded_split(&copied, &split_given(&flow)).unwrap_err().contains("“90”"));
+    let real = crate::structured_math::grounded_split(&json!({"participants":["Aria","Bo"],"charges":["Acme invoice|1240|*"]}), &split_given(&flow)).unwrap();
+    assert_eq!(real["participants"], json!(["Person 1", "Person 2"]));
+    assert!(crate::structured_math::render(&crate::structured_math::run("split_costs", &real).unwrap()).contains("Each person owes 620."));
+}
+
+#[test]
 fn structured_answers_require_recomputed_results_and_do_not_skip_other_requested_text() {
     let task:TaskRecord=serde_json::from_value(json!({"id":"math-unit","prompt":"Scale this recipe from 3 servings to 9: 100g rice.","answer":"","state":"running","createdAt":now(),"sources":[],"files":[],"backend":"apple"})).unwrap();
     let settings = Settings::default();

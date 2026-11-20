@@ -191,7 +191,7 @@ pub(super) async fn public_workflows() -> Vec<Value> {
             .is_some_and(|saved| {
                 saved.answer == turn.task.answer && saved.cards.len() == cards.len()
             });
-        let checks = json!({"realProviderCards":!cards.is_empty(),"actualAppleSummary":actual_summary,"validSourceCitations":citations,"requiredSources":required_sources,"persistedTaskAndCards":persisted,"facts":facts.iter().map(|(name,passed)|json!({"name":name,"passed":passed})).collect::<Vec<_>>()});
+        let checks = json!({"realProviderCards":!cards.is_empty(),"sourcedAnswer":actual_summary,"validSourceCitations":citations,"requiredSources":required_sources,"persistedTaskAndCards":persisted,"facts":facts.iter().map(|(name,passed)|json!({"name":name,"passed":passed})).collect::<Vec<_>>()});
         let passed = turn.error.is_none()
             && turn.task.state == "completed"
             && !cards.is_empty()

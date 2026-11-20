@@ -1,7 +1,7 @@
 {
  "scenes": [
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -19,10 +19,157 @@
    },
    "flow": null,
    "overlay": null,
-   "sound": null
+   "sound": null,
+   "words": {
+    "language": "en",
+    "rtl": false,
+    "labels": {
+     "surface.accessory.bandana": "Bandana",
+     "surface.accessory.bell": "Bell collar",
+     "surface.accessory.bow": "Bow",
+     "surface.accessory.flowers": "Flowers",
+     "surface.accessory.hat": "Top hat",
+     "surface.accessory.none": "None",
+     "surface.agents.acceptEdits": "Accept edits",
+     "surface.agents.always": "Always",
+     "surface.agents.inTerminal": "In terminal",
+     "surface.agents.keepPlanning": "Keep planning",
+     "surface.agents.recapTitle": "My week with coding agents",
+     "surface.agents.start": "Start",
+     "surface.allow": "Allow",
+     "surface.back": "Back",
+     "surface.cancel": "Cancel",
+     "surface.capture.ask": "Ask",
+     "surface.capture.capture": "Capture",
+     "surface.capture.markUp": "Mark up",
+     "surface.capture.paste": "Paste",
+     "surface.capture.screenRecording": "Screen Recording",
+     "surface.character.cat": "Cat",
+     "surface.character.orb": "Orbit",
+     "surface.clear": "Clear",
+     "surface.close": "Close",
+     "surface.coat.black": "Midnight",
+     "surface.coat.calico": "Calico",
+     "surface.coat.ginger": "Ginger tabby",
+     "surface.coat.gray": "Silver tabby",
+     "surface.coat.siamese": "Siamese",
+     "surface.coat.tuxedo": "Tuxedo",
+     "surface.coat.white": "Snowball",
+     "surface.copy": "Copy",
+     "surface.deny": "Deny",
+     "surface.dismiss": "Dismiss",
+     "surface.done": "Done",
+     "surface.eyes.amber": "Amber",
+     "surface.eyes.blue": "Blue",
+     "surface.eyes.copper": "Copper",
+     "surface.eyes.green": "Green",
+     "surface.eyes.odd": "Odd-eyed",
+     "surface.island.askBuntini": "Ask Buntini",
+     "surface.island.chat": "Chat",
+     "surface.island.dropFiles": "Drop files",
+     "surface.island.focus": "Focus",
+     "surface.island.hi": "Hi",
+     "surface.island.hiName": "Hi {name}",
+     "surface.later": "Later",
+     "surface.mail.all": "All",
+     "surface.mail.closed": "Mail is closed",
+     "surface.mail.discard": "Discard",
+     "surface.mail.flag": "Flag",
+     "surface.mail.important": "Important",
+     "surface.mail.isFlagged": "flagged",
+     "surface.mail.isUnread": "unread",
+     "surface.mail.junk": "Junk",
+     "surface.mail.mail": "Mail",
+     "surface.mail.markRead": "Mark Read",
+     "surface.mail.markUnread": "Mark Unread",
+     "surface.mail.more": "More",
+     "surface.mail.noMail": "No mail",
+     "surface.mail.noMatch": "No match",
+     "surface.mail.openMail": "Open Mail",
+     "surface.mail.plan": "Mail plan",
+     "surface.mail.planTitle": "Plan",
+     "surface.mail.reply": "Reply",
+     "surface.mail.run": "Run",
+     "surface.mail.saveDraft": "Save draft",
+     "surface.mail.search": "Search",
+     "surface.mail.sort": "Sort {count}",
+     "surface.mail.today": "Today",
+     "surface.mail.unflag": "Unflag",
+     "surface.mail.unread": "Unread",
+     "surface.markup.arrow": "Arrow",
+     "surface.markup.blue": "Blue",
+     "surface.markup.box": "Box",
+     "surface.markup.pen": "Pen",
+     "surface.markup.red": "Red",
+     "surface.markup.yellow": "Yellow",
+     "surface.media.next": "Next",
+     "surface.media.nowPlaying": "Now playing",
+     "surface.media.pause": "Pause",
+     "surface.media.play": "Play",
+     "surface.media.position": "Position",
+     "surface.media.previous": "Previous",
+     "surface.media.repeat": "Repeat",
+     "surface.media.shuffle": "Shuffle",
+     "surface.media.volume": "Volume",
+     "surface.next": "Next",
+     "surface.notNow": "Not now",
+     "surface.note.notes": "Notes",
+     "surface.open": "Open",
+     "surface.pause": "Pause",
+     "surface.pill.asSaid": "As said",
+     "surface.pill.automatic": "Automatic",
+     "surface.pill.copied": "Copied",
+     "surface.pill.dictate": "Dictate",
+     "surface.pill.finish": "Finish",
+     "surface.pill.handsFree": "Hands-free",
+     "surface.pill.library": "Library",
+     "surface.pill.listening": "Listening",
+     "surface.pill.modeDictate": "Dictate",
+     "surface.pill.modePrompt": "Prompt",
+     "surface.pill.modeTranslate": "Translate",
+     "surface.pill.natural": "Natural",
+     "surface.pill.openBuntini": "Open Buntini",
+     "surface.pill.polished": "Polished",
+     "surface.pill.recordCall": "Record a call",
+     "surface.pill.recording": "Recording",
+     "surface.pill.stopRecording": "Stop recording",
+     "surface.pill.working": "Working",
+     "surface.resume": "Resume",
+     "surface.send": "Send",
+     "surface.services.activity": "Activity",
+     "surface.share": "Share",
+     "surface.skip": "Skip",
+     "surface.stop": "Stop",
+     "surface.timer.again": "Again",
+     "surface.timer.done": "{label} done",
+     "surface.timer.left": "{label}, {time} left",
+     "surface.timer.round": "Round {round} of {rounds}",
+     "surface.tryAgain": "Try again",
+     "surface.undo": "Undo",
+     "surface.update.ask": "Keep Buntini up to date?",
+     "surface.update.available": "New version",
+     "surface.update.checkDaily": "Check daily",
+     "surface.update.checking": "Checking",
+     "surface.update.current": "Buntini is up to date",
+     "surface.update.download": "Download",
+     "surface.update.downloading": "Downloading",
+     "surface.update.failed": "Couldn’t update",
+     "surface.update.install": "Install",
+     "surface.update.notes": "Notes",
+     "surface.update.ready": "Ready to restart",
+     "surface.update.restart": "Restart",
+     "surface.update.whatsNew": "What’s new",
+     "surface.vitals.nothingWaiting": "Nothing waiting",
+     "surface.vitals.soundsOff": "Sounds off",
+     "surface.vitals.soundsOn": "Sounds on",
+     "surface.wardrobe.accessory": "Accessory",
+     "surface.wardrobe.coat": "Coat",
+     "surface.wardrobe.eyes": "Eyes"
+    }
+   }
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -78,7 +225,14 @@
      "detail": "cargo test --locked",
      "code": true,
      "always": true,
-     "plan": false
+     "plan": false,
+     "allow": true,
+     "rules": [
+      {
+       "rule": "Bash(cargo test --locked)",
+       "place": "This project"
+      }
+     ]
     }
    },
    "held": true,
@@ -97,7 +251,7 @@
    "interrupt": true
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -159,7 +313,7 @@
    "interrupt": true
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -211,7 +365,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -263,7 +417,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -293,7 +447,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -331,7 +485,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -371,7 +525,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -399,7 +553,23 @@
        "url": null
       }
      ],
-     "graph": [0, 1, 3, 0, 2, 5, 0, 0, 4, 1, 0, 2, 3, 1, 6]
+     "graph": [
+      0,
+      1,
+      3,
+      0,
+      2,
+      5,
+      0,
+      0,
+      4,
+      1,
+      0,
+      2,
+      3,
+      1,
+      6
+     ]
     }
    },
    "held": false,
@@ -417,7 +587,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -497,7 +667,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -517,7 +687,8 @@
      "duration": 337.0,
      "shuffle": false,
      "repeatMode": "off",
-     "volume": 0.6
+     "volume": 0.6,
+     "positionAt": null
     }
    },
    "held": false,
@@ -535,7 +706,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -550,10 +721,13 @@
      "endsAt": 1763301500,
      "remaining": 1320.0,
      "total": 1500.0,
-     "paused": false
+     "paused": false,
+     "round": 2,
+     "rounds": 4
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",
@@ -568,7 +742,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -584,6 +758,7 @@
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",
@@ -598,7 +773,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -612,6 +787,7 @@
     }
    },
    "held": false,
+   "interrupt": true,
    "cat": {
     "character": "cat",
     "coat": "ginger",
@@ -626,7 +802,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -658,7 +834,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -690,7 +866,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -727,7 +903,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -755,7 +931,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -796,7 +972,7 @@
    "sound": null
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "desktop",
    "placement": "topRight",
    "pills": [],
@@ -833,7 +1009,7 @@
    }
   },
   {
-   "contract": 1,
+   "contract": 2,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -893,6 +1069,446 @@
     }
    },
    "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "claude-1",
+     "source": "agents",
+     "label": "Claude Code",
+     "tint": "#D97757",
+     "state": "waiting",
+     "badge": "buntini",
+     "progress": null
+    },
+    {
+     "id": "codex-1",
+     "source": "agents",
+     "label": "Codex",
+     "tint": "#10A37F",
+     "state": "working",
+     "badge": null,
+     "progress": null
+    },
+    {
+     "id": "github",
+     "source": "services",
+     "label": "GitHub",
+     "tint": "#6E7681",
+     "state": "error",
+     "badge": "CI",
+     "progress": null
+    },
+    {
+     "id": "music",
+     "source": "media",
+     "label": "Music",
+     "tint": "#FA2D48",
+     "state": "idle",
+     "badge": null,
+     "progress": 0.42
+    }
+   ],
+   "overflow": [
+    "claude-2",
+    "claude-3"
+   ],
+   "card": {
+    "id": "a2",
+    "source": "agents",
+    "body": {
+     "kind": "approval",
+     "agent": "Claude Code",
+     "project": "buntini",
+     "title": "Edit cart.ts",
+     "detail": "src/cart.ts",
+     "code": true,
+     "always": false,
+     "plan": false,
+     "allow": true,
+     "changes": [
+      {
+       "kind": "same",
+       "text": "export function total(items: Item[]) {"
+      },
+      {
+       "kind": "remove",
+       "text": "  return items.reduce((sum, item) => sum + item.price, 0);"
+      },
+      {
+       "kind": "add",
+       "text": "  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);"
+      },
+      {
+       "kind": "add",
+       "text": "  return subtotal + tax(subtotal);"
+      },
+      {
+       "kind": "same",
+       "text": "}"
+      }
+     ]
+    }
+   },
+   "held": true,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null,
+   "interrupt": true
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "s1",
+     "source": "services",
+     "label": "GitHub",
+     "tint": "#6E7681",
+     "state": "error",
+     "badge": "CI",
+     "progress": null
+    },
+    {
+     "id": "agent:codex:1",
+     "source": "agents",
+     "label": "Codex",
+     "tint": "#10A37F",
+     "state": "working",
+     "badge": "buntini",
+     "progress": null,
+     "card": "t1"
+    },
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "label": "Focus",
+     "tint": "#FF7A59",
+     "state": "working",
+     "badge": "22:00",
+     "progress": 0.27
+    },
+    {
+     "id": "n1",
+     "source": "media",
+     "label": "Instant Crush",
+     "tint": "#1ED760",
+     "state": "working",
+     "badge": "Daft Punk",
+     "progress": 0.42
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "t1",
+    "source": "agents",
+    "body": {
+     "kind": "ticker",
+     "agent": "Codex",
+     "project": "buntini",
+     "steps": [
+      {
+       "label": "Reads · lib.rs",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": false
+      },
+      {
+       "label": "Edits · surface.rs",
+       "detail": "src-tauri/src/surface.rs",
+       "added": 12,
+       "removed": 3,
+       "failed": false
+      },
+      {
+       "label": "Runs · cargo test",
+       "detail": null,
+       "added": null,
+       "removed": null,
+       "failed": true
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null,
+   "shelf": [
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "body": {
+      "kind": "timer",
+      "label": "Focus",
+      "phase": "focus",
+      "endsAt": 1763301500,
+      "remaining": 1320.0,
+      "total": 1500.0,
+      "paused": false,
+      "round": 2,
+      "rounds": 4
+     }
+    },
+    {
+     "id": "n1",
+     "source": "media",
+     "body": {
+      "kind": "nowPlaying",
+      "player": "spotify",
+      "title": "Instant Crush",
+      "artist": "Daft Punk",
+      "album": "Random Access Memories",
+      "artwork": null,
+      "playing": true,
+      "position": 61.5,
+      "duration": 337.0,
+      "shuffle": false,
+      "repeatMode": "off",
+      "volume": 0.6,
+      "positionAt": null
+     }
+    },
+    {
+     "id": "u1",
+     "source": "agents",
+     "body": {
+      "kind": "usage",
+      "agent": "Claude",
+      "windows": [
+       {
+        "label": "5 hours",
+        "percent": 37.5,
+        "resetsAt": 1763300000
+       },
+       {
+        "label": "Week",
+        "percent": 12.0,
+        "resetsAt": null
+       }
+      ]
+     }
+    },
+    {
+     "id": "s1",
+     "source": "services",
+     "body": {
+      "kind": "service",
+      "service": "github",
+      "title": "2 reviews requested",
+      "rows": [
+       {
+        "id": "pr-12",
+        "title": "Add the island",
+        "detail": "example/buntini#12",
+        "state": "waiting",
+        "url": "https://github.com/example/buntini/pull/12"
+       },
+       {
+        "id": "ci",
+        "title": "CI failed on main",
+        "detail": null,
+        "state": "error",
+        "url": null
+       }
+      ],
+      "graph": [
+       0,
+       1,
+       3,
+       0,
+       2,
+       5,
+       0,
+       0,
+       4,
+       1,
+       0,
+       2,
+       3,
+       1,
+       6
+      ]
+     }
+    },
+    {
+     "id": "m1",
+     "source": "mail",
+     "body": {
+      "kind": "mail",
+      "filter": "unread",
+      "messages": [
+       {
+        "id": "msg-1",
+        "from": "Ana",
+        "subject": "Dinner on Tuesday",
+        "preview": "Are we still on?",
+        "unread": true,
+        "flagged": false,
+        "at": 1763290000
+       },
+       {
+        "id": "msg-2",
+        "from": "Bank",
+        "subject": "Statement",
+        "preview": null,
+        "unread": false,
+        "flagged": true,
+        "at": 1763200000
+       }
+      ],
+      "query": "",
+      "unread": 1,
+      "sortable": 2,
+      "more": false,
+      "open": {
+       "id": "msg-1",
+       "from": "Ana",
+       "subject": "Dinner on Tuesday",
+       "at": 1763290000,
+       "body": "Are we still on?\nLet me know.",
+       "attachments": [
+        "menu.pdf"
+       ],
+       "flagged": false,
+       "unread": true
+      },
+      "pending": null,
+      "plan": null,
+      "log": [
+       {
+        "id": "e1",
+        "label": "To Newsletters · This week in tech",
+        "undoable": true
+       },
+       {
+        "id": "e2",
+        "label": "Draft to ana@example.org · Payslip",
+        "undoable": false
+       }
+      ],
+      "status": null,
+      "closed": false
+     }
+    }
+   ]
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.focus",
+     "source": "utilities",
+     "label": "Focus",
+     "tint": "#FF7A59",
+     "state": "working",
+     "badge": "22:00",
+     "progress": 0.27
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.focus",
+    "source": "utilities",
+    "body": {
+     "kind": "timer",
+     "label": "Focus",
+     "phase": "focus",
+     "endsAt": 1763301500,
+     "remaining": 1320.0,
+     "total": 1500.0,
+     "paused": false,
+     "round": 2,
+     "rounds": 4
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "calm",
+    "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 2,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "n1",
+     "source": "media",
+     "label": "Instant Crush",
+     "tint": "#1ED760",
+     "state": "working",
+     "badge": "Daft Punk",
+     "progress": 0.42
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "n1",
+    "source": "media",
+    "body": {
+     "kind": "nowPlaying",
+     "player": "spotify",
+     "title": "Instant Crush",
+     "artist": "Daft Punk",
+     "album": "Random Access Memories",
+     "artwork": null,
+     "playing": true,
+     "position": 61.5,
+     "duration": 337.0,
+     "shuffle": false,
+     "repeatMode": "off",
+     "volume": 0.6,
+     "positionAt": null
+    }
+   },
+   "held": false,
    "cat": {
     "character": "cat",
     "coat": "ginger",

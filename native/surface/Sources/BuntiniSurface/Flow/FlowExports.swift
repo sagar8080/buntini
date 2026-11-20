@@ -51,27 +51,32 @@ public func buntiniFlowFocus(_ out: UnsafeMutablePointer<UInt8>?, _ capacity: In
 }
 
 /// Pastes with ⌘V, checks the words arrived, and puts the clipboard back. Blocks the calling
-/// thread for up to 0.7 s (call it off the main thread). False: the words are on the clipboard
-/// to paste by hand.
+/// thread for up to 0.7 s (call it off the main thread). Returns 1 when the words were seen
+/// to arrive; 0 when they're on the clipboard to paste by hand (⌘V couldn't be sent, or the
+/// field didn't show them arriving); -1 when a password is being typed, with nothing pasted
+/// and the clipboard untouched.
 @_cdecl("buntini_flow_paste")
-public func buntiniFlowPaste(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> Bool {
-    guard let text = flowText(bytes, length) else { return false }
+public func buntiniFlowPaste(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> Int32 {
+    guard let text = flowText(bytes, length) else { return 0 }
+    if FocusedField.secureNow() { return -1 }
     let before = FocusedField.fingerprint()
-    guard let started = onMainSync({ Paster.begin(text) }) else { return false }
+    guard let started = onMainSync({ Paster.begin(text) }) else {
+        onMainSync { _ = Paster.copy(text) }
+        return 0
+    }
     // An app busy building its accessibility tree (Chromium, after a while unused) can drop the
-    // key: wait for the field to change. A field that says nothing about itself is trusted.
-    var arrived = before == nil
+    // key: wait for the field to change. A field that says nothing about itself can't show the
+    // words arriving, so they stay on the clipboard.
+    var arrived = false
     let deadline = Date().addingTimeInterval(Paster.restoreAfter)
-    while !arrived && Date() < deadline {
+    while before != nil && !arrived && Date() < deadline {
         Thread.sleep(forTimeInterval: 0.05)
-        if let now = FocusedField.fingerprint(), let before, now != before { arrived = true }
+        arrived = Paster.arrived(before: before, after: FocusedField.fingerprint())
     }
-    if arrived {
-        let wait = deadline.timeIntervalSinceNow
-        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-    }
+    let wait = deadline.timeIntervalSinceNow
+    if wait > 0 { Thread.sleep(forTimeInterval: wait) }
     onMainSync { Paster.end(text, saved: started.saved, ours: started.ours, arrived: arrived) }
-    return arrived
+    return arrived ? 1 : 0
 }
 
 /// Puts text on the clipboard to paste by hand.

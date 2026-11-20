@@ -2,7 +2,7 @@
 // says, what the user's answer reads like, what blocks a step, and the settings it saves.
 import { appleStatus, cloudProviders } from './brain.ts';
 import { sharedSentence } from './cloudShares.ts';
-import { coats } from './petOptions.ts';
+import { language, number, t } from './i18n.ts';
 import type { AppConnection, AppStatus, CatCoat, CloudProvider, Diagnostics, ModelBackend, Settings } from './types';
 
 // Online lookups need no setup (browser research works without a key), so setup asks
@@ -52,17 +52,17 @@ export const previous = (step: Step): Step => steps[Math.max(0, steps.indexOf(st
 export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics): string {
   if (step === 'hello') {
     const name = answers.assistantName.trim();
-    if (!name || name.length > 40) return 'Give me a name of up to 40 characters.';
-    if (answers.userName.trim().length > 40) return 'Your name can be up to 40 characters.';
+    if (!name || name.length > 40) return t('onboarding.blocker.assistantName');
+    if (answers.userName.trim().length > 40) return t('onboarding.blocker.userName');
   }
   if (step === 'brain') {
-    if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return `${appleStatus(diagnostics.appleIntelligence).advice || 'Apple Intelligence can’t run here.'} Sign in with ChatGPT or set up on this Mac.`;
-    if (answers.backend === 'mlx' && !answers.localStarted && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return 'Finish setting up on this Mac, or sign in with ChatGPT.';
+    if (answers.backend === 'apple' && !appleLater.includes(diagnostics.appleIntelligence)) return t('onboarding.blocker.appleUnavailable', { reason: appleStatus(diagnostics.appleIntelligence).advice || t('onboarding.blocker.appleCantRun') });
+    if (answers.backend === 'mlx' && !answers.localStarted && (!answers.pythonPath.trim() || !answers.modelPath.trim())) return t('onboarding.blocker.finishLocal');
     if (answers.backend === 'cloud' && answers.cloudProvider === 'chatgpt') {
-      if (!diagnostics.chatgptAccount) return 'Sign in with ChatGPT, or set up on this Mac.';
-      if (diagnostics.chatgptPlan === 'refused') return 'This ChatGPT account can’t use its plan in other apps. Set up on this Mac instead.';
+      if (!diagnostics.chatgptAccount) return t('onboarding.blocker.signIn');
+      if (diagnostics.chatgptPlan === 'refused') return t('onboarding.blocker.planRefused');
     } else if (answers.backend === 'cloud') {
-      if (!diagnostics.cloudKeys?.includes(answers.cloudProvider)) return 'Add your API key in Settings → Brain, or sign in with ChatGPT.';
+      if (!diagnostics.cloudKeys?.includes(answers.cloudProvider)) return t('onboarding.blocker.apiKey');
     }
   }
   return '';
@@ -72,16 +72,17 @@ export function blocker(step: Step, answers: Answers, diagnostics: Diagnostics):
 export function message(step: Step, answers: Answers, diagnostics: Diagnostics): string {
   const you = answers.userName.trim();
   switch (step) {
-    case 'hello': return 'Hi! I’m the little cat in the corner of your screen. What should I call you?';
+    case 'hello': return t('onboarding.message.hello');
     case 'brain': {
       const apple = appleStatus(diagnostics.appleIntelligence);
-      const hello = `Nice to meet you${you ? `, ${you}` : ''}!`;
-      if (apple.ready) return `${hello} I’ll think with Apple Intelligence.`;
-      if (diagnostics.appleIntelligence === 'checking' || diagnostics.appleIntelligence === undefined) return `${hello} Let me check how I can think on this Mac.`;
-      return `${hello} Apple Intelligence isn’t ready on this Mac (${apple.label.toLowerCase()}). How should I think?`;
+      if (apple.ready) return you ? t('onboarding.message.brainAppleNamed', { name: you }) : t('onboarding.message.brainApple');
+      if (diagnostics.appleIntelligence === 'checking' || diagnostics.appleIntelligence === undefined) return you ? t('onboarding.message.brainCheckingNamed', { name: you }) : t('onboarding.message.brainChecking');
+      // Lower case reads right inside an English sentence; other languages keep the label as written.
+      const status = language() === 'en' ? apple.label.toLowerCase() : apple.label;
+      return you ? t('onboarding.message.brainNotReadyNamed', { name: you, status }) : t('onboarding.message.brainNotReady', { status });
     }
-    case 'roam': return 'Last one: may I wander around your screen and notice which apps you’re using?';
-    case 'done': return `All set${you ? `, ${you}` : ''}! Ask me anything.`;
+    case 'roam': return t('onboarding.message.roam');
+    case 'done': return you ? t('onboarding.message.doneNamed', { name: you }) : t('onboarding.message.done');
   }
 }
 
@@ -89,20 +90,26 @@ export function message(step: Step, answers: Answers, diagnostics: Diagnostics):
 export function reply(step: Step, answers: Answers, settings?: Pick<Settings, 'cloudBudgetUsd'>): string {
   switch (step) {
     case 'hello': {
-      const coat = coats.find(item => item.id === answers.coat)?.label.toLowerCase() || 'cat';
-      return `${answers.userName.trim() ? `Call me ${answers.userName.trim()}.` : 'Hi!'} You’re ${answers.assistantName.trim()}, my ${coat}.`;
+      const coat = t(myCoat[answers.coat] ?? 'onboarding.myCoat.cat'), name = answers.assistantName.trim(), user = answers.userName.trim();
+      return user ? t('onboarding.reply.helloNamed', { user, name, coat }) : t('onboarding.reply.hello', { name, coat });
     }
     case 'brain': {
-      if (answers.backend === 'apple') return 'Use Apple Intelligence.';
-      if (answers.backend === 'mlx') return 'Set up on this Mac.';
+      if (answers.backend === 'apple') return t('onboarding.reply.apple');
+      if (answers.backend === 'mlx') return t('onboarding.reply.local');
       const provider = cloudProviders.find(item => item.id === answers.cloudProvider)!;
-      if (provider.id === 'chatgpt') return `Use ChatGPT with my own plan. ${sharedSentence(answers.shares)}`;
-      return `Use ${provider.name}, up to $${cloudBudget(settings)} a month. ${sharedSentence(answers.shares)}`;
+      if (provider.id === 'chatgpt') return t('onboarding.reply.chatgpt', { shared: sharedSentence(answers.shares) });
+      return t('onboarding.reply.cloud', { provider: provider.name, budget: number(cloudBudget(settings)), shared: sharedSentence(answers.shares) });
     }
-    case 'roam': return answers.roam ? `Roam around${answers.awareness ? ' and notice what I’m up to' : ''}.` : 'Stay put for now.';
+    case 'roam': return answers.roam ? t(answers.awareness ? 'onboarding.reply.roamNotice' : 'onboarding.reply.roam') : t('onboarding.reply.stay');
     case 'done': return '';
   }
 }
+
+/** The coat as it reads in "You’re Miso, my calico." */
+const myCoat: Partial<Record<CatCoat, string>> = {
+  ginger: 'onboarding.myCoat.ginger', gray: 'onboarding.myCoat.gray', black: 'onboarding.myCoat.black', white: 'onboarding.myCoat.white',
+  tuxedo: 'onboarding.myCoat.tuxedo', calico: 'onboarding.myCoat.calico', siamese: 'onboarding.myCoat.siamese',
+};
 
 /** The monthly cloud cap: the one saved earlier, else a small default. */
 const cloudBudget = (settings?: Pick<Settings, 'cloudBudgetUsd'>) => settings && settings.cloudBudgetUsd > 0 ? settings.cloudBudgetUsd : defaultCloudBudget;
@@ -127,15 +134,15 @@ export function applyAnswers(settings: Settings, answers: Answers): Settings {
 export type Shortcut = 'day' | 'reply';
 const shortcutApps: Record<Shortcut, { reads: string[]; apps: string[]; ask: string; allow: string }> = {
   // The brief uses whichever of these is allowed, so any one of them is enough to start.
-  day: { reads: ['calendar', 'reminders', 'mail'], apps: ['calendar', 'reminders'], ask: 'I’ll need Calendar and Reminders for that.', allow: 'Allow Calendar and Reminders' },
-  reply: { reads: ['mail'], apps: ['mail'], ask: 'I’ll need Mail for that.', allow: 'Allow Mail' },
+  day: { reads: ['calendar', 'reminders', 'mail'], apps: ['calendar', 'reminders'], ask: 'setup.shortcut.dayAsk', allow: 'setup.shortcut.dayAllow' },
+  reply: { reads: ['mail'], apps: ['mail'], ask: 'setup.shortcut.replyAsk', allow: 'setup.shortcut.replyAllow' },
 };
 
 /** What a welcome shortcut still needs on a fresh install, so it can be allowed in place
     instead of dead-ending; null when it can run. */
 export function shortcutNeeds(shortcut: Shortcut, allowed: string[]): { apps: string[]; ask: string; allow: string } | null {
   const { reads, apps, ask, allow } = shortcutApps[shortcut];
-  return reads.some(app => allowed.includes(app)) ? null : { apps, ask, allow };
+  return reads.some(app => allowed.includes(app)) ? null : { apps, ask: t(ask), allow: t(allow) };
 }
 
 /** The apps the connect card offers. */

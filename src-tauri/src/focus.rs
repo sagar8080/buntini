@@ -292,7 +292,7 @@ pub fn sender_address(sender: &str) -> Option<String> {
         .then(|| address.to_lowercase())
 }
 
-fn browser_id(bundle: &str) -> Option<&'static str> {
+pub(crate) fn browser_id(bundle: &str) -> Option<&'static str> {
     match bundle {
         "com.apple.Safari" => Some("safari"),
         "com.google.Chrome" => Some("chrome"),

@@ -14,7 +14,7 @@ struct PillView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             if let pill = model.pill {
-                pillBody(pill)
+                pillBody(pill).inLanguage()
                     .background(Capsule().fill(Color.black.opacity(0.88)))
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
@@ -45,21 +45,21 @@ struct PillView: View {
             case .listening:
                 BandsView(levels: levels, active: model.visible)
                     .frame(width: 84, height: 22)
-                    .accessibilityLabel("Listening")
+                    .accessibilityLabel(L(.listening))
                 if pill.locked {
                     Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
-                        .accessibilityLabel("Hands-free")
+                        .accessibilityLabel(L(.handsFree))
                 }
                 if hovering || pill.locked {
-                    iconButton("stop.fill", label: "Finish") { act("dictate") }
-                    iconButton("xmark", label: "Cancel") { act("cancel") }
+                    iconButton("stop.fill", label: L(.finish)) { act("dictate") }
+                    iconButton("xmark", label: L(.cancel)) { act("cancel") }
                 }
             case .working:
-                WorkingDots(still: reduceMotion).frame(width: 40, height: 18).accessibilityLabel("Working")
+                WorkingDots(still: reduceMotion).frame(width: 40, height: 18).accessibilityLabel(L(.working))
             case .done:
                 result("checkmark", pill.app)
             case .copied:
-                result("doc.on.clipboard", "Copied")
+                result("doc.on.clipboard", L(.copied))
             case .error:
                 result("exclamationmark.triangle.fill", pill.text, tint: .orange)
             }
@@ -79,9 +79,9 @@ struct PillView: View {
 
     private func toolbar(_ pill: FlowPill) -> some View {
         HStack(spacing: 4) {
-            iconButton("mic.fill", label: "Dictate") { act("dictate") }
-            iconButton(pill.recording == nil ? "record.circle" : "stop.circle", label: pill.recording == nil ? "Record a call" : "Stop recording", tint: pill.recording == nil ? .white : .red) { act("record") }
-            iconButton("pawprint.fill", label: "Open Buntini") { act("open") }
+            iconButton("mic.fill", label: L(.dictate)) { act("dictate") }
+            iconButton(pill.recording == nil ? "record.circle" : "stop.circle", label: pill.recording == nil ? L(.recordCall) : L(.stopRecording), tint: pill.recording == nil ? .white : .red) { act("record") }
+            iconButton("pawprint.fill", label: L(.openBuntini)) { act("open") }
         }
     }
 
@@ -116,7 +116,7 @@ struct PillView: View {
                         if pill.style == style { Label(styleName(style), systemImage: "checkmark") } else { Text(styleName(style)) }
                     }
                 }
-                Button("Automatic") { act("style", .null) }
+                Button(L(.automatic)) { act("style", .null) }
             }
         }
         Section {
@@ -126,22 +126,22 @@ struct PillView: View {
                 }
             }
         }
-        Button("Library") { act("library") }
+        Button(L(.library)) { act("library") }
     }
 
     private func styleName(_ style: FlowStyle) -> String {
         switch style {
-        case .asSaid: "As said"
-        case .natural: "Natural"
-        case .polished: "Polished"
+        case .asSaid: L(.asSaid)
+        case .natural: L(.natural)
+        case .polished: L(.polished)
         }
     }
 
     private func modeName(_ mode: FlowMode) -> String {
         switch mode {
-        case .dictate: "Dictate"
-        case .prompt: "Prompt"
-        case .translate: "Translate"
+        case .dictate: L(.modeDictate)
+        case .prompt: L(.modePrompt)
+        case .translate: L(.modeTranslate)
         }
     }
 
@@ -163,7 +163,7 @@ struct RecordingMark: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Recording")
+        .accessibilityLabel(L(.recording))
     }
 
     static func elapsed(_ seconds: Double) -> String {

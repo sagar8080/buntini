@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 pub use board::{Contribution, Offer, Urgency, ERROR_MS, FINISH_MS, HOLD_MS};
 pub use scene::{Action, Card, CardBody, Cat, Home, Mood, Pill, PillState, Placement, Scene, Source, CONTRACT};
 
@@ -24,6 +26,8 @@ pub struct IslandState {
     pub home: Home,
     pub placement: Placement,
     pub cat: Cat,
+    /// The line about the Mac under the island, if it needs a look.
+    pub line: Option<String>,
 }
 
 type Handler = Arc<dyn Fn(Action) + Send + Sync>;
@@ -67,6 +71,67 @@ pub fn set_flow(pill: Option<cards::flow::FlowPill>) {
 
 pub fn set_overlay(overlay: Option<cards::utilities::Overlay>) {
     change(|hub| hub.overlay = overlay);
+}
+
+/// Every pill showing, most urgent first.
+pub fn pills() -> Vec<Pill> {
+    HUB.0.lock().unwrap().board.pills()
+}
+
+/// The id of the card in front on the island now, if any.
+pub fn front_card() -> Option<String> {
+    let mut hub = HUB.0.lock().unwrap();
+    hub.board.pick(now_ms());
+    hub.board.front().map(str::to_string)
+}
+
+/// How long the card `id` has been in front of the island. None when it isn't in front.
+pub fn shown_ms(id: &str, now_ms: u64) -> Option<u64> {
+    HUB.0.lock().unwrap().board.in_front_ms(id, now_ms)
+}
+
+/// Something on the island waits on the person: an approval or a question.
+pub fn waiting() -> bool {
+    HUB.0.lock().unwrap().board.waiting(now_ms())
+}
+
+/// Hands an action to the part that owns its source, as if it came from a surface: a
+/// shortcut that opens a pill, say.
+pub fn act(action: Action) {
+    dispatch(action);
+}
+
+/// What a click on the island's tour becomes: its cards and pills are samples that look like
+/// the real ones, so a click on one only moves the tour along, and never reaches the part
+/// whose card it imitates (the person's music, mail, timer or agents).
+fn tour_only(action: Action) -> Action {
+    let sample = |text: &str| text.starts_with(crate::island::demo::PREFIX);
+    let from_tour = action.card.as_deref().is_some_and(sample)
+        || matches!(&action.value, Some(Value::String(text)) if sample(text))
+        || action.value.as_ref().and_then(|value| value.get("pill")).and_then(Value::as_str).is_some_and(sample);
+    if !from_tour {
+        return action;
+    }
+    Action { source: Source::Island, card: Some(crate::island::demo::PREFIX.into()), name: "advance".into(), value: None }
+}
+
+fn dispatch(action: Action) {
+    let action = tour_only(action);
+    let handler = HANDLERS.lock().unwrap().get(&action.source).cloned();
+    if let Some(handler) = handler {
+        handler(action);
+    }
+}
+
+static MUTED: AtomicBool = AtomicBool::new(false);
+
+/// Silences the island's sounds (a shortcut toggles it).
+pub fn set_muted(muted: bool) {
+    MUTED.store(muted, Ordering::SeqCst);
+}
+
+pub fn muted() -> bool {
+    MUTED.load(Ordering::SeqCst)
 }
 
 /// Plays a sound once, when the Mac's sound rules allow.
@@ -181,19 +246,28 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
         pills: picked.pills,
         overflow: picked.overflow,
         card: picked.card,
+        shelf: picked.shelf,
         held: picked.held,
         interrupt: picked.interrupt,
         cat,
         flow: hub.flow.clone(),
         overlay: hub.overlay.clone(),
         sound: hub.sound.clone(),
+        line: hub.island.line.clone(),
+        words: None,
     }
 }
 
-/// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus.
+/// Wakes the scenes, so a change made elsewhere (the language) is sent.
+pub fn refresh() {
+    change(|_| {});
+}
+
+/// The Mac's own sound rules for the cat: UI sounds on, the microphone not in use, no Focus;
+/// and the island not muted.
 #[cfg(not(test))]
 fn sounds_allowed() -> bool {
-    crate::pet::pet_sound_allowed()
+    !muted() && crate::pet::pet_sound_allowed()
 }
 
 #[cfg(test)]
@@ -206,7 +280,11 @@ fn sounds_allowed() -> bool {
 fn send_scenes() {
     const FRAME: Duration = Duration::from_millis(16);
     let mut last: Option<Vec<u8>> = None;
+    // The language the surfaces were last given words in.
+    let mut told: Option<&'static str> = None;
     while STARTED.load(Ordering::SeqCst) {
+        let language = crate::i18n::language();
+        let words = (told != Some(language)).then(|| crate::i18n::surface_words(language));
         let json = {
             let (lock, wake) = &*HUB;
             let mut hub = lock.lock().unwrap();
@@ -223,11 +301,15 @@ fn send_scenes() {
                 hub = wake.wait_timeout(hub, wait).unwrap().0;
             }
             hub.dirty = false;
-            serde_json::to_vec(&scene(&mut hub, now_ms())).ok()
+            let mut scene = scene(&mut hub, now_ms());
+            scene.words = words;
+            serde_json::to_vec(&scene).ok()
         };
         if let Some(json) = json {
             if last.as_ref() != Some(&json) {
-                if !ffi::update(&json) {
+                if ffi::update(&json) {
+                    told = Some(language);
+                } else {
                     eprintln!("The native surfaces refused a scene");
                 }
                 last = Some(json);
@@ -252,16 +334,27 @@ fn route(bytes: &[u8]) {
         eprintln!("A surface action didn't read");
         return;
     };
-    let handler = HANDLERS.lock().unwrap().get(&action.source).cloned();
-    if let Some(handler) = handler {
-        handler(action);
-    }
+    dispatch(action);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+
+    #[test]
+    fn a_click_on_the_tour_only_moves_it_along() {
+        let tour = |source: Source, card: Option<&str>, name: &str, value: Option<Value>| tour_only(Action { source, card: card.map(str::to_string), name: name.into(), value });
+        let advance = Action { source: Source::Island, card: Some("demo:".into()), name: "advance".into(), value: None };
+        // Play on the tour's music, Sort on its inbox, Allow on its approval: none reach the real part.
+        assert_eq!(tour(Source::Media, Some("demo:np1"), "pause", None), advance);
+        assert_eq!(tour(Source::Mail, Some("demo:mail"), "sort", None), advance);
+        assert_eq!(tour(Source::Agents, Some("demo:a1"), "allow", None), advance);
+        assert_eq!(tour(Source::Agents, None, "pill", Some(Value::String("demo:claude-1".into()))), advance);
+        assert_eq!(tour(Source::Island, Some("drop"), "dropInto", Some(serde_json::json!({ "pill": "demo:claude-1", "paths": [] }))), advance);
+        // Real cards are left as they are.
+        let real = Action { source: Source::Media, card: Some("np1".into()), name: "pause".into(), value: None };
+        assert_eq!(tour_only(real.clone()), real);
+    }
 
     const FIXTURE: &str = include_str!("../../../native/surface/Fixtures/contract.json");
 

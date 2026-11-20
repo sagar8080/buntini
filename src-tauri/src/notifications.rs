@@ -12,6 +12,7 @@ mod native {
         UNNotificationSettings, UNTimeIntervalNotificationTrigger, UNUserNotificationCenter,
         UNUserNotificationCenterDelegate,
     };
+    use crate::i18n::t;
     use std::{ptr::NonNull, sync::Mutex};
 
     /// macOS throws (and takes the app down) when a process that isn't inside an .app
@@ -251,14 +252,28 @@ mod native {
         if !bundled() {
             return;
         }
+        categories();
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let delegate: Retained<Delegate> =
+            unsafe { msg_send![super(Delegate::alloc().set_ivars(())), init] };
+        center.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
+        // The center keeps only a weak reference; the delegate lives as long as the app.
+        std::mem::forget(delegate);
+    }
+
+    /// The approval category, its buttons in the language Buntini speaks.
+    pub fn categories() {
+        if !bundled() {
+            return;
+        }
         let review = UNNotificationAction::actionWithIdentifier_title_options(
             &NSString::from_str(super::REVIEW),
-            &NSString::from_str("Review"),
+            &NSString::from_str(&t("notify.action.review")),
             UNNotificationActionOptions::Foreground,
         );
         let later = UNNotificationAction::actionWithIdentifier_title_options(
             &NSString::from_str("later"),
-            &NSString::from_str("Later"),
+            &NSString::from_str(&t("surface.later")),
             UNNotificationActionOptions::empty(),
         );
         let category =
@@ -268,13 +283,8 @@ mod native {
                 &NSArray::from_retained_slice(&[]),
                 UNNotificationCategoryOptions::empty(),
             );
-        let center = UNUserNotificationCenter::currentNotificationCenter();
-        center.setNotificationCategories(&NSSet::from_retained_slice(&[category]));
-        let delegate: Retained<Delegate> =
-            unsafe { msg_send![super(Delegate::alloc().set_ivars(())), init] };
-        center.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*delegate)));
-        // The center keeps only a weak reference; the delegate lives as long as the app.
-        std::mem::forget(delegate);
+        UNUserNotificationCenter::currentNotificationCenter()
+            .setNotificationCategories(&NSSet::from_retained_slice(&[category]));
     }
 }
 
@@ -286,7 +296,10 @@ static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 pub fn install(app: &tauri::AppHandle) {
     let _ = APP.set(app.clone());
     #[cfg(target_os = "macos")]
-    native::install();
+    {
+        native::install();
+        crate::i18n::on_change(|_| native::categories());
+    }
 }
 
 /// The identifier of an approval's notification. Only the approval id travels
@@ -392,7 +405,7 @@ pub(crate) async fn deliver_nudge(app: &tauri::AppHandle, nudge_id: &str, body: 
     #[cfg(target_os = "macos")]
     {
         notification_availability(&native::status().await?)?;
-        let pending = native::enqueue_as(&crate::nudges::identifier(nudge_id), None, "Heads-up", body);
+        let pending = native::enqueue_as(&crate::nudges::identifier(nudge_id), None, &t("notify.headsUp"), body);
         finish_delivery(&state, pending).await?;
         Ok("desktop_accepted".into())
     }
@@ -415,12 +428,12 @@ pub(crate) async fn deliver_routine(
     use tauri::Manager;
     let body = match (task.state.as_str(), goal) {
         ("waiting_action" | "waiting_online", _) => return Ok("approval_requested".into()),
-        ("completed", false) => "A routine finished. Open Buntini to see what it found.",
-        ("completed", true) => "One of your goals has news. Open Buntini to see it.",
-        (_, false) => "A routine needs attention. Open Buntini to see what happened.",
-        (_, true) => "A goal’s check-in needs attention. Open Buntini to see what happened.",
+        ("completed", false) => t("notify.routine.finished"),
+        ("completed", true) => t("notify.goal.news"),
+        (_, false) => t("notify.routine.attention"),
+        (_, true) => t("notify.goal.attention"),
     };
-    let title = if goal { "Goal" } else { "Routine" };
+    let title = if goal { t("notify.goal.title") } else { t("notify.routine.title") };
     let state = app.state::<AppState>();
     if !state.store.lock().unwrap().settings()?.notifications_enabled {
         return Ok("in_app_only".into());
@@ -428,7 +441,7 @@ pub(crate) async fn deliver_routine(
     #[cfg(target_os = "macos")]
     {
         notification_availability(&native::status().await?)?;
-        let pending = native::enqueue_as(&format!("routine-{}", task.id), None, title, body);
+        let pending = native::enqueue_as(&format!("routine-{}", task.id), None, &title, &body);
         finish_delivery(&state, pending).await?;
         Ok("desktop_accepted".into())
     }
@@ -441,36 +454,34 @@ pub(crate) async fn deliver_routine(
 
 /// Lock-screen safe wording: the kind of work only, never a recipient, title,
 /// time or text from the proposal, because the body shows on the lock screen.
-pub(crate) fn approval_body(tool: &str) -> &'static str {
+pub(crate) fn approval_body(tool: &str) -> String {
     match tool {
-        "draft_email" => "Buntini drafted an email and needs your OK.",
-        "reply_email" => "Buntini drafted a reply and needs your OK.",
-        "send_message" => "Buntini wrote a text and needs your OK.",
-        "start_call" => "Buntini wants to start a call and needs your OK.",
-        "add_reminder" => "Buntini prepared a reminder and needs your OK.",
-        "add_calendar_event" => "Buntini prepared a calendar event and needs your OK.",
+        "draft_email" => t("notify.approval.draftEmail"),
+        "reply_email" => t("notify.approval.replyEmail"),
+        "send_message" => t("notify.approval.sendMessage"),
+        "start_call" => t("notify.approval.startCall"),
+        "add_reminder" => t("notify.approval.addReminder"),
+        "add_calendar_event" => t("notify.approval.addCalendarEvent"),
         // A change names no item: "Dentist" or "Divorce lawyer" is as private as a title.
-        "complete_reminder" => "Buntini wants to mark a reminder done and needs your OK.",
-        "reschedule_reminder" => "Buntini wants to move a reminder and needs your OK.",
-        "update_calendar_event" => "Buntini wants to change a calendar event and needs your OK.",
-        "append_to_note" => "Buntini wants to add to a note and needs your OK.",
-        "create_note" => "Buntini wrote a note and needs your OK.",
-        "run_shortcut" => "Buntini wants to run a shortcut and needs your OK.",
-        "open_app" | "open_link" => "Buntini wants to open something for you and needs your OK.",
-        "control_music" => "Buntini wants to change your music and needs your OK.",
-        "switch_tab" => "Buntini wants to switch a browser tab and needs your OK.",
-        "remember" => "Buntini wants to remember something and needs your OK.",
-        "set_timer" => "Buntini wants to set a timer and needs your OK.",
-        "change_mac_setting" => "Buntini wants to change a Mac setting and needs your OK.",
-        crate::glance::QUIT_TOOL => "Buntini wants to quit an app and needs your OK.",
-        "create_saved_search" | "create_price_watch" => {
-            "Buntini set up a recurring check and needs your OK."
-        }
-        "create_routine" => "Buntini set up a routine and needs your OK.",
-        "create_goal" => "Buntini set up a goal and needs your OK.",
-        "browse_page" => "Buntini wants to read a web page and needs your OK.",
-        "look_up_online" => "Buntini wants to look something up online and needs your OK.",
-        _ => "A task is waiting for your OK.",
+        "complete_reminder" => t("notify.approval.completeReminder"),
+        "reschedule_reminder" => t("notify.approval.rescheduleReminder"),
+        "update_calendar_event" => t("notify.approval.updateCalendarEvent"),
+        "append_to_note" => t("notify.approval.appendToNote"),
+        "create_note" => t("notify.approval.createNote"),
+        "run_shortcut" => t("notify.approval.runShortcut"),
+        "open_app" | "open_link" => t("notify.approval.openSomething"),
+        "control_music" => t("notify.approval.controlMusic"),
+        "switch_tab" => t("notify.approval.switchTab"),
+        "remember" => t("notify.approval.remember"),
+        "set_timer" => t("notify.approval.setTimer"),
+        "change_mac_setting" => t("notify.approval.changeMacSetting"),
+        crate::glance::QUIT_TOOL => t("notify.approval.quitApp"),
+        "create_saved_search" | "create_price_watch" => t("notify.approval.recurringCheck"),
+        "create_routine" => t("notify.approval.createRoutine"),
+        "create_goal" => t("notify.approval.createGoal"),
+        "browse_page" => t("notify.approval.browsePage"),
+        "look_up_online" => t("notify.approval.lookUpOnline"),
+        _ => t("notify.approval.anyTask"),
     }
 }
 
@@ -536,8 +547,8 @@ async fn deliver_approval(
         let pending = native::enqueue_as(
             &approval_identifier(approval_id),
             Some(APPROVAL_CATEGORY),
-            "Waiting for you",
-            approval_body(tool),
+            &t("notify.approval.title"),
+            &approval_body(tool),
         );
         finish_delivery(&state, pending).await
     }
@@ -609,6 +620,7 @@ pub(crate) async fn pending_identifiers() -> Option<std::collections::HashSet<St
     None
 }
 
+use crate::i18n::t;
 use crate::{controller::AppState, store::Store};
 use std::sync::{
     atomic::{AtomicBool, Ordering},

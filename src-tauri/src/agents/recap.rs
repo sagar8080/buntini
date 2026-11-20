@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, tf};
+
 const WEEKS_KEPT: usize = 12;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -117,37 +119,70 @@ impl Recap {
     }
 }
 
-const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+/// A day of the week by name, 0 = Monday.
+fn weekday(day: usize) -> String {
+    match day {
+        0 => t("common.weekday.monday"),
+        1 => t("common.weekday.tuesday"),
+        2 => t("common.weekday.wednesday"),
+        3 => t("common.weekday.thursday"),
+        4 => t("common.weekday.friday"),
+        5 => t("common.weekday.saturday"),
+        _ => t("common.weekday.sunday"),
+    }
+}
+
+/// A month, short: `Nov` for 11. Service cards use it too.
+pub fn month_short(month: u32) -> String {
+    match month {
+        1 => t("common.monthShort.jan"),
+        2 => t("common.monthShort.feb"),
+        3 => t("common.monthShort.mar"),
+        4 => t("common.monthShort.apr"),
+        5 => t("common.monthShort.may"),
+        6 => t("common.monthShort.jun"),
+        7 => t("common.monthShort.jul"),
+        8 => t("common.monthShort.aug"),
+        9 => t("common.monthShort.sep"),
+        10 => t("common.monthShort.oct"),
+        11 => t("common.monthShort.nov"),
+        _ => t("common.monthShort.dec"),
+    }
+}
 
 /// The week as a few labelled numbers, for the card and the picture.
 pub fn stats(week: &Week, names: impl Fn(&str) -> String, projects: bool) -> Vec<(String, String)> {
-    let mut out = vec![("Time".to_string(), duration(week.seconds)), ("Sessions".into(), week.sessions.len().to_string()), ("Turns".into(), week.turns.to_string())];
-    out.push(("Lines".into(), format!("+{} −{}", week.added, week.removed)));
-    out.push(("Files".into(), week.files.len().to_string()));
-    out.push(("Commands".into(), week.commands.to_string()));
+    let mut out = vec![(t("agents.recap.time"), duration(week.seconds)), (t("agents.recap.sessions"), week.sessions.len().to_string()), (t("agents.recap.turns"), week.turns.to_string())];
+    out.push((t("agents.recap.lines"), format!("+{} −{}", week.added, week.removed)));
+    out.push((t("agents.recap.files"), week.files.len().to_string()));
+    out.push((t("agents.recap.commands"), week.commands.to_string()));
     if week.allowed + week.denied > 0 {
-        out.push(("Allowed".into(), format!("{} · {} denied", week.allowed, week.denied)));
+        out.push((t("agents.recap.allowed"), tf("agents.recap.allowedDenied", &[("allowed", &week.allowed), ("denied", &week.denied)])));
     }
     if let Some((agent, _)) = week.agents.iter().max_by_key(|(_, turns)| **turns) {
-        out.push(("Top agent".into(), names(agent)));
+        out.push((t("agents.recap.topAgent"), names(agent)));
     }
     if projects {
         if let Some((project, _)) = week.projects.iter().max_by_key(|(_, seconds)| **seconds) {
-            out.push(("Top project".into(), project.clone()));
+            out.push((t("agents.recap.topProject"), project.clone()));
         }
     }
     if let Some((day, _)) = week.days.iter().enumerate().filter(|(_, seconds)| **seconds > 0).max_by_key(|(_, seconds)| **seconds) {
-        out.push(("Busiest day".into(), DAYS[day].into()));
+        out.push((t("agents.recap.busiestDay"), weekday(day)));
     }
     if let Some(longest) = week.session_seconds.values().max().filter(|seconds| **seconds > 0) {
-        out.push(("Longest session".into(), duration(*longest)));
+        out.push((t("agents.recap.longestSession"), duration(*longest)));
     }
     out
 }
 
 pub fn duration(seconds: u64) -> String {
     let minutes = seconds / 60;
-    if minutes < 60 { format!("{minutes} min") } else { format!("{} h {:02} min", minutes / 60, minutes % 60) }
+    if minutes < 60 {
+        tf("agents.recap.minutes", &[("minutes", &minutes)])
+    } else {
+        tf("agents.recap.hoursMinutes", &[("hours", &(minutes / 60)), ("minutes", &format!("{:02}", minutes % 60))])
+    }
 }
 
 /// "10–16 Nov" for a week starting on `start`.
@@ -155,9 +190,9 @@ pub fn title(start: &str) -> String {
     let Ok(monday) = NaiveDate::parse_from_str(start, "%Y-%m-%d") else { return start.into() };
     let sunday = monday + chrono::Duration::days(6);
     if monday.month() == sunday.month() {
-        format!("{}–{} {}", monday.day(), sunday.day(), sunday.format("%b"))
+        tf("agents.recap.weekInMonth", &[("first", &monday.day()), ("last", &sunday.day()), ("month", &month_short(sunday.month()))])
     } else {
-        format!("{} {} – {} {}", monday.day(), monday.format("%b"), sunday.day(), sunday.format("%b"))
+        tf("agents.recap.weekAcrossMonths", &[("first", &monday.day()), ("firstMonth", &month_short(monday.month())), ("last", &sunday.day()), ("lastMonth", &month_short(sunday.month()))])
     }
 }
 

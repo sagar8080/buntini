@@ -1,7 +1,8 @@
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import { CircleCheck, Thermometer, TriangleAlert } from 'lucide-react';
 import { command } from './bridge';
-import { appBar, batteryNote, batteryTone, DAY, describeTrend, gigabytes, HOUR, longestStep, memoryFill, memoryTone, memoryWord, nearestPoint, partNote, rankApps, RING_LENGTH, RING_RADIUS, ringSegments, sectionFor, sectionView, seriesValue, trendPaths, trendPoints, type Section, type Series, type Tone, type TrendPoint } from './glanceChart';
+import { appBar, batteryNote, batteryRingNote, batteryTone, DAY, describeTrend, gigabytes, HOUR, longestStep, memoryFill, memoryTone, memoryWord, nearestPoint, partNote, percent, rankApps, RING_LENGTH, RING_RADIUS, ringSegments, sectionFor, sectionView, seriesValue, sizeInGigabytes, trendPaths, trendPoints, type Section, type Series, type Tone, type TrendPoint } from './glanceChart';
+import { locale, number, t } from './i18n.ts';
 import type { GlanceMetric, MacGlance } from './types';
 
 type Props = { glance: MacGlance; latest: boolean; busy: boolean; onQuit: (app: string) => void; onPane: (pane: string) => void };
@@ -55,7 +56,7 @@ export default function MacGlanceCard({ glance: saved, latest, busy, onQuit, onP
     {section === 'storage' && <StorageHero glance={glance} />}
     {section === 'battery' && glance.battery && <BatteryHero glance={glance} />}
     {section === 'memory' && <MemoryHero glance={glance} />}
-    {glance.hot && glance.verdict.kind !== 'hot' && <div className="mac-hot"><Thermometer size={13} aria-hidden /> Running hot</div>}
+    {glance.hot && glance.verdict.kind !== 'hot' && <div className="mac-hot"><Thermometer size={13} aria-hidden /> {t('glance.runningHot')}</div>}
     {section !== 'storage' && <Trend glance={glance} series={series} onSeries={setSeries} />}
     {section !== 'storage' && <Apps glance={glance} metric={metric} canEnergy={canEnergy} canQuit={canAct} onMetric={setMetric} onQuit={onQuit} />}
     {canAct && glance.verdict.actions.length > 0 && <div className="mac-actions">{glance.verdict.actions.map(action => <button key={action.label} className="secondary-button" onClick={() => action.kind === 'quit' ? onQuit(action.target) : onPane(action.target)}>{action.label}</button>)}</div>}
@@ -81,14 +82,14 @@ function RingText({ value, note, small }: { value: string; note?: string; small?
 
 function storageLabel(glance: MacGlance) {
   const { freeBytes, totalBytes, parts } = glance.storage;
-  return `Storage: ${gigabytes(freeBytes)} GB free of ${gigabytes(totalBytes)} GB. ${parts.map(part => `${part.label} ${gigabytes(part.bytes)} GB`).join(', ')}`;
+  return t('glance.storage.label', { free: gigabytes(freeBytes), total: gigabytes(totalBytes), parts: parts.map(part => t('glance.storage.part', { part: part.label, size: gigabytes(part.bytes) })).join(', ') });
 }
 function StorageArcs({ glance, pointed, onPoint }: { glance: MacGlance; pointed?: string; onPoint?: (key: string) => void }) {
   const { totalBytes, parts } = glance.storage;
   return <g transform="rotate(-90 40 40)">{ringSegments(parts, totalBytes).map(segment => <circle key={segment.key} className={`mac-arc part-${segment.key} ${pointed && pointed !== segment.key ? 'is-dim' : ''}`} cx="40" cy="40" r={RING_RADIUS} style={{ strokeDasharray: `${segment.length} ${RING_LENGTH}`, strokeDashoffset: segment.offset }} onPointerEnter={onPoint && (() => onPoint(segment.key))} />)}</g>;
 }
 function StorageRing({ glance }: { glance: MacGlance }) {
-  return <Ring><StorageArcs glance={glance} /><RingText value={gigabytes(glance.storage.freeBytes)} note="GB free" /></Ring>;
+  return <Ring><StorageArcs glance={glance} /><RingText value={gigabytes(glance.storage.freeBytes)} note={partNote('free')} /></Ring>;
 }
 function memoryArc(glance: MacGlance) {
   const { state } = glance.memory;
@@ -96,27 +97,29 @@ function memoryArc(glance: MacGlance) {
 }
 function MemoryRing({ glance, big }: { glance: MacGlance; big?: boolean }) {
   const { state } = glance.memory;
-  return <Ring big={big} label={big ? `Memory: ${memoryWord[state]}` : undefined}>{memoryArc(glance)}<RingText value={memoryWord[state]} small={state === 'struggling'} /></Ring>;
+  return <Ring big={big} label={big ? t('glance.memory.label', { state: memoryWord(state) }) : undefined}>{memoryArc(glance)}<RingText value={memoryWord(state)} small={state === 'struggling'} /></Ring>;
 }
 function batteryLabel(glance: MacGlance) {
   const battery = glance.battery!, note = batteryNote(battery);
-  return `Battery: ${battery.percent} percent${note ? `, ${note}` : ''}${battery.healthPercent ? `, ${battery.healthPercent} percent health` : ''}`;
+  const values = { percent: number(battery.percent), note, health: number(battery.healthPercent ?? 0) };
+  if (battery.healthPercent) return t(note ? 'glance.battery.labelNoteHealth' : 'glance.battery.labelHealth', values);
+  return t(note ? 'glance.battery.labelNote' : 'glance.battery.label', values);
 }
 function batteryArc(glance: MacGlance) {
   return <Arc fraction={glance.battery!.percent / 100} tone={batteryTone(glance.battery!)} />;
 }
 function BatteryRing({ glance, big }: { glance: MacGlance; big?: boolean }) {
-  const battery = glance.battery!, note = batteryNote(battery);
-  return <Ring big={big} label={big ? batteryLabel(glance) : undefined}>{batteryArc(glance)}<RingText value={`${battery.percent}%`} note={note.length > 9 ? note.replace(' left', '') : note} /></Ring>;
+  const battery = glance.battery!;
+  return <Ring big={big} label={big ? batteryLabel(glance) : undefined}>{batteryArc(glance)}<RingText value={percent(battery.percent)} note={batteryRingNote(battery)} /></Ring>;
 }
 
 function Overview({ glance, onOpen }: { glance: MacGlance; onOpen: (section: Section) => void }) {
   const { parts } = glance.storage;
   return <>
     <div className={`mac-rings ${glance.battery ? 'has-three' : ''}`}>
-      <button type="button" aria-label={storageLabel(glance)} onClick={() => onOpen('storage')}><StorageRing glance={glance} /><span>Storage</span></button>
-      <button type="button" aria-label={`Memory: ${memoryWord[glance.memory.state]}`} onClick={() => onOpen('memory')}><MemoryRing glance={glance} /><span>Memory</span></button>
-      {glance.battery && <button type="button" aria-label={batteryLabel(glance)} onClick={() => onOpen('battery')}><BatteryRing glance={glance} /><span>Battery</span></button>}
+      <button type="button" aria-label={storageLabel(glance)} onClick={() => onOpen('storage')}><StorageRing glance={glance} /><span>{t('glance.storage.title')}</span></button>
+      <button type="button" aria-label={t('glance.memory.label', { state: memoryWord(glance.memory.state) })} onClick={() => onOpen('memory')}><MemoryRing glance={glance} /><span>{t('glance.memory.title')}</span></button>
+      {glance.battery && <button type="button" aria-label={batteryLabel(glance)} onClick={() => onOpen('battery')}><BatteryRing glance={glance} /><span>{t('glance.battery.title')}</span></button>}
     </div>
     {parts.length > 1 && <div className="mac-legend">{parts.map(part => <span key={part.key}><i className={`part-${part.key}`} />{part.label}</span>)}</div>}
   </>;
@@ -125,9 +128,9 @@ function Overview({ glance, onOpen }: { glance: MacGlance; onOpen: (section: Sec
 function SectionChips({ glance, section, onOpen }: { glance: MacGlance; section: Section; onOpen: (section: Section) => void }) {
   const chip = (id: Section, label: string, arc: ReactNode) => <button type="button" aria-pressed={section === id} onClick={() => onOpen(id)}><Ring mini>{arc}</Ring>{label}</button>;
   return <div className="mac-chips">
-    {chip('storage', 'Storage', <StorageArcs glance={glance} />)}
-    {chip('memory', 'Memory', memoryArc(glance))}
-    {glance.battery && chip('battery', 'Battery', batteryArc(glance))}
+    {chip('storage', t('glance.storage.title'), <StorageArcs glance={glance} />)}
+    {chip('memory', t('glance.memory.title'), memoryArc(glance))}
+    {glance.battery && chip('battery', t('glance.battery.title'), batteryArc(glance))}
   </div>;
 }
 
@@ -138,14 +141,14 @@ function StorageHero({ glance }: { glance: MacGlance }) {
   const [hovered, setHovered] = useState('');
   const [kept, setKept] = useState('');
   const pointed = hovered || kept;
-  const rows = [...[...parts].sort((a, b) => b.bytes - a.bytes), { key: 'free', label: 'Free', bytes: freeBytes }];
+  const rows = [...[...parts].sort((a, b) => b.bytes - a.bytes), { key: 'free', label: t('glance.storage.free'), bytes: freeBytes }];
   const shown = rows.find(row => row.key === pointed);
   return <div className="mac-hero" onPointerLeave={() => setHovered('')}>
     <Ring big label={storageLabel(glance)}>
       <StorageArcs glance={glance} pointed={pointed} onPoint={setHovered} />
-      <RingText value={gigabytes(shown ? shown.bytes : freeBytes)} note={partNote[shown?.key ?? 'free']} />
+      <RingText value={gigabytes(shown ? shown.bytes : freeBytes)} note={partNote(shown?.key ?? 'free')} />
     </Ring>
-    <div className="mac-sizes">{rows.map(row => <button type="button" key={row.key} className={pointed && pointed !== row.key ? 'is-dim' : ''} aria-pressed={kept === row.key} onPointerEnter={() => setHovered(row.key)} onFocus={() => setHovered(row.key)} onBlur={() => setHovered('')} onClick={() => setKept(kept === row.key ? '' : row.key)}><span><i className={`part-${row.key}`} />{row.label}</span><b>{gigabytes(row.bytes)} GB</b></button>)}</div>
+    <div className="mac-sizes">{rows.map(row => <button type="button" key={row.key} className={pointed && pointed !== row.key ? 'is-dim' : ''} aria-pressed={kept === row.key} onPointerEnter={() => setHovered(row.key)} onFocus={() => setHovered(row.key)} onBlur={() => setHovered('')} onClick={() => setKept(kept === row.key ? '' : row.key)}><span><i className={`part-${row.key}`} />{row.label}</span><b>{sizeInGigabytes(row.bytes)}</b></button>)}</div>
   </div>;
 }
 function Facts({ rows }: { rows: [string, string][] }) {
@@ -154,12 +157,12 @@ function Facts({ rows }: { rows: [string, string][] }) {
 function BatteryHero({ glance }: { glance: MacGlance }) {
   const battery = glance.battery!;
   const rows: [string, string][] = [];
-  if (battery.healthPercent !== undefined) rows.push(['Health', `${battery.healthPercent}%`]);
-  if (battery.cycles !== undefined) rows.push(['Cycles', String(battery.cycles)]);
+  if (battery.healthPercent !== undefined) rows.push([t('glance.battery.health'), percent(battery.healthPercent)]);
+  if (battery.cycles !== undefined) rows.push([t('glance.battery.cycles'), number(battery.cycles)]);
   return <div className="mac-hero"><BatteryRing glance={glance} big /><Facts rows={rows} /></div>;
 }
 function MemoryHero({ glance }: { glance: MacGlance }) {
-  return <div className="mac-hero"><MemoryRing glance={glance} big /><Facts rows={[['Busy now', `${Math.round(glance.cpuPercent)}%`], ['Swap', `${gigabytes(glance.memory.swapBytes)} GB`], ['Memory', `${gigabytes(glance.memory.totalBytes)} GB`]]} /></div>;
+  return <div className="mac-hero"><MemoryRing glance={glance} big /><Facts rows={[[t('glance.busyNow'), percent(glance.cpuPercent)], [t('glance.swap'), sizeInGigabytes(glance.memory.swapBytes)], [t('glance.memory.title'), sizeInGigabytes(glance.memory.totalBytes)]]} /></div>;
 }
 
 function Tabs<T extends string>({ label, options, value, onChange }: { label: string; options: [T, string][]; value: T; onChange: (value: T) => void }) {
@@ -167,9 +170,10 @@ function Tabs<T extends string>({ label, options, value, onChange }: { label: st
 }
 
 const CHART_WIDTH = 308, CHART_HEIGHT = 52;
-const seriesName: Record<Series, string> = { cpu: 'Busy', memory: 'Memory', battery: 'Battery' };
+const seriesNames: Record<Series, string> = { cpu: 'glance.series.busy', memory: 'glance.memory.title', battery: 'glance.battery.title' };
+const seriesName = (series: Series) => t(seriesNames[series]);
 /** A day's chart starts and ends at the same clock time, so its times name the day too. */
-const clock = (at: number, withDay = false) => new Date(at * 1000).toLocaleString(undefined, { ...(withDay ? { weekday: 'short' as const } : {}), hour: 'numeric', minute: '2-digit' });
+const clock = (at: number, withDay = false) => new Date(at * 1000).toLocaleString(locale(), { ...(withDay ? { weekday: 'short' as const } : {}), hour: 'numeric', minute: '2-digit' });
 
 function Trend({ glance, series, onSeries }: { glance: MacGlance; series: Series; onSeries: (series: Series) => void }) {
   const [hover, setHover] = useState<TrendPoint | null>(null);
@@ -187,15 +191,15 @@ function Trend({ glance, series, onSeries }: { glance: MacGlance; series: Series
     const box = event.currentTarget.getBoundingClientRect();
     if (box.width) setHover(nearestPoint(points, (event.clientX - box.left) / box.width * CHART_WIDTH));
   };
-  const options: [Series, string][] = [['cpu', seriesName.cpu], ['memory', seriesName.memory]];
-  if (glance.battery) options.push(['battery', seriesName.battery]);
-  const label = `${seriesName[series]}, last ${range === 'day' ? '24 hours' : 'hour'}`;
+  const options: [Series, string][] = [['cpu', seriesName('cpu')], ['memory', seriesName('memory')]];
+  if (glance.battery) options.push(['battery', seriesName('battery')]);
+  const label = t(range === 'day' ? 'glance.trend.lastDay' : 'glance.trend.lastHour', { name: seriesName(series) });
   return <div className="mac-trend">
     <div className="mac-section-head">
-      <Tabs label="What the chart shows" options={options} value={series} onChange={next => { setHover(null); onSeries(next); }} />
-      {day.length >= 2 && glance.history.length >= 2 && <Tabs label="How far back" options={[['hour', '1 h'], ['day', '24 h']]} value={range} onChange={next => { setHover(null); setWanted(next); }} />}
+      <Tabs label={t('glance.trend.shows')} options={options} value={series} onChange={next => { setHover(null); onSeries(next); }} />
+      {day.length >= 2 && glance.history.length >= 2 && <Tabs label={t('glance.trend.range')} options={[['hour', t('glance.trend.hour')], ['day', t('glance.trend.day')]]} value={range} onChange={next => { setHover(null); setWanted(next); }} />}
     </div>
-    <div className="mac-readout"><span>{hover ? clock(hover.at, range === 'day') : 'Now'}</span><b>{shown === undefined ? '' : seriesValue(series, shown)}</b></div>
+    <div className="mac-readout"><span>{hover ? clock(hover.at, range === 'day') : t('glance.trend.now')}</span><b>{shown === undefined ? '' : seriesValue(series, shown)}</b></div>
     <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label={points.length ? describeTrend(points, label, series) : label} onPointerMove={move} onPointerLeave={() => setHover(null)}>
       <line className="mac-trend-base" x1="0" x2={CHART_WIDTH} y1={CHART_HEIGHT - .5} y2={CHART_HEIGHT - .5} />
       {trendPaths(points, CHART_HEIGHT, longestStep(span)).map((path, index) => <g key={index}><path className="mac-trend-area" d={path.area} /><path className="mac-trend-line" d={path.line} /></g>)}
@@ -208,21 +212,21 @@ function Trend({ glance, series, onSeries }: { glance: MacGlance; series: Series
 function Apps({ glance, metric, canEnergy, canQuit, onMetric, onQuit }: { glance: MacGlance; metric: GlanceMetric; canEnergy: boolean; canQuit: boolean; onMetric: (metric: GlanceMetric) => void; onQuit: (app: string) => void }) {
   const [opened, setOpened] = useState('');
   if (!glance.apps.length) return null;
-  const options: [GlanceMetric, string][] = [['cpu', 'CPU'], ['memory', 'Memory']];
-  if (canEnergy) options.push(['energy', 'Energy']);
+  const options: [GlanceMetric, string][] = [['cpu', t('glance.apps.cpu')], ['memory', t('glance.memory.title')]];
+  if (canEnergy) options.push(['energy', t('glance.apps.energy')]);
   const ranked = rankApps(glance.apps, metric);
   return <div className="mac-apps">
-    <div className="mac-section-head"><span>Using the most</span><Tabs label="Rank apps by" options={options} value={metric} onChange={onMetric} /></div>
+    <div className="mac-section-head"><span>{t('glance.apps.usingMost')}</span><Tabs label={t('glance.apps.rankBy')} options={options} value={metric} onChange={onMetric} /></div>
     {ranked.map(app => {
       const bar = appBar(app, metric, glance.memory.totalBytes, ranked);
       const open = opened === app.name;
       return <div className="mac-app-group" key={app.name}>
-        <button type="button" className="mac-app" aria-expanded={open} aria-label={`${app.name}: ${bar.value}`} onClick={() => setOpened(open ? '' : app.name)}><span title={app.name}>{app.name}</span><div className="mac-app-track"><i style={{ width: `${Math.max(bar.fraction * 100, 2)}%` }} /></div><small>{bar.value}</small></button>
+        <button type="button" className="mac-app" aria-expanded={open} aria-label={t('glance.apps.value', { app: app.name, value: bar.value })} onClick={() => setOpened(open ? '' : app.name)}><span title={app.name}>{app.name}</span><div className="mac-app-track"><i style={{ width: `${Math.max(bar.fraction * 100, 2)}%` }} /></div><small>{bar.value}</small></button>
         {open && <div className="mac-app-more">
-          <span>CPU <b>{Math.round(app.cpuPercent)}%</b></span>
-          <span>Memory <b>{gigabytes(app.memoryBytes)} GB</b></span>
-          {app.energy !== undefined && <span>Energy <b>{Math.round(app.energy)}</b></span>}
-          {canQuit && app.quittable && <button type="button" className="secondary-button" onClick={() => onQuit(app.name)}>Quit</button>}
+          <span>{t('glance.apps.cpu')} <b>{percent(app.cpuPercent)}</b></span>
+          <span>{t('glance.memory.title')} <b>{sizeInGigabytes(app.memoryBytes)}</b></span>
+          {app.energy !== undefined && <span>{t('glance.apps.energy')} <b>{number(Math.round(app.energy))}</b></span>}
+          {canQuit && app.quittable && <button type="button" className="secondary-button" onClick={() => onQuit(app.name)}>{t('glance.apps.quit')}</button>}
         </div>}
       </div>;
     })}

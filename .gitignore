@@ -31,3 +31,4 @@ dist-release/
 *.keychain-db
 native/audio/.build/
 native/audio/.swiftpm/
+scripts/router/.vectors.json

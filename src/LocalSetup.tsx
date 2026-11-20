@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { command, desktop, errorMessage } from './bridge';
+import { number, t } from './i18n.ts';
 
 export interface LocalPlan { repo: string; label: string; downloadBytes: number; problem?: string | null }
 export interface LocalStatus { phase: 'idle' | 'downloading' | 'waiting' | 'installing' | 'testing' | 'ready' | 'failed'; doneBytes: number; totalBytes: number; message: string; python?: string | null; model?: string | null }
 
-const gigabytes = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
+const gigabytes = (bytes: number) => number(bytes / 1e9, { style: 'unit', unit: 'gigabyte', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const percent = (status: LocalStatus) => status.totalBytes > 0 ? Math.min(100, Math.floor(status.doneBytes * 100 / status.totalBytes)) : 0;
-const doing: Partial<Record<LocalStatus['phase'], string>> = { installing: 'Installing', testing: 'Trying it out' };
+/** What a step without its own message is doing. */
+const doing = (phase: LocalStatus['phase']) => phase === 'installing' ? t('settings.local.installing') : phase === 'testing' ? t('settings.local.tryingOut') : '';
 
 type Props = {
   onStart?: () => void; onStop?: () => void; onReady: (python: string, model: string) => void; onRemoved?: () => void; onError: (message: string) => void;
@@ -38,18 +40,18 @@ export default function LocalSetup({ onStart, onStop, onReady, onRemoved, onErro
   async function cancel() { await act('local_setup_cancel'); onStop?.(); }
   async function remove() { await act('local_setup_remove'); onRemoved?.(); }
   if (!plan || !status) return <div className="local-setup"><LoaderCircle size={14} className="spin" /></div>;
-  if (phase === 'ready') return <div className="local-setup-ready"><Check size={14} /><span>{plan.label} is ready on this Mac</span>{removable && <button type="button" className="text-button danger" onClick={() => void remove()}>Remove</button>}</div>;
+  if (phase === 'ready') return <div className="local-setup-ready"><Check size={14} /><span>{t('settings.local.ready', { model: plan.label })}</span>{removable && <button type="button" className="text-button danger" onClick={() => void remove()}>{t('common.remove')}</button>}</div>;
   if (phase === 'failed') return <div className="local-setup">
     <p className="field-help" role="alert">{status.message}</p>
-    <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void act('local_setup_start')}>Try again</button><button type="button" className="text-button" onClick={() => void cancel()}>Cancel</button></div>
+    <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void act('local_setup_start')}>{t('common.tryAgain')}</button><button type="button" className="text-button" onClick={() => void cancel()}>{t('common.cancel')}</button></div>
   </div>;
   if (phase !== 'idle') {
     const value = percent(status);
     return <div className="local-setup">
-      <div className="local-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label="Setting up on this Mac"><i style={{ width: `${value}%` }} /></div>
-      <div className="row-actions"><span className="field-help" role="status">{status.message || doing[phase!] || `${value}% of ${gigabytes(status.totalBytes)}`}</span><button type="button" className="text-button" onClick={() => void cancel()}>Cancel</button></div>
+      <div className="local-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label={t('settings.local.settingUp')}><i style={{ width: `${value}%` }} /></div>
+      <div className="row-actions"><span className="field-help" role="status">{status.message || doing(status.phase) || t('settings.local.progress', { percent: number(value / 100, { style: 'percent' }), size: gigabytes(status.totalBytes) })}</span><button type="button" className="text-button" onClick={() => void cancel()}>{t('common.cancel')}</button></div>
     </div>;
   }
   if (plan.problem) return <p className="field-help">{plan.problem}</p>;
-  return <button type="button" className="secondary-button local-setup-start" onClick={() => { onStart?.(); void act('local_setup_start'); }}>Set up on this Mac · {gigabytes(plan.downloadBytes)}</button>;
+  return <button type="button" className="secondary-button local-setup-start" onClick={() => { onStart?.(); void act('local_setup_start'); }}>{t('settings.local.setUp')} · {gigabytes(plan.downloadBytes)}</button>;
 }

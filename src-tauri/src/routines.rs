@@ -1166,6 +1166,21 @@ for line in sys.stdin:
     }
 
     #[tokio::test]
+    async fn release_routine_calculates_without_asking_for_a_personal_source() {
+        let (state, task, _, _dir) = headless_run(
+            "Tell me what 11 times 4 is as a Buntini QA check",
+            json!({"name":"read_calendar","arguments":{}}),
+            &["mail", "calendar", "reminders"],
+        ).await;
+        assert_eq!(task.state, "completed", "{}", task.answer);
+        assert_eq!(task.answer, "44");
+        let flow = state.store.lock().unwrap().workflow(&task.id).unwrap().unwrap();
+        assert_eq!(flow.steps.len(), 1);
+        assert_eq!(flow.steps[0].tool, "calculate");
+        assert_eq!(flow.steps[0].state, "succeeded");
+    }
+
+    #[tokio::test]
     async fn a_routines_proposal_waits_for_you_in_its_own_thread() {
         let (state, task, thread_id, _dir) = headless_run(
             "Create a note titled Week plan with body Plan the week",

@@ -6,8 +6,9 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde_json::{json, Value};
 
 use super::fetch::{Failure, Net};
-use super::snapshot::{self, flag, graph, list, number, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, flag, graph, list, number, short, text, time, when, Row, Snapshot};
 use super::{Kind, Memo};
+use crate::i18n::{t, tf, tn};
 use crate::surface::PillState;
 
 pub const HOST: &str = "api.github.com";
@@ -53,11 +54,11 @@ pub fn graphql_errors(kind: Kind, value: &Value, data: &str) -> Result<(), Failu
     Err(Failure::Other(format!("{}: {}", kind.name(), snapshot::clip(&message, 160))))
 }
 
-fn ci(state: Option<&str>) -> (PillState, Option<&'static str>) {
+fn ci(state: Option<&str>) -> (PillState, Option<String>) {
     match state {
-        Some("FAILURE" | "ERROR") => (PillState::Error, Some("CI failed")),
-        Some("PENDING" | "EXPECTED") => (PillState::Working, Some("CI running")),
-        Some("SUCCESS") => (PillState::Done, Some("CI passed")),
+        Some("FAILURE" | "ERROR") => (PillState::Error, Some(t("services.ci.failed"))),
+        Some("PENDING" | "EXPECTED") => (PillState::Working, Some(t("services.ci.running"))),
+        Some("SUCCESS") => (PillState::Done, Some(t("services.ci.passed"))),
         _ => (PillState::Idle, None),
     }
 }
@@ -76,7 +77,7 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph_before: Option<Vec
                 .detail([Some(place(pr)), text(pr, "/author/login"), updated(pr)])
                 .state(Some(PillState::Waiting))
                 .url(text(pr, "/url"))
-                .alert("Review requested", true)
+                .alert(t("services.alert.reviewRequested"), true)
         })
         .collect();
 
@@ -87,12 +88,12 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph_before: Option<Vec
     for pr in mine {
         let (state, label) = ci(text(pr, "/commits/nodes/0/commit/statusCheckRollup/state").as_deref());
         busy |= state == PillState::Working;
-        let draft = flag(pr, "/isDraft").then(|| "Draft".to_string());
+        let draft = flag(pr, "/isDraft").then(|| t("services.draft"));
         let row = Row::new(format!("pr-{}", place(pr)), text(pr, "/title").unwrap_or_default())
-            .detail([Some(place(pr)), draft, label.map(str::to_string), updated(pr)])
+            .detail([Some(place(pr)), draft, label, updated(pr)])
             .state(Some(state))
             .url(text(pr, "/url"))
-            .alert("CI failed", state == PillState::Error);
+            .alert(t("services.ci.failed"), state == PillState::Error);
         if state == PillState::Error {
             failing.push(row);
         } else {
@@ -103,11 +104,11 @@ pub fn parse(value: &Value, now: DateTime<FixedOffset>, graph_before: Option<Vec
     let review_count = number(value, "/data/reviews/issueCount").map_or(reviews.len(), |count| count.max(0) as usize);
     let open = number(viewer, "/pullRequests/totalCount").map_or(mine.len(), |count| count.max(0) as usize);
     let title = if review_count > 0 {
-        plural(review_count, "review requested", "reviews requested")
+        tn("services.reviewsRequested", review_count as u64, &[])
     } else if let Some(first) = failing.first() {
-        format!("CI failed on {}", first.title)
+        tf("services.ciFailedOn", &[("title", &first.title)])
     } else {
-        plural(open, "open pull request", "open pull requests")
+        tn("services.openPullRequests", open as u64, &[])
     };
     let badge = if review_count > 0 {
         Some(short(review_count))
@@ -150,10 +151,10 @@ mod tests {
         assert_eq!(ids, ["review-acme/api#88", "pr-sagar/buntini#14", "pr-sagar/buntini#12", "pr-acme/web#7"]);
         let review = &snapshot.rows[0];
         assert_eq!(review.state, Some(PillState::Waiting));
-        assert_eq!(review.alert, Some("Review requested"));
+        assert_eq!(review.alert.as_deref(), Some("Review requested"));
         assert_eq!(review.detail.as_deref(), Some("acme/api#88 · ana · 13:40"));
         let failing = &snapshot.rows[1];
-        assert_eq!((failing.state, failing.alert), (Some(PillState::Error), Some("CI failed")));
+        assert_eq!((failing.state, failing.alert.as_deref()), (Some(PillState::Error), Some("CI failed")));
         assert_eq!(failing.url.as_deref(), Some("https://github.com/sagar/buntini/pull/14"));
         assert_eq!(snapshot.rows[2].state, Some(PillState::Working));
         assert_eq!(snapshot.rows[2].detail.as_deref(), Some("sagar/buntini#12 · Draft · CI running · Sun 18:05"));

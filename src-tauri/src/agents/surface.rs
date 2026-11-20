@@ -5,7 +5,7 @@ use crate::surface::{self as island, Action, Card, CardBody, Contribution, Offer
 use serde_json::Value;
 
 use super::session::{Phase, Session};
-use super::{answer_agent, diff, hub, recap, Agent, AgentRequest, Answer, Hub, RECAP};
+use super::{answer_agent, diff, hub, recap, Agent, AgentRequest, Answer, Hub, ARMING_MS, RECAP};
 
 /// How long last week's recap shows on Monday morning.
 const RECAP_MS: u64 = 20_000;
@@ -52,6 +52,9 @@ fn request_card(view: &AgentRequest) -> Card {
             code: view.code,
             always: view.always,
             plan: view.plan,
+            allow: view.allow,
+            changes: view.changes.clone(),
+            rules: view.rules.clone(),
         })
     } else {
         CardBody::Question(cards::QuestionCard {
@@ -122,6 +125,7 @@ pub(super) fn publish(hub: &Hub) {
             state,
             badge: some(session.project()),
             progress: None,
+            card: (session.phase == Phase::Working && !session.steps.is_empty()).then(|| ticker_id(session)),
         });
         if session.phase == Phase::Working && !session.steps.is_empty() {
             offers.push(Offer { card: ticker(session), urgency: Urgency::Info, at_ms: session.last_ms, ttl_ms: None });
@@ -167,15 +171,25 @@ pub(super) fn listen() {
     });
 }
 
+/// An answer clicked on the island counts only once its card has been in front of the
+/// island for a moment, so a click aimed at the card before it doesn't land on this one.
+fn answer_from_island(card: &str, answer: Answer) -> Result<(), String> {
+    match island::shown_ms(card, island::now_ms()) {
+        Some(ms) if ms >= ARMING_MS => answer_agent(card.to_string(), answer),
+        Some(_) => Err("That card only just showed.".into()),
+        None => Err("That card isn't showing.".into()),
+    }
+}
+
 fn handle(action: &Action) -> Result<(), String> {
     let card = action.card.clone().unwrap_or_default();
     match action.name.as_str() {
-        "allow" => answer_agent(card, Answer::Allow),
-        "always" => answer_agent(card, Answer::Always),
-        "deny" => answer_agent(card, Answer::Deny),
-        "terminal" => answer_agent(card, Answer::Terminal),
+        "allow" => answer_from_island(&card, Answer::Allow),
+        "always" => answer_from_island(&card, Answer::Always),
+        "deny" => answer_from_island(&card, Answer::Deny),
+        "terminal" => answer_from_island(&card, Answer::Terminal),
         "answers" => match &action.value {
-            Some(Value::Object(answers)) => answer_agent(card, Answer::Answers { answers: answers.clone() }),
+            Some(Value::Object(answers)) => answer_from_island(&card, Answer::Answers { answers: answers.clone() }),
             _ => Err("No answers came with it.".into()),
         },
         "diff" => {

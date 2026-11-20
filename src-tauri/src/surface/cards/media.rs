@@ -20,4 +20,7 @@ pub struct NowPlaying {
     pub repeat_mode: Option<String>,
     /// 0…1.
     pub volume: Option<f64>,
+    /// When `position` was read, in Unix seconds: the island runs the clock on from there.
+    #[serde(default)]
+    pub position_at: Option<f64>,
 }

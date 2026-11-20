@@ -27,6 +27,8 @@ final class FlowWatch {
     private static let rightControl: UInt = 0x2000
     /// Hands-free can last ten minutes.
     private static let armedFor: TimeInterval = 11 * 60
+    /// "BunF", for ⌃⌘V.
+    static let signature: OSType = 0x42_75_6E_46
 
     func start(config: WatchConfig, keys: Bool, emit: @escaping ([String: Any]) -> Void) {
         stopKeys()
@@ -182,12 +184,13 @@ final class FlowWatch {
     private func installPasteLast() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let context = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetEventDispatcherTarget(), { _, _, context in
-            guard let context else { return noErr }
+        InstallEventHandler(GetEventDispatcherTarget(), { _, event, context in
+            // Other hot keys (Buntini's shortcuts, Utilities/HotKeys.swift) pass by.
+            guard let context, let event, HotKeys.id(of: event)?.signature == FlowWatch.signature else { return OSStatus(eventNotHandledErr) }
             Unmanaged<FlowWatch>.fromOpaque(context).takeUnretainedValue().emit?(["kind": "pasteLast"])
             return noErr
         }, 1, &spec, context, &hotKeyHandler)
-        let id = EventHotKeyID(signature: OSType(0x42_75_6E_46), id: 1) // "BunF"
+        let id = EventHotKeyID(signature: FlowWatch.signature, id: 1)
         RegisterEventHotKey(UInt32(KeyLayout.code(for: "v")), UInt32(cmdKey | controlKey), id, GetEventDispatcherTarget(), 0, &hotKey)
     }
 

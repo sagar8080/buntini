@@ -14,6 +14,10 @@ struct DropCardView: View {
                 Text(drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).font(.callout.weight(.semibold)).lineLimit(2)
             }
             FlowRow(spacing: 6) {
+                // Into the chat, attached to the next message.
+                IslandButton(label: L(.chat)) {
+                    send(Action(source: .island, card: card.id, name: "dropChat", value: .object(["paths": .array(drop.files.map(JSONValue.string))])))
+                }
                 ForEach(drop.targets, id: \.pill) { target in
                     IslandButton(label: target.label) {
                         send(Action(source: .island, card: card.id, name: "dropInto", value: .object(["pill": .string(target.pill), "paths": .array(drop.files.map(JSONValue.string))])))
@@ -28,6 +32,6 @@ struct GreetingCardView: View {
     let greeting: Greeting
 
     var body: some View {
-        Text(greeting.name.map { "Hi \($0)" } ?? "Hi").font(.callout.weight(.semibold))
+        Text(greeting.name.map { L(.hiName, ["name": $0]) } ?? L(.hi)).font(.callout.weight(.semibold))
     }
 }

@@ -49,10 +49,23 @@ public final class SurfaceRuntime {
     }
 
     public func show(_ scene: SurfaceScene) {
+        // Before the views read them.
+        Lexicon.learn(scene)
         island?.apply(scene)
         flowPill?.apply(scene.flow)
         overlay?.apply(scene.overlay)
         if let sound = scene.sound { sounds.play(sound.name, sequence: sound.sequence) }
+    }
+
+    /// Lets screenshots see the island, for SurfaceLab's pictures of it on a real screen.
+    /// Buntini never calls this: the island's cards can show commands and mail.
+    public func allowCapture() {
+        island?.allowCapture()
+    }
+
+    /// Opens the island as a click on it does, for SurfaceLab to look at it opened.
+    public func open() {
+        island?.model.expanded = true
     }
 
     public func stop() {

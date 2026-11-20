@@ -104,9 +104,11 @@ pub(crate) fn non_action(clause: &str) -> bool {
     is_explanation(clause)
         // "Remind me what I was supposed to buy" asks; "remind me to buy milk" doesn't.
         || ["remind me what", "remind me who", "remind me when", "remind me where", "remind me which", "remind me whether", "remind me if"].iter().any(|s| clause.starts_with(s))
-        || ["don't ", "do not ", "never ", "no need to "]
+        || (["don't ", "do not ", "never ", "no need to "]
             .iter()
             .any(|s| clause.starts_with(s))
+            // "Don't let me forget to water the plants" asks for a reminder.
+            && !["don't let me forget", "do not let me forget", "never let me forget", "don't forget to", "do not forget to", "don't let me miss"].iter().any(|s| clause.replace('’', "'").starts_with(s)))
 }
 
 /// Words after "reply to this" that make it a question for Buntini to answer in chat
@@ -267,6 +269,13 @@ fn changes_mac_setting(tokens: &[&str]) -> bool {
 }
 
 fn appends_to_note(tokens: &[&str]) -> bool {
+    if tokens.get(1..).is_some_and(|rest| rest.windows(4).any(|words| {
+        words[0] == "to" && ["my", "the", "our"].contains(&words[1])
+            && ["note", "notes"].contains(&words[2])
+            && ["called", "named", "titled"].contains(&words[3])
+    })) {
+        return true;
+    }
     let Some(to) = tokens.iter().rposition(|word| *word == "to") else {
         return false;
     };
@@ -276,8 +285,8 @@ fn appends_to_note(tokens: &[&str]) -> bool {
         .collect();
     // What is added may be quoted, and so already removed from these words.
     to >= 1
-        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
         && (2..=5).contains(&name.len())
+        && name.last().is_some_and(|word| ["note", "notes"].contains(*word))
         && !(["a", "an", "new"].contains(&tokens[1]) && tokens.get(2) == Some(&"note"))
 }
 
@@ -639,44 +648,11 @@ fn require_reads(goal: &str, steps: &[Step]) -> Result<(), String> {
     }
 }
 
-pub(crate) fn claims_own_write(text: &str) -> bool {
-    let text = unquoted(text);
-    let tokens = words(&text);
-    let writes = [
-        "created",
-        "added",
-        "saved",
-        "sent",
-        "booked",
-        "reserved",
-        "purchased",
-        "ordered",
-        "scheduled",
-        "deleted",
-        "cancelled",
-        "canceled",
-        "updated",
-        "changed",
-        "moved",
-        "ran",
-        "opened",
-        "submitted",
-        "posted",
-        "paid",
-        "transferred",
-        "emailed",
-        "set",
-        "enabled",
-        "forwarded",
-        "archived",
-        "unsubscribed",
-        "accepted",
-        "declined",
-        "replied",
-        "trashed",
-        "blocked",
-        "marked",
-    ];
+/// Whether Buntini says it did something itself: "Done.", "I've moved it", "we sent it".
+/// Read-only answers may describe what was read ("your dentist is booked for 15:00"); they
+/// may never say this.
+fn says_it_did(text: &str) -> bool {
+    let tokens = words(text);
     if tokens.first().is_some_and(|first| *first == "done") && tokens.len() <= 4 {
         return true;
     }
@@ -691,9 +667,55 @@ pub(crate) fn claims_own_write(text: &str) -> bool {
         {
             tail = &tail[1..];
         }
-        if tail.first().is_some_and(|word| writes.contains(word)) {
+        if tail.first().is_some_and(|word| WRITES.contains(word)) {
             return true;
         }
+    }
+    false
+}
+
+/// Verbs that tell a change as done.
+const WRITES: [&str; 33] = [
+    "created",
+    "added",
+    "saved",
+    "sent",
+    "booked",
+    "reserved",
+    "purchased",
+    "ordered",
+    "scheduled",
+    "deleted",
+    "cancelled",
+    "canceled",
+    "updated",
+    "changed",
+    "moved",
+    "ran",
+    "opened",
+    "submitted",
+    "posted",
+    "paid",
+    "transferred",
+    "emailed",
+    "set",
+    "enabled",
+    "forwarded",
+    "archived",
+    "unsubscribed",
+    "accepted",
+    "declined",
+    "replied",
+    "trashed",
+    "blocked",
+    "marked",
+];
+
+pub(crate) fn claims_own_write(text: &str) -> bool {
+    let text = unquoted(text);
+    let writes = WRITES;
+    if says_it_did(&text) {
+        return true;
     }
     // A change told as a result, without anyone doing it: "Brightness set to 50%", "Wi-Fi
     // turned off", "the timer has been started". "Can be set to" explains; it isn't one.
@@ -784,7 +806,17 @@ pub(crate) fn receipt_only_goal(goal: &str) -> bool {
     let mut previous_action = false;
     let mut previous_calendar_read = false;
     let mut previous_read = false;
+    let mut calendar_edit = false;
     for sentence in plain.split([';', '\n', '.', '!', '?']) {
+        let sentence = sentence.trim();
+        if calendar_edit && ["keep its duration and location", "keep its location and duration",
+            "keep its duration", "keep its location"].contains(&sentence)
+        {
+            continue;
+        }
+        let sentence = crate::edit_targets::event_date_opening(sentence)
+            .filter(|(_, action)| requested_actions(action).0 == ["update_calendar_event"])
+            .map_or(sentence, |(_, action)| action);
         for segment in sentence.split(',') {
             let segment = request_clause(segment);
             if segment.is_empty() {
@@ -807,6 +839,7 @@ pub(crate) fn receipt_only_goal(goal: &str) -> bool {
                 let (actions, unsupported) = requested_actions(clause);
                 if !actions.is_empty() && !unsupported {
                     saw_action = true;
+                    calendar_edit = actions == ["update_calendar_event"];
                     previous_action = true;
                     previous_calendar_read = false;
                     previous_read = false;
@@ -1537,6 +1570,12 @@ pub fn validate_answer(prompt: &str, text: &str, steps: &[Step]) -> Result<Strin
         if supplied && actions.is_empty() && !unsupported {
             return Ok(text.to_string());
         }
+        // A question answered from what was read: "your dentist is booked 15:00 to 15:45"
+        // says what the calendar holds. Only Buntini saying it did something is a claim.
+        let read = steps.iter().any(|step| !step.effect && step.state == "succeeded");
+        if read && actions.is_empty() && !unsupported && !says_it_did(&unquoted(text)) {
+            return Ok(text.to_string());
+        }
         return Err("The response claimed an action without a verified receipt. Buntini has not confirmed that it was done.".into());
     }
     Ok(text.to_string())
@@ -1555,6 +1594,26 @@ mod tests {
         for said in ["Brightness can be set to 50% in Control Centre.", "You can turn the volume down with F11.", "To set a timer, open Clock.", "The capital of Australia is Canberra.", "Your meeting starts at 3."] {
             assert!(!claims_own_write(said), "{said}");
         }
+    }
+
+    #[test]
+    fn an_answer_may_describe_what_it_read_but_never_say_it_did_something() {
+        let read = |tool: &str| Step { id: "1".into(), tool: tool.into(), arguments: serde_json::json!({}), state: "succeeded".into(), effect: false, proposed_at: String::new(), approved_at: None, finished_at: None, evidence: Some(serde_json::json!({"text":"1. Dentist 15:00-15:45"})) };
+        for (asked, said) in [
+            ("What's the total time I'm booked for tomorrow?", "You're booked for 75 minutes tomorrow: 30 for the 1:1 and 45 for the dentist."),
+            ("Will the dentist be done before 4pm tomorrow?", "Yes. Your dentist appointment is scheduled from 3:00 to 3:45 pm, so it ends 15 minutes before 4."),
+            ("Is the Priya catch-up tomorrow a quick one or a long one?", "Quick: it's set for 30 minutes, 11:00 to 11:30."),
+        ] {
+            assert_eq!(validate_answer(asked, said, &[read("read_calendar")]).as_deref(), Ok(said), "{said}");
+        }
+        // Buntini saying it did something is still a claim, read or not.
+        for said in ["I've moved your dentist appointment to 4pm.", "Done.", "We sent the reply to Ana."] {
+            assert!(validate_answer("When is the dentist tomorrow?", said, &[read("read_calendar")]).is_err(), "{said}");
+        }
+        // Nothing read: a description of a change can't rest on anything.
+        assert!(validate_answer("When is the dentist tomorrow?", "Your dentist appointment is scheduled for 3pm.", &[]).is_err());
+        // Something asked to be done: only a receipt says it was.
+        assert!(validate_answer("move the dentist to 4pm", "Your dentist appointment is now moved to 4pm.", &[read("read_calendar")]).is_err());
     }
 
     #[test]

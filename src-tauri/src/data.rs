@@ -250,6 +250,11 @@ where
     if let Err(error) = state.voice.stop_speaking().await {
         failures.push(error);
     }
+    // Dictation, the wake word and call notes stop, and words still on their way are dropped,
+    // before the database is emptied.
+    if let Err(error) = crate::flow::erase(state).await {
+        failures.push(error);
+    }
     if let Err(error) = sign_out().await {
         failures.push(error);
     }
@@ -261,6 +266,9 @@ where
         .index_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
     crate::local_setup::erase(state);
+    if let Err(error) = crate::mail::erase().await {
+        failures.push(error);
+    }
     if let Err(error) = state.store.lock().unwrap().erase_everything() {
         failures.push(error);
     }
@@ -283,6 +291,13 @@ where
         if let Err(error) = clear_credential(provider) {
             failures.push(error);
         }
+    }
+    // With their keys gone, developer services drop what they showed and any poll under way.
+    crate::services::erase();
+    // Coding agents: Buntini's hooks and plugins come out of their settings, as when each is
+    // switched off, and its backups of those settings, the recap and its scripts go.
+    if let Err(error) = crate::agent_setup::erase(&state.data_dir, &state.cache_dir) {
+        failures.push(error);
     }
     if let Err(error) = state.voice.clear_cache() {
         failures.push(error);
@@ -420,7 +435,11 @@ mod tests {
                 "anthropic",
                 "openai",
                 "gemini",
+                "deepseek",
+                "qwen",
+                "moonshot",
                 "chatgpt",
+                "lmstudio",
                 "custom"
             ]
         );
@@ -530,7 +549,7 @@ mod tests {
         }
         assert_eq!(
             calls.borrow().len(),
-            18,
+            22,
             "a failed credential never skips the remaining services"
         );
         assert!(state.store.lock().unwrap().memories().unwrap().is_empty());

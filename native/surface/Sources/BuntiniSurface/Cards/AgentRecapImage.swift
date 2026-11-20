@@ -14,7 +14,7 @@ struct RecapPicture: View {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(recap.week).font(.system(size: 54, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
-                    Text("My week with coding agents").font(.system(size: 88, weight: .bold)).foregroundStyle(.white).lineLimit(2)
+                    Text(L(.recapTitle)).font(.system(size: 88, weight: .bold)).foregroundStyle(.white).lineLimit(2)
                 }
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 36), GridItem(.flexible(), spacing: 36)], alignment: .leading, spacing: 48) {
                     ForEach(recap.stats, id: \.label) { stat in

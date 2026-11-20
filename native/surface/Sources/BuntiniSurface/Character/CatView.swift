@@ -88,6 +88,9 @@ final class CatLife {
     /// Something on the face is moving, so draw every frame; otherwise only glance at the
     /// pointer now and then.
     private(set) var busy = true
+    /// Moving in a way that needs every frame: eyes, lids, a blink. The ear twitch while
+    /// alert alone looks the same at 30 frames a second.
+    private(set) var smooth = true
     private var gaze = CGPoint.zero
     private var last: Double?
     private var nextBlink: Double = 0
@@ -97,7 +100,7 @@ final class CatLife {
 
     /// Whether a resting cat should wake: the pointer moved, a blink is due, or its mood moves.
     func wants(now: Double, mood: Mood, center: CGPoint?, reduceMotion: Bool) -> Bool {
-        if (mood == .dancing || mood == .alert) && !reduceMotion { return true }
+        if mood == .alert && !reduceMotion { return true }
         if nextBlink - now < 0.12 { return true }
         guard let center, !reduceMotion else { return false }
         let mouse = NSEvent.mouseLocation
@@ -124,9 +127,14 @@ final class CatLife {
 
         // Blink every 2.2–5.4 s, sometimes twice.
         if nextBlink == 0 { nextBlink = now + Double.random(in: 1...3) }
-        if blinkAt == nil, now >= nextBlink, mood != .sleepy {
-            blinkAt = now
-            doubleBlink = Double.random(in: 0...1) < 0.22
+        if blinkAt == nil, now >= nextBlink {
+            if mood == .sleepy {
+                // Heavy lids don't blink; it rests until the next one would be due.
+                nextBlink = now + Double.random(in: 2.2...5.4)
+            } else {
+                blinkAt = now
+                doubleBlink = Double.random(in: 0...1) < 0.22
+            }
         }
         var blink: Double = 0
         if let start = blinkAt {
@@ -155,15 +163,16 @@ final class CatLife {
         pose.lid = lid
         // Busy while the eyes travel, a blink runs or is about to, or the mood moves.
         let blinkSoon = nextBlink - now < 0.12
-        busy = moving || lidMoving || blinkAt != nil || blinkSoon || ((mood == .dancing || mood == .alert) && !reduceMotion)
+        smooth = moving || lidMoving || blinkAt != nil || blinkSoon
+        busy = smooth || (mood == .alert && !reduceMotion)
         switch mood {
         case .happy:
             pose.eyes = .happy
             pose.mouth = .smile
         case .dancing:
+            // The sway is the view's (CatView.sway), so dancing costs no redraws.
             pose.eyes = .happy
             pose.mouth = .smile
-            pose.tilt = reduceMotion ? 0 : sin(now * 2 * .pi * 1.6) * 7
         case .curious:
             pose.pupil = 1.14
             pose.tilt = 6
@@ -186,6 +195,10 @@ struct CatView: View {
     @State private var spot = ScreenSpot()
     /// Drawing every frame; off while the cat rests, so a still cat costs nothing.
     @State private var awake = true
+    /// Only the ear twitch moves: 30 frames a second is enough.
+    @State private var slow = false
+    /// Dancing: a sway animated by Core Animation, with nothing redrawn.
+    @State private var sway: Double = 0
     /// Ten looks a second at whether to wake, without drawing.
     private let look = Timer.publish(every: 0.1, tolerance: 0.02, on: .main, in: .common).autoconnect()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -211,17 +224,27 @@ struct CatView: View {
     }
 
     private var living: some View {
-        TimelineView(.animation(minimumInterval: FrameClock.interval, paused: !awake)) { timeline in
+        TimelineView(.animation(minimumInterval: slow ? 1.0 / 30 : FrameClock.interval, paused: !awake)) { timeline in
             Canvas { context, size in
                 // Reading the date makes SwiftUI redraw on every tick.
                 let now = timeline.date.timeIntervalSinceReferenceDate
                 let pose = life.pose(now: now, mood: cat.mood, center: spot.center, reduceMotion: reduceMotion)
                 draw(&context, size: size, pose: pose)
-                if !life.busy {
-                    DispatchQueue.main.async { awake = false }
+                let resting = !life.busy, coarse = life.busy && !life.smooth
+                if resting || coarse != slow {
+                    DispatchQueue.main.async {
+                        if resting { awake = false }
+                        slow = coarse
+                    }
                 }
             }
         }
+        // Flattened first, so the sway turns a finished picture instead of redrawing the face.
+        .drawingGroup()
+        .rotationEffect(.degrees(sway), anchor: UnitPoint(x: 0.5, y: 0.85))
+        .onAppear { dance(cat.mood == .dancing) }
+        .onChange(of: cat.mood == .dancing) { dancing in dance(dancing) }
+        .onChange(of: reduceMotion) { _ in dance(cat.mood == .dancing) }
         .background { if !inPicture { ScreenSpotReader(spot: spot) } }
         .onReceive(look) { date in
             if !awake && life.wants(now: date.timeIntervalSinceReferenceDate, mood: cat.mood, center: spot.center, reduceMotion: reduceMotion) {
@@ -229,6 +252,23 @@ struct CatView: View {
             }
         }
         .accessibilityElement()
-        .accessibilityLabel(cat.character == "orb" ? "Orbit" : "Cat")
+        .accessibilityLabel(cat.character == "orb" ? L(.orb) : L(.cat))
+    }
+
+    /// Sways side to side about 1.6 times a second while dancing; settles when it stops.
+    private func dance(_ dancing: Bool) {
+        guard dancing, !reduceMotion, !inPicture else {
+            withAnimation(.easeOut(duration: 0.25)) { sway = 0 }
+            return
+        }
+        var start = Transaction()
+        start.disablesAnimations = true
+        withTransaction(start) { sway = -7 }
+        // On the next turn, so the swing starts from the far side rather than from the middle.
+        DispatchQueue.main.async {
+            // Unless it stopped dancing meanwhile.
+            guard sway == -7 else { return }
+            withAnimation(.easeInOut(duration: 1 / 3.2).repeatForever(autoreverses: true)) { sway = 7 }
+        }
     }
 }

@@ -1,0 +1,2816 @@
+[
+ {
+  "q": "whats a calendar invite",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition of a calendar invite; no record"
+ },
+ {
+  "q": "how do i set up a shared inbox for my team",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to about shared inboxes in general"
+ },
+ {
+  "q": "is it rude to cc your boss",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette in general"
+ },
+ {
+  "q": "is it rude to cc my manager when i email a colleague who keeps ignoring me",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette advice; no record needed"
+ },
+ {
+  "q": "whats bcc and when should i use it instead of cc",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions in one about email in general"
+ },
+ {
+  "q": "bcc meaning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition of bcc"
+ },
+ {
+  "q": "difference between reply and reply all?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an email feature in general"
+ },
+ {
+  "q": "how do I write an email asking for a day off next friday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help; asks how to word it, reads no mail"
+ },
+ {
+  "q": "how long should i wait before following up on an email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette in general"
+ },
+ {
+  "q": "is 'per my last email' passive aggressive",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email phrasing in general"
+ },
+ {
+  "q": "what does 'kindly revert' mean in an email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meaning of an office phrase"
+ },
+ {
+  "q": "how to get to inbox zero",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to about email habits in general"
+ },
+ {
+  "q": "is inbox zero actually worth it or just a productivity fad",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opinion on an email habit; no record"
+ },
+ {
+  "q": "my inbox is a disaster, whats a good system for sorting email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks for a sorting method, not what is in the inbox"
+ },
+ {
+  "q": "good subject line for a cold email to a recruiter",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help, no record"
+ },
+ {
+  "q": "how to write a thank you email after an interview",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help in general"
+ },
+ {
+  "q": "in a uk work email do i start with hi or dear",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette in general"
+ },
+ {
+  "q": "is it ok to email my lecturer on a sunday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette question; the weekday needs no calendar"
+ },
+ {
+  "q": "how do email rules and filters work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an email feature"
+ },
+ {
+  "q": "archive vs delete an email, whats the difference",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains two email features"
+ },
+ {
+  "q": "why do real emails end up in spam",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how spam filtering works in general"
+ },
+ {
+  "q": "how can i tell if an email is a phishing scam",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general safety advice"
+ },
+ {
+  "q": "is this a scam: 'your parcel is held, pay 1.99 to release it'",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "judges text given in the question; no record"
+ },
+ {
+  "q": "can you unsend an email after you've sent it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an email feature"
+ },
+ {
+  "q": "how do i schedule an email to go out monday morning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to for a mail feature; the weekday needs no record"
+ },
+ {
+  "q": "whats a read receipt and is it creepy to use them",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions in one about email in general"
+ },
+ {
+  "q": "cheers or kind regards, whats normal to sign off an email in australia",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette in general"
+ },
+ {
+  "q": "how do i politely tell someone to stop emailing me",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette advice"
+ },
+ {
+  "q": "when should i stay out of a big reply-all thread",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "email etiquette in general"
+ },
+ {
+  "q": "write me an out of office message for the christmas break",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help, no record"
+ },
+ {
+  "q": "help me word an email to my landlord about the broken boiler",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help; the facts are in the question"
+ },
+ {
+  "q": "how do i decline a meeting request by email without sounding rude",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette advice"
+ },
+ {
+  "q": "how do i stop newsletters flooding my inbox",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to about unsubscribing in general"
+ },
+ {
+  "q": "how do i know if my email account got hacked",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general security advice"
+ },
+ {
+  "q": "can my employer read my work email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general fact about work accounts"
+ },
+ {
+  "q": "should i answer work emails on my day off",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice, no record"
+ },
+ {
+  "q": "is it weird to send an email at 2am or should i wait till morning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette advice"
+ },
+ {
+  "q": "how do i write a reminder email for an unpaid invoice",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help; 'reminder' here is a kind of email, no record"
+ },
+ {
+  "q": "how do i gently nudge someone who hasnt replied to my email in a week",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks how to word a follow-up, not who replied"
+ },
+ {
+  "q": "what do i say in an email when i missed a meeting",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help in general"
+ },
+ {
+  "q": "why do my emails keep landing in peoples junk folder",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "deliverability in general; reads no mail"
+ },
+ {
+  "q": "i accidentally replied all with something embarrassing, what do i do now",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice; the event is told in the question"
+ },
+ {
+  "q": "sent an email to the wrong person, can i get it back??",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains whether recall works"
+ },
+ {
+  "q": "what happens when you snooze an email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an email feature"
+ },
+ {
+  "q": "how does a sender know i opened their email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains tracking in general"
+ },
+ {
+  "q": "best email app for mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best; no record"
+ },
+ {
+  "q": "wat is the meaning of 'do the needful' in office mails",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meaning of an office phrase"
+ },
+ {
+  "q": "how to write formal email for leave application to hr",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help in general"
+ },
+ {
+  "q": "whats a priority inbox",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an email feature"
+ },
+ {
+  "q": "whats a focused inbox and should i turn it off",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions in one about a mail feature"
+ },
+ {
+  "q": "how do i find someones work email address",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general how-to"
+ },
+ {
+  "q": "how do i recieve emails from a new address without them going to junk",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to about junk filtering"
+ },
+ {
+  "q": "is it rude to not reply to a group email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette in general"
+ },
+ {
+  "q": "what does tentative mean on a calendar invite",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains an invite option"
+ },
+ {
+  "q": "how do shared calendars work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a calendar feature"
+ },
+ {
+  "q": "best calendar app for a family of five",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best"
+ },
+ {
+  "q": "how do i stop getting double booked",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general scheduling advice"
+ },
+ {
+  "q": "how do i give my assistant access to my calendar",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to for calendar sharing; reads no event"
+ },
+ {
+  "q": "is time blocking my whole calendar actually worth it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opinion on a method; no record"
+ },
+ {
+  "q": "why do invites from overseas show up at the wrong time",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains time zones in invites"
+ },
+ {
+  "q": "can a calendar event repeat on the last friday of every month",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks what a repeat rule can do"
+ },
+ {
+  "q": "what's an .ics file",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "how do i colour code my calendar so it's actually useful",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general calendar advice"
+ },
+ {
+  "q": "how many meetings a day is too many",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general work advice"
+ },
+ {
+  "q": "what does prepone the meeting mean",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meaning of a word"
+ },
+ {
+  "q": "is it rude to decline a meeting without leaving a note",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette in general"
+ },
+ {
+  "q": "how do i politely leave a meeting that's running over",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette advice"
+ },
+ {
+  "q": "who's supposed to send the invite, the person who asked for the meeting or the senior one",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meeting etiquette in general"
+ },
+ {
+  "q": "etiquette for rescheduling a meeting last minute",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette in general"
+ },
+ {
+  "q": "how early should you arrive for a doctors appointment",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "what should i bring to my first physio appointment",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice about physio visits; no event needed"
+ },
+ {
+  "q": "how do families with two shift-working parents keep a schedule",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general planning advice"
+ },
+ {
+  "q": "paper diary or digital calendar, which is better with adhd",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "what does 'hold' mean in a calendar invite title",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meaning of a calendar convention"
+ },
+ {
+  "q": "how do i stop people booking meetings over my lunch",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to; reads no event"
+ },
+ {
+  "q": "is it weird to block focus time on my work calendar",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opinion, no record"
+ },
+ {
+  "q": "how do i say i'm not free tomorrow without giving a reason",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "wording help; the person states the fact"
+ },
+ {
+  "q": "polite way to ask to move a meeting to thursday?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "wording help in general"
+ },
+ {
+  "q": "what does 'check availability' mean when booking an appointment online",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a booking term"
+ },
+ {
+  "q": "can i bring someone with me to a GP appointment",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general fact about GP visits"
+ },
+ {
+  "q": "is it ok to cancel a hair appointment on the day",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette in general"
+ },
+ {
+  "q": "how do i get a doctors appointment quicker",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "best calender app for freelancers",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best"
+ },
+ {
+  "q": "how do invites from emails end up in my calendar automatically",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains how a feature works"
+ },
+ {
+  "q": "why do some calendars start the week on sunday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general fact"
+ },
+ {
+  "q": "best way to schedual a meeting with 8 people in 4 time zones",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general scheduling advice"
+ },
+ {
+  "q": "what's the difference between an appointment and a meeting",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definitions"
+ },
+ {
+  "q": "how do i say no to a meeting that could have been an email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etiquette advice"
+ },
+ {
+  "q": "julian vs gregorian calendar, what's the difference",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definitions"
+ },
+ {
+  "q": "should i seperate my work and personal calenders",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "how do i book a gp appointment online in the uk",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to in general"
+ },
+ {
+  "q": "how early do i need to be for a blood test apointment",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "whats the difference between a reminder and a to-do",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definitions"
+ },
+ {
+  "q": "how do location based reminders work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a feature"
+ },
+ {
+  "q": "how does the reminders app know when i've left home",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a feature; reads no reminder"
+ },
+ {
+  "q": "what's a smart list in reminders",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a feature"
+ },
+ {
+  "q": "best to do list app",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best"
+ },
+ {
+  "q": "good to-do app for someone with adhd",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best"
+ },
+ {
+  "q": "how do i make my to-do list less overwhelming",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general productivity advice"
+ },
+ {
+  "q": "what's the eisenhower matrix",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "how many things should be on a daily to-do list",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "should i write my to-do list at night or in the morning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "how do i stop ignoring my reminders",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "habit advice; reads no reminder"
+ },
+ {
+  "q": "why do i keep putting off the same stuff on my list",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "psychology of procrastination; no record"
+ },
+ {
+  "q": "how can i remember to take my tablets every morning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general habit advice"
+ },
+ {
+  "q": "can you share a grocery list with your partner on an iphone",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks what a feature can do"
+ },
+ {
+  "q": "how do i organise a shopping list by aisle",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general how-to"
+ },
+ {
+  "q": "what should be on a moving house checklist",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general checklist advice"
+ },
+ {
+  "q": "give me a packing list for a 3 day work trip",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help; a list in the reply, no record"
+ },
+ {
+  "q": "what's a someday maybe list",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "how do u prioritise when everything on the list is urgent",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "what does snooze do on a reminder",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a feature"
+ },
+ {
+  "q": "how do i write a to-do list i'll actually finish",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "kanban vs to do list whats the diff",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definitions"
+ },
+ {
+  "q": "whats on a typical christmas to-do list",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general checklist, not the person's list"
+ },
+ {
+  "q": "grocery list for a week of healthy eating",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "writing help; a list in the reply"
+ },
+ {
+  "q": "my to do list gets longer every day, how do i stop that",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "habit advice; reads no reminder"
+ },
+ {
+  "q": "list 5 things to do on a rainy sunday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "ideas in the reply; 'list' is a request word here"
+ },
+ {
+  "q": "list some easy dinners for tonight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "recipe ideas; no record"
+ },
+ {
+  "q": "list the planets in order",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "trivia in list form"
+ },
+ {
+  "q": "remind me what a mortgage offer actually is",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks for an explanation, not a reminder"
+ },
+ {
+  "q": "remind me how to tie a tie",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks for a how-to, not a reminder"
+ },
+ {
+  "q": "remind me what the 50/30/20 budget rule is",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks for an explanation"
+ },
+ {
+  "q": "do reminders still go off if my phone is on silent",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains a feature"
+ },
+ {
+  "q": "is it better to have one big to-do list or several",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "how to make a remidner repeat every 2 weeks",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to for a feature; reads no reminder"
+ },
+ {
+  "q": "whats a good reminder app for my mum, she's not techy",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "which app is best"
+ },
+ {
+  "q": "why do reminder notifications sometimes come late",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "explains notification timing"
+ },
+ {
+  "q": "is a done list better than a to-do list for motivation",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "what's a rota and how do i make a fair one for flatmates",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions in one; general advice"
+ },
+ {
+  "q": "how do i free up storage on my mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac how-to"
+ },
+ {
+  "q": "my mac's been really slow lately, what can i do",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac troubleshooting in general"
+ },
+ {
+  "q": "how to take a screenshot on a mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac how-to"
+ },
+ {
+  "q": "how do i turn on do not disturb",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "how do i get my calendar to sync between my iphone and my mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "sync how-to; reads no event"
+ },
+ {
+  "q": "my reminders arent syncing to my phone, how do i fix it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "sync troubleshooting; reads no reminder"
+ },
+ {
+  "q": "why does the mail app keep asking for my password",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "account troubleshooting in general"
+ },
+ {
+  "q": "how do i add my work email account to the mail app",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to; asks how, reads no mail"
+ },
+ {
+  "q": "where do email attachments get saved on a mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac how-to"
+ },
+ {
+  "q": "how do i make a strong password i'll actually remember",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "security advice"
+ },
+ {
+  "q": "is it safe to save passwords in the browser",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "security advice"
+ },
+ {
+  "q": "how do i back up my iphone to my mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to"
+ },
+ {
+  "q": "how do i turn off calendar notifications on my phone",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "how do i stop my mac going to sleep",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "should i update to the new macos straight away or wait a few weeks",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "my phone battery drains so fast, why",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "phone troubleshooting in general"
+ },
+ {
+  "q": "how do i get photos from my phone to my mac without a cable",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to"
+ },
+ {
+  "q": "how do i remove an email account from my phone",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to; asks how"
+ },
+ {
+  "q": "how do i change the default calendar for new events",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "how to make the calendar week start on monday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "how do i show week numbers in the calendar app",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "can my reminders show up in my calendar",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks what a feature can do"
+ },
+ {
+  "q": "if i sign out of my account on my mac do i lose my stuff",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "account question in general"
+ },
+ {
+  "q": "my bluetooth earbuds keep disconnecting from my mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac troubleshooting"
+ },
+ {
+  "q": "whats a vpn and do i need one",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions in one; general"
+ },
+ {
+  "q": "can i get back a file i deleted on my mac",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "Mac how-to"
+ },
+ {
+  "q": "why is my mail not downloading new emails",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "mail troubleshooting; reads no message"
+ },
+ {
+  "q": "how do i make mail check for new email more often",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "how do i stop my phone lighting up with every email",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "notification settings how-to"
+ },
+ {
+  "q": "pls tell how to change language on mac to hindi",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "kindly tell me how to set reminder in iphone",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "how-to for a feature; asks how, sets nothing"
+ },
+ {
+  "q": "how do i get notifications only from certain people",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "settings how-to"
+ },
+ {
+  "q": "whats the weather tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live weather from the web"
+ },
+ {
+  "q": "will it rain on saturday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast; the weekday needs no calendar"
+ },
+ {
+  "q": "do i need an umbrella today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "weather",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live weather"
+ },
+ {
+  "q": "weather in edinburgh this weekend",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "is it going to be hot in delhi on friday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "how cold is it going to get tonight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "good day to hang the washing out?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "reckon it'll rain this arvo?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "chance of thunderstorms monday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "is it going to rain tommorow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "whats the wether like in goa this week",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "tmrw weather manchester",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live forecast"
+ },
+ {
+  "q": "what time is it in tokyo",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "current time somewhere"
+ },
+ {
+  "q": "time in lagos rn",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "current time somewhere"
+ },
+ {
+  "q": "if it's 4pm in london what time is it in new york",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time zone conversion"
+ },
+ {
+  "q": "when its 9am in chicago what time is it in bangalore",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time zone conversion"
+ },
+ {
+  "q": "whats in the news today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live news"
+ },
+ {
+  "q": "news",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live news"
+ },
+ {
+  "q": "latest on the rail strike",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live news"
+ },
+ {
+  "q": "is there a tube strike tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live news; 'tomorrow' needs no calendar"
+ },
+ {
+  "q": "who won the match last night",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live scores"
+ },
+ {
+  "q": "did the Harbour City Hawks win on sunday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live scores for an invented team"
+ },
+ {
+  "q": "when do the Ridgeback Rovers play next",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public fixture list, not the person's calendar"
+ },
+ {
+  "q": "petrol price in perth today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live price"
+ },
+ {
+  "q": "how much are flights from london to lisbon in march",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live fares from the web"
+ },
+ {
+  "q": "any good tv deals this black friday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live deals"
+ },
+ {
+  "q": "reviews for the Copper Fern bistro on Harlow Road",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "web reviews"
+ },
+ {
+  "q": "what time does the post office close today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opening hours from the web"
+ },
+ {
+  "q": "is the Greenmarket pharmacy open on sunday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opening hours from the web"
+ },
+ {
+  "q": "what is the timing of banks on saturday in mumbai",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opening hours"
+ },
+ {
+  "q": "is the library open on bank holiday monday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opening hours"
+ },
+ {
+  "q": "what time do supermarkets shut on christmas eve",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "opening hours"
+ },
+ {
+  "q": "usd to inr today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live exchange rate"
+ },
+ {
+  "q": "eur to gbp rate",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live exchange rate"
+ },
+ {
+  "q": "how much is 250 euros in rupees",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "currency conversion"
+ },
+ {
+  "q": "who is Talia Brennock",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "who-is question about an invented public figure"
+ },
+ {
+  "q": "who's Desmond Okafor-Lane",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "who-is question"
+ },
+ {
+  "q": "who is Marguerite Asante-Vale, everyone at work keeps talking about her book",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "who-is question; 'at work' needs no record"
+ },
+ {
+  "q": "what's Ines Halvorsen-Mbeki famous for",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "who-is question"
+ },
+ {
+  "q": "when's sunset today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live astronomical fact"
+ },
+ {
+  "q": "is monday a bank holiday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public holiday fact, not a calendar event"
+ },
+ {
+  "q": "when is diwali this year",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public date fact"
+ },
+ {
+  "q": "is the stock market open tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public opening fact"
+ },
+ {
+  "q": "traffic on the m4 right now",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live traffic"
+ },
+ {
+  "q": "is flight QZ482 on time",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live flight status from the web"
+ },
+ {
+  "q": "what's on at the cinema tonight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "live listings"
+ },
+ {
+  "q": "whats on tv wednesday night",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "TV listings, not the person's calendar"
+ },
+ {
+  "q": "anything fun on in brisbane this saturday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "local events from the web"
+ },
+ {
+  "q": "is today a public holiday in singapore",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public holiday fact"
+ },
+ {
+  "q": "is tomorrow a holiday in india",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "public holiday fact"
+ },
+ {
+  "q": "what's the weather in leeds tomorrow and do i need a coat",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions; the second rests on the forecast"
+ },
+ {
+  "q": "what time is it in toronto and is it too late to call",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "two questions; time somewhere plus a judgement"
+ },
+ {
+  "q": "is the Northgate bridge still closed this weekend",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "local news"
+ },
+ {
+  "q": "best noise cancelling headphones under 200",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research"
+ },
+ {
+  "q": "where can i buy a standing desk",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "shopping"
+ },
+ {
+  "q": "good laptop for uni under 800 quid",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research"
+ },
+ {
+  "q": "best paper planner for 2027",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research; a planner to buy, not the person's calendar"
+ },
+ {
+  "q": "whats a good wall calendar for a big family",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research"
+ },
+ {
+  "q": "is the Vellora X2 worth it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product reviews"
+ },
+ {
+  "q": "Korvex S7 or S8, which one should i get",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product advice"
+ },
+ {
+  "q": "where can i buy a label maker",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "shopping"
+ },
+ {
+  "q": "anniversary is tomorrow and ive got nothing, gift ideas?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "gift ideas; the date is told, nothing to look up"
+ },
+ {
+  "q": "is a refurbished laptop worth it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product advice"
+ },
+ {
+  "q": "best webcam for video meetings",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research"
+ },
+ {
+  "q": "best cheap smartwatch for reminders and notifications",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research; 'reminders' is a feature wanted"
+ },
+ {
+  "q": "where do i get a whiteboard calendar for the fridge",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "shopping"
+ },
+ {
+  "q": "best phone under 30k rupees",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research"
+ },
+ {
+  "q": "which is cheaper per litre, 2 x 1.5L at 3.20 or one 4L at 7.50",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "unit price sums from figures in the question"
+ },
+ {
+  "q": "good christmas presents for a 10 yr old",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "gift ideas"
+ },
+ {
+  "q": "a good diary for 2027 with a week on two pages",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "product research; a diary to buy"
+ },
+ {
+  "q": "what's a good gift for wensday, its my sisters bday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "gift ideas; the weekday needs no record"
+ },
+ {
+  "q": "hi",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "good morning!",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "hey buntini",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "thanks!",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "thanks"
+ },
+ {
+  "q": "ur the best",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "compliment"
+ },
+ {
+  "q": "i'm so tired",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling; nothing to look up"
+ },
+ {
+  "q": "just got back from a run",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement"
+ },
+ {
+  "q": "i need a break",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "tell me a joke",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "joke"
+ },
+ {
+  "q": "tell me a joke about meetings",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "joke; 'meetings' is the topic, not a record"
+ },
+ {
+  "q": "ugh mondays",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "small talk"
+ },
+ {
+  "q": "today was sooo long",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "just had the worst meeting of my life",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "venting; nothing asked of the calendar"
+ },
+ {
+  "q": "finally cleared my inbox!!!",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement; nothing to read"
+ },
+ {
+  "q": "my boss emailed me at 11pm again",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "venting; asks nothing of the mail"
+ },
+ {
+  "q": "i'm really nervous about my interview tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling; wants support, not the event"
+ },
+ {
+  "q": "its my birthday today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement"
+ },
+ {
+  "q": "happy friday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "small talk"
+ },
+ {
+  "q": "how are you",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "small talk"
+ },
+ {
+  "q": "do you like cats",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "small talk"
+ },
+ {
+  "q": "can't be bothered with anything today",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "feeling a bit low tbh",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "just ticked off everything on my to do list for the week",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement; nothing to read"
+ },
+ {
+  "q": "so many meetings today my brain is mush",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "venting"
+ },
+ {
+  "q": "rough day at work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "venting"
+ },
+ {
+  "q": "back from holiday and dreading my inbox",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling; asks nothing of the mail"
+ },
+ {
+  "q": "forgot my mums birthday, what do i do",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice; no record needed"
+ },
+ {
+  "q": "my calendar is so full i can't breathe",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "venting; asks nothing of the calendar"
+ },
+ {
+  "q": "i keep forgetting things lately, is that normal",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general health question"
+ },
+ {
+  "q": "what can you do",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "question about the assistant"
+ },
+ {
+  "q": "give me a pep talk, big day tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "encouragement"
+ },
+ {
+  "q": "i got the job!!",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement"
+ },
+ {
+  "q": "ok",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "acknowledgement"
+ },
+ {
+  "q": "night, talk tomorrow",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "farewell"
+ },
+ {
+  "q": "i'm procrastinating instead of doing my to-do list lol",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement; nothing to read"
+ },
+ {
+  "q": "wish me luck for my exam on thursday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "encouragement; the weekday needs no record"
+ },
+ {
+  "q": "howzit",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "how far, hope you're good",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "i'm knackered, think i need a cuppa",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "im so stressed about work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "i finally booked a holiday!",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement; nothing to read"
+ },
+ {
+  "q": "today's my last day at this job",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "statement"
+ },
+ {
+  "q": "what's the craic",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "greeting"
+ },
+ {
+  "q": "definately need a holiday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "feeling"
+ },
+ {
+  "q": "how should i plan a week of meals",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "what's a good time to wake up before a flight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how early should i get to the airport for an international flight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how do i plan a productive monday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "best way to fit deep work into my week",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice; reads no event"
+ },
+ {
+  "q": "how far ahead should i book a dentist appt",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how long before a wedding should invitations go out",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "is it better to work out in the morning or evening",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "how do i plan a kids birthday party in 2 weeks",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "tips for a sunday reset",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how long should a one to one meeting be",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meeting advice"
+ },
+ {
+  "q": "how much buffer should i leave between meetings",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "scheduling advice"
+ },
+ {
+  "q": "what's a good weekly cleaning schedule",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how should i structure my day when i work from home",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "is tuesday really the cheapest day to book flights",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general fact check"
+ },
+ {
+  "q": "what time should i go to bed if i want 8 hours and have to be up at 6:15",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "subtracts 8 hours from 6:15"
+ },
+ {
+  "q": "how do i get through christmas without stressing",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "when should i start revising for exams in may",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "what should i do the night before a job interview",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "plan me a 5 day itinerary for rome",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "travel planning in the reply; no record"
+ },
+ {
+  "q": "should i do the hardest task first thing in the morning",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "productivity advice"
+ },
+ {
+  "q": "how do i stop overbooking my weekends",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice; reads no event"
+ },
+ {
+  "q": "how do i run a good monday team meeting",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "meeting advice"
+ },
+ {
+  "q": "plan a 3 day weekend in the lake district for me",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "travel planning in the reply"
+ },
+ {
+  "q": "my flight lands at 6am, is it a bad idea to go straight to work",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice; the time is given in the question"
+ },
+ {
+  "q": "if i leave at 7:40 and the drive is 2h15 when do i get there",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "adds a duration to a time given in the question"
+ },
+ {
+  "q": "appointment is at 10:30, 25 min drive plus 10 to park, when should i leave",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "subtracts durations from a time given in the question"
+ },
+ {
+  "q": "the meeting's at 2pm berlin time and i'm in dubai, what time do i join",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time zone conversion from facts in the question"
+ },
+ {
+  "q": "i need 3 weeks notice to book leave, what's the latest i can ask for christmas day off",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts back 3 weeks from 25 december"
+ },
+ {
+  "q": "i have a call with someone in sydney at 8pm my time in london, what time is it for them",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time zone conversion; the time is given"
+ },
+ {
+  "q": "how do i plan my week around school pickups",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice; reads no event"
+ },
+ {
+  "q": "is it better to book appointments first thing or late afternoon",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "is monday morning the best time to send a job application",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general advice"
+ },
+ {
+  "q": "how should i plan tomorrow if i only have about 4 good hours of focus",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice; reads no event"
+ },
+ {
+  "q": "whats a good revision schedule for the week before finals",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "how do i plan a week if i work nights",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "planning advice"
+ },
+ {
+  "q": "i have a 9am meeting, quick breakfast ideas?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "food ideas; the meeting time is given"
+ },
+ {
+  "q": "my meeting got cancelled so i've got a free hour, what should i do with it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "ideas; nothing to read"
+ },
+ {
+  "q": "i've got 3 back to back meetings tomorrow, how do i stay focused",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice; the facts are given"
+ },
+ {
+  "q": "i have a dentist appointment tomorrow, can i eat before",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "health advice; the event is told"
+ },
+ {
+  "q": "is a 4 day work week schedule actually better",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general opinion"
+ },
+ {
+  "q": "what's a 9/80 work schedule",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "can take leave during probation or not",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general employment question"
+ },
+ {
+  "q": "how many vacation days is normal in the us",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general fact"
+ },
+ {
+  "q": "how do i ask for PTO without feeling guilty",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "work advice"
+ },
+ {
+  "q": "what should i wear tomorrow if it's 8 degrees",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "clothing advice; the temperature is given"
+ },
+ {
+  "q": "ideas for a date night friday",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "ideas"
+ },
+ {
+  "q": "is it bad to drink coffee after 2pm",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "health advice"
+ },
+ {
+  "q": "what day is new year's day next year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date reasoning"
+ },
+ {
+  "q": "how many weeks till the end of the year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts weeks from today"
+ },
+ {
+  "q": "how many days until christmas",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts days from today"
+ },
+ {
+  "q": "whats 15% of 84",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "percentage sum"
+ },
+ {
+  "q": "10 km to miles",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "unit conversion"
+ },
+ {
+  "q": "180cm in feet and inches",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "unit conversion"
+ },
+ {
+  "q": "meeting starts 9:45 and runs 90 mins, when does it end",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "adds a duration to a time given in the question"
+ },
+ {
+  "q": "3h 40m + 2h 35m",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "adds durations"
+ },
+ {
+  "q": "is 2028 a leap year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "leap year rule"
+ },
+ {
+  "q": "whats the date 90 days from today",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date arithmetic"
+ },
+ {
+  "q": "what week number is it",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date reasoning"
+ },
+ {
+  "q": "whats todays date",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "read off the clock"
+ },
+ {
+  "q": "what day is it",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "read off the clock"
+ },
+ {
+  "q": "what day of the week was 4 july 1990",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date reasoning"
+ },
+ {
+  "q": "how many working days are there in december",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts weekdays in a month"
+ },
+ {
+  "q": "350f to c",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "temperature conversion"
+ },
+ {
+  "q": "split a 186 dollar bill 4 ways with a 15% tip",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "sum from figures in the question"
+ },
+ {
+  "q": "20% off 65 pounds is how much",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "percentage sum"
+ },
+ {
+  "q": "if i save 150 a month how long till i have 2000",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "division from figures in the question"
+ },
+ {
+  "q": "i'm 34, how many days old am i roughly",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "multiplication; the age is given"
+ },
+ {
+  "q": "how old is someone born in 1987",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "subtraction from the year"
+ },
+ {
+  "q": "14:45 in 12 hour time",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time format conversion"
+ },
+ {
+  "q": "turn these into 12 hour times: 08:15, 13:30, 21:05",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time format conversion of times in the question"
+ },
+ {
+  "q": "what's the date two fridays from now",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date arithmetic"
+ },
+ {
+  "q": "whats the date next tuesday",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date arithmetic"
+ },
+ {
+  "q": "what day of the week is christmas this year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date reasoning"
+ },
+ {
+  "q": "if today's wednesday what day is it in 100 days",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "weekday arithmetic"
+ },
+ {
+  "q": "how long is it from 8:50am to 5:15pm",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "duration between two times"
+ },
+ {
+  "q": "my shift is 7pm to 3:30am, how many hours is that",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "duration; the times are given"
+ },
+ {
+  "q": "i worked 7.5 hrs a day mon to thu and 5 on fri, whats my total for the wk",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "sum of hours given in the question"
+ },
+ {
+  "q": "60 kg in stone",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "unit conversion"
+ },
+ {
+  "q": "how many weekdays between 1 dec and 24 dec",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts weekdays between dates"
+ },
+ {
+  "q": "1 lakh rupees in dollars approx",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "currency conversion"
+ },
+ {
+  "q": "if i run 5k in 28 min what's my pace per km",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "division"
+ },
+ {
+  "q": "train leaves 23:40 and takes 6h50, what time does it get in",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "adds a duration across midnight"
+ },
+ {
+  "q": "how many days between 3 march and 21 june",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "days between dates"
+ },
+ {
+  "q": "is easter early or late next year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date comparison"
+ },
+ {
+  "q": "what's the date of the first monday in january 2027",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date reasoning"
+ },
+ {
+  "q": "how many days till the weekend",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts days from today"
+ },
+ {
+  "q": "how many mondays left this year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts weekdays from today"
+ },
+ {
+  "q": "if a fortnight starts tomorrow when does it end",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date arithmetic"
+ },
+ {
+  "q": "what day was it 6 weeks ago",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "date arithmetic"
+ },
+ {
+  "q": "whats 9am pst in gmt",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "time zone conversion"
+ },
+ {
+  "q": "if i get paid every other friday starting this friday, how many paydays left this year",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "counts dates; the rule is given in the question"
+ },
+ {
+  "q": "whats 12 percent gst on 4,500",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "percentage sum"
+ },
+ {
+  "q": "what has keys but can't open locks",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "riddle"
+ },
+ {
+  "q": "riddle: the more you take, the more you leave behind. what am i",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "riddle"
+ },
+ {
+  "q": "tell me a riddle",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "asks for a riddle, not to solve one"
+ },
+ {
+  "q": "anagram of listen",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "word puzzle"
+ },
+ {
+  "q": "what rhymes with calendar",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "word play"
+ },
+ {
+  "q": "another word for reminder",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "synonym"
+ },
+ {
+  "q": "is agenda singular or plural",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "grammar"
+ },
+ {
+  "q": "where does the word calendar come from",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "etymology"
+ },
+ {
+  "q": "what does rsvp stand for",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "what does eod mean",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "how do you pronounce schedule in british english",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "pronunciation"
+ },
+ {
+  "q": "is it 'an appointment with' or 'an appointment at'",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "grammar"
+ },
+ {
+  "q": "my basil keeps wilting, why",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "gardening advice; 'my' needs no record"
+ },
+ {
+  "q": "how do i get red wine out of my carpet",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "cleaning how-to"
+ },
+ {
+  "q": "how do i get my toddler to sleep past 5am",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "parenting advice"
+ },
+ {
+  "q": "my back hurts after sitting all day, any stretches",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "health advice"
+ },
+ {
+  "q": "how do i tell my manager im overloaded",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "work advice"
+ },
+ {
+  "q": "how do i tell my mother in law she cant visit every weekend",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "family advice"
+ },
+ {
+  "q": "how do i ask my neighbour to turn their music down",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "advice"
+ },
+ {
+  "q": "i want to get better at remembering names, tips?",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "memory advice"
+ },
+ {
+  "q": "if a plane crashes on the border between two countries, where do they bury the survivors",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "riddle"
+ },
+ {
+  "q": "which month has 28 days",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "riddle"
+ },
+ {
+  "q": "a bat and a ball cost 1.10 together, the bat costs 1 more than the ball, how much is the ball",
+  "apps": [],
+  "kind": "general",
+  "work_out": true,
+  "why": "puzzle sum"
+ },
+ {
+  "q": "i've got a cold, should i still go to the gym",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "health advice"
+ },
+ {
+  "q": "how do i keep my houseplants alive while i'm away for 2 weeks",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "plant care advice"
+ },
+ {
+  "q": "my landlord wants to put the rent up, can he do that",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "general tenancy question"
+ },
+ {
+  "q": "is it 'everyday' or 'every day' in 'my everyday schedule'",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "grammar; the schedule is just the example"
+ },
+ {
+  "q": "what does 'touch base' mean",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition of a phrase"
+ },
+ {
+  "q": "what's the meaning of fortnight",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "definition"
+ },
+ {
+  "q": "make this sound more professional: 'hey cant make it tmrw, can we do next wk'",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "rewrites text given in the question; no record"
+ },
+ {
+  "q": "today i learned octopuses have 3 hearts, is that true",
+  "apps": [],
+  "kind": "general",
+  "work_out": false,
+  "why": "trivia check"
+ }
+]

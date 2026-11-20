@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarPlus, CalendarClock, Bell, BellRing, ExternalLink, ListChecks, Mail, MessageCircle, NotebookPen, Phone, Play, Plug, AppWindow, Reply, ShoppingCart } from 'lucide-react';
 import ModalSheet from './ModalSheet';
+import { locale, t } from './i18n.ts';
 
 /** `hidden` is sent back without being shown (an item's id); `fixed` is shown but never edited or sent, such as the email a reply answers, its recipient, or what an item is like now. */
 export interface ActionField { key: string; label: string; value: string; kind: 'text' | 'long' | 'when' | 'hidden' | 'fixed' }
@@ -16,11 +17,12 @@ const fromPicker = (value: string) => value.replace('T', ' ').slice(0, 16);
 const shown = (value: string) => {
   const at = new Date(value.replace(' ', 'T'));
   if (Number.isNaN(at.getTime())) return value;
-  const day = at.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  return value.length > 10 ? `${day}, ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : day;
+  const day = at.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short' });
+  return value.length > 10 ? t('action.dayAndTime', { day, time: at.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) }) : day;
 };
 // The button says what happens.
-const verbs: Record<string, string> = { add_reminder: 'Add', add_calendar_event: 'Add', create_note: 'Save', draft_email: 'Draft', reply_email: 'Draft reply', send_message: 'Send', start_call: 'Call', run_shortcut: 'Run', open_app: 'Open', open_link: 'Open', complete_reminder: 'Mark done', reschedule_reminder: 'Move', update_calendar_event: 'Change', append_to_note: 'Add', create_routine: 'Set up', create_goal: 'Start', remember: 'Remember', set_timer: 'Start', change_mac_setting: 'Change', create_saved_search: 'Save', create_price_watch: 'Watch', add_to_cart: 'Add to cart' };
+const verbs: Record<string, string> = { add_reminder: 'action.verb.add', add_calendar_event: 'action.verb.add', create_note: 'action.verb.save', draft_email: 'action.verb.draft', reply_email: 'action.verb.draftReply', send_message: 'action.verb.send', start_call: 'action.verb.call', run_shortcut: 'action.verb.run', open_app: 'action.verb.open', open_link: 'action.verb.open', complete_reminder: 'action.verb.markDone', reschedule_reminder: 'action.verb.move', update_calendar_event: 'action.verb.change', append_to_note: 'action.verb.add', create_routine: 'action.verb.setUp', create_goal: 'action.verb.start', remember: 'action.verb.remember', set_timer: 'action.verb.start', change_mac_setting: 'action.verb.change', create_saved_search: 'action.verb.save', create_price_watch: 'action.verb.watch', add_to_cart: 'action.verb.addToCart' };
+const verb = (tool: string) => verbs[tool] ? t(verbs[tool]) : t(tool.startsWith('mcp_') ? 'action.verb.run' : 'action.allow');
 // What an edit changes from, shown struck through beside its new value.
 const before: Record<string, string> = { due: 'was_due', start: 'occurrence' };
 
@@ -41,7 +43,7 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
     return { ...previous, ...cleared, ...choice.also, [choice.field]: choice.value };
   }); };
   const choicesFor = (key: string) => proposal.choices?.filter(choice => choice.field === key) ?? [];
-  const picker = (label: string, choices: ActionChoice[], key: string) => <span className="field-choices" role="group" aria-label={`Matching ${label}`}>
+  const picker = (label: string, choices: ActionChoice[], key: string) => <span className="field-choices" role="group" aria-label={t('action.matching', { field: label })}>
     {choices.map(choice => <button key={choice.value} type="button" className="secondary-button" disabled={running} aria-pressed={values[key] === choice.value} onClick={() => pick(choice)}>{choice.label}</button>)}
   </span>;
   return <ModalSheet className="action-sheet" labelledBy="action-title">
@@ -58,12 +60,12 @@ export default function ActionSheet({ proposal, running, error, onCancel, onAllo
           {was && was !== values[field.key] && <s className="action-was">{shown(was)}</s>}
           {field.kind === 'long' ? <textarea disabled={running} rows={4} value={values[field.key]} onChange={event => set(field.key, event.target.value)} />
             : field.kind === 'when' ? <input disabled={running} type="datetime-local" value={toPicker(values[field.key])} onChange={event => set(field.key, fromPicker(event.target.value))} />
-            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={field.key === 'to' || field.key === 'location' ? 'Optional' : undefined} />}
+            : <input disabled={running} type={field.key === 'minutes' ? 'number' : 'text'} min={field.key === 'minutes' ? 5 : undefined} max={field.key === 'minutes' ? 1440 : undefined} step={field.key === 'minutes' ? 1 : undefined} value={values[field.key]} onChange={event => set(field.key, event.target.value)} placeholder={field.key === 'to' || field.key === 'location' ? t('action.optional') : undefined} />}
           {choices.length > 0 && picker(field.label, choices, field.key)}
         </label>;
       })}
     </form>
     {shownError && <p role="alert">{shownError}</p>}
-    <div><button className="secondary-button" disabled={running} onClick={onCancel}>Not now</button><button className="primary-button" disabled={running} onClick={allow}>{running ? 'Working…' : verbs[proposal.tool] ?? (proposal.tool.startsWith('mcp_') ? 'Run' : 'Allow')}</button></div>
+    <div><button className="secondary-button" disabled={running} onClick={onCancel}>{t('action.notNow')}</button><button className="primary-button" disabled={running} onClick={allow}>{running ? t('action.working') : verb(proposal.tool)}</button></div>
   </ModalSheet>;
 }

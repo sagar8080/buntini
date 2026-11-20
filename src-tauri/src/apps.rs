@@ -1877,7 +1877,7 @@ pub fn validate_evidence(
             return Err(invalid())
         }
         "mail" => {
-            let limit = args["limit"].as_u64().unwrap_or(5).clamp(1, 8);
+            let limit = args["limit"].as_u64().unwrap_or(5).clamp(1, MAIL_SHOWN as u64);
             let scanned = scope["metadataScanned"].as_u64().ok_or_else(invalid)?;
             if scope["query"] != query
                 || scope["unreadOnly"] != args["unread"].as_bool().unwrap_or(false)
@@ -2224,6 +2224,10 @@ async fn read_mail_evidence(query: &str, unread: bool, limit: usize, launch: Lau
     mail_evidence(query, unread, limit, found, openings.as_deref().ok())
 }
 
+/// The most emails one read shows with their openings, as `read_mail` offers. Every match is
+/// still counted by day beyond these.
+pub const MAIL_SHOWN: usize = 20;
+
 fn select_mail_rows(
     found: &CountedRows,
     unread: bool,
@@ -2238,8 +2242,32 @@ fn select_mail_rows(
     }
     let mut selected = found.rows.clone();
     selected.sort_by(|a, b| b[0].cmp(&a[0]));
-    selected.truncate(limit.clamp(1, 8));
+    selected.truncate(limit.clamp(1, MAIL_SHOWN));
     Ok(selected)
+}
+
+/// How many of these rows came in on each day, and how many of those are unread, newest
+/// day first: (YYYY-MM-DD, messages, unread).
+fn mail_counts_by_day(rows: &[Vec<String>]) -> Vec<(String, usize, usize)> {
+    let mut days: Vec<(String, usize, usize)> = Vec::new();
+    for row in rows {
+        let Some(day) = row[0].get(..10).filter(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok()) else { continue };
+        let unread = usize::from(row[2] == "false");
+        match days.iter_mut().find(|(seen, ..)| seen == day) {
+            Some(entry) => {
+                entry.1 += 1;
+                entry.2 += unread;
+            }
+            None => days.push((day.to_string(), 1, unread)),
+        }
+    }
+    days.sort_by(|a, b| b.0.cmp(&a.0));
+    days
+}
+
+/// "Tue 17 Nov" for a YYYY-MM-DD day.
+fn day_name(day: &str) -> String {
+    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").map_or_else(|_| day.to_string(), |date| date.format("%a %-d %b").to_string())
 }
 
 fn mail_evidence(
@@ -2306,13 +2334,22 @@ fn mail_evidence(
             .join("\n");
         format!("Email in the inbox, returned messages newest first:\n{lines}")
     };
+    // Every matching message is counted by day, so a count doesn't rest on the few shown.
+    let by_day = mail_counts_by_day(&found.rows);
     if !complete {
         display += &format!("\nPartial inbox result: showing {} of {} matching messages. Search covers only the last {days} days.", selected.len(), found.total);
+        if !by_day.is_empty() {
+            let exact = found.rows.len() == found.total;
+            let counts: Vec<String> = by_day.iter().map(|(day, all, unread)| format!("{}: {all} ({unread} unread)", day_name(day))).collect();
+            let scope = if exact { format!("all {}", found.total) } else { format!("the newest {} scanned", found.rows.len()) };
+            display += &format!("\nMatching messages by day received, counting {scope}: {}.", counts.join("; "));
+        }
     }
+    let counts: Vec<Value> = by_day.iter().map(|(day, all, unread)| json!({"day":day,"messages":all,"unread":unread})).collect();
     Ok(evidence(
         "mail",
-        json!({"app":"mail","mailbox":"inbox","query":query,"unreadOnly":unread,
-        "lookbackDays":days,"limit":limit.clamp(1,8),"metadataScanLimit":300,"metadataScanned":found.rows.len(),
+        json!({"app":"mail","mailbox":"inbox","query":query,"unreadOnly":unread,"countsByDay":counts,
+        "lookbackDays":days,"limit":limit.clamp(1,MAIL_SHOWN),"metadataScanLimit":300,"metadataScanned":found.rows.len(),
         "order":if found.rows.len() == found.total { "newest_first" } else { "newest_in_scanned_prefix" },"excerptLimit":500}),
         records,
         Some(found.total),
@@ -2535,33 +2572,63 @@ pub(crate) async fn control_music(
         );
     }
     let parts: Vec<&str> = result.trim().split('\t').collect();
-    Ok(match (action, parts.as_slice()) {
-        (_, ["closed"]) => format!("{name} isn’t open, so nothing is playing."),
-        (_, ["stopped"]) => format!("Nothing is playing in {name}."),
-        ("now_playing", [state, track, show, episode]) if app == "tv" => format!(
-            "{name} is {}: “{track}”{}.",
-            if *state == "paused" { "paused on" } else { "playing" },
-            from_show(show, episode)
-        ),
-        (_, ["track", title, show]) if app == "tv" => format!("Playing “{title}”{} in {name}.", from_show(show, "")),
-        ("next", _) if app == "tv" => format!("Skipped to the next episode in {name}."),
-        ("previous", _) if app == "tv" => format!("Went back in {name}."),
-        ("now_playing", [state, track, artist, album]) => format!(
-            "{name} is {}: “{track}” by {artist}, from {album}.",
-            if *state == "paused" {
-                "paused on"
-            } else {
-                "playing"
-            }
-        ),
-        (_, ["playlist", playlist]) => format!("Playing the “{playlist}” playlist in {name}."),
-        (_, ["track", track, artist]) => format!("Playing “{track}” by {artist} in {name}."),
-        (_, ["notfound"]) => format!("Nothing in your {name} library matches that."),
-        ("pause", _) => format!("Paused {name}."),
-        ("next", _) => format!("Skipped to the next track in {name}."),
-        ("previous", _) => format!("Went back a track in {name}."),
-        _ => format!("{name} is playing."),
-    })
+    let read = action == "now_playing" || matches!(parts.as_slice(), ["closed"] | ["stopped"] | ["notfound"]);
+    if read {
+        return Ok(played(app, name, action, &parts, None));
+    }
+    // The player is asked once, a moment later, what it's doing now: only that is claimed.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let now = osascript(script, &["now_playing".into(), String::new()], 10).await.unwrap_or_default();
+    Ok(played(app, name, action, &parts, Some(now.trim())))
+}
+
+/// What a playback request did, in words: `result` is the player's answer to the request and
+/// `now` its state read back afterwards. A change is claimed only when `now` shows it;
+/// otherwise the reply says what was asked.
+fn played(app: &str, name: &str, action: &str, result: &[&str], now: Option<&str>) -> String {
+    let tv = app == "tv";
+    match (action, result) {
+        (_, ["closed"]) => return format!("{name} isn’t open, so nothing is playing."),
+        (_, ["stopped"]) => return format!("Nothing is playing in {name}."),
+        (_, ["notfound"]) => return format!("Nothing in your {name} library matches that."),
+        ("now_playing", [state, track, show, episode]) if tv => {
+            return format!("{name} is {}: “{track}”{}.", if *state == "paused" { "paused on" } else { "playing" }, from_show(show, episode));
+        }
+        ("now_playing", [state, track, artist, album]) => {
+            return format!("{name} is {}: “{track}” by {artist}, from {album}.", if *state == "paused" { "paused on" } else { "playing" });
+        }
+        _ => {}
+    }
+    // The state read back: playing or paused, and on what.
+    let parts: Vec<&str> = now.unwrap_or_default().split('\t').collect();
+    let (state, on) = match parts.as_slice() {
+        [state @ ("playing" | "paused"), track, second, third] if !track.is_empty() => {
+            (*state, if tv { format!("“{track}”{}", from_show(second, third)) } else if second.is_empty() { format!("“{track}”") } else { format!("“{track}” by {second}") })
+        }
+        [state @ ("playing" | "paused" | "stopped"), ..] => (*state, String::new()),
+        ["closed"] => ("closed", String::new()),
+        _ => ("unknown", String::new()),
+    };
+    let playing = state == "playing";
+    let now_on = |fallback: String| if playing && !on.is_empty() { format!("{name} is now playing {on}.") } else { fallback };
+    match (action, result) {
+        ("pause", _) if matches!(state, "paused" | "stopped") => format!("Paused {name}."),
+        ("pause", _) if playing => format!("Asked {name} to pause, but it’s still playing."),
+        ("pause", _) => format!("Asked {name} to pause."),
+        ("next", _) => now_on(format!("Asked {name} for the next {}.", if tv { "episode" } else { "track" })),
+        ("previous", _) => now_on(format!("Asked {name} to go back.")),
+        (_, ["playlist", playlist]) if playing => format!("Playing the “{playlist}” playlist in {name}."),
+        (_, ["playlist", playlist]) => format!("Asked {name} to play the “{playlist}” playlist."),
+        (_, ["track", title, show]) if tv => {
+            if playing && parts.get(1) == Some(title) { format!("Playing “{title}”{} in {name}.", from_show(show, "")) } else { now_on(format!("Asked {name} to play “{title}”.")) }
+        }
+        (_, ["track", track, artist]) => {
+            if playing && parts.get(1) == Some(track) { format!("Playing “{track}” by {artist} in {name}.") } else { now_on(format!("Asked {name} to play “{track}” by {artist}.")) }
+        }
+        _ if playing && !on.is_empty() => format!("{name} is playing {on}."),
+        _ if playing => format!("{name} is playing."),
+        _ => format!("Asked {name} to play."),
+    }
 }
 
 fn matches_pressed_track(label: &str, state: &str) -> bool {
@@ -3268,7 +3335,9 @@ pub(crate) fn inbox_world(query: &str, unread: bool, limit: usize, inbox: &[(&st
         .collect();
     let mut output: Vec<String> = found.iter().map(|(at, row)| format!("{}\tm{at}\t{}\t{}\t{}\t{at}", row.0, row.1, row.2, row.3)).collect();
     output.push(format!("__buntini_summary__\t{0}\t{0}\ttrue", found.len()));
-    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", row.4, row.4.len())).collect();
+    // As `MAIL_TEXT` gives them: the first 500 characters, tabs and line breaks as spaces.
+    let opening = |body: &str| body.chars().take(500).map(|c| if matches!(c, '\t' | '\r' | '\n') { ' ' } else { c }).collect::<String>();
+    let openings: Vec<String> = found.iter().map(|(at, row)| format!("{at}\t{}\t{}", opening(row.4), row.4.chars().count())).collect();
     mail_evidence(query, unread, limit, counted_rows(&output.join("\n"), 6, "Mail").unwrap(), Some(&openings.join("\n"))).unwrap()
 }
 
@@ -3334,6 +3403,26 @@ async fn connect_app_asked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_is_claimed_only_once_the_player_says_so() {
+        let ok: &[&str] = &["ok"];
+        assert_eq!(played("music", "Music", "pause", ok, Some("paused\tSo What\tMiles Davis\tKind of Blue")), "Paused Music.");
+        assert_eq!(played("music", "Music", "pause", ok, Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Asked Music to pause, but it’s still playing.");
+        assert_eq!(played("spotify", "Spotify", "pause", ok, Some("")), "Asked Spotify to pause.", "nothing read back, nothing claimed");
+        assert_eq!(played("music", "Music", "next", ok, Some("playing\tBlue in Green\tMiles Davis\tKind of Blue")), "Music is now playing “Blue in Green” by Miles Davis.");
+        assert_eq!(played("music", "Music", "next", ok, Some("closed")), "Asked Music for the next track.");
+        assert_eq!(played("tv", "TV", "next", ok, Some("paused\tEpisode 2\tSeverance\tSeason 1, Episode 2")), "Asked TV for the next episode.");
+        assert_eq!(played("music", "Music", "previous", ok, None), "Asked Music to go back.");
+        assert_eq!(played("music", "Music", "play", ok, Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Music is playing “So What” by Miles Davis.");
+        assert_eq!(played("music", "Music", "play", ok, Some("paused\tSo What\tMiles Davis\tKind of Blue")), "Asked Music to play.");
+        assert_eq!(played("music", "Music", "play", &["track", "So What", "Miles Davis"], Some("playing\tSo What\tMiles Davis\tKind of Blue")), "Playing “So What” by Miles Davis in Music.");
+        assert_eq!(played("music", "Music", "play", &["track", "So What", "Miles Davis"], Some("stopped")), "Asked Music to play “So What” by Miles Davis.");
+        assert_eq!(played("music", "Music", "play", &["playlist", "Focus"], Some("playing\tA\tB\tC")), "Playing the “Focus” playlist in Music.");
+        assert_eq!(played("music", "Music", "play", &["playlist", "Focus"], Some("paused\tA\tB\tC")), "Asked Music to play the “Focus” playlist.");
+        assert_eq!(played("music", "Music", "now_playing", &["paused", "So What", "Miles Davis", "Kind of Blue"], None), "Music is paused on: “So What” by Miles Davis, from Kind of Blue.");
+        assert_eq!(played("music", "Music", "play", &["notfound"], None), "Nothing in your Music library matches that.");
+    }
 
     #[test]
     fn connecting_mail_tells_no_account_and_refusal_apart_from_a_failure() {
@@ -3498,6 +3587,31 @@ mod tests {
             .unwrap()
             .rows
             .is_empty());
+    }
+
+    #[test]
+    fn a_partial_mail_read_still_counts_every_message_by_day() {
+        let inbox: Vec<(String, bool, String, String, String)> = (0..12)
+            .map(|at| {
+                let day = if at < 6 { "2026-11-17" } else { "2026-11-16" };
+                (format!("{day} {:02}:00", 20 - at), at % 4 != 0, format!("Sender {at}"), format!("Subject {at}"), "Hi".to_string())
+            })
+            .collect();
+        let rows: Vec<(&str, bool, &str, &str, &str)> = inbox.iter().map(|row| (row.0.as_str(), row.1, row.2.as_str(), row.3.as_str(), row.4.as_str())).collect();
+        let value = inbox_world("", false, 8, &rows);
+        let text = value["text"].as_str().unwrap();
+        assert!(text.contains("counting all 12: Tue 17 Nov: 6 (2 unread); Mon 16 Nov: 6 (1 unread)."), "{text}");
+        assert_eq!(value["scope"]["countsByDay"][1], json!({"day":"2026-11-16","messages":6,"unread":1}));
+        // Everything shown: nothing more to count.
+        let few = inbox_world("", false, 8, &rows[..3]);
+        assert!(!few["text"].as_str().unwrap().contains("by day"));
+    }
+
+    #[test]
+    fn a_made_up_email_body_over_several_lines_comes_through_whole() {
+        let rows = [("2026-11-17 09:00", false, "Gus <gus@example.com>", "Rent review", "Hi,\n\nYour rent goes from $1,350 to $1,420.\tThanks")];
+        let text = inbox_world("", false, 8, &rows)["text"].as_str().unwrap().to_string();
+        assert!(text.contains("Your rent goes from $1,350 to $1,420.") && text.contains("Thanks"), "{text}");
     }
 
     #[test]

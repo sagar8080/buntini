@@ -236,13 +236,169 @@ fn split(args: &Value) -> Result<(Value, String), String> {
         display(common),
         arithmetic.join("\n")
     );
-    for (name, total) in participants.iter().zip(totals) {
-        answer.push_str(&format!("\n{name} owes {}.", display(total)));
+    // People the request only counted share alike, and have no names to list.
+    let counted = participants.iter().enumerate().all(|(at, name)| *name == stand_in(at));
+    if counted && totals.iter().all(|total| *total == totals[0]) {
+        answer.push_str(&format!("\nEach person owes {}.", display(totals[0])));
+    } else {
+        for (name, total) in participants.iter().zip(totals) {
+            answer.push_str(&format!("\n{name} owes {}.", display(total)));
+        }
     }
     Ok((
         json!({"charges":charges,"sharedBase":common,"totals":result}),
         answer,
     ))
+}
+
+/// The name Rust gives the person in this place of a split the request counted but didn't name.
+fn stand_in(at: usize) -> String {
+    format!("Person {}", at + 1)
+}
+
+/// What a split may name: the words and figures of the person's request and of the records
+/// read for it, and how many share the cost when the request counts them instead.
+#[derive(Debug, Default)]
+pub(crate) struct Given {
+    words: BTreeSet<String>,
+    figures: Vec<f64>,
+    people: Option<usize>,
+}
+
+impl Given {
+    pub(crate) fn new<'a>(request: &'a str, records: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut given = Given { people: head_count(request), ..Given::default() };
+        for text in std::iter::once(request).chain(records) {
+            given.words.extend(words(text));
+            given.figures.extend(figures(text));
+        }
+        given
+    }
+
+    fn named(&self, name: &str) -> bool {
+        const SPEAKER: [&str; 7] = ["i", "me", "my", "myself", "we", "us", "our"];
+        let words = words(name);
+        // "Between Ana and I" names the person asking, whichever word stands for them.
+        let speaker = matches!(words.as_slice(), [word] if SPEAKER.contains(&word.as_str()) || word == "you");
+        if speaker && SPEAKER.iter().any(|word| self.words.contains(*word)) {
+            return true;
+        }
+        !words.is_empty() && words.iter().all(|word| self.words.contains(word))
+    }
+
+    fn mentions(&self, label: &str) -> bool {
+        words(label).iter().any(|word| self.words.contains(word))
+    }
+
+    fn states(&self, amount: f64) -> bool {
+        self.figures.iter().any(|figure| (figure - amount).abs() < 0.005)
+    }
+}
+
+fn words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every number written in the text: "$1,240" is 1240 (and 1 and 240), "27.50" is 27.5.
+fn figures(text: &str) -> Vec<f64> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].is_ascii_digit() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len()
+            && (chars[at].is_ascii_digit()
+                || (matches!(chars[at], ',' | '.') && chars.get(at + 1).is_some_and(char::is_ascii_digit)))
+        {
+            at += 1;
+        }
+        let written: String = chars[start..at].iter().collect();
+        found.extend(written.replace(',', "").parse::<f64>());
+        if written.contains(',') {
+            found.extend(written.split(',').filter_map(|part| part.parse::<f64>().ok()));
+        }
+    }
+    found
+}
+
+/// How many share a cost when the request counts them instead of naming them: "two of us",
+/// "among 3 people", "three ways", "in half".
+fn head_count(request: &str) -> Option<usize> {
+    let words = words(request);
+    if words.windows(2).any(|pair| pair == ["in", "half"]) {
+        return Some(2);
+    }
+    const WHO: [&str; 9] = ["of", "people", "persons", "ways", "friends", "roommates", "flatmates", "housemates", "guests"];
+    words.windows(2).find_map(|pair| {
+        let count = crate::literals::count(&pair[0]).filter(|count| (2..=MAX_PARTICIPANTS as i64).contains(count))?;
+        WHO.contains(&pair[1].as_str()).then_some(count as usize)
+    })
+}
+
+/// How many share a cost: as many as the request counts ("two of us") or names ("between Sam
+/// and me"); "with Sam" adds the person asking. None when it says neither.
+pub(crate) fn sharers(request: &str) -> Option<usize> {
+    if let Some(count) = head_count(request) {
+        return Some(count);
+    }
+    let lower = request.to_lowercase().replace('’', "'");
+    lower.split(['.', '?', '!', ';', '\n']).find_map(|clause| {
+        let (word, rest) = [" between ", " among ", " amongst ", " with "].iter().find_map(|word| clause.split_once(word).map(|(_, rest)| (*word, rest)))?;
+        let names: Vec<&str> = rest.split(',').flat_map(|part| part.split(" and ")).map(str::trim).filter(|part| !part.is_empty()).collect();
+        if names.is_empty() || names.iter().any(|name| name.split_whitespace().count() > 3) {
+            return None;
+        }
+        let count = names.len() + usize::from(word == " with ");
+        (2..=MAX_PARTICIPANTS).contains(&count).then_some(count)
+    })
+}
+
+/// A split as the request and the records give it, before it runs. Every amount must be one of
+/// their figures and every person one of their names; people the request counts without naming
+/// ("two of us") are numbered here, and a charge it never names is called by its place. Anything
+/// else nobody gave, so it isn't split: a small model filled this tool from its example rows.
+pub(crate) fn grounded_split(arguments: &Value, given: &Given) -> Result<Value, String> {
+    let fields = object(arguments, &["participants", "charges"], &[])?;
+    let participants = rows(fields, "participants", MAX_PARTICIPANTS)?;
+    let rows = rows(fields, "charges", MAX_ROWS)?;
+    let not_given = |value: &str| crate::i18n::tf("chat.answer.splitNotGiven", &[("value", &value.trim())]);
+    let mut charges = Vec::new();
+    for row in &rows {
+        let [label, amount, beneficiaries] = cells(row)?;
+        if !given.states(numeric(amount, false)?) {
+            return Err(not_given(amount));
+        }
+        charges.push((label, amount, beneficiaries));
+    }
+    // A charge that lists every participant is everyone's, however the model wrote it.
+    let all: BTreeSet<String> = participants.iter().map(|name| name.trim().to_lowercase()).collect();
+    let everyone = charges.iter().all(|(_, _, beneficiaries)| *beneficiaries == "*" || beneficiaries.split(',').map(|name| name.trim().to_lowercase()).collect::<BTreeSet<_>>() == all);
+    let people: Vec<String> = match (participants.iter().find(|name| !given.named(name)), given.people) {
+        (None, _) => participants.clone(),
+        (Some(_), Some(count)) if everyone => (0..count).map(stand_in).collect(),
+        (Some(name), _) => return Err(not_given(name)),
+    };
+    let counted = people != participants;
+    let alone = charges.len() == 1;
+    let charges: Vec<String> = charges
+        .iter()
+        .enumerate()
+        .map(|(at, (label, amount, beneficiaries))| {
+            let label = if given.mentions(label) { label.to_string() } else if alone { "Total".into() } else { format!("Charge {}", at + 1) };
+            format!("{label}|{amount}|{}", if counted { "*" } else { beneficiaries })
+        })
+        .collect();
+    let grounded = json!({"participants":people,"charges":charges});
+    split(&grounded)?;
+    Ok(grounded)
 }
 
 fn scale(args: &Value) -> Result<(Value, String), String> {
@@ -281,7 +437,35 @@ fn scale(args: &Value) -> Result<(Value, String), String> {
     ))
 }
 
-fn compare(args: &Value) -> Result<(Value, String), String> {
+/// Copy an explicit, self-contained RAM and price comparison into the fixed
+/// operation. Every option must supply both fields in the same units.
+pub(crate) fn supplied_offers(request: &str) -> Option<Value> {
+    let (instruction, details) = request.split_once(':')?;
+    let plain = crate::completion::unquoted(instruction);
+    if !plain.starts_with("compare only these supplied ") {
+        return None;
+    }
+    let (_, requirement) = plain.rsplit_once(" at least ")?;
+    let minimum = requirement.strip_suffix("gb ram")?.trim().parse::<u64>().ok()?;
+    let (offers, follow_up) = details.split_once(". ").unwrap_or((details, ""));
+    if !follow_up.is_empty() && !follow_up.to_ascii_lowercase().starts_with("which qualifying option ") {
+        return None;
+    }
+    let options = offers.trim_end_matches('.').split([',', ';']).map(|row| {
+        let (spec, price) = row.trim().rsplit_once(' ')?;
+        let (name, memory) = spec.strip_suffix(" RAM")?.rsplit_once(' ')?;
+        let memory = memory.strip_suffix("GB")?.parse::<u64>().ok()?;
+        if !price.starts_with('$') || name.contains('|') {
+            return None;
+        }
+        Some(format!("{name}|{price}|{memory}"))
+    }).collect::<Option<Vec<_>>>()?;
+    let arguments = json!({"minimum":minimum,"attribute_label":"RAM","unit":"GB","options":options});
+    compare(&arguments, false).ok()?;
+    Some(arguments)
+}
+
+fn compare(args: &Value, source_currency: bool) -> Result<(Value, String), String> {
     let fields = object(args, &["minimum", "options"], &["attribute_label", "unit"])?;
     let minimum = number(fields, "minimum", false, true)?;
     let attribute = fields
@@ -296,12 +480,15 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
         .unwrap_or_default();
     let mut seen = BTreeSet::new();
     let mut options = Vec::new();
+    let mut dollar_prices = true;
     for row in rows(fields, "options", MAX_ROWS)? {
         let [name, price, value] = cells(&row)?;
         let name = label(name)?;
         unique(&mut seen, &name)?;
+        dollar_prices &= price.trim_start().starts_with('$');
         options.push((name, numeric(price, false)?, numeric(value, true)?));
     }
+    let show_price = |amount| format!("{}{}", if source_currency && dollar_prices { "$" } else { "" }, display(amount));
     let cheapest = options
         .iter()
         .filter(|(_, _, value)| *value >= minimum)
@@ -322,7 +509,7 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
         answer.push(format!(
             "{} is the cheapest qualifying option at {}.",
             winners.join(" and "),
-            display(price)
+            show_price(price)
         ));
     } else {
         answer.push("No supplied option meets the minimum requirement.".into());
@@ -348,8 +535,8 @@ fn compare(args: &Value) -> Result<(Value, String), String> {
             answer.push(format!(
                 "{} is {} less than {name} ({}).",
                 winners.join(" and "),
-                display(difference),
-                display(price)
+                show_price(difference),
+                show_price(price)
             ));
         }
         result.push(json!({"label":name,"price":price,"attributeValue":value,"qualifies":qualifies,"differenceFromCheapest":difference}));
@@ -418,7 +605,7 @@ pub fn run(tool: &str, arguments: &Value) -> Result<Value, String> {
     let (results, answer) = match tool {
         "split_costs" => split(arguments),
         "scale_quantities" => scale(arguments),
-        "compare_options" => compare(arguments),
+        "compare_options" => compare(arguments, false),
         "sum_by_status" => sum_status(arguments),
         _ => Err("Unknown structured math tool.".into()),
     }?;
@@ -444,6 +631,10 @@ pub fn render(evidence: &Value) -> String {
 /// A status sum asked about as cancelling says what to cancel, what to keep and what
 /// that saves, in the request's own terms.
 pub fn render_for(evidence: &Value, request: &str) -> String {
+    if evidence["tool"] == "compare_options" {
+        return compare(&evidence["inputs"], true)
+            .map_or_else(|_| render(evidence), |(_, answer)| answer);
+    }
     let results = &evidence["results"];
     let cancelling = request
         .split(|c: char| !c.is_alphanumeric())
@@ -493,6 +684,61 @@ mod tests {
         assert!(render(&result).contains("Parking: 14 / 2 = 7"));
         assert!(verify("split_costs", &args, &result));
     }
+    const ACME: &str = "Split the Acme invoice evenly between two of us. What's each share?";
+    const INVOICE: &str = "Your invoice of $1,240 is due on 20 November.";
+
+    #[test]
+    fn a_split_filled_from_the_tool_example_is_refused_not_answered() {
+        // What Apple's model filled on macOS 27.2 for the Acme question: the tool's example rows.
+        let copied = json!({"participants":["Aria","Bo"],"charges":["Lodging|90|*","Food|27|*","Parking|14|Aria,Bo"]});
+        // Its shape is valid, so it ran and was shown as the answer.
+        assert!(validate("split_costs", &copied).is_ok());
+        assert!(render(&run("split_costs", &copied).unwrap()).contains("Aria owes 65.5."));
+        // Nothing the person asked or that was read for it holds those figures or names.
+        let given = Given::new(ACME, [INVOICE, "Acme Billing <billing@acme.example>", "Invoice 4821 for October"]);
+        let refused = grounded_split(&copied, &given).unwrap_err();
+        assert!(refused.contains("“90”"), "{refused}");
+        let named = json!({"participants":["Aria","Bo"],"charges":["Acme invoice|1240|*","Parking|$14|Aria,Bo"]});
+        assert!(grounded_split(&named, &given).unwrap_err().contains("“$14”"));
+        let unknown = json!({"participants":["Ana","Zed"],"charges":["Room|210|Ana,Zed"]});
+        assert!(grounded_split(&unknown, &Given::new("Split 210 for the room between Ana and Bo.", [])).unwrap_err().contains("“Zed”"));
+        // Without the email, the invoice's amount was never given.
+        assert!(grounded_split(&json!({"participants":["Aria","Bo"],"charges":["Acme invoice|1240|*"]}), &Given::new(ACME, [])).is_err());
+    }
+
+    #[test]
+    fn a_split_keeps_what_was_given_and_numbers_people_who_were_only_counted() {
+        // The real amount from the email, for two people nobody named.
+        let given = Given::new(ACME, [INVOICE]);
+        let grounded = grounded_split(&json!({"participants":["Aria","Bo"],"charges":["Acme invoice|1240|*"]}), &given).unwrap();
+        assert_eq!(grounded, json!({"participants":["Person 1","Person 2"],"charges":["Acme invoice|1240|*"]}));
+        let answer = render(&run("split_costs", &grounded).unwrap());
+        assert!(answer.ends_with("Acme invoice: 1240 / 2 = 620 per beneficiary.\nEach person owes 620."), "{answer}");
+        // Every value in the question itself: unchanged.
+        let example = json!({"participants":["Aria","Bo","Cy"],"charges":["Lodging|90|*","Food|27|*","Parking|14|Aria,Bo"]});
+        let asked = Given::new("Split 90 lodging and 27 food between Aria, Bo and Cy. Parking costs 14 shared only by Aria and Bo.", []);
+        assert_eq!(grounded_split(&example, &asked).unwrap(), example);
+        for (request, args) in [
+            ("Split a $84 dinner between Ana, Ben and me.", json!({"participants":["Ana","Ben","me"],"charges":["Dinner|84|*"]})),
+            ("Split a $84 dinner between Ana and I.", json!({"participants":["Ana","Me"],"charges":["Dinner|$84|*"]})),
+            ("Rent is $1,800. Split it between Kim and Lee.", json!({"participants":["Kim","Lee"],"charges":["Rent|1800|*"]})),
+        ] {
+            assert_eq!(grounded_split(&args, &Given::new(request, [])).unwrap(), args, "{request}");
+        }
+        // Counted, not named, and a charge nobody named: Rust's own words, never the example's.
+        let counted = grounded_split(&json!({"participants":["Aria","Bo","Cy"],"charges":["Lodging|90|*"]}), &Given::new("Split $90 three ways.", [])).unwrap();
+        assert_eq!(counted, json!({"participants":["Person 1","Person 2","Person 3"],"charges":["Total|90|*"]}));
+        assert_eq!(render(&run("split_costs", &counted).unwrap()), "Shared base per person: 30.\nTotal: 90 / 3 = 30 per beneficiary.\nEach person owes 30.");
+        // What the model filled on macOS 27.2: every invented person named on each charge.
+        let listed = json!({"participants":["Aria","Bo","Cy"],"charges":["Lodging|210|Aria,Bo,Cy","Food|90|Aria,Bo,Cy"]});
+        let two = grounded_split(&listed, &Given::new("Split 210 plus 90 equally among three people.", [])).unwrap();
+        assert_eq!(two, json!({"participants":["Person 1","Person 2","Person 3"],"charges":["Charge 1|210|*","Charge 2|90|*"]}));
+        assert!(render(&run("split_costs", &two).unwrap()).ends_with("Each person owes 100."));
+        // Some of them only: those people had to be named.
+        let some = json!({"participants":["Aria","Bo","Cy"],"charges":["Room|210|*","Parking|90|Aria,Bo"]});
+        assert!(grounded_split(&some, &Given::new("Split 210 plus 90 among three people.", [])).unwrap_err().contains("“Aria”"));
+    }
+
     #[test]
     fn scaling_uses_one_ratio_and_preserves_units_and_labels() {
         let result=run("scale_quantities",&json!({"from_servings":3,"to_servings":9,"items":["Rice|75|g","Beans|120|g","Limes|2|"]})).unwrap();

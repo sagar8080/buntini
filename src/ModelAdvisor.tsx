@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Cpu, LoaderCircle } from 'lucide-react';
 import { command } from './bridge';
+import { number, t } from './i18n.ts';
 import type { Settings } from './types';
 
 export interface ModelChoice { repo: string; label: string; downloadGb: number; note: string }
@@ -47,24 +48,24 @@ export default function ModelAdvisor({ draft, update }: Props) {
   }, [profile?.python, profile?.modelFolder]);
 
   if (failed && !profile) return null;
-  if (!profile) return <div className="advisor"><LoaderCircle size={14} className="spin" /> Checking this Mac…</div>;
+  if (!profile) return <div className="advisor"><LoaderCircle size={14} className="spin" /> {t('settings.advisor.checking')}</div>;
   const options = [profile.recommended, ...(profile.alternative ? [profile.alternative] : [])];
   return <div className="advisor">
-    <div className="advisor-head"><Cpu size={16} /><span><strong>Recommended for this Mac</strong><small>{profile.chip} · {profile.memoryGb} GB memory</small></span></div>
-    {!profile.appleSilicon && <p className="field-help">Needs an Apple silicon Mac</p>}
-    <div className="advisor-options" role="radiogroup" aria-label="Model">
+    <div className="advisor-head"><Cpu size={16} /><span><strong>{t('settings.advisor.recommended')}</strong><small>{profile.chip} · {t('settings.advisor.memory', { size: number(profile.memoryGb) })}</small></span></div>
+    {!profile.appleSilicon && <p className="field-help">{t('settings.advisor.needsAppleSilicon')}</p>}
+    <div className="advisor-options" role="radiogroup" aria-label={t('settings.brain.model')}>
       {options.map((option, index) => <button type="button" key={option.repo} role="radio" aria-checked={profile.selected.repo === option.repo} className={profile.selected.repo === option.repo ? 'active' : ''} onClick={() => setChoice(index === 0 ? null : option.repo)}>
-        <strong>{option.label}</strong><em>{index === 0 ? 'Best fit' : 'Also fits'} · {option.downloadGb.toFixed(1)} GB</em><small>{option.note}</small>
+        <strong>{option.label}</strong><em>{index === 0 ? t('settings.advisor.bestFit') : t('settings.advisor.alsoFits')} · {number(option.downloadGb, { style: 'unit', unit: 'gigabyte', minimumFractionDigits: 1, maximumFractionDigits: 1 })}</em><small>{option.note}</small>
       </button>)}
     </div>
-    {inUse ? <p className="advisor-done"><Check size={14} /> {profile.selected.label} · in use</p> : <>
+    {inUse ? <p className="advisor-done"><Check size={14} /> {t('settings.advisor.inUse', { model: profile.selected.label })}</p> : <>
       <ol className="advisor-steps">
         {profile.steps.map((step, index) => <li key={step.title} className={step.done ? 'done' : ''}>
-          <span className="advisor-step-title">{step.done ? <Check size={13} /> : <b>{index + 1}</b>}{step.title}</span>
-          {!step.done && <div className="advisor-command"><code>{step.command}</code><button type="button" aria-label={`Copy: ${step.title}`} title="Copy" onClick={() => { void navigator.clipboard?.writeText(step.command).then(() => { setCopied(index); window.setTimeout(() => setCopied(current => current === index ? -1 : current), 1500); }); }}>{copied === index ? <Check size={13} /> : <Copy size={13} />}</button></div>}
+          <span className="advisor-step-title">{step.done ? <Check size={13} /> : <b>{number(index + 1)}</b>}{step.title}</span>
+          {!step.done && <div className="advisor-command"><code>{step.command}</code><button type="button" aria-label={t('settings.advisor.copyStep', { step: step.title })} title={t('common.copy')} onClick={() => { void navigator.clipboard?.writeText(step.command).then(() => { setCopied(index); window.setTimeout(() => setCopied(current => current === index ? -1 : current), 1500); }); }}>{copied === index ? <Check size={13} /> : <Copy size={13} />}</button></div>}
         </li>)}
       </ol>
-      {ready && <button type="button" className="secondary-button" onClick={() => { update('pythonPath', profile.python!); update('modelPath', profile.modelFolder!); filled.current = `${profile.python}|${profile.modelFolder}`; }}>Use {profile.selected.label}</button>}
+      {ready && <button type="button" className="secondary-button" onClick={() => { update('pythonPath', profile.python!); update('modelPath', profile.modelFolder!); filled.current = `${profile.python}|${profile.modelFolder}`; }}>{t('settings.advisor.use', { model: profile.selected.label })}</button>}
     </>}
   </div>;
 }

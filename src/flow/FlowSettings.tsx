@@ -5,12 +5,13 @@ import { command, desktop, errorMessage } from '../bridge';
 import { listen } from '@tauri-apps/api/event';
 import type { Settings } from '../types';
 import { callFlow } from './api';
-import { chordFrom, keyLabels, languageNames, type DictationKey, type FlowSettings as Flow, type FlowStatus, type ModelStatus } from './model';
+import { chordFrom, keyLabels, languageName, languageNames, type DictationKey, type FlowSettings as Flow, type FlowStatus, type ModelStatus } from './model';
+import { number, t } from '../i18n.ts';
 import './flow.css';
 
 type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void };
 
-const gigabytes = (bytes: number) => `${(bytes / 1e9).toFixed(bytes > 1e9 ? 1 : 2)} GB`;
+const gigabytes = (bytes: number) => { const digits = bytes > 1e9 ? 1 : 2; return number(bytes / 1e9, { style: 'unit', unit: 'gigabyte', minimumFractionDigits: digits, maximumFractionDigits: digits }); };
 
 /** Dictation anywhere, the speech model, the wake word, call notes and your words. */
 export default function FlowSettings({ draft, update, onError }: Props) {
@@ -53,38 +54,38 @@ export default function FlowSettings({ draft, update, onError }: Props) {
 
   return <>
     <section className="settings-section flow-settings">
-      <div className="settings-section-heading"><h3>Dictation</h3></div>
-      <Toggle label="Dictate anywhere" detail={flow.enabled && status && !status.accessibility ? 'Needs Accessibility' : undefined} checked={flow.enabled} onChange={value => set('enabled', value)} />
-      {flow.enabled && status && !status.accessibility && <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void command('accessibility', { ask: true }).catch(error => onError(errorMessage(error)))}>Allow Accessibility</button></div>}
-      <div className="setting-label">Hold</div>
-      <div className="chip-row" role="radiogroup" aria-label="Dictation key">
+      <div className="settings-section-heading"><h3>{t('settings.flow.title')}</h3></div>
+      <Toggle label={t('settings.flow.dictateAnywhere')} detail={flow.enabled && status && !status.accessibility ? t('settings.flow.needsAccessibility') : undefined} checked={flow.enabled} onChange={value => set('enabled', value)} />
+      {flow.enabled && status && !status.accessibility && <div className="row-actions"><button type="button" className="secondary-button" onClick={() => void command('accessibility', { ask: true }).catch(error => onError(errorMessage(error)))}>{t('settings.flow.allowAccessibility')}</button></div>}
+      <div className="setting-label">{t('settings.flow.hold')}</div>
+      <div className="chip-row" role="radiogroup" aria-label={t('settings.flow.key')}>
         {(Object.keys(keyLabels) as (keyof typeof keyLabels)[]).map(key => <button type="button" key={key} role="radio" aria-checked={flow.key === key} className={flow.key === key ? 'active' : ''} onClick={() => choose(key)}>{keyLabels[key]}</button>)}
-        <button type="button" role="radio" aria-checked={flow.key === 'chord'} className={flow.key === 'chord' || recording ? 'active' : ''} onClick={() => choose('chord')}>{recording ? 'Press keys…' : flow.chord?.label ?? 'Your own'}</button>
+        <button type="button" role="radio" aria-checked={flow.key === 'chord'} className={flow.key === 'chord' || recording ? 'active' : ''} onClick={() => choose('chord')}>{recording ? t('settings.flow.pressKeys') : flow.chord?.label ?? t('settings.flow.yourOwn')}</button>
       </div>
-      <div className="setting-label">Languages</div>
+      <div className="setting-label">{t('settings.flow.languages')}</div>
       <div className="flow-chips">
-        {flow.languages.map(tag => <span className="flow-chip" key={tag}>{languageNames[tag] ?? tag}<button type="button" aria-label={`Remove ${languageNames[tag] ?? tag}`} onClick={() => set('languages', flow.languages.filter(item => item !== tag))}><X size={11} /></button></span>)}
-        {flow.languages.length < 3 && <select aria-label="Add a language" value={language} onChange={event => { const tag = event.target.value; setLanguage(''); if (tag && !flow.languages.includes(tag)) set('languages', [...flow.languages, tag]); }}>
-          <option value="">{flow.languages.length ? 'Add' : 'This Mac’s language'}</option>
-          {Object.entries(languageNames).filter(([tag]) => !flow.languages.includes(tag)).map(([tag, name]) => <option key={tag} value={tag}>{name}</option>)}
+        {flow.languages.map(tag => <span className="flow-chip" key={tag}>{languageName(tag)}<button type="button" aria-label={t('common.removeItem', { item: languageName(tag) })} onClick={() => set('languages', flow.languages.filter(item => item !== tag))}><X size={11} /></button></span>)}
+        {flow.languages.length < 3 && <select aria-label={t('settings.flow.addLanguage')} value={language} onChange={event => { const tag = event.target.value; setLanguage(''); if (tag && !flow.languages.includes(tag)) set('languages', [...flow.languages, tag]); }}>
+          <option value="">{flow.languages.length ? t('common.add') : t('settings.flow.macLanguage')}</option>
+          {Object.keys(languageNames).filter(tag => !flow.languages.includes(tag)).map(tag => <option key={tag} value={tag}>{languageName(tag)}</option>)}
         </select>}
       </div>
-      <Toggle label="Mute the Mac while I speak" checked={flow.mute} onChange={value => set('mute', value)} />
+      <Toggle label={t('settings.flow.mute')} checked={flow.mute} onChange={value => set('mute', value)} />
       <Toggle label="Hey Buntini" checked={flow.wakeWord} onChange={value => set('wakeWord', value)} />
-      <Toggle label="Record calls" checked={flow.recordCalls} onChange={value => set('recordCalls', value)} />
-      <div className="setting-label">Speech model</div>
+      <Toggle label={t('settings.flow.recordCalls')} checked={flow.recordCalls} onChange={value => set('recordCalls', value)} />
+      <div className="setting-label">{t('settings.flow.speechModel')}</div>
       {models?.phase === 'ready'
-        ? <div className="flow-model"><span>Parakeet</span><button type="button" className="icon-button" aria-label="Remove the speech model" title="Remove" onClick={remove}><Trash2 size={14} /></button></div>
+        ? <div className="flow-model"><span>Parakeet</span><button type="button" className="icon-button" aria-label={t('settings.flow.removeModel')} title={t('common.remove')} onClick={remove}><Trash2 size={14} /></button></div>
         : models && (models.phase === 'downloading' || models.phase === 'waiting')
-          ? <div className="flow-model"><div className="local-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Speech model"><i style={{ width: `${percent}%` }} /></div><span>{percent}%</span><button type="button" className="icon-button" aria-label="Cancel" title="Cancel" onClick={() => void callFlow({ op: 'cancelDownload' })}><X size={14} /></button></div>
+          ? <div className="flow-model"><div className="local-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={t('settings.flow.speechModel')}><i style={{ width: `${percent}%` }} /></div><span>{number(percent / 100, { style: 'percent' })}</span><button type="button" className="icon-button" aria-label={t('common.cancel')} title={t('common.cancel')} onClick={() => void callFlow({ op: 'cancelDownload' })}><X size={14} /></button></div>
           : <div className="flow-model"><button type="button" className="secondary-button" disabled={!desktop} onClick={download}><Download size={14} /> Parakeet · {gigabytes(models?.totalBytes ?? 654832571)}</button>{models?.phase === 'failed' && <span className="flow-problem">{models.message}</span>}</div>}
-      <div className="row-actions"><button type="button" className="secondary-button" disabled={!desktop} onClick={() => void callFlow({ op: 'openLibrary' }).catch(error => onError(errorMessage(error)))}><BookOpen size={14} /> Library</button></div>
+      <div className="row-actions"><button type="button" className="secondary-button" disabled={!desktop} onClick={() => void callFlow({ op: 'openLibrary' }).catch(error => onError(errorMessage(error)))}><BookOpen size={14} /> {t('library.title')}</button></div>
     </section>
     <section className="settings-section flow-settings">
-      <div className="settings-section-heading"><h3>Your words</h3></div>
-      <WordList label="Dictionary" items={flow.dictionary} placeholder="Buntini" onChange={items => set('dictionary', items)} />
-      <PairList label="Replacements" items={flow.replacements.map(item => [item.from, item.to])} placeholders={['my email', 'sam@example.com']} onChange={items => set('replacements', items.map(([from, to]) => ({ from, to })))} />
-      <PairList label="Snippets" long items={flow.snippets.map(item => [item.trigger, item.text])} placeholders={['my address', '1 Infinite Loop, Cupertino']} onChange={items => set('snippets', items.map(([trigger, text]) => ({ trigger, text })))} />
+      <div className="settings-section-heading"><h3>{t('settings.flow.yourWords')}</h3></div>
+      <WordList label={t('settings.flow.dictionary')} items={flow.dictionary} placeholder="Buntini" onChange={items => set('dictionary', items)} />
+      <PairList label={t('settings.flow.replacements')} items={flow.replacements.map(item => [item.from, item.to])} placeholders={[t('settings.flow.replacementExample'), 'sam@example.com']} onChange={items => set('replacements', items.map(([from, to]) => ({ from, to })))} />
+      <PairList label={t('settings.flow.snippets')} long items={flow.snippets.map(item => [item.trigger, item.text])} placeholders={[t('settings.flow.snippetExample'), '1 Infinite Loop, Cupertino']} onChange={items => set('snippets', items.map(([trigger, text]) => ({ trigger, text })))} />
     </section>
   </>;
 }
@@ -95,8 +96,8 @@ function WordList({ label, items, placeholder, onChange }: { label: string; item
   return <>
     <div className="setting-label">{label}</div>
     <div className="flow-chips">
-      {items.map(item => <span className="flow-chip" key={item}>{item}<button type="button" aria-label={`Remove ${item}`} onClick={() => onChange(items.filter(other => other !== item))}><X size={11} /></button></span>)}
-      <form className="flow-add" onSubmit={event => { event.preventDefault(); add(); }}><input aria-label={`Add to ${label}`} value={word} placeholder={placeholder} maxLength={64} onChange={event => setWord(event.target.value)} /><button type="submit" className="icon-button" aria-label="Add" disabled={!word.trim()}><Plus size={13} /></button></form>
+      {items.map(item => <span className="flow-chip" key={item}>{item}<button type="button" aria-label={t('common.removeItem', { item })} onClick={() => onChange(items.filter(other => other !== item))}><X size={11} /></button></span>)}
+      <form className="flow-add" onSubmit={event => { event.preventDefault(); add(); }}><input aria-label={t('settings.flow.addTo', { list: label })} value={word} placeholder={placeholder} maxLength={64} onChange={event => setWord(event.target.value)} /><button type="submit" className="icon-button" aria-label={t('common.add')} disabled={!word.trim()}><Plus size={13} /></button></form>
     </div>
   </>;
 }
@@ -106,14 +107,14 @@ function PairList({ label, items, placeholders, long, onChange }: { label: strin
   const ready = pair[0].trim() && pair[1].trim();
   return <>
     <div className="setting-label">{label}</div>
-    {items.map(([from, to], index) => <div className="flow-pair" key={`${from}-${index}`}><span>{from}</span><span className="flow-arrow">→</span><span className="flow-pair-to" title={to}>{to}</span><button type="button" className="icon-button" aria-label={`Remove ${from}`} onClick={() => onChange(items.filter((_, other) => other !== index))}><X size={12} /></button></div>)}
+    {items.map(([from, to], index) => <div className="flow-pair" key={`${from}-${index}`}><span>{from}</span><span className="flow-arrow">→</span><span className="flow-pair-to" title={to}>{to}</span><button type="button" className="icon-button" aria-label={t('common.removeItem', { item: from })} onClick={() => onChange(items.filter((_, other) => other !== index))}><X size={12} /></button></div>)}
     <form className="flow-pair flow-pair-new" onSubmit={event => { event.preventDefault(); if (ready) { onChange([...items, [pair[0].trim(), pair[1]]]); setPair(['', '']); } }}>
-      <input aria-label={`${label}: what you say`} value={pair[0]} placeholder={placeholders[0]} maxLength={64} onChange={event => setPair([event.target.value, pair[1]])} />
+      <input aria-label={t('settings.flow.whatYouSay', { list: label })} value={pair[0]} placeholder={placeholders[0]} maxLength={64} onChange={event => setPair([event.target.value, pair[1]])} />
       <span className="flow-arrow">→</span>
       {long
-        ? <textarea aria-label={`${label}: what’s typed`} value={pair[1]} placeholder={placeholders[1]} maxLength={4000} rows={2} onChange={event => setPair([pair[0], event.target.value])} />
-        : <input aria-label={`${label}: what’s typed`} value={pair[1]} placeholder={placeholders[1]} maxLength={1000} onChange={event => setPair([pair[0], event.target.value])} />}
-      <button type="submit" className="icon-button" aria-label="Add" disabled={!ready}><Plus size={13} /></button>
+        ? <textarea aria-label={t('settings.flow.whatsTyped', { list: label })} value={pair[1]} placeholder={placeholders[1]} maxLength={4000} rows={2} onChange={event => setPair([pair[0], event.target.value])} />
+        : <input aria-label={t('settings.flow.whatsTyped', { list: label })} value={pair[1]} placeholder={placeholders[1]} maxLength={1000} onChange={event => setPair([pair[0], event.target.value])} />}
+      <button type="submit" className="icon-button" aria-label={t('common.add')} disabled={!ready}><Plus size={13} /></button>
     </form>
   </>;
 }

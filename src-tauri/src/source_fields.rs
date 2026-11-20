@@ -609,7 +609,7 @@ fn year(word: &str) -> Option<i32> {
 }
 
 /// A clock time at `words[at]`: "13:20", "1:20 pm", "1pm", with the index after it.
-fn clock(words: &[&str], at: usize) -> Option<(chrono::NaiveTime, usize)> {
+pub(crate) fn clock(words: &[&str], at: usize) -> Option<(chrono::NaiveTime, usize)> {
     let word = words.get(at)?;
     let (body, suffix) = match word.strip_suffix("am").or_else(|| word.strip_suffix("pm")) {
         Some(body) => (body, Some(&word[body.len()..])),
@@ -630,6 +630,21 @@ fn clock(words: &[&str], at: usize) -> Option<(chrono::NaiveTime, usize)> {
     Some((chrono::NaiveTime::from_hms_opt(hour, minute, 0)?, next))
 }
 
+pub(crate) fn explicit_dates(words: &[&str]) -> HashSet<chrono::NaiveDate> {
+    let mut dates = HashSet::new();
+    for at in 0..words.len() {
+        let date = if let (Some(m), Some(d), Some(y)) = (month(words[at]), words.get(at + 1).and_then(|w| day(w)), words.get(at + 2).and_then(|w| year(w))) {
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+        } else if let (Some(d), Some(m), Some(y)) = (day(words[at]), words.get(at + 1).and_then(|w| month(w)), words.get(at + 2).and_then(|w| year(w))) {
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+        } else {
+            chrono::NaiveDate::parse_from_str(words[at], "%Y-%m-%d").ok()
+        };
+        dates.extend(date);
+    }
+    dates
+}
+
 /// An event's fields from the one note or file it is being copied from, when its text
 /// gives each exactly once: "on May 20, 2031", "starts at 13:20 and ends at 14:05",
 /// "in Study Room". A field the text gives twice, or not at all, is left for the model
@@ -645,17 +660,7 @@ pub fn note_event(text: &str) -> Vec<(&'static str, Value)> {
         .map(|w| w.trim_matches(|c: char| matches!(c, '.' | ';' | ':' | '(' | ')' | '!' | '?')))
         .filter(|w| !w.is_empty())
         .collect();
-    let mut dates = HashSet::new();
-    for at in 0..words.len() {
-        let date = if let (Some(m), Some(d), Some(y)) = (month(words[at]), words.get(at + 1).and_then(|w| day(w)), words.get(at + 2).and_then(|w| year(w))) {
-            chrono::NaiveDate::from_ymd_opt(y, m, d)
-        } else if let (Some(d), Some(m), Some(y)) = (day(words[at]), words.get(at + 1).and_then(|w| month(w)), words.get(at + 2).and_then(|w| year(w))) {
-            chrono::NaiveDate::from_ymd_opt(y, m, d)
-        } else {
-            chrono::NaiveDate::parse_from_str(words[at], "%Y-%m-%d").ok()
-        };
-        dates.extend(date);
-    }
+    let dates = explicit_dates(&words);
     // Clock times in order, splitting "13:20-14:05".
     let spread: Vec<&str> = words.iter().flat_map(|w| w.split('-')).filter(|w| !w.is_empty()).collect();
     let mut times = Vec::new();

@@ -338,11 +338,11 @@ pub fn read_text(file: &mut File, path: &Path, documents: &Documents) -> Option<
                 return None;
             }
             match extract(helper, kind, bytes, documents) {
-                Ok(text) => {
+                Ok((text, _)) => {
                     remember(key, Cached::Text(text.clone()));
                     Some(text)
                 }
-                Err(Unread::Refused) => {
+                Err(Unread::Refused(_)) => {
                     remember(key, Cached::Refused);
                     Some(String::new())
                 }
@@ -359,8 +359,9 @@ pub fn read_text(file: &mut File, path: &Path, documents: &Documents) -> Option<
 
 /// Why the helper gave no text.
 enum Unread {
-    /// It answered without text, or with more than a reply may hold.
-    Refused,
+    /// It answered without text, or with more than a reply may hold, with its reason when
+    /// it gave one ("locked", "no_preview", …).
+    Refused(Option<String>),
     /// It used all its time.
     Stalled,
     /// It was cancelled, cut short by the search's deadline, or couldn't start.
@@ -369,7 +370,7 @@ enum Unread {
 
 /// Runs `--extract-document` with the bytes on standard input, so the helper never opens
 /// a path itself. Stops on cancel or after the timeout, and reads a bounded reply.
-fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> Result<String, Unread> {
+fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> Result<(String, bool), Unread> {
     use std::{
         io::Write,
         process::{Command, Stdio},
@@ -426,23 +427,31 @@ fn extract(helper: &Path, kind: &str, bytes: Vec<u8>, documents: &Documents) -> 
     let _ = writer.join();
     let reply = reader.join().map_err(|_| Unread::Stopped)?;
     if reply.len() as u64 > MAX_HELPER_OUTPUT {
-        return Err(Unread::Refused);
+        return Err(Unread::Refused(None));
     }
-    document_text(&reply).ok_or(Unread::Refused)
+    document_text(&reply).ok_or_else(|| Unread::Refused(refusal(&reply)))
 }
 
-/// The helper's one-line reply as text, or nothing when it refused the file.
-fn document_text(reply: &[u8]) -> Option<String> {
+/// The reason the helper gave for refusing a file, if it gave one.
+fn refusal(reply: &[u8]) -> Option<String> {
+    let line = reply.split(|byte| *byte == b'\n').next()?;
+    let value: serde_json::Value = serde_json::from_slice(line).ok()?;
+    value["error"].as_str().map(str::to_string)
+}
+
+/// The helper's one-line reply as text and whether any was left out, or nothing when it
+/// refused the file.
+fn document_text(reply: &[u8]) -> Option<(String, bool)> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Reply {
         text: String,
-        #[allow(dead_code)]
         truncated: bool,
     }
     let line = reply.split(|byte| *byte == b'\n').next()?;
     let reply: Reply = serde_json::from_slice(line).ok()?;
     let mut text = reply.text.replace('\0', "");
+    let cut = reply.truncated || text.len() > MAX_READ as usize;
     if text.len() > MAX_READ as usize {
         let mut end = MAX_READ as usize;
         while !text.is_char_boundary(end) {
@@ -450,7 +459,86 @@ fn document_text(reply: &[u8]) -> Option<String> {
         }
         text.truncate(end);
     }
-    Some(text)
+    Some((text, cut))
+}
+
+/// A file the person handed over (attached to a message or dropped on the island), read as
+/// a shared folder's file is: plain text up to `MAX_READ`, a document's text through the
+/// Apple helper with the same caps, time limit and sandbox. Text is untrusted content.
+#[derive(Debug)]
+pub struct Handed {
+    pub text: String,
+    /// Some of it was left out.
+    pub cut: bool,
+}
+
+/// Why a handed-over file gave no text, in words for the person.
+pub fn read_handed(path: &Path, helper: &Path, cancel: &Arc<AtomicBool>) -> Result<Handed, String> {
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    // Any other file is read as text when it is text (code, notes, logs).
+    let kind = content_kind(path).unwrap_or(Content::Text);
+    let file = open_handed(path).map_err(|_| format!("I couldn’t open {name}."))?;
+    let size = file.metadata().map_err(|_| format!("I couldn’t open {name}."))?.len();
+    match kind {
+        Content::Text => {
+            let mut bytes = Vec::with_capacity(size.min(MAX_READ + 1) as usize);
+            file.take(MAX_READ + 1).read_to_end(&mut bytes).map_err(|_| format!("I couldn’t read {name}."))?;
+            if bytes.contains(&0) {
+                return Err(format!("I can’t read {name}: it’s not a kind of file I can open."));
+            }
+            let cut = bytes.len() as u64 > MAX_READ;
+            bytes.truncate(MAX_READ as usize);
+            // A cut can fall inside a character; only a whole file must be valid text.
+            let text = match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(error) if cut && error.utf8_error().error_len().is_none() => {
+                    let valid = error.utf8_error().valid_up_to();
+                    String::from_utf8(error.into_bytes()[..valid].to_vec()).unwrap_or_default()
+                }
+                Err(_) => return Err(format!("I can’t read {name}: it’s not a kind of file I can open.")),
+            };
+            Ok(Handed { text, cut })
+        }
+        Content::Document(kind) => {
+            if size > MAX_DOCUMENT_BYTES {
+                return Err(format!("{name} is too large for me to read (over 32 MB)."));
+            }
+            if !helper.is_file() {
+                return Err(format!("I can’t read {name} without Buntini’s Apple helper."));
+            }
+            let mut bytes = Vec::with_capacity(size as usize);
+            file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes).map_err(|_| format!("I couldn’t read {name}."))?;
+            let documents = Documents { helper: Some(helper.to_path_buf()), cancel: cancel.clone(), fresh: 1.into(), until: None, seconds: DOCUMENT_SECONDS };
+            match extract(helper, kind, bytes, &documents) {
+                Ok((text, _)) if text.trim().is_empty() => Err(format!("I couldn’t find any text in {name}. If it’s a scan, it holds only pictures of pages.")),
+                Ok((text, cut)) => Ok(Handed { text, cut }),
+                Err(Unread::Refused(Some(code))) if code == "locked" => Err(format!("{name} needs a password, so I couldn’t read it.")),
+                Err(Unread::Refused(Some(code))) if code == "no_preview" => Err(format!("I can’t read {name}: this Pages file keeps its text in a form I can’t open.")),
+                Err(Unread::Refused(Some(code))) if code == "too_large" => Err(format!("{name} is too large for me to read (over 32 MB).")),
+                Err(Unread::Refused(_)) => Err(format!("I couldn’t read the text in {name}.")),
+                Err(Unread::Stalled) => Err(format!("{name} took too long to read.")),
+                Err(Unread::Stopped) if cancel.load(Ordering::Relaxed) => Err("Task cancelled.".into()),
+                Err(Unread::Stopped) => Err(format!("I couldn’t read {name}.")),
+            }
+        }
+    }
+}
+
+/// Opens a file the person chose, only if it is a regular file once any link is followed,
+/// and without following a link swapped in after that.
+pub(crate) fn open_handed(path: &Path) -> std::io::Result<File> {
+    let real = path.canonicalize()?;
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&real)?
+    };
+    #[cfg(not(unix))]
+    let file = File::open(&real)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("not a file"));
+    }
+    Ok(file)
 }
 
 /// A conservative regular-plural alternative, never a replacement for the
@@ -1046,6 +1134,45 @@ mod tests {
         fs::write(dir.join("buntini-fm.sh"), format!("{body}\n")).unwrap();
         std::os::unix::fs::symlink(launcher, &path).unwrap();
         path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_handed_over_is_read_with_the_same_caps_and_says_when_it_was_cut() {
+        let tools = tempfile::tempdir().unwrap();
+        let files = tempfile::tempdir().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let none = tools.path().join("missing-helper");
+        let note = files.path().join("notes.swift");
+        fs::write(&note, "let total = 680").unwrap();
+        let read = read_handed(&note, &none, &cancel).unwrap();
+        assert_eq!((read.text.as_str(), read.cut), ("let total = 680", false), "any text file, whatever its name");
+        let long = files.path().join("log.txt");
+        fs::write(&long, "é".repeat(MAX_READ as usize)).unwrap();
+        let read = read_handed(&long, &none, &cancel).unwrap();
+        assert!(read.cut && read.text.len() <= MAX_READ as usize && read.text.chars().all(|c| c == 'é'), "cut on a character");
+        let binary = files.path().join("archive.zip");
+        fs::write(&binary, b"PK\x03\x04\0\0").unwrap();
+        assert!(read_handed(&binary, &none, &cancel).unwrap_err().contains("archive.zip"));
+        let pdf = files.path().join("lease.pdf");
+        fs::write(&pdf, "%PDF-binary").unwrap();
+        assert!(read_handed(&pdf, &none, &cancel).unwrap_err().contains("helper"));
+        let helper = fake_helper(tools.path(), r#"[ "$1" = --extract-document ] && [ "$2" = pdf ] || exit 2
+cat >/dev/null
+printf '%s\n' '{"text":"Rent is 680 a month","truncated":true}'"#);
+        let read = read_handed(&pdf, &helper, &cancel).unwrap();
+        assert_eq!((read.text.as_str(), read.cut), ("Rent is 680 a month", true));
+        let locked_tools = tempfile::tempdir().unwrap();
+        let locked = fake_helper(locked_tools.path(), r#"cat >/dev/null
+printf '%s\n' '{"error":"locked"}'"#);
+        assert_eq!(read_handed(&pdf, &locked, &cancel).unwrap_err(), "lease.pdf needs a password, so I couldn’t read it.");
+        let empty_tools = tempfile::tempdir().unwrap();
+        let empty = fake_helper(empty_tools.path(), r#"cat >/dev/null
+printf '%s\n' '{"text":"  ","truncated":false}'"#);
+        assert!(read_handed(&pdf, &empty, &cancel).unwrap_err().contains("any text"));
+        let folder = files.path().join("folder.txt");
+        fs::create_dir(&folder).unwrap();
+        assert!(read_handed(&folder, &none, &cancel).is_err(), "only regular files");
     }
 
     #[cfg(unix)]

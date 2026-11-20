@@ -43,6 +43,14 @@ pub struct Workflow {
     /// Started with the user at the window. Older saved tasks don't say, so count as not.
     #[serde(default)]
     pub attended: bool,
+    /// Kinds of data the user attached to the request themselves (`attach.rs`): this task
+    /// may carry them to its brain whatever Privacy says. Other tasks still go by Privacy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attached: Vec<String>,
+    /// How a question about the person's own Mail, Calendar and Reminders is answered
+    /// (`decision.rs`), once decided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<crate::decision::Decision>,
 }
 
 pub fn backend_key(settings: &Settings) -> String {
@@ -79,6 +87,8 @@ impl Workflow {
             updated_at: now(),
             error: None,
             attended: !crate::controller::headless(),
+            attached: Vec::new(),
+            decision: None,
         }
     }
 
@@ -264,7 +274,7 @@ impl Workflow {
             && task
                 .touched
                 .iter()
-                .any(|id| !settings.external_shares.contains(id))
+                .any(|id| !settings.external_shares.contains(id) && !self.attached.contains(id))
         {
             return Err("This task contains data you no longer share with this brain. Restore the relevant sharing permission or cancel the task.".into());
         }

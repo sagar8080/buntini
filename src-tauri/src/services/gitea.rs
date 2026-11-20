@@ -6,8 +6,9 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde_json::Value;
 
 use super::fetch::{Failure, Net};
-use super::snapshot::{self, flag, graph, list, number, plural, short, text, time, when, Row, Snapshot};
+use super::snapshot::{self, flag, graph, list, number, short, text, time, when, Row, Snapshot};
 use super::Memo;
+use crate::i18n::{t, tf, tn};
 use crate::surface::PillState;
 
 pub const CAP: usize = 512 * 1024;
@@ -81,11 +82,11 @@ pub fn heatmap_graph(value: &Value, now: DateTime<FixedOffset>) -> Vec<u32> {
     graph(&days, now.date_naive())
 }
 
-fn ci_state(state: Option<&str>) -> (PillState, Option<&'static str>) {
+fn ci_state(state: Option<&str>) -> (PillState, Option<String>) {
     match state {
-        Some("failure" | "error") => (PillState::Error, Some("CI failed")),
-        Some("pending") => (PillState::Working, Some("CI running")),
-        Some("success" | "warning") => (PillState::Done, Some("CI passed")),
+        Some("failure" | "error") => (PillState::Error, Some(t("services.ci.failed"))),
+        Some("pending") => (PillState::Working, Some(t("services.ci.running"))),
+        Some("success" | "warning") => (PillState::Done, Some(t("services.ci.passed"))),
         _ => (PillState::Idle, None),
     }
 }
@@ -103,7 +104,7 @@ pub fn parse(mine: &Value, reviews: &Value, ci: &HashMap<String, String>, now: D
                 .detail([Some(key(pr)), text(pr, "/user/login"), updated(pr)])
                 .state(Some(PillState::Waiting))
                 .url(text(pr, "/html_url"))
-                .alert("Review requested", true)
+                .alert(t("services.alert.reviewRequested"), true)
         })
         .collect();
     let mine = pulls(mine);
@@ -114,10 +115,10 @@ pub fn parse(mine: &Value, reviews: &Value, ci: &HashMap<String, String>, now: D
         let (state, label) = ci_state(ci.get(&key(pr)).map(String::as_str));
         busy |= state == PillState::Working;
         let row = Row::new(format!("pr-{}", key(pr)), text(pr, "/title").unwrap_or_default())
-            .detail([Some(key(pr)), flag(pr, "/pull_request/draft").then(|| "Draft".into()), label.map(str::to_string), updated(pr)])
+            .detail([Some(key(pr)), flag(pr, "/pull_request/draft").then(|| t("services.draft")), label, updated(pr)])
             .state(Some(state))
             .url(text(pr, "/html_url"))
-            .alert("CI failed", state == PillState::Error);
+            .alert(t("services.ci.failed"), state == PillState::Error);
         if state == PillState::Error {
             failing.push(row);
         } else {
@@ -125,11 +126,11 @@ pub fn parse(mine: &Value, reviews: &Value, ci: &HashMap<String, String>, now: D
         }
     }
     let title = if !reviews.is_empty() {
-        plural(reviews.len(), "review requested", "reviews requested")
+        tn("services.reviewsRequested", reviews.len() as u64, &[])
     } else if let Some(first) = failing.first() {
-        format!("CI failed on {}", first.title)
+        tf("services.ciFailedOn", &[("title", &first.title)])
     } else {
-        plural(mine.len(), "open pull request", "open pull requests")
+        tn("services.openPullRequests", mine.len() as u64, &[])
     };
     let badge = if !reviews.is_empty() { Some(short(reviews.len())) } else { (!mine.is_empty()).then(|| short(mine.len())) };
     rows.extend(failing);
@@ -161,7 +162,7 @@ mod tests {
         assert_eq!(snapshot.title, "1 review requested");
         let ids: Vec<&str> = snapshot.rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids, ["review-team/site#40", "pr-sagar/buntini#5", "pr-sagar/buntini#6"]);
-        assert_eq!(snapshot.rows[1].alert, Some("CI failed"));
+        assert_eq!(snapshot.rows[1].alert.as_deref(), Some("CI failed"));
         assert_eq!(snapshot.rows[2].detail.as_deref(), Some("sagar/buntini#6 · Draft · CI running · 08:30"));
         assert_eq!(snapshot.rows[0].url.as_deref(), Some("https://git.example.com/team/site/pulls/40"));
         assert!(snapshot.busy);

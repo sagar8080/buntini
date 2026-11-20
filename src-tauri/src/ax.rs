@@ -246,6 +246,102 @@ pub fn knock_window(pid: i32, frame: (f64, f64, f64, f64)) -> Result<(), String>
     Err("moved".into())
 }
 
+/// One window's readable content, for attaching it to a message: its title, its address
+/// when it shows a web page, and its text in reading order. Password fields are never read.
+pub struct WindowText {
+    pub title: String,
+    pub url: Option<String>,
+    pub text: String,
+    /// Some of the text was left out.
+    pub cut: bool,
+    /// It is the app's main window (for a browser, the one its private-window check sees).
+    pub main: bool,
+    /// A password field has the app's focus: nothing of the window is read.
+    pub secure: bool,
+}
+
+/// Whether an element is a password field.
+fn password_field(element: &Element) -> bool {
+    [element.text("AXRole"), element.text("AXSubrole")].iter().any(|role| role == "AXSecureTextField")
+}
+
+/// Reads the window of app `pid` at `frame` (x, y, width, height, as CoreGraphics reports
+/// it), up to `cap` characters. Some apps (Electron ones among them) don't report where
+/// their windows are: then, only when the window is the app's front one (`front`), its main
+/// window is read. Err("access") without Accessibility, Err("gone") when the window isn't
+/// there any more.
+pub fn window_text(pid: i32, frame: (f64, f64, f64, f64), front: bool, cap: usize) -> Result<WindowText, String> {
+    if !trusted(true) {
+        return Err("access".into());
+    }
+    let app = Element::app(pid);
+    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 2.0 && (a.1 - b.1).abs() < 2.0;
+    let find = || {
+        app.list("AXWindows").into_iter().find(|window| {
+            window.pair("AXPosition", AXValueType::CGPoint).is_some_and(|at| close(at, (frame.0, frame.1)))
+                && window.pair("AXSize", AXValueType::CGSize).is_some_and(|size| close(size, (frame.2, frame.3)))
+        })
+    };
+    // Chromium and Electron apps build their tree only once asked, a moment later.
+    let window = match find() {
+        Some(window) => window,
+        None => {
+            app.ask_for_tree();
+            std::thread::sleep(Duration::from_millis(500));
+            match find() {
+                Some(window) => window,
+                None if front => app.element("AXMainWindow").or_else(|| app.element("AXFocusedWindow")).filter(|window| window.pair("AXPosition", AXValueType::CGPoint).is_none()).ok_or("gone")?,
+                None => return Err("gone".into()),
+            }
+        }
+    };
+    let title = window.text("AXTitle");
+    let main = window.flag("AXMain").unwrap_or(false);
+    // Someone typing a password in the app: the window isn't read at all.
+    if app.element("AXFocusedUIElement").is_some_and(|focused| password_field(&focused)) {
+        return Ok(WindowText { title, url: None, text: String::new(), cut: false, main, secure: true });
+    }
+    let nodes = window.descendants(20_000);
+    let area = nodes.iter().find(|element| element.text("AXRole") == "AXWebArea").cloned();
+    let url = area.as_ref().and_then(|area| area.url("AXURL")).filter(|url| url.starts_with("http"));
+    let elements = match &area {
+        Some(area) => area.descendants(30_000),
+        None => nodes,
+    };
+    let mut text = String::new();
+    let mut count = 0;
+    let mut cut = false;
+    for element in elements {
+        let role = element.text("AXRole");
+        if !["AXStaticText", "AXTextArea", "AXTextField", "AXHeading"].contains(&role.as_str()) || element.text("AXSubrole") == "AXSecureTextField" {
+            continue;
+        }
+        let value = element.text("AXValue");
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let length = value.chars().count();
+        if count + length > cap {
+            text.extend(value.chars().take(cap.saturating_sub(count)));
+            cut = true;
+            break;
+        }
+        count += length + 1;
+        text.push_str(value);
+        text.push(if role == "AXStaticText" { ' ' } else { '\n' });
+    }
+    Ok(WindowText { title, url, text: text.trim().to_string(), cut, main, secure: false })
+}
+
+/// Each of an app's windows as (title, position, size), for checking what a drop finds.
+#[cfg(test)]
+pub fn window_frames(pid: i32) -> Vec<(String, Option<(f64, f64)>, Option<(f64, f64)>)> {
+    let app = Element::app(pid);
+    std::thread::sleep(Duration::from_millis(300));
+    app.list("AXWindows").into_iter().map(|window| (window.text("AXTitle"), window.pair("AXPosition", AXValueType::CGPoint), window.pair("AXSize", AXValueType::CGSize))).collect()
+}
+
 /// The process id of a running app by bundle identifier.
 pub fn pid(bundle: &str) -> Option<i32> {
     let apps = objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(

@@ -5,13 +5,14 @@ import type { PetLook, PetState, Settings } from './types';
 
 const defaultLook: PetLook = { coat: 'ginger', eyes: 'green', accessory: 'bell', motion: 'playful', accent: '#e9985d' };
 
-export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook, alive = false, reaction, moving = null, facing = -1, landing = false, asleep = false, held = false, remember = false, speed = 90 }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook; alive?: boolean; reaction?: PetReaction; moving?: 'walk' | 'jump' | 'fall' | null; facing?: -1 | 1; landing?: boolean; asleep?: boolean; held?: boolean; remember?: boolean; speed?: number }) {
+/** `restful`: the desktop pet may nap of its own accord (the panel is closed). */
+export default function Pet({ state, small = false, avatar = 'cat', look = defaultLook, alive = false, reaction, moving = null, facing = -1, landing = false, asleep = false, held = false, remember = false, restful = false, speed = 90 }: { state: PetState; small?: boolean; avatar?: Settings['avatar']; look?: PetLook; alive?: boolean; reaction?: PetReaction; moving?: 'walk' | 'jump' | 'fall' | null; facing?: -1 | 1; landing?: boolean; asleep?: boolean; held?: boolean; remember?: boolean; restful?: boolean; speed?: number }) {
   const gradientId = useId().replaceAll(':', '');
   const element = useRef<HTMLDivElement>(null);
-  // Habits wait while the pet is travelling, napping or being carried.
-  const { action, blinking, face } = usePetLife(element, { alive, state, paused: !!moving || asleep || held, motion: look.motion, cat: avatar === 'cat', reaction, asleep, held, remember });
+  // Habits wait while the pet is travelling, asleep or being carried.
+  const { action, blinking, face, napping } = usePetLife(element, { alive, state, paused: !!moving || asleep || held, motion: look.motion, cat: avatar === 'cat', reaction, asleep, held, remember, restful });
 
-  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && !moving && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small', moving && `pet--${moving}ing`, moving === 'walk' && speed > 200 && 'pet--dashing', facing > 0 && 'pet--facing-right', landing && 'pet--landing', asleep && !moving && 'pet--asleep', held && 'pet--held', face !== 'neutral' && `pet--face-${face}`];
+  const classes = ['pet', `pet--${state}`, `pet--motion-${look.motion}`, avatar === 'cat' && 'pet--cat', alive && 'pet--alive', action && !moving && `pet--act-${action}`, blinking && 'pet--blink', small && 'pet--small', moving && `pet--${moving}ing`, moving === 'walk' && speed > 200 && 'pet--dashing', facing > 0 && 'pet--facing-right', landing && 'pet--landing', (asleep || napping) && !moving && 'pet--asleep', held && 'pet--held', face !== 'neutral' && `pet--face-${face}`];
   // One full gait cycle covers about 36 points, so the paws keep pace with the window.
   const stride = `${Math.min(.7, Math.max(.26, 36 / speed)).toFixed(2)}s`;
   return <div ref={element} className={classes.filter(Boolean).join(' ')} style={{ '--stride': stride } as CSSProperties} aria-hidden="true">

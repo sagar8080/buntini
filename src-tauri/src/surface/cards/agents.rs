@@ -16,6 +16,25 @@ pub struct Approval {
     /// The agent's plan, waiting to be started.
     #[serde(default)]
     pub plan: bool,
+    /// "Allow" can be offered: everything it approves is shown. Off when the detail had to
+    /// be cut or the request carries something the card can't show.
+    #[serde(default)]
+    pub allow: bool,
+    /// What an edit changes, line by line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<DiffLine>,
+    /// What "Always" keeps, and where.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<AgentRule>,
+}
+
+/// A rule "Always" keeps, as the agent writes it, and where it's kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRule {
+    pub rule: String,
+    /// This session or this project, in words.
+    pub place: String,
 }
 
 /// One to four questions an agent asks.

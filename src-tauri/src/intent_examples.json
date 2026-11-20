@@ -13,7 +13,9 @@
   "new reminder pick up kids at 4",
   "can you remind me to text jo in an hour",
   "add a reminder to pay the council tax on the 15th",
-  "remind me to water the garden tomorrow evening"
+  "remind me to water the garden tomorrow evening",
+  "put a reminder on my list to ring the dentist",
+  "stick a reminder on my to do list to pay the rent"
  ],
  "add_calendar_event": [
   "add a meeting with tom on tuesday at 10",
@@ -51,6 +53,9 @@
  "complete_reminder": [
   "mark pay the bill as done",
   "tick off get stamps",
+  "tick off the laundry reminder",
+  "tick the bins reminder off",
+  "check off the dentist reminder",
   "i called the vet, mark it done",
   "cross off book the vet",
   "done with the laundry reminder",
@@ -58,7 +63,8 @@
   "i've already sent the parcel, check it off",
   "finished fixing the bike, tick it",
   "the gas bill is paid, mark it complete",
-  "remove pick up kids from my list, i did it"
+  "remove pick up kids from my list, i did it",
+  "mark the passport reminder done"
  ],
  "reschedule_reminder": [
   "move the gas bill reminder to monday",
@@ -204,6 +210,19 @@
   "what can you do",
   "summarise this: the train is delayed by an hour so we will meet at noon",
   "rewrite this to sound friendly: give me the file",
+  "sort my to-do list by date",
+  "sort my to-dos alphabetically",
+  "put my tasks in order of when they're due",
+  "rewrite my to-do list as one sentence",
+  "turn my calendar for today into a short paragraph",
+  "sum up tomorrow's calendar in two lines",
+  "give me my meetings this week as a numbered list",
+  "show my unread emails from today",
+  "count the emails i got this morning",
+  "show friday's events in 12-hour time",
+  "give me a short summary of my inbox",
+  "show my tasks one per line",
+  "arrange today's events by start time",
   "fix the spelling: i recieved the pakage",
   "translate good night to spanish",
   "what song is this",

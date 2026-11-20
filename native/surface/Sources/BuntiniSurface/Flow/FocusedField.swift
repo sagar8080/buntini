@@ -2,6 +2,7 @@
 // this whether to paste (src-tauri/src/flow/native.rs, `should_paste`).
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 enum FocusedField {
     /// Chromium and Electron apps build their accessibility tree only when asked.
@@ -9,10 +10,13 @@ enum FocusedField {
     private static let lock = NSLock()
 
     static func describe() -> [String: Any] {
-        var out: [String: Any] = ["trusted": AXIsProcessTrusted()]
+        // Something is taking a password (any app's secure field, or a terminal's Secure
+        // Keyboard Entry): dictated words are dropped.
+        var out: [String: Any] = ["trusted": AXIsProcessTrusted(), "secureInput": IsSecureEventInputEnabled()]
         guard let app = NSWorkspace.shared.frontmostApplication else { return out }
         out["app"] = app.localizedName ?? ""
         out["bundle"] = app.bundleIdentifier ?? ""
+        out["pid"] = Int(app.processIdentifier)
         guard AXIsProcessTrusted() else { return out }
         let element = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(element, 0.5)
@@ -32,6 +36,8 @@ enum FocusedField {
         }
         guard let field = focused, CFGetTypeID(field) == AXUIElementGetTypeID() else { return out }
         let target = field as! AXUIElement
+        // Which element it is, to tell whether the caret moved to another field meanwhile.
+        out["field"] = UInt64(CFHash(target))
         out["role"] = copy(target, kAXRoleAttribute) as? String ?? ""
         out["subrole"] = copy(target, kAXSubroleAttribute) as? String ?? ""
         var settable: DarwinBoolean = false
@@ -42,9 +48,20 @@ enum FocusedField {
         return out
     }
 
+    /// Whether a password is being typed now: the field in front is secure, or secure input
+    /// is on. Checked again right before ⌘V.
+    static func secureNow() -> Bool {
+        if IsSecureEventInputEnabled() { return true }
+        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.25)
+        guard let focused = copy(element, kAXFocusedUIElementAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        return copy(focused as! AXUIElement, kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole
+    }
+
     /// What the focused field holds, as a fingerprint that changes when text arrives: its
-    /// length, where the caret is, and the text itself when it's short. Nil when the field
-    /// says none of these.
+    /// length, where the caret is, and a hash of its text (in memory only, never kept). Nil
+    /// when the field says none of these.
     static func fingerprint() -> String? {
         guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let element = AXUIElementCreateApplication(app.processIdentifier)

@@ -1,14 +1,15 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { streamDefaults, streamPreviews } from './streams';
-import type { AgentRequest, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
+import { resolve } from './i18n.ts';
+import type { AgentRequest, Attached, Bootstrap, CodingAgent, ConversationPage, ConversationList, ConversationSummary, Mode, PetMemory, Settings, TaskEvent, TaskRecord, WebApproval } from './types';
 
 export const desktop = isTauri();
 const defaults: Settings = {
-  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', companionScale: 1,
+  assistantName: 'Buntini', userName: '', personality: 'Warm, concise, practical, and honest.', avatar: 'cat', accent: 'preset', accentColor: '', themePreset: 'classic', textSize: 'medium', density: 'comfortable', chatFont: 'sans', corners: 'round', panelSize: 'standard', statusText: '', language: '', companionScale: 1,
   catCoat: 'ginger', catEyes: 'green', catAccessory: 'bell', petMotion: 'playful', petRoam: true, petAwareness: true, petNudges: true,
   voiceId: '', voiceRate: 180, notificationsEnabled: false, morningBrief: false, headsUps: false, openAtLogin: false, monthlyBudgetUsd: 5, costPerSearchUsd: .005, vadModelPath: '',
   modelBackend: 'apple', brainAuto: true, pythonPath: '', modelPath: '', whisperModel: '', searchProvider: 'brave',
-  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], apps: [],
+  monthlySearchLimit: 1000, dailySearchLimit: 30, freeTierOnly: true, speakResponses: false, speakVoiceReplies: true, theme: 'system', reducedMotion: false, ebayMarketplace: 'EBAY_US', externalShares: [], workoutBrains: [], workoutDeclined: [], apps: [],
   cloudProvider: 'anthropic', cloudModel: '', cloudUrl: '', cloudOnThisMac: false, cloudBudgetUsd: 5, cloudInputPrice: 4, cloudOutputPrice: 20,
   ...streamDefaults,
 };
@@ -18,7 +19,7 @@ export async function bootstrap(): Promise<Bootstrap> {
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('buntini-preview-settings') || '{}') }; } catch { /* Invalid preview settings reset to defaults. */ }
   const threads = previewThreads();
   return {
-    settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [],
+    settings, tasks: threads.items.flatMap(item => item.turns), conversation: previewPage(threads, threads.activeId), conversations: previewList(threads), onboarded: previewOnboarded(), roots: [], audit: [], savedSearches: [], priceWatches: [], systemLanguage: resolve('', navigator.languages),
     diagnostics: { modelReady: false, appleIntelligence: 'unsupported', workerStatus: 'Desktop app required', braveConfigured: false, tavilyConfigured: false, searchesUsed: 0, searchesToday: 0, searchLimitMonth: 1000, searchLimitDay: 30, chatgptPlan: previewChatGptPlan(), chatgptAlwaysAllow: localStorage.getItem('buntini-preview-chatgpt-always') === '1' },
   };
 }
@@ -58,8 +59,9 @@ function previewCodingAgents(): CodingAgent[] {
   return [{ id: 'claude', name: 'Claude Code', available: true, connected: on('claude'), heard: true, problem: '', usage: on('claude-usage') }, { id: 'codex', name: 'Codex', available: true, connected: on('codex'), heard: false, problem: '' }, { id: 'copilot', name: 'Copilot CLI', available: true, connected: on('copilot'), heard: false, problem: '' }];
 }
 let previewAgentRequests: AgentRequest[] = import.meta.env.DEV && new URLSearchParams(location.search).has('agents-preview') ? [
-  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], always: true, createdAt: '2026-11-15T12:00:00Z' },
-  { id: 'preview-agent-3', agent: 'Claude Code', project: 'buntini', title: 'Start on its plan', detail: '1. Add the island\n2. Wire the agents', code: false, questions: [], always: true, plan: true, createdAt: '2026-11-15T12:00:02Z' },
+  { id: 'preview-agent-1', agent: 'Claude Code', project: 'buntini', title: 'Run the Rust tests', detail: 'cargo test --manifest-path src-tauri/Cargo.toml agents', code: true, questions: [], always: true, allow: true, rules: [{ rule: 'Bash(cargo test:*)', place: 'This project' }], createdAt: '2026-11-15T12:00:00Z' },
+  { id: 'preview-agent-4', agent: 'Claude Code', project: 'buntini', title: 'Edit cart.ts', detail: 'src/cart.ts', code: true, questions: [], allow: true, changes: [{ kind: 'remove', text: 'return total;' }, { kind: 'add', text: 'return total + tax(total);' }], createdAt: '2026-11-15T12:00:01Z' },
+  { id: 'preview-agent-3', agent: 'Claude Code', project: 'buntini', title: 'Start on its plan', detail: '1. Add the island\n2. Wire the agents', code: false, questions: [], always: true, allow: true, plan: true, createdAt: '2026-11-15T12:00:02Z' },
   { id: 'preview-agent-2', agent: 'Claude Code', project: 'buntini', title: '', detail: '', code: false, createdAt: '2026-11-15T12:00:05Z', questions: [{ question: 'Where should the request card go when the panel is open?', header: 'Placement', multiSelect: false, options: [{ label: 'Top of the panel', description: '' }, { label: 'Above the composer', description: '' }] }] },
 ] : [];
 // Preview-only sample thread, seeded by hand through localStorage for UI checks.
@@ -143,7 +145,7 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
     if (name === 'restart_onboarding') { localStorage.removeItem('buntini-preview-onboarded'); return undefined as T; }
     // Keys can't be kept without the desktop app's Keychain; setup still finishes.
     if (name === 'set_api_key') return undefined as T;
-    if (name === 'check_server') return { base: 'http://localhost:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
+    if (name === 'check_server') return { base: 'http://127.0.0.1:11434/v1', models: ['llama3.2:latest', 'qwen3:8b'], onThisMac: true } as T;
     if (name === 'mac_profile') return previewProfile(args?.model as string | null) as T;
     // The preview has no download to run: it shows setup partway through.
     if (name === 'local_setup_plan') return { repo: 'Qwen3.5-9B-4bit', label: 'Qwen3.5 9B', downloadBytes: 6100000000 } as T;
@@ -173,11 +175,12 @@ export async function command<T = void>(name: string, args?: Record<string, unkn
   }
   return invoke<T>(name, args);
 }
-export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskEvent) => void, approvalId?: string): Promise<TaskRecord> {
+export async function runTask(prompt: string, mode: Mode, onEvent: (event: TaskEvent) => void, approvalId?: string, attachments: Attached[] = []): Promise<TaskRecord> {
   if (!desktop) throw new Error('This is the browser preview. Open Buntini with npm run desktop to run local tools and chat with Qwen.');
   const channel = new Channel<TaskEvent>();
   channel.onmessage = onEvent;
-  return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null });
+  const sent = attachments.map(item => item.kind === 'file' ? { kind: 'file', path: item.path, brain: item.brain } : { kind: 'window', id: item.id, brain: item.brain });
+  return invoke('run_task', { prompt, mode, onEvent: channel, approvalId: approvalId || null, attachments: sent.length ? sent : null });
 }
 export async function continueTask(name: 'resume_task' | 'run_action' | 'continue_task_online', args: Record<string, unknown>, onEvent: (event: TaskEvent) => void): Promise<TaskRecord> {
   if (!desktop) throw new Error('Open the desktop app to continue a saved task.');

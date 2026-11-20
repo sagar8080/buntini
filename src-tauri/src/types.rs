@@ -42,6 +42,8 @@ pub struct Settings {
     pub panel_size: String,
     /// Shown in the header while Buntini is idle; empty means Buntini picks one.
     pub status_text: String,
+    /// The language Buntini speaks (`i18n::LANGUAGES`); empty follows the Mac.
+    pub language: String,
     pub companion_scale: f64,
     pub cat_coat: String,
     pub cat_eyes: String,
@@ -70,6 +72,12 @@ pub struct Settings {
     pub ebay_marketplace: String,
     /// Local data categories an external model backend may receive. On-device models see everything.
     pub external_shares: Vec<String>,
+    /// Brains (`cloud_provider` ids) the person allowed, once each, to work out questions about
+    /// their own things while an on-device brain answers the rest. They get only what
+    /// `external_shares` allows.
+    pub workout_brains: Vec<String>,
+    /// Brains the person chose to keep those questions from, so they aren't asked again.
+    pub workout_declined: Vec<String>,
     /// Apps the user allowed Buntini to use (ids from `apps::APPS`). None until they choose.
     pub apps: Vec<String>,
     /// Cloud brain: provider, model (empty = the suggested one), monthly cap and the
@@ -127,6 +135,7 @@ impl Default for Settings {
             corners: "round".into(),
             panel_size: "standard".into(),
             status_text: String::new(),
+            language: String::new(),
             companion_scale: 1.0,
             cat_coat: "ginger".into(),
             cat_eyes: "green".into(),
@@ -145,6 +154,8 @@ impl Default for Settings {
             cost_per_search_usd: 0.005,
             ebay_marketplace: "EBAY_US".into(),
             external_shares: Vec::new(),
+            workout_brains: Vec::new(),
+            workout_declined: Vec::new(),
             apps: Vec::new(),
             cloud_provider: "anthropic".into(),
             cloud_model: String::new(),
@@ -238,7 +249,18 @@ impl Settings {
         if self.status_text.chars().count() > 40 || self.status_text.chars().any(char::is_control) {
             return Err("The status line can be up to 40 characters.".into());
         }
+        if !self.language.is_empty() && !crate::i18n::LANGUAGES.contains(&self.language.as_str()) {
+            return Err("Choose a language from the list.".into());
+        }
         crate::privacy::validate_shares(&self.external_shares)?;
+        for list in [&self.workout_brains, &self.workout_declined] {
+            if list.iter().enumerate().any(|(index, id)| crate::cloud::provider(id).is_none() || list[..index].contains(id)) {
+                return Err("Choose brains from the list in Settings → Brain.".into());
+            }
+        }
+        if self.workout_brains.iter().any(|id| self.workout_declined.contains(id)) {
+            return Err("Choose brains from the list in Settings → Brain.".into());
+        }
         for (index, id) in self.apps.iter().enumerate() {
             if crate::apps::app(id).is_none() || self.apps[..index].contains(id) {
                 return Err("Choose apps from the list in Settings → Apps.".into());
@@ -437,6 +459,9 @@ pub struct TaskRecord {
     /// Answers the user can pick when Buntini asked them something. Each sends its prompt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
+    /// The apps the person named with a tag ("/calendar …"): only these are read for it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -444,6 +469,18 @@ pub struct TaskRecord {
 pub struct Choice {
     pub label: String,
     pub prompt: String,
+    /// The person's answer about a brain working questions out, saved before the prompt is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<Consent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Consent {
+    pub brain: String,
+    pub allow: bool,
+    /// What the brain would see, switched on in Privacy when the person allows it.
+    pub shares: Vec<String>,
 }
 /// One structured result from an approved integration (a forecast, rate, place, listing or flight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -598,6 +635,8 @@ pub struct Diagnostics {
     /// Cloud providers with a saved key, and this month's estimated spend on the chosen one.
     pub cloud_keys: Vec<String>,
     pub cloud_spend_usd: f64,
+    /// Command-line tools installed on this Mac that can answer as the brain (`cli.rs`).
+    pub cli_tools: Vec<String>,
     /// The ChatGPT account Buntini is signed in to, if any.
     pub chatgpt_account: Option<String>,
     /// "none", "usable" or "refused": what this Mac's ChatGPT sign-in allows.
@@ -675,6 +714,8 @@ pub struct Bootstrap {
     pub memories: Vec<Memory>,
     /// The morning brief is on and hasn't been shown today.
     pub brief_due: bool,
+    /// The language Buntini speaks when Settings leaves it to the Mac.
+    pub system_language: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

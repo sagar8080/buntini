@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import Customization from './Customization';
 import FlowSettings from './flow/FlowSettings';
+import Shortcuts from './utilities/Shortcuts';
+import SettingsSearch from './utilities/SettingsSearch';
+import { tabName } from './utilities/model';
 import BrainSettings from './BrainSettings';
 import Connections from './Connections';
 import PrivacyTab from './PrivacyTab';
 import AppsTab from './AppsTab';
+import { t } from './i18n.ts';
 import type { SettingsSaver, SaveState } from './settingsSave';
 import type { Bootstrap, KeyProvider, Settings } from './types';
 
 export type Tab = 'buntini' | 'brain' | 'apps' | 'connections' | 'privacy';
-const tabs: { id: Tab; label: string }[] = [{ id: 'buntini', label: 'Buntini' }, { id: 'brain', label: 'Brain' }, { id: 'apps', label: 'Apps' }, { id: 'connections', label: 'Connections' }, { id: 'privacy', label: 'Privacy' }];
+const tabs: Tab[] = ['buntini', 'brain', 'apps', 'connections', 'privacy'];
 
 type Props = {
   data: Bootstrap; saver: SettingsSaver; initialTab?: Tab; onError: (message: string) => void;
@@ -45,31 +49,33 @@ export default function SettingsView({ data, saver, initialTab, onError, onAddFo
     if (sent.openAtLogin === saved.openAtLogin) { setLoginProblem(''); return; }
     edited.current = false;
     setDraft(previous => ({ ...previous, openAtLogin: saved.openAtLogin }));
-    setLoginProblem(saved.openAtLogin ? 'Still in your login items. Remove me in System Settings → General → Login Items.' : 'macOS didn’t add me to your login items.');
+    setLoginProblem(saved.openAtLogin ? t('settings.login.stillListed') : t('settings.login.notAdded'));
   }), [saver]);
   // Closing Settings (Esc, the header button, tucking the panel away) saves at once.
   useEffect(() => () => {
     void saver.flush();
-    if (saver.state === 'waiting') onNotice('Settings save after this task.');
+    if (saver.state === 'waiting') onNotice(t('settings.save.afterTaskNotice'));
   }, [saver]);
   return <div className="subpage settings-page">
     <div className="settings-top">
-      <div className="settings-tabs" role="tablist" aria-label="Settings" onKeyDown={event => {
+      <SettingsSearch onTab={setTab} />
+      <div className="settings-tabs" role="tablist" aria-label={t('settings.title')} onKeyDown={event => {
         // Arrow keys move between tabs, as in native tab bars.
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (!step) return;
         event.preventDefault();
-        const next = tabs[(tabs.findIndex(item => item.id === tab) + step + tabs.length) % tabs.length];
-        setTab(next.id);
-        (event.currentTarget.querySelector(`[data-tab="${next.id}"]`) as HTMLButtonElement | null)?.focus();
-      }}>{tabs.map(item => <button key={item.id} data-tab={item.id} role="tab" type="button" tabIndex={tab === item.id ? 0 : -1} aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>)}</div>
-      <span className={`save-state ${status}`} role="status">{status === 'saving' ? <><LoaderCircle size={12} className="spin" />Saving</> : status === 'waiting' ? <><LoaderCircle size={12} className="spin" />Saves after this task</> : status === 'saved' ? <><Check size={12} />Saved</> : status === 'error' ? 'Not saved' : ''}</span>
+        const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+        setTab(next);
+        (event.currentTarget.querySelector(`[data-tab="${next}"]`) as HTMLButtonElement | null)?.focus();
+      }}>{tabs.map(id => <button key={id} data-tab={id} role="tab" type="button" tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{tabName(id)}</button>)}</div>
+      <span className={`save-state ${status}`} role="status">{status === 'saving' ? <><LoaderCircle size={12} className="spin" />{t('settings.save.saving')}</> : status === 'waiting' ? <><LoaderCircle size={12} className="spin" />{t('settings.save.waiting')}</> : status === 'saved' ? <><Check size={12} />{t('settings.save.saved')}</> : status === 'error' ? t('settings.save.notSaved') : ''}</span>
     </div>
     {status === 'error' && problem && <p className="settings-problem" role="alert">{problem}</p>}
     {loginProblem && <p className="settings-problem" role="alert">{loginProblem}</p>}
-    <div role="tabpanel" aria-label={tabs.find(item => item.id === tab)?.label}>
+    <div role="tabpanel" aria-label={tabName(tab)}>
       {tab === 'buntini' && <Customization draft={draft} update={update} onError={onError} onPreviewVoice={onPreviewVoice} onRestartSetup={onRestartSetup} />}
       {tab === 'buntini' && <FlowSettings draft={draft} update={update} onError={onError} />}
+      {tab === 'buntini' && <Shortcuts onError={onError} />}
       {tab === 'brain' && <BrainSettings draft={draft} update={update} diagnostics={data.diagnostics} onError={onError} onKey={onKey} onRefresh={onRefresh} onNotice={onNotice} />}
       {tab === 'apps' && <AppsTab draft={draft} update={update} onError={onError} />}
       {tab === 'connections' && <Connections draft={draft} update={update} diagnostics={data.diagnostics} onKey={onKey} onError={onError} />}

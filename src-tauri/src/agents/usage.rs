@@ -10,16 +10,17 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::i18n::{t, tn};
 use crate::surface::cards::agents::{Usage, UsageWindow};
 
 /// Claude Code's `rate_limits`, from what its status line receives.
 pub fn from_status_line(status: &Value) -> Option<Usage> {
     let limits = status.get("rate_limits")?.as_object()?;
-    let window = |key: &str, label: &str| {
+    let window = |key: &str, label: String| {
         let window = limits.get(key)?;
-        Some(UsageWindow { label: label.into(), percent: window.get("used_percentage")?.as_f64()?.clamp(0.0, 100.0), resets_at: window.get("resets_at").and_then(Value::as_i64) })
+        Some(UsageWindow { label, percent: window.get("used_percentage")?.as_f64()?.clamp(0.0, 100.0), resets_at: window.get("resets_at").and_then(Value::as_i64) })
     };
-    let windows: Vec<UsageWindow> = [window("five_hour", "5 hours"), window("seven_day", "Week")].into_iter().flatten().collect();
+    let windows: Vec<UsageWindow> = [window("five_hour", tn("agents.usage.hours", 5, &[])), window("seven_day", t("agents.usage.week"))].into_iter().flatten().collect();
     (!windows.is_empty()).then(|| Usage { agent: "Claude".into(), windows })
 }
 
@@ -30,11 +31,11 @@ pub fn from_codex(result: &Value) -> Option<Usage> {
         let window = snapshot.get(key)?;
         let minutes = window.get("windowDurationMins").and_then(Value::as_i64);
         let label = match minutes {
-            Some(300) => "5 hours".to_string(),
-            Some(10_080) => "Week".to_string(),
-            Some(minutes) if minutes % 1_440 == 0 => format!("{} days", minutes / 1_440),
-            Some(minutes) if minutes % 60 == 0 => format!("{} hours", minutes / 60),
-            _ => if key == "primary" { "Short" } else { "Long" }.to_string(),
+            Some(10_080) => t("agents.usage.week"),
+            Some(minutes) if minutes >= 0 && minutes % 1_440 == 0 => tn("agents.usage.days", (minutes / 1_440) as u64, &[]),
+            Some(minutes) if minutes >= 0 && minutes % 60 == 0 => tn("agents.usage.hours", (minutes / 60) as u64, &[]),
+            _ if key == "primary" => t("agents.usage.short"),
+            _ => t("agents.usage.long"),
         };
         Some(UsageWindow { label, percent: window.get("usedPercent")?.as_f64()?.clamp(0.0, 100.0), resets_at: window.get("resetsAt").and_then(Value::as_i64) })
     };

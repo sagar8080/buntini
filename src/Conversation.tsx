@@ -10,7 +10,9 @@ import { taskRecovery, missingTaskFields } from './taskRecovery';
 import { parse, withoutTracking, type Span } from './markdown';
 import { fileSize, relativeTime, safeHostname } from './format';
 import { askedChatGpt, chatGptHelp, type ChatGptPlan } from './chatgptHelp';
-import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate } from './types';
+import { locale, t, tn } from './i18n.ts';
+import type { ModelBackend, Settings, TaskRecord, TaskProgress, TaskFieldUpdate, WorkoutConsent } from './types';
+import { appTags } from './types';
 
 type Props = {
   turns: TaskRecord[]; live: TaskRecord | null; busy: boolean; activity: string;
@@ -19,12 +21,14 @@ type Props = {
   onOpen: (url: string) => void; onSpeak: (text: string) => void; onStopSpeaking: () => void;
   progress?: TaskProgress[]; onContinue: (task: TaskRecord, guidance?: string, fields?: TaskFieldUpdate[]) => void; onCancel: (task: TaskRecord) => void;
   onFollowUp: (text: string) => void;
+  /** Saves the person's answer about a brain working questions out, then asks again. */
+  onConsent?: (consent: WorkoutConsent, prompt: string) => void;
   chatgptPlan?: ChatGptPlan; onAskChatGpt?: (question: string) => void; onOpenChatGpt?: (question: string) => void;
   onOpenPane?: (pane: string) => void;
 };
 
 /** The ongoing chat: your messages on the right, Buntini's replies (with any cards and sources) on the left. */
-export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
+export default function Conversation({ turns, live, busy, activity, settings, focusId, speaking, scroller, canLoadEarlier, onLoadEarlier, onOpen, onSpeak, onStopSpeaking, progress, onContinue, onCancel, onFollowUp, onConsent, chatgptPlan, onAskChatGpt, onOpenChatGpt, onOpenPane }: Props) {
   const [reading, setReading] = useState('');
   const [copied, setCopied] = useState('');
   const [loading, setLoading] = useState(false);
@@ -66,42 +70,43 @@ export default function Conversation({ turns, live, busy, activity, settings, fo
     // A card that says it all stands alone; a model's own reply about the Mac sits above it.
     const cardOnly = !!item.glance && item.answer === item.glance.summary;
     return <article className={`turn ${focusId && focusId === item.id ? 'is-focused' : ''}`} id={item.id ? `turn-${item.id}` : undefined} key={item.id || 'live'}>
-      {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.prompt}</div></div>}
+      {item.prompt && <div className="bubble-row is-you"><div className="bubble bubble-you">{item.apps?.map(read => <span key={read} className="app-tag">/{appTags.find(tag => tag.read === read)?.tag ?? read}</span>)}{item.prompt}</div></div>}
       <div className="bubble-row is-buntini">
         <span className="bubble-avatar"><Pet state={working ? 'thinking' : 'idle'} avatar={settings?.avatar || 'cat'} look={settings ? lookFrom(settings) : undefined} /></span>
         <div className={`bubble bubble-buntini ${item.state === 'error' ? 'is-error' : ''}`}>
-          {askedQuestion !== undefined && <div className="asked-chatgpt"><span>Asked ChatGPT</span>{askedQuestion}</div>}
+          {askedQuestion !== undefined && <div className="asked-chatgpt"><span>{t('chat.askedChatGpt')}</span>{askedQuestion}</div>}
           {item.answer && !cardOnly && item.state !== 'error' && (confirmed ? <Confirmations lines={confirmed} /> : <Reply text={item.answer} onOpen={onOpen} />)}
-          {working && !item.answer && <div className="typing" role="status" aria-label={activity || 'Thinking'}><i /><i /><i /><span>{activity}</span></div>}
+          {working && !item.answer && <div className="typing" role="status" aria-label={activity || t('chat.thinking')}><i /><i /><i /><span>{activity}</span></div>}
           {item.glance && <MacGlanceCard glance={item.glance} latest={latest} busy={busy} onQuit={app => onFollowUp(`Quit ${app}`)} onPane={pane => onOpenPane?.(pane)} />}
           {!!item.cards?.length && <ResultCards cards={item.cards} onOpen={onOpen} />}
           {item.files.length > 0 && <div className="file-results">{item.files.map(file => <article className="file-result" key={file.path}><FileText size={18} /><div><strong>{file.name}</strong><span title={file.path}>{file.path}</span><small>{fileSize(file.size)} · {relativeTime(file.modifiedAt)}</small>{file.excerpt && <p>{file.excerpt}</p>}</div></article>)}</div>}
-          {item.sources.length > 0 && <div className="sources"><div className="section-label">Sources</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={withoutTracking(source.url)} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(withoutTracking(source.url)); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
-          {!!item.prices?.length && <div className="product-comparison"><div className="section-label">Published offers</div>{item.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? 'Published range' : 'Published offer'}</span></div>{offer.seller && <small>Seller: {offer.seller}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => onOpen(offer.url)}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}</div>}
-          {!!item.research?.length && <details className="research-evidence"><summary>Inspect retrieved evidence · {item.research.length} pages</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ' · excerpt' : ''}</small><p>{content.text}</p></article>)}</details>}
-          {working && !!item.answer && !!activity && activity !== 'Thinking it over' && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity}</span></div>}
-          {item.state === 'cancelled' && !item.answer && <div className="muted-note"><Square size={11} /> Stopped. You’re in control.</div>}
+          {item.sources.length > 0 && <div className="sources"><div className="section-label">{t('chat.sources')}</div>{item.sources.map((source, index) => <a key={`${source.url}-${index}`} className="source" href={withoutTracking(source.url)} target="_blank" rel="noreferrer" onClick={event => { event.preventDefault(); onOpen(withoutTracking(source.url)); }}><span className="source-number">{index + 1}</span><div><strong>{source.title}</strong><small>{safeHostname(source.url)} · {relativeTime(source.retrievedAt)}</small></div><ExternalLink size={13} /></a>)}</div>}
+          {!!item.prices?.length && <div className="product-comparison"><div className="section-label">{t('chat.offers.title')}</div>{item.prices.map((offer, index) => <article key={`${offer.url}-${index}`}><strong>{offer.product}</strong><div><b>{offer.currency} {offer.price}{offer.isAggregate && offer.highPrice ? `–${offer.highPrice}` : ''}</b><span>{offer.isAggregate ? t('chat.offers.range') : t('chat.offers.offer')}</span></div>{offer.seller && <small>{t('chat.offers.seller', { seller: offer.seller })}</small>}{offer.availability && <small>{offer.availability.replace(/^https?:\/\/schema.org\//, '')}</small>}<button className="text-button" onClick={() => onOpen(offer.url)}><ExternalLink size={10} /> {safeHostname(offer.url)}</button></article>)}</div>}
+          {!!item.research?.length && <details className="research-evidence"><summary>{tn('chat.evidence.summary', item.research.length)}</summary>{item.research.map((content, index) => <article key={`${content.url}-${index}`}><strong>{content.title || safeHostname(content.url)}</strong><small>{safeHostname(content.url)} · {relativeTime(content.retrievedAt)}{content.truncated ? ` · ${t('chat.evidence.excerpt')}` : ''}</small><p>{content.text}</p></article>)}</details>}
+          {working && !!item.answer && !!activity && activity !== t('app.activity.thinkingItOver') && <div className="activity" role="status"><LoaderCircle size={12} className="spin" /><span>{activity}</span></div>}
+          {item.state === 'cancelled' && !item.answer && <div className="muted-note"><Square size={11} /> {t('chat.stopped')}</div>}
           <ProgressDetails progress={savedProgress} />
           {!working && recovery.canContinue && missing.map(field => <label className="task-clarification" key={field.key}>{field.label}{field.field === 'body'
             ? <textarea aria-label={field.label} value={fieldValues[`${item.id}:${field.key}`] || ''} maxLength={8000} disabled={busy} onChange={event => setFieldValues(previous => ({ ...previous, [`${item.id}:${field.key}`]: event.target.value }))} />
             : <input aria-label={field.label} type={field.date ? 'datetime-local' : 'text'} value={fieldValues[`${item.id}:${field.key}`] || ''} maxLength={8000} disabled={busy} onChange={event => setFieldValues(previous => ({ ...previous, [`${item.id}:${field.key}`]: event.target.value }))} />}</label>)}
-          {!working && recovery.canContinue && <label className="task-clarification">Anything to add?<textarea aria-label="Additional task details" value={clarifications[item.id] || ''} maxLength={4000} disabled={busy} onChange={event => setClarifications(previous => ({ ...previous, [item.id]: event.target.value }))} placeholder="Tomorrow at 3 pm" /></label>}
-          {!working && (recovery.canContinue || recovery.canReview) && <div className="task-controls"><button disabled={busy} onClick={continueWithDetails}>{recovery.canReview ? 'Review next step' : recovery.retryRead ? 'Try again' : 'Continue task'}</button><button disabled={busy} className="text-button" onClick={() => onCancel(item)}>Stop task</button></div>}
-          {item.state === 'unknown' && <p role="status">Check the app before asking again.</p>}
-          {item.state === 'error' && !working && <p className="bubble-error">{item.answer || 'That didn’t finish. Try again.'}</p>}
+          {!working && recovery.canContinue && <label className="task-clarification">{t('chat.task.anythingToAdd')}<textarea aria-label={t('chat.task.details')} value={clarifications[item.id] || ''} maxLength={4000} disabled={busy} onChange={event => setClarifications(previous => ({ ...previous, [item.id]: event.target.value }))} placeholder={t('chat.task.detailsPlaceholder')} /></label>}
+          {!working && (recovery.canContinue || recovery.canReview) && <div className="task-controls"><button disabled={busy} onClick={continueWithDetails}>{recovery.canReview ? t('chat.task.review') : recovery.retryRead ? t('common.tryAgain') : t('chat.task.continue')}</button><button disabled={busy} className="text-button" onClick={() => onCancel(item)}>{t('chat.task.stop')}</button></div>}
+          {item.state === 'unknown' && <p role="status">{t('chat.task.unknown')}</p>}
+          {item.state === 'error' && !working && <p className="bubble-error">{item.answer || t('chat.task.failed')}</p>}
         </div>
       </div>
-      {latest && !busy && !!item.choices?.length && <div className="reply-chips">{item.choices.map(choice => <button key={choice.label} onClick={() => onFollowUp(choice.prompt)}>{choice.label}</button>)}</div>}
-      {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>More like this</button>}<button onClick={() => onFollowUp('Save that to a new note')}>Save to Notes</button></div>}
-      {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? 'Ask ChatGPT' : <><ExternalLink size={12} /> Open in ChatGPT</>}</button></div>}
-      {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>
-        <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? 'Stop' : 'Read aloud'}</button>
-        <button className="text-button" onClick={() => { void navigator.clipboard?.writeText(item.answer).then(() => { setCopied(item.id); setTimeout(() => setCopied(current => current === item.id ? '' : current), 1500); }); }}>{copied === item.id ? <Check size={11} /> : <Copy size={11} />}{copied === item.id ? 'Copied' : 'Copy'}</button>
+      {latest && !busy && !!item.choices?.length && <div className="reply-chips">{item.choices.map(choice => <button key={choice.label} onClick={() => choice.consent && onConsent ? onConsent(choice.consent, choice.prompt) : onFollowUp(choice.prompt)}>{choice.label}</button>)}</div>}
+      {/* The follow-ups stay in English: Buntini reads them as requests. */}
+      {listed && !busy && <div className="reply-chips">{!readOwnItems && <button onClick={() => onFollowUp('More like these')}>{t('chat.followUp.moreLikeThis')}</button>}<button onClick={() => onFollowUp('Save that to a new note')}>{t('chat.followUp.saveToNotes')}</button></div>}
+      {help && <div className="chatgpt-help"><button className="secondary-button" disabled={busy} onClick={() => (help === 'ask' ? onAskChatGpt : onOpenChatGpt)?.(askedQuestion ?? item.prompt)}>{help === 'ask' ? t('chat.askChatGpt') : <><ExternalLink size={12} /> {t('chat.openInChatGpt')}</>}</button></div>}
+      {done && <div className="bubble-meta"><span title={new Date(item.createdAt).toLocaleString(locale())}>{relativeTime(item.createdAt)}{item.backend && item.backend !== settings?.modelBackend && backendLabel[item.backend as ModelBackend] ? ` · ${backendLabel[item.backend as ModelBackend]}` : ''}</span>
+        <button className="text-button" onClick={() => { if (speaking && reading === item.id) onStopSpeaking(); else { setReading(item.id); onSpeak(item.answer); } }}>{speaking && reading === item.id ? <VolumeX size={11} /> : <Volume2 size={11} />}{speaking && reading === item.id ? t('common.stop') : t('chat.readAloud')}</button>
+        <button className="text-button" onClick={() => { void navigator.clipboard?.writeText(item.answer).then(() => { setCopied(item.id); setTimeout(() => setCopied(current => current === item.id ? '' : current), 1500); }); }}>{copied === item.id ? <Check size={11} /> : <Copy size={11} />}{copied === item.id ? t('common.copied') : t('common.copy')}</button>
       </div>}
     </article>;
   };
   return <div className="thread">
-    {canLoadEarlier && <button className="load-earlier" onClick={() => void loadEarlier()} disabled={loading}>{loading ? <LoaderCircle size={11} className="spin" /> : null}{loading ? 'Loading…' : 'Load earlier'}</button>}
+    {canLoadEarlier && <button className="load-earlier" onClick={() => void loadEarlier()} disabled={loading}>{loading ? <LoaderCircle size={11} className="spin" /> : null}{loading ? t('common.loading') : t('chat.loadEarlier')}</button>}
     {turns.map(item => turn(item, false))}
     {live && turn(live, true)}
   </div>;

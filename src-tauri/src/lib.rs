@@ -21,7 +21,10 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod cli;
+mod attach;
 mod helper;
+mod i18n;
 mod glance;
 mod cloud;
 mod completion;
@@ -55,6 +58,10 @@ mod notifications;
 mod nudges;
 mod overlay;
 mod personal_answer;
+mod decision;
+mod router;
+mod answers;
+mod literals;
 mod pet;
 mod planning;
 mod pricing;
@@ -95,7 +102,7 @@ mod device_live_tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
@@ -118,6 +125,14 @@ pub(crate) fn show_companion(app: &tauri::AppHandle) {
 }
 fn app_context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
+}
+
+/// The menu bar menu, in the language Buntini speaks now.
+fn tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem};
+    let item = |id: &str, key: &str| MenuItem::with_id(app, id, i18n::t(key), true, None::<&str>);
+    let (show, hide, tour, updates, quit) = (item("show", "tray.show")?, item("hide", "tray.hide")?, item("tour", "tray.tour")?, item("updates", "tray.updates")?, item("quit", "tray.quit")?);
+    Menu::with_items(app, &[&show, &hide, &tour, &updates, &quit])
 }
 
 pub fn run() {
@@ -146,6 +161,17 @@ pub fn run() {
             app.manage(
                 controller::AppState::new(data, cache, resources).map_err(std::io::Error::other)?,
             );
+            // Speak the language from Settings, or the Mac's, before anything is said.
+            let chosen = app.state::<controller::AppState>().store.lock().unwrap().settings().map(|settings| settings.language).unwrap_or_default();
+            i18n::follow(&chosen);
+            let speaker = app.handle().clone();
+            i18n::on_change(move |language| {
+                if let Some(tray) = speaker.tray_by_id("buntini-tray") {
+                    let _ = tray_menu(&speaker).map(|menu| tray.set_menu(Some(menu)));
+                }
+                surface::refresh();
+                let _ = speaker.emit("language", language);
+            });
             // Construct the privileged UI with navigation guards in place before
             // it loads. External pages belong in the isolated browser workspace.
             let main = app
@@ -212,6 +238,7 @@ pub fn run() {
             // The island and the dictation pill: drawn natively, empty until something shows.
             if surface::start() {
                 island::start(app.handle().clone());
+                media::start(app.handle().clone());
             } else {
                 eprintln!("Native surfaces unavailable");
             }
@@ -221,27 +248,17 @@ pub fn run() {
             notifications::install(app.handle());
             scheduler::observe_wake();
             scheduler::start(app.handle().clone());
-            if let Err(error) = app
-                .global_shortcut()
-                .register("CommandOrControl+Shift+Space")
-            {
-                eprintln!("Global shortcut unavailable: {error}");
-            }
-            use tauri::{
-                menu::{Menu, MenuItem},
-                tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-            };
-            let show = MenuItem::with_id(app, "show", "Show companion", true, None::<&str>)?;
-            let hide = MenuItem::with_id(app, "hide", "Hide companion", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit Buntini", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            // The shortcuts you can change (⇧⌘Space among them), the focus timer and captures.
+            utilities::start(app.handle().clone());
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+            let menu = tray_menu(app.handle())?;
             TrayIconBuilder::with_id("buntini-tray")
                 // A template silhouette, so macOS tints it for light and dark menu bars.
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/tray.png"
                 ))?)
                 .icon_as_template(true)
-                .tooltip("Buntini · ⌘⇧Space")
+                .tooltip("Buntini")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -251,6 +268,8 @@ pub fn run() {
                             let _ = w.hide();
                         }
                     }
+                    "tour" => island::demo::start(),
+                    "updates" => island::updates::check_now(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -346,6 +365,9 @@ pub fn run() {
             skills::photos::show_photo,
             apps::new_shortcut,
             apps::connect_app,
+            attach::pet_drop,
+            attach::forget_window,
+            attach::pick_files,
             world::pet_world,
             world::pet_move,
             world::pet_stop,

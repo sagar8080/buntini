@@ -108,6 +108,14 @@ fn searching_calendar(outcome: Option<&Outcome>) -> bool {
     outcome.is_some_and(|o| o.kind == "write" && o.tool.as_deref() == Some("update_calendar_event"))
 }
 
+/// Whether the request asks for arithmetic by its words: "calculate", "split", "how much do I
+/// save". Quoted words are text it supplies, not what it asks.
+pub(crate) fn asks_arithmetic(goal: &str) -> bool {
+    let plain = completion::unquoted(goal);
+    tokens(&plain).iter().any(|word| ["calculate", "compute", "split", "scale", "arithmetic"].contains(word))
+        || plain.contains("how much less") || plain.contains("how much i save") || plain.contains("how much do i save")
+}
+
 fn tokens(text: &str) -> Vec<&str> {
     text.split(|c: char| !c.is_alphanumeric() && c != '-')
         .filter(|s| !s.is_empty())
@@ -123,8 +131,8 @@ fn dates(text: &str) -> Vec<String> {
 /// How people type: "tmrw", "wht", "havent". Only for reading what a question asks, never
 /// for what gets written or sent.
 pub(crate) fn spelled(text: &str) -> String {
-    const USUAL: [(&str, &str); 30] = [
-        ("yesterdays", "yesterday"), ("todays", "today"), ("tomorrows", "tomorrow"),
+    const USUAL: [(&str, &str); 31] = [
+        ("yesterdays", "yesterday"), ("todays", "today"), ("tomorrows", "tomorrow"), ("tmrws", "tomorrow"),
         ("tmrw", "tomorrow"), ("tmr", "tomorrow"), ("tomorow", "tomorrow"), ("tommorow", "tomorrow"), ("tommorrow", "tomorrow"), ("2morrow", "tomorrow"), ("2day", "today"),
         ("tonite", "tonight"), ("wht", "what"), ("wat", "what"), ("whos", "who's"), ("hows", "how's"), ("wheres", "where's"), ("whens", "when's"), ("havent", "haven't"),
         ("dont", "don't"), ("didnt", "didn't"), ("doesnt", "doesn't"), ("cant", "can't"), ("isnt", "isn't"), ("cal", "calendar"), ("emial", "email"), ("calender", "calendar"),
@@ -133,13 +141,34 @@ pub(crate) fn spelled(text: &str) -> String {
     text.split(' ')
         .map(|word| {
             let bare = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-            match USUAL.iter().find(|(typed, _)| *typed == bare) {
-                Some((_, meant)) => word.to_lowercase().replacen(&bare, meant, 1),
+            match USUAL.iter().find(|(typed, _)| *typed == bare).map(|(_, meant)| *meant).or_else(|| misspelled_app(&bare)) {
+                Some(meant) => word.to_lowercase().replacen(&bare, meant, 1),
                 None => word.to_string(),
             }
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// An app's word typed a letter off ("remidners", "meetins", "calandar"): one letter left out,
+/// added or swapped with the next. A word that is itself English is left alone, so only the
+/// long app words are tried, and a changed letter counts only in the longest.
+fn misspelled_app(word: &str) -> Option<&'static str> {
+    const WORDS: [&str; 10] = ["reminders", "reminder", "calendar", "meetings", "meeting", "appointment", "appointments", "schedule", "emails", "inbox"];
+    const ENGLISH: [&str; 13] = ["remainder", "remainders", "meting", "email", "emailed", "schedules", "scheduled", "scheduler", "meetup", "inboxes", "reminded", "reminds", "minder"];
+    if word.chars().count() < 5 || WORDS.contains(&word) || ENGLISH.contains(&word) || !word.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    WORDS.iter().copied().find(|target| {
+        let (a, b): (Vec<char>, Vec<char>) = (word.chars().collect(), target.chars().collect());
+        let swapped = a.len() == b.len() && {
+            let differ: Vec<usize> = (0..a.len()).filter(|at| a[*at] != b[*at]).collect();
+            differ.len() == 2 && differ[1] == differ[0] + 1 && a[differ[0]] == b[differ[1]] && a[differ[1]] == b[differ[0]]
+        };
+        let one_out = |long: &[char], short: &[char]| long.len() == short.len() + 1 && (0..long.len()).any(|skip| long.iter().enumerate().filter(|(at, _)| *at != skip).map(|(_, c)| *c).eq(short.iter().copied()));
+        let changed = a.len() == b.len() && b.len() >= 8 && (0..a.len()).filter(|at| a[*at] != b[*at]).count() == 1;
+        swapped || one_out(&a, &b) || one_out(&b, &a) || changed
+    })
 }
 
 /// The days a clause names, for calendar reads. Rust resolves them from the task's date, so
@@ -369,7 +398,15 @@ fn clauses(goal: &str) -> Vec<String> {
     result
         .iter()
         .map(|clause| match completion::requested_actions(clause).0.contains(&"append_to_note") {
-            true => completion::unjoined(clause, goal),
+            true => {
+                // Recover quoted payloads and titles that the intent scan blanked out.
+                let intent = |text: &str| completion::unquoted(text).split_whitespace().collect::<Vec<_>>().join(" ");
+                crate::explicit_fields::literal_sentences(goal)
+                    .into_iter().flatten()
+                    .find(|sentence| intent(sentence) == intent(clause))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| completion::unjoined(clause, goal))
+            },
             false => clause.clone(),
         })
         .collect()
@@ -421,6 +458,14 @@ pub(crate) fn read_tools(clause: &str) -> Vec<&'static str> {
     // Online topic words such as "calendar apps" do not authorize local reads.
     if crate::search_intent::explicit_request(clause).is_some() {
         return vec!["look_up_online"];
+    }
+    if crate::explicit_fields::read_query(clause).is_some()
+        && tokens(clause).windows(3).any(|words| {
+            words[0] == "my" && ["note", "notes"].contains(&words[1])
+                && ["called", "named", "titled", "containing"].contains(&words[2])
+        })
+    {
+        return vec!["find_notes"];
     }
     if recalls(clause) {
         return vec!["search_memory"];
@@ -825,6 +870,25 @@ impl TaskContract {
             self.intent_status = "connector_request".into();
             return;
         }
+        if let Some(arguments) = crate::browser_workspace::requested_page(goal) {
+            self.push_outcome("read", goal, vec!["browse_page".into()], arguments, vec!["url".into()]);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "explicit_browser_workspace".into();
+            return;
+        }
+        if let Some(arguments) = crate::calculation::simple_request(goal) {
+            self.push_outcome("read", goal, vec!["calculate".into()], arguments, vec!["expressions".into()]);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "literal_calculation".into();
+            return;
+        }
+        if let Some(arguments) = crate::structured_math::supplied_offers(goal) {
+            let fields = ["minimum", "attribute_label", "unit", "options"].map(str::to_string).to_vec();
+            self.push_outcome("read", goal, vec!["compare_options".into()], arguments, fields);
+            self.push_outcome("answer", goal, vec![], json!({}), vec![]);
+            self.intent_status = "supplied_offer_comparison".into();
+            return;
+        }
         // A goal is one write too: its aim, check-ins, last day and end are the user's own
         // words, and each check-in is its own task later.
         if let Some(request) = crate::goals::parse_request(goal) {
@@ -1031,7 +1095,8 @@ impl TaskContract {
                     self.push_outcome("unsupported", goal, vec![], json!({}), vec![]);
                     unparsed = false;
                 }
-                Some(crate::intent::Intent::LookUp) if !self.outcomes.iter().any(|o| o.kind == "read") => {
+                Some(crate::intent::Intent::LookUp) if !self.outcomes.iter().any(|o| o.kind == "read")
+                    && !completion::unquoted(goal).contains("only these supplied ") => {
                     self.outcomes.clear();
                     self.push_outcome("read", goal, vec!["look_up_online".into()], json!({"query":goal.trim()}), vec!["query".into()]);
                     self.outcomes.last_mut().unwrap().resources = vec!["web".into()];
@@ -1079,15 +1144,22 @@ impl TaskContract {
         let (writes, unsupported) = completion::requested_actions(goal);
         let plain = completion::unquoted(goal);
         let words = tokens(&plain);
-        let arithmetic = words.iter().any(|word| ["calculate", "compute", "split", "scale", "arithmetic"].contains(word))
-            || plain.contains("how much less") || plain.contains("how much i save") || plain.contains("how much do i save");
+        let arithmetic = asks_arithmetic(goal);
         if writes.is_empty() && !unsupported && arithmetic {
             let tool = if words.contains(&"split") { "split_costs" }
                 else if words.contains(&"scale") { "scale_quantities" }
                 else if words.contains(&"subscriptions") && words.contains(&"unused") { "sum_by_status" }
                 else if words.contains(&"offers") && plain.contains("at least") { "compare_options" }
                 else { "calculate" };
-            self.push_outcome("read", "Compute the requested result from supplied quantities, labels and constraints using the fixed operation", vec![tool.into()], json!({}), vec![]);
+            // A table operation works on figures: the request's own, or those of a source it
+            // reads. "Split the Acme invoice evenly between two of us" gives neither, so its
+            // amount is in the person's records, which are found and read first. Sent straight
+            // to the operation, the model filled it with the tool's example rows. A sum may
+            // still use figures everyone knows ("seconds in a day": 24*60*60).
+            let figures = crate::decision::states_figures(&plain) || self.outcomes.iter().any(|outcome| outcome.kind == "read");
+            if figures || tool == "calculate" {
+                self.push_outcome("read", "Compute the requested result from supplied quantities, labels and constraints using the fixed operation", vec![tool.into()], json!({}), vec![]);
+            }
         }
         if !completion::receipt_only_goal(goal) {
             let mut accepted = Vec::new();
@@ -2366,6 +2438,9 @@ impl TaskContract {
             return None;
         }
         let plain=completion::unquoted(&self.current_request);
+        let calendar_write = self.outcomes.iter().any(|outcome| outcome.tool.as_deref() == Some("add_calendar_event"));
+        let arrival_reminder = steps.iter().any(|step| step.tool == "add_reminder" && verified_write(step)
+            && step.evidence.as_ref().is_some_and(|evidence| evidence["planningSource"]["kind"] == "note_arrival_reminder"));
         let mut remaining=Vec::new();
         for sentence in plain.split(['.',';','\n']) {
             let sentence=sentence.trim();
@@ -2377,7 +2452,20 @@ impl TaskContract {
             let duration_field=(sentence.starts_with("derive its duration ") || sentence.starts_with("derive the duration "))
                 && !sentence.contains(" then ")
                 && sentence.split(" and ").skip(1).all(completion::non_action);
-            if temporal_fact || duration_field { continue; }
+            if temporal_fact || duration_field || (calendar_write && sentence == "do not invite anyone") {
+                continue;
+            }
+            if arrival_reminder {
+                if sentence.starts_with("use exactly the reminder title ") {
+                    continue;
+                }
+                if let Some((_, rest)) = sentence.rsplit_once(", ") {
+                    if rest.starts_with("remind me to ") {
+                        remaining.push(rest.to_string());
+                        continue;
+                    }
+                }
+            }
             // Only discard this known field modifier. Any further requested
             // operation remains for the conservative completion parser below.
             remaining.push(sentence.replace(", using exactly the title","").replace(" with exactly the title"," titled"));
@@ -2400,6 +2488,15 @@ impl TaskContract {
             }
         }
         (!messages.is_empty()).then(||messages.join("\n\n"))
+    }
+    /// The request turned out to be about the user's own things, which the local index holds:
+    /// the online look it was read as goes, and its answer stays.
+    pub fn answer_from_own_apps(&mut self) {
+        self.outcomes.retain(|outcome| !(outcome.kind == "read" && outcome.accepted_tools == ["look_up_online"]));
+        if !self.outcomes.iter().any(|outcome| outcome.kind == "answer") {
+            let goal = self.current_request.clone();
+            self.push_outcome("answer", &goal, vec![], json!({}), vec![]);
+        }
     }
     pub fn mark_answer_complete(&mut self) {
         if self
@@ -3033,6 +3130,27 @@ mod tests {
     }
 
     #[test]
+    fn a_split_with_no_figures_of_its_own_is_not_sent_to_the_operation_before_a_read() {
+        // Its amount is in the person's email. Sent straight to split_costs, the model filled the
+        // tool's example rows and "Aria owes 65.5" was the answer.
+        let goal = "Split the Acme invoice evenly between two of us. What's each share?";
+        assert!(asks_arithmetic(goal));
+        let contract = TaskContract::from_request(goal);
+        assert!(contract.outcomes.iter().all(|outcome| outcome.kind == "answer"), "{:?}", contract.outcomes);
+        // The figures in the question itself, or a source it reads, still go to the operation.
+        for (goal, tool) in [
+            ("Split 90 lodging and 27 food between Aria, Bo and Cy.", "split_costs"),
+            ("Split $90 three ways.", "split_costs"),
+            ("Scale this recipe from 3 servings to 9: 100g rice.", "scale_quantities"),
+            ("Calculate how many seconds are in a day", "calculate"),
+        ] {
+            assert_eq!(TaskContract::from_request(goal).next_outcome().unwrap().accepted_tools, vec![tool], "{goal}");
+        }
+        let read_first = TaskContract::from_request("Compare my Alder vendor quotes and calculate the difference.");
+        assert!(read_first.outcomes.iter().any(|outcome| outcome.accepted_tools == vec!["calculate"]));
+    }
+
+    #[test]
     fn named_plans_filenames_and_a_just_added_document_require_actual_reads() {
         for goal in ["Read my Seabright travel plan and tell me the departure.","Read quarterly-planning-memo.txt and tell me the decision."] {
             let contract=TaskContract::from_request(goal);
@@ -3662,3 +3780,16 @@ mod tests {
 #[path = "task_contract_eval_tests.rs"]
 mod eval_tests;
 
+
+#[cfg(test)]
+mod spelling_tests {
+    #[test]
+    fn an_app_word_a_letter_off_is_read_as_that_word() {
+        assert_eq!(super::spelled("whats due today on my remidners"), "whats due today on my reminders");
+        assert_eq!(super::spelled("do any of my meetins clash"), "do any of my meetings clash");
+        assert_eq!(super::spelled("my calandar"), "my calendar");
+        for word in ["melting", "meetup", "minders", "remainder", "email", "inbox", "boxes", "schedules"] {
+            assert_eq!(super::misspelled_app(word), None, "{word}");
+        }
+    }
+}

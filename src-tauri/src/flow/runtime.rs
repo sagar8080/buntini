@@ -5,18 +5,23 @@
 use super::{history, keys, models, native, notes, service::{self, Service}, text, wake, Choices, Op, Settings};
 use crate::{
     controller::AppState,
+    i18n::{t, tf},
     privacy::{Locality, Share},
     surface::{
         self,
         cards::flow::{FlowPill, FlowState},
         Action, Card, CardBody, Contribution, Offer, Pill, PillState, Source, Urgency,
     },
+    utilities::capture,
 };
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc, OnceLock},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
@@ -32,6 +37,11 @@ const CLEAN_UP_WAIT: Duration = Duration::from_secs(8);
 const MOST_MS: u64 = 10 * 60 * 1_000;
 const CHOICES: &str = "flow-choices";
 const MUTED: &str = "flow-muted-outputs";
+/// How often words older than 30 days are cleared while Buntini runs.
+const PURGE_EVERY: Duration = Duration::from_secs(3600);
+/// A crashed helper's muting is undone at most this often, so a helper that keeps crashing
+/// isn't started over and over (the next launch undoes it too).
+const REPLAY_EVERY: Duration = Duration::from_secs(10);
 
 enum Input {
     Native(native::Event),
@@ -44,18 +54,29 @@ enum Input {
     /// Takes Done or Copied off the pill.
     Settle { generation: u64 },
     NoteSaved { id: String },
+    /// Delete everything: stop, forget and switch off.
+    Erase(oneshot::Sender<()>),
+    /// A voice turn is taking the microphone: the wake word stops.
+    VoiceTurn(oneshot::Sender<()>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum Outcome {
-    Pasted(String),
-    Copied(String),
-    /// Nothing was said.
+    Pasted,
+    Copied,
+    /// Nothing was said, or it was erased meanwhile.
     Empty,
     Failed(String),
 }
 
 static INPUT: OnceLock<mpsc::UnboundedSender<Input>> = OnceLock::new();
+/// Bumped by `erase`: words still on their way are dropped, not typed or kept.
+static ERASED: AtomicU64 = AtomicU64::new(0);
+
+/// Changes whenever anything is erased, here or by Delete everything.
+fn erase_mark(app: &AppHandle) -> u64 {
+    ERASED.load(Ordering::SeqCst).wrapping_add(app.state::<AppState>().erasures.load(Ordering::SeqCst))
+}
 
 fn send(input: Input) {
     if let Some(sender) = INPUT.get() {
@@ -69,6 +90,42 @@ extern "C" fn watched(bytes: *const u8, length: usize) {
     if let Some(event) = unsafe { native::read(bytes, length) } {
         send(Input::Native(event));
     }
+}
+
+/// Delete everything, for dictation: an open dictation is dropped with its words, a call
+/// recording stops and its audio is deleted, muted outputs are unmuted, the wake word and the
+/// key watcher stop, settings go back to all off, the helper quits, and captures and call
+/// audio are removed from the cache. Works before or after the database is erased.
+pub async fn erase(state: &AppState) -> Result<(), String> {
+    ERASED.fetch_add(1, Ordering::SeqCst);
+    let mut failures = Vec::new();
+    if INPUT.get().is_some() {
+        let (reply, done) = oneshot::channel();
+        send(Input::Erase(reply));
+        if tokio::time::timeout(Duration::from_secs(10), done).await.is_err() {
+            failures.push("Dictation didn’t stop.".to_string());
+        }
+    }
+    remove_audio(&state.cache_dir.join("notes"), None);
+    if let Err(error) = capture::erase(&state.cache_dir) {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join(" "))
+    }
+}
+
+/// A voice turn is about to open the microphone. Returns once the wake word has stopped (or
+/// after a moment, if dictation isn't running).
+pub async fn voice_turn() {
+    if INPUT.get().is_none() {
+        return;
+    }
+    let (reply, done) = oneshot::channel();
+    send(Input::VoiceTurn(reply));
+    let _ = tokio::time::timeout(Duration::from_secs(2), done).await;
 }
 
 /// Starts dictation's runtime. Nothing listens until dictation, the wake word or call notes
@@ -101,12 +158,13 @@ pub async fn call(app: AppHandle, op: Op) -> Result<Value, String> {
     let base = models::folder(&state.data_dir);
     match op {
         Op::Ping => Ok(Value::Bool(true)),
+        Op::Language => Ok(Value::String(crate::i18n::language().into())),
         Op::Stats => {
             let today = chrono::Local::now().date_naive();
             let stats = history::stats(&state.store.lock().unwrap().db, today)?;
             Ok(json!(stats))
         }
-        Op::History { limit } => Ok(json!(history::recent(&state.store.lock().unwrap().db, limit.unwrap_or(100).min(500))?)),
+        Op::History { limit } => Ok(json!(history::recent(&state.store.lock().unwrap().db, limit.unwrap_or(100).min(500), chrono::Utc::now())?)),
         Op::ForgetDictation { id } => history::forget(&state.store.lock().unwrap().db, id).map(|_| Value::Null),
         Op::Notes => Ok(json!(history::notes(&state.store.lock().unwrap().db)?)),
         Op::DeleteNote { id } => history::delete_note(&state.store.lock().unwrap().db, &id).map(|_| Value::Null),
@@ -147,7 +205,7 @@ fn open_library(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(app, "library", tauri::WebviewUrl::App("index.html".into()))
-        .title("Library")
+        .title(t("surface.pill.library"))
         .inner_size(860.0, 620.0)
         .min_inner_size(560.0, 420.0)
         .on_navigation(|url| crate::security::ui_navigation_allowed(url, cfg!(dev)))
@@ -177,6 +235,8 @@ struct Dictation {
     focus: native::Focus,
     locked: bool,
     text: Option<String>,
+    /// The capture on the island when it started, pasted with the words if still there.
+    picture: Option<PathBuf>,
 }
 
 struct Recording {
@@ -207,10 +267,15 @@ struct Runtime {
     heard: u64,
     woke: u64,
     recording: Option<Recording>,
-    /// The last thing typed, for ⌃⌘V.
-    last: Option<String>,
     /// The app of the last dictation, for picking its style from the pill.
     last_bundle: Option<(String, String)>,
+    /// This dictation muted the Mac's outputs: they're unmuted when it ends, whatever the
+    /// setting says by then.
+    muting: bool,
+    /// When a crashed helper's muting was last undone.
+    replayed_at: Option<Instant>,
+    /// When old words are next cleared.
+    purge_at: Instant,
 }
 
 impl Runtime {
@@ -234,8 +299,10 @@ impl Runtime {
             heard: 0,
             woke: 0,
             recording: None,
-            last: None,
             last_bundle: None,
+            muting: false,
+            replayed_at: None,
+            purge_at: Instant::now() + PURGE_EVERY,
         }
     }
 
@@ -249,7 +316,7 @@ impl Runtime {
 
     async fn begin(&mut self) {
         // A crash while muted is undone now.
-        let pending: Vec<String> = self.state().store.lock().unwrap().preference(MUTED).ok().flatten().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+        let pending = self.saved_muted();
         if !pending.is_empty() {
             let _ = self.service.send(json!({"op": "unmute", "devices": pending})).await;
         }
@@ -260,12 +327,51 @@ impl Runtime {
             for mut note in history::notes(&store.db).unwrap_or_default() {
                 if note.state == "recording" || note.state == "processing" {
                     note.state = "failed".into();
-                    let _ = history::save_note(&store.db, &note);
+                    let _ = history::update_note(&store.db, &note);
                 }
             }
+            let _ = history::purge(&store.db, chrono::Utc::now());
         }
         remove_audio(&self.notes_folder(), None);
         self.apply().await;
+    }
+
+    // MARK: Muting
+
+    /// Every output Buntini muted and hasn't seen unmuted yet, by any helper.
+    fn saved_muted(&self) -> Vec<String> {
+        self.state().store.lock().unwrap().preference(MUTED).ok().flatten().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default()
+    }
+
+    fn save_muted(&self, devices: &[String]) {
+        let raw = serde_json::to_string(devices).unwrap_or_else(|_| "[]".into());
+        let _ = self.state().store.lock().unwrap().set_preference(MUTED, &raw);
+    }
+
+    /// Unmutes what Buntini muted: the helper's own list and every device saved.
+    async fn unmute_all(&mut self) {
+        let devices = self.saved_muted();
+        if self.muting || !devices.is_empty() {
+            let _ = self.service.send(json!({"op": "unmute", "devices": devices})).await;
+        }
+        self.muting = false;
+    }
+
+    /// A helper died while outputs were muted: a new one unmutes them.
+    async fn replay_muted(&mut self) {
+        if self.saved_muted().is_empty() || self.replayed_at.is_some_and(|at| at.elapsed() < REPLAY_EVERY) {
+            return;
+        }
+        self.replayed_at = Some(Instant::now());
+        self.unmute_all().await;
+        if !self.needs_helper() {
+            self.service.stop().await;
+            self.wake_on = false;
+        }
+    }
+
+    fn needs_helper(&self) -> bool {
+        self.settings.enabled || self.settings.wake_word || self.recording.is_some() || self.dictation.is_some()
     }
 
     async fn run(&mut self, mut inputs: mpsc::UnboundedReceiver<Input>) {
@@ -274,6 +380,7 @@ impl Runtime {
             let key_at = self.machine.next_deadline().map(|at| self.clock + Duration::from_millis(at));
             let limit_at = self.dictation.as_ref().filter(|dictation| dictation.locked).map(|dictation| dictation.started + Duration::from_millis(MOST_MS));
             let next = [wake_at, key_at, limit_at].into_iter().flatten().min();
+            let next = next.map(|at| at.min(self.purge_at)).or(Some(self.purge_at));
             let input = match next {
                 Some(at) => tokio::select! {
                     input = inputs.recv() => input,
@@ -305,9 +412,15 @@ impl Runtime {
             }
             self.reconcile_wake().await;
         }
+        // A hands-free dictation left open (a double tap by accident) ends at the limit, and
+        // its words go to the clipboard: never typed by themselves.
         if self.dictation.as_ref().is_some_and(|dictation| dictation.locked && dictation.started.elapsed() >= Duration::from_millis(MOST_MS)) {
             self.machine.ended();
-            self.command(keys::Command::Finish).await;
+            self.close(false).await;
+        }
+        if self.purge_at <= instant {
+            self.purge_at = instant + PURGE_EVERY;
+            let _ = history::purge(&self.state().store.lock().unwrap().db, chrono::Utc::now());
         }
     }
 
@@ -357,14 +470,57 @@ impl Runtime {
             Input::NoteSaved { id } => {
                 let _ = self.app.emit("flow-notes", id);
             }
+            Input::Erase(reply) => {
+                self.erase().await;
+                let _ = reply.send(());
+            }
+            Input::VoiceTurn(reply) => {
+                self.conditions.microphone_busy = true;
+                self.reconcile_wake().await;
+                // Listening comes back once the turn has let go of the microphone.
+                self.wake_check_at = Some(Instant::now() + Duration::from_secs(2));
+                let _ = reply.send(());
+            }
         }
+    }
+
+    async fn erase(&mut self) {
+        // A dictation under way ends without its words; one being typed is dropped too.
+        if let Some(dictation) = self.dictation.take() {
+            let _ = self.service.send(json!({"op": "cancel", "id": dictation.id})).await;
+        }
+        let _ = self.machine.reset();
+        self.waiting.clear();
+        self.conditions.dictating = false;
+        self.unmute_all().await;
+        // A call stops; the helper deletes its audio as it quits. Its note is already gone.
+        self.recording = None;
+        self.publish_recording();
+        self.last_bundle = None;
+        self.apply_settings(Settings::default()).await;
+        self.service.stop().await;
+        self.wake_on = false;
+        self.parakeet = false;
+        self.wake_check_at = None;
+        remove_audio(&self.notes_folder(), None);
+        self.show(self.idle_pill());
     }
 
     // MARK: Settings
 
     async fn apply(&mut self) {
         let saved = self.state().store.lock().unwrap().settings().map(|settings| settings.flow).unwrap_or_default();
+        self.apply_settings(saved).await;
+    }
+
+    async fn apply_settings(&mut self, saved: Settings) {
         self.settings = saved;
+        // Record calls switched off: a call recording now stops.
+        if !self.settings.record_calls && self.recording.as_ref().is_some_and(|recording| !recording.stopping) {
+            if let Err(message) = self.stop_notes().await {
+                eprintln!("A call recording didn't stop: {message}");
+            }
+        }
         if self.settings.enabled || self.settings.wake_word {
             self.watch();
         } else {
@@ -408,7 +564,7 @@ impl Runtime {
                 }
                 self.show_listening();
             }
-            keys::Command::Finish => self.close().await,
+            keys::Command::Finish => self.close(true).await,
             keys::Command::Cancel => self.cancel().await,
         }
     }
@@ -425,10 +581,12 @@ impl Runtime {
             self.flash(FlowState::Error, Some(message));
             return;
         }
-        if self.settings.mute {
-            let _ = self.service.send(json!({"op": "mute"})).await;
+        if self.settings.mute && self.service.send(json!({"op": "mute"})).await.is_ok() {
+            self.muting = true;
         }
-        self.dictation = Some(Dictation { id, started: Instant::now(), started_ms: self.now_ms(), focus: native::Focus::default(), locked: false, text: None });
+        // A capture on the island now goes in with the words, if it is still there then.
+        let picture = capture::showing();
+        self.dictation = Some(Dictation { id, started: Instant::now(), started_ms: self.now_ms(), focus: native::Focus::default(), locked: false, text: None, picture });
         self.conditions.dictating = true;
         self.reconcile_wake().await;
         self.show_listening();
@@ -440,8 +598,8 @@ impl Runtime {
     }
 
     async fn after_listening(&mut self) {
-        if self.settings.mute {
-            let _ = self.service.send(json!({"op": "unmute"})).await;
+        if self.muting {
+            self.unmute_all().await;
         }
         self.conditions.dictating = false;
         self.reconcile_wake().await;
@@ -454,7 +612,8 @@ impl Runtime {
         self.show(self.idle_pill());
     }
 
-    async fn close(&mut self) {
+    /// Ends the dictation and types its words; with `paste` false they only go to the clipboard.
+    async fn close(&mut self, paste: bool) {
         let Some(dictation) = self.dictation.take() else { return };
         let (reply, words) = oneshot::channel();
         self.waiting.insert(dictation.id, reply);
@@ -465,10 +624,12 @@ impl Runtime {
         self.last_bundle = Some((dictation.focus.bundle.clone(), dictation.focus.app.clone())).filter(|(bundle, _)| !bundle.is_empty());
         let app = self.app.clone();
         let flow = self.settings.clone();
+        let delivery = Delivery { started: dictation.focus, speaking_ms, picture: dictation.picture, paste, mark: erase_mark(&self.app) };
         tauri::async_runtime::spawn(async move {
             let outcome = match tokio::time::timeout(FINAL_WAIT, words).await {
-                Ok(Ok(event)) => deliver(&app, &flow, event, dictation.focus, speaking_ms).await,
-                _ => Outcome::Failed("The words didn’t come back. Try again.".into()),
+                _ if erase_mark(&app) != delivery.mark => Outcome::Empty,
+                Ok(Ok(event)) => deliver(&app, &flow, event, delivery).await,
+                _ => Outcome::Failed(t("flow.error.wordsLost")),
             };
             send(Input::Finished { outcome });
         });
@@ -476,14 +637,8 @@ impl Runtime {
 
     fn finished(&mut self, outcome: Outcome) {
         let (state, text) = match outcome {
-            Outcome::Pasted(typed) => {
-                self.last = Some(typed);
-                (FlowState::Done, None)
-            }
-            Outcome::Copied(typed) => {
-                self.last = Some(typed);
-                (FlowState::Copied, None)
-            }
+            Outcome::Pasted => (FlowState::Done, None),
+            Outcome::Copied => (FlowState::Copied, None),
             Outcome::Empty => (FlowState::Idle, None),
             Outcome::Failed(message) => (FlowState::Error, Some(message)),
         };
@@ -498,14 +653,17 @@ impl Runtime {
         let _ = self.app.emit("flow-history", ());
     }
 
+    /// ⌃⌘V: the last dictation's words, while they're kept (Clear history, forgetting it and
+    /// the 30 days take them away). Never into a password.
     fn paste_last(&self) {
-        let last = self.last.clone().or_else(|| history::last_text(&self.state().store.lock().unwrap().db).ok().flatten());
-        let Some(text) = last else { return };
+        let Some(text) = history::last_text(&self.state().store.lock().unwrap().db, chrono::Utc::now()).ok().flatten() else { return };
         std::thread::spawn(move || {
             let focus = native::focus();
-            if native::should_paste(&focus) {
-                native::paste(&text);
-            } else {
+            if native::secure(&focus) {
+                return;
+            }
+            let text = if text::kind_of(&focus.bundle) == text::AppKind::Terminal { text::one_line(&text) } else { text };
+            if !native::should_paste(&focus) || native::paste(&text) == native::Pasted::OnClipboard {
                 native::copy(&text);
             }
         });
@@ -566,7 +724,7 @@ impl Runtime {
             "dictate" => {
                 if self.dictation.is_some() {
                     self.machine.ended();
-                    self.close().await;
+                    self.close(true).await;
                 } else {
                     self.open().await;
                     if let Some(dictation) = self.dictation.as_mut() {
@@ -689,6 +847,14 @@ impl Runtime {
                 self.parakeet = event.get("parakeet").and_then(Value::as_bool).unwrap_or(false);
                 // A helper that started again isn't listening for the wake word yet.
                 self.wake_on = false;
+                // Nor did it mute anything: what an earlier one muted is unmuted now, unless a
+                // dictation is muting (it unmutes everything when it ends).
+                if !self.muting {
+                    let devices = self.saved_muted();
+                    if !devices.is_empty() {
+                        let _ = self.service.send_running(json!({"op": "unmute", "devices": devices})).await;
+                    }
+                }
                 self.reconcile_wake().await;
             }
             "partial" => {
@@ -712,20 +878,18 @@ impl Runtime {
                     self.dictation = None;
                     self.machine.ended();
                     self.after_listening().await;
-                    let message = event.get("message").and_then(Value::as_str).unwrap_or("The microphone didn’t open.").to_string();
+                    let message = event.get("message").and_then(Value::as_str).map_or_else(|| t("flow.error.micDidntOpen"), str::to_string);
                     self.flash(FlowState::Error, Some(message));
                 }
             }
             "muted" => {
-                let devices = event.get("devices").cloned().unwrap_or_else(|| json!([]));
-                let empty = devices.as_array().is_none_or(Vec::is_empty);
-                let state = self.state();
-                let store = state.store.lock().unwrap();
-                let _ = if empty { store.set_preference(MUTED, "[]") } else { store.set_preference(MUTED, &devices.to_string()) };
+                let devices = device_list(&event).unwrap_or_default();
+                self.save_muted(&merged(&self.saved_muted(), &devices));
             }
             "unmuted" => {
-                let state = self.state();
-                let _ = state.store.lock().unwrap().set_preference(MUTED, "[]");
+                // An older helper doesn't say which: it unmuted all it had.
+                let left = device_list(&event).map_or_else(Vec::new, |devices| without(&self.saved_muted(), &devices));
+                self.save_muted(&left);
             }
             "wake.heard" => {
                 self.heard += 1;
@@ -742,33 +906,50 @@ impl Runtime {
                     }
                 }
             }
-            "notes.recording" => {}
+            "notes.recording" => {
+                // Stop was pressed (or Delete everything ran) while macOS asked about the
+                // microphone: the recording that started anyway stops now.
+                let id = event.get("id").and_then(Value::as_str);
+                let wanted = self.recording.as_ref().is_some_and(|recording| Some(recording.id.as_str()) == id && !recording.stopping);
+                if let (false, Some(id)) = (wanted, id) {
+                    let _ = self.service.send(json!({"op": "notesStop", "id": id})).await;
+                }
+            }
             "notes.live" => {
                 let _ = self.app.emit("flow-notes-live", &event);
             }
             "notes.done" => self.notes_done(event),
             "notes.error" => {
+                let id = event.get("id").and_then(Value::as_str);
+                if !self.recording.as_ref().is_some_and(|recording| id.is_none_or(|id| id == recording.id)) {
+                    return;
+                }
                 if let Some(recording) = self.recording.take() {
                     self.fail_note(&recording.id);
+                    remove_audio(&self.notes_folder(), Some(&recording.id));
                 }
                 self.after_notes().await;
-                let message = event.get("message").and_then(Value::as_str).unwrap_or("The call couldn’t be recorded.").to_string();
+                let stopped = event.get("code").and_then(Value::as_str) == Some("stopped");
+                let message = event.get("message").and_then(Value::as_str).filter(|_| !stopped).map_or_else(|| t("flow.error.callNotRecorded"), str::to_string);
                 self.flash(FlowState::Error, Some(message));
             }
             "exited" => {
                 self.wake_on = false;
                 self.parakeet = false;
                 self.waiting.clear();
+                self.muting = false;
                 if self.dictation.take().is_some() {
                     self.machine.ended();
                     self.conditions.dictating = false;
-                    self.flash(FlowState::Error, Some("The microphone stopped. Try again.".into()));
+                    self.flash(FlowState::Error, Some(t("flow.error.micStopped")));
                 }
                 if let Some(recording) = self.recording.take() {
                     self.fail_note(&recording.id);
                     remove_audio(&self.notes_folder(), Some(&recording.id));
                     self.after_notes().await;
                 }
+                // It can't unmute what it muted any more; a new one does.
+                self.replay_muted().await;
                 // The wake word comes back with the helper, unless it keeps stopping.
                 if self.settings.wake_word {
                     self.wake_check_at = Some(Instant::now() + Duration::from_secs(5));
@@ -800,21 +981,23 @@ impl Runtime {
 
     async fn start_notes(&mut self) -> Result<(), String> {
         if self.recording.is_some() {
-            return Err("A call is already recording.".into());
+            return Err(t("flow.error.alreadyRecording"));
         }
         if !self.settings.record_calls {
-            return Err("Turn on Record calls in Settings first.".into());
+            return Err(t("flow.error.recordCallsOff"));
         }
         let folder = self.notes_folder();
-        std::fs::create_dir_all(&folder).map_err(|_| "Buntini couldn’t make a folder for the recording.".to_string())?;
+        std::fs::create_dir_all(&folder).map_err(|_| t("flow.error.noRecordingFolder"))?;
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700));
         let id = uuid::Uuid::new_v4().to_string();
         self.service.send(json!({"op": "notes", "id": id, "folder": folder})).await?;
         let now = chrono::Utc::now();
-        let title = format!("Call at {}", now.with_timezone(&chrono::Local).format("%-I:%M %p"));
+        // English reads a 12-hour clock; other languages a 24-hour one.
+        let clock = if crate::i18n::language() == "en" { "%-I:%M %p" } else { "%H:%M" };
+        let title = tf("flow.note.callAt", &[("time", &now.with_timezone(&chrono::Local).format(clock))]);
         let note = history::Note { id: id.clone(), title, created_at: now.to_rfc3339(), seconds: 0.0, state: "recording".into(), lines: vec![], summary: String::new(), key_points: vec![], todos: vec![] };
-        history::save_note(&self.state().store.lock().unwrap().db, &note)?;
+        history::add_note(&self.state().store.lock().unwrap().db, &note)?;
         self.state().audit("microphone.start", "Recording a call: microphone and the Mac's sound");
         self.recording = Some(Recording { id, since: now.timestamp_millis() as f64 / 1000.0, stopping: false });
         self.conditions.microphone_busy = true;
@@ -828,7 +1011,7 @@ impl Runtime {
     }
 
     async fn stop_notes(&mut self) -> Result<(), String> {
-        let Some(recording) = self.recording.as_mut() else { return Err("No call is recording.".into()) };
+        let Some(recording) = self.recording.as_mut() else { return Err(t("flow.error.notRecording")) };
         if recording.stopping {
             return Ok(());
         }
@@ -839,7 +1022,7 @@ impl Runtime {
         let store = state.store.lock().unwrap();
         if let Some(mut note) = history::notes(&store.db)?.into_iter().find(|note| note.id == id) {
             note.state = "processing".into();
-            history::save_note(&store.db, &note)?;
+            history::update_note(&store.db, &note)?;
         }
         drop(store);
         drop(state);
@@ -856,11 +1039,12 @@ impl Runtime {
             .map(|recording| Pill {
                 id: "flow-notes".into(),
                 source: Source::Flow,
-                label: if recording.stopping { "Writing notes".into() } else { "Recording".into() },
+                label: if recording.stopping { t("flow.pill.writingNotes") } else { t("surface.pill.recording") },
                 tint: "#E5484D".into(),
                 state: if recording.stopping { PillState::Working } else { PillState::Waiting },
                 badge: None,
                 progress: None,
+                card: None,
             })
             .into_iter()
             .collect();
@@ -881,7 +1065,7 @@ impl Runtime {
         let store = state.store.lock().unwrap();
         if let Some(mut note) = history::notes(&store.db).unwrap_or_default().into_iter().find(|note| note.id == id) {
             note.state = "failed".into();
-            let _ = history::save_note(&store.db, &note);
+            let _ = history::update_note(&store.db, &note);
         }
         let _ = self.app.emit("flow-notes", ());
     }
@@ -910,6 +1094,27 @@ impl Runtime {
     }
 }
 
+/// The `devices` of a `muted` or `unmuted` event; none when it names none.
+fn device_list(event: &Value) -> Option<Vec<String>> {
+    serde_json::from_value(event.get("devices")?.clone()).ok()
+}
+
+/// Every device in either list, each once: a helper that starts after a crash reports only
+/// what it muted itself, which mustn't hide what the crashed one had muted.
+fn merged(saved: &[String], devices: &[String]) -> Vec<String> {
+    let mut all = saved.to_vec();
+    for device in devices {
+        if !all.contains(device) {
+            all.push(device.clone());
+        }
+    }
+    all
+}
+
+fn without(saved: &[String], devices: &[String]) -> Vec<String> {
+    saved.iter().filter(|device| !devices.contains(device)).cloned().collect()
+}
+
 /// Deletes a call's audio (or every call's, with no id).
 fn remove_audio(folder: &std::path::Path, id: Option<&str>) {
     let Ok(entries) = std::fs::read_dir(folder) else { return };
@@ -933,9 +1138,10 @@ async fn write_up(app: &AppHandle, id: &str, segments: Vec<notes::Segment>, seco
     note.lines = lines;
     note.seconds = seconds;
     note.state = if note.lines.is_empty() { "ready".into() } else { "processing".into() };
-    let saved = history::save_note(&state.store.lock().unwrap().db, &note);
+    // A note deleted meanwhile (by you, Clear history or Delete everything) stays deleted.
+    let saved = history::update_note(&state.store.lock().unwrap().db, &note);
     remove_audio(folder, Some(id));
-    if saved.is_err() || note.lines.is_empty() {
+    if saved != Ok(true) || note.lines.is_empty() {
         return;
     }
     let _ = app.emit("flow-notes", id);
@@ -955,7 +1161,9 @@ async fn write_up(app: &AppHandle, id: &str, segments: Vec<notes::Segment>, seco
         }
     }
     note.state = "ready".into();
-    let _ = history::save_note(&state.store.lock().unwrap().db, &note);
+    if history::update_note(&state.store.lock().unwrap().db, &note) != Ok(true) {
+        return;
+    }
     let card = Card {
         id: format!("note-{id}"),
         source: Source::Flow,
@@ -979,8 +1187,53 @@ fn brain_for(state: &AppState, settings: &crate::types::Settings) -> Option<crat
     (crate::privacy::allows(Locality::External, settings, Share::Dictation) && state.models.ready(settings).is_ok()).then(|| settings.clone())
 }
 
+/// What a dictation carries to where its words go.
+struct Delivery {
+    /// What had the caret when it started.
+    started: native::Focus,
+    speaking_ms: u64,
+    /// The capture it started over.
+    picture: Option<PathBuf>,
+    /// False: the words only go to the clipboard.
+    paste: bool,
+    /// `erase_mark` when it ended: an erase meanwhile drops the words.
+    mark: u64,
+}
+
+/// Where the words go, decided right before they're typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    Paste,
+    Copy,
+    /// A password was being typed: not typed, not copied, not kept.
+    Drop,
+}
+
+/// `target` is where the words were going when they were ready; `now` is read again right
+/// before pasting (a clean-up can take seconds). The words are typed only into the same field
+/// of the app the dictation started in.
+fn placement(started: &native::Focus, target: &native::Focus, now: &native::Focus, paste: bool) -> Placement {
+    if [started, target, now].into_iter().any(native::secure) {
+        return Placement::Drop;
+    }
+    let same_app = started.bundle.is_empty() || started.bundle == now.bundle;
+    if paste && same_app && native::same_field(target, now) && native::should_paste(now) {
+        Placement::Paste
+    } else {
+        Placement::Copy
+    }
+}
+
+/// What became of the words.
+enum Typed {
+    Pasted,
+    Copied,
+    Dropped,
+    Erased,
+}
+
 /// Turns what was heard into what's typed, then types it.
-async fn deliver(app: &AppHandle, flow: &Settings, event: Value, started: native::Focus, speaking_ms: u64) -> Outcome {
+async fn deliver(app: &AppHandle, flow: &Settings, event: Value, delivery: Delivery) -> Outcome {
     if super::service::name(&event) != "final" {
         return match event.get("message").and_then(Value::as_str) {
             Some(message) => Outcome::Failed(message.to_string()),
@@ -991,50 +1244,88 @@ async fn deliver(app: &AppHandle, flow: &Settings, event: Value, started: native
     if heard.is_empty() {
         return Outcome::Empty;
     }
+    let Delivery { started, speaking_ms, picture, paste, mark } = delivery;
     let state = app.state::<AppState>();
     // Where the caret is now; the app it started in if the check finds nothing.
     let focus = tokio::task::spawn_blocking(native::focus).await.unwrap_or_default();
-    let target = if focus.bundle.is_empty() { started } else { focus };
+    let target = if focus.bundle.is_empty() { started.clone() } else { focus };
+    // Words said at a password field go nowhere, not even to the brain.
+    if native::secure(&started) || native::secure(&target) {
+        return Outcome::Failed(t("flow.error.passwordField"));
+    }
     let choices = choices(&state);
     let style = text::style_for(&target.bundle, &choices.app_styles);
+    let kind = text::kind_of(&target.bundle);
     let shaped = shape(&heard, flow, style);
     let mut typed = None;
-    if let Some(request) = text::request(&shaped.text, style, choices.mode, &choices.translate_to) {
+    if let Some(request) = text::request(&shaped.text, style, choices.mode, &choices.translate_to, kind) {
         let settings = state.store.lock().unwrap().settings().unwrap_or_default();
         if let Some(brain) = brain_for(&state, &settings) {
             let payload = json!({"messages": [{"role": "system", "content": request.system}, {"role": "user", "content": request.user}], "tools": [], "max_tokens": (request.limit / 2).max(96)});
             let cancel = Arc::new(AtomicBool::new(false));
             let answer = tokio::time::timeout(CLEAN_UP_WAIT, state.models.generate(&brain, payload, cancel.clone(), |_| {})).await;
-            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            cancel.store(true, Ordering::SeqCst);
             if let Ok(Ok(turn)) = answer {
                 typed = text::accept(&turn.text, &request, &shaped.kept);
             }
         }
     }
     let typed = complete(typed.as_deref().unwrap_or(&shaped.text), &shaped.kept, flow, style);
+    // A new line would run a terminal command before you've read it.
+    let typed = if kind == text::AppKind::Terminal { text::one_line(&typed) } else { typed };
     if typed.is_empty() {
         return Outcome::Empty;
     }
-    let paste = native::should_paste(&target);
     let words = typed.clone();
-    let pasted = tokio::task::spawn_blocking(move || {
-        if paste && native::paste(&words) {
-            return true;
+    let handle = app.clone();
+    let meant = target.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let now = native::focus();
+        if erase_mark(&handle) != mark {
+            return Typed::Erased;
         }
-        // Not a text field (or the paste didn't go through): kept on the clipboard instead.
-        native::copy(&words);
-        false
+        match placement(&started, &meant, &now, paste) {
+            Placement::Drop => Typed::Dropped,
+            Placement::Copy => {
+                native::copy(&words);
+                Typed::Copied
+            }
+            Placement::Paste => {
+                // The capture it started over goes in first, if it is still on the island.
+                if let Some(picture) = picture.as_deref().and_then(capture::for_dictation) {
+                    capture::paste(&picture);
+                }
+                match native::paste(&words) {
+                    native::Pasted::Arrived => Typed::Pasted,
+                    native::Pasted::Refused => Typed::Dropped,
+                    // Not seen to arrive: kept on the clipboard to paste by hand.
+                    native::Pasted::OnClipboard => {
+                        native::copy(&words);
+                        Typed::Copied
+                    }
+                }
+            }
+        }
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or(Typed::Erased);
+    let pasted = match result {
+        Typed::Erased => return Outcome::Empty,
+        Typed::Dropped => return Outcome::Failed(t("flow.error.passwordField")),
+        Typed::Pasted => true,
+        Typed::Copied => false,
+    };
     {
         let store = state.store.lock().unwrap();
+        if erase_mark(app) != mark {
+            return Outcome::Empty;
+        }
         let _ = history::record(&store.db, &history::NewDictation { app: &target.app, bundle: &target.bundle, text: &typed, speaking_ms, pasted }, chrono::Utc::now());
     }
     if pasted {
-        Outcome::Pasted(typed)
+        Outcome::Pasted
     } else {
-        Outcome::Copied(typed)
+        Outcome::Copied
     }
 }
 
@@ -1097,6 +1388,62 @@ mod tests {
         assert_eq!(shaped.text, "thanks Buntini ⟦1⟧");
         // The brain "corrected" the name; your spelling wins.
         assert_eq!(complete("Thanks, Buntiny! ⟦1⟧", &shaped.kept, &flow, Style::Natural), "Thanks, Buntini! — Sam\nBuntini team");
+    }
+
+    fn field(bundle: &str, field: u64) -> native::Focus {
+        native::Focus { app: bundle.into(), bundle: bundle.into(), pid: 1, field, role: "AXTextArea".into(), settable: true, selection: true, trusted: true, ..native::Focus::default() }
+    }
+
+    #[test]
+    fn words_are_typed_only_into_the_field_they_were_meant_for() {
+        let notes = field("com.apple.Notes", 7);
+        assert_eq!(placement(&notes, &notes, &notes, true), Placement::Paste);
+        assert_eq!(placement(&notes, &notes, &notes, false), Placement::Copy, "the time limit never pastes");
+        assert_eq!(placement(&notes, &notes, &field("com.apple.Notes", 8), true), Placement::Copy, "the caret moved to another field");
+        let mail = field("com.apple.mail", 3);
+        assert_eq!(placement(&notes, &mail, &mail, true), Placement::Copy, "another app than the one it started in");
+        assert_eq!(placement(&notes, &notes, &mail, true), Placement::Copy, "another app came to the front");
+        assert_eq!(placement(&native::Focus::default(), &mail, &mail, true), Placement::Paste, "the start wasn't read in time");
+        let button = native::Focus { role: "AXButton".into(), settable: false, selection: false, ..notes.clone() };
+        assert_eq!(placement(&notes, &notes, &button, true), Placement::Copy);
+    }
+
+    #[test]
+    fn words_said_at_a_password_go_nowhere() {
+        let notes = field("com.apple.Notes", 7);
+        let password = native::Focus { subrole: "AXSecureTextField".into(), ..notes.clone() };
+        let secure_input = native::Focus { secure_input: true, ..notes.clone() };
+        assert_eq!(placement(&password, &notes, &notes, true), Placement::Drop, "started at a password");
+        assert_eq!(placement(&notes, &password, &password, true), Placement::Drop);
+        assert_eq!(placement(&notes, &notes, &secure_input, true), Placement::Drop, "secure input came on before the paste");
+        assert_eq!(placement(&notes, &notes, &secure_input, false), Placement::Drop);
+    }
+
+    #[test]
+    fn muted_outputs_are_merged_and_removed_by_name() {
+        let crashed = vec!["speakers".to_string(), "headphones".to_string()];
+        // A new helper finds them muted already and reports none of its own.
+        assert_eq!(merged(&crashed, &[]), crashed);
+        assert_eq!(merged(&crashed, &["hdmi".into(), "speakers".into()]), ["speakers", "headphones", "hdmi"]);
+        assert_eq!(without(&crashed, &["speakers".into()]), ["headphones"]);
+        assert_eq!(device_list(&json!({"event": "unmuted"})), None, "an older helper unmuted all it had");
+        assert_eq!(device_list(&json!({"event": "muted", "devices": ["a"]})), Some(vec!["a".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn erase_removes_captures_and_call_audio_even_with_dictation_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().join("data"), dir.path().join("cache"), dir.path().join("resources")).unwrap();
+        for folder in ["captures", "notes"] {
+            std::fs::create_dir_all(state.cache_dir.join(folder)).unwrap();
+        }
+        std::fs::write(state.cache_dir.join("captures/Capture.png"), b"picture").unwrap();
+        std::fs::write(state.cache_dir.join("notes/abc-mic.caf"), b"audio").unwrap();
+        let before = ERASED.load(Ordering::SeqCst);
+        erase(&state).await.unwrap();
+        assert!(ERASED.load(Ordering::SeqCst) > before, "words on their way are dropped");
+        assert!(!state.cache_dir.join("captures").exists());
+        assert_eq!(std::fs::read_dir(state.cache_dir.join("notes")).unwrap().count(), 0);
     }
 
     #[test]

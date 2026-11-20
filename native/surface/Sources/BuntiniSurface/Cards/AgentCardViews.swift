@@ -2,6 +2,9 @@
 import SwiftUI
 import SurfaceKit
 
+/// What an agent asks to do, shown whole: every line of the command, every line an edit
+/// changes, and every rule Always keeps with where it's kept. When Rust couldn't show all of
+/// it (`allow` off), only Deny and In terminal are offered.
 struct ApprovalCardView: View {
     let card: Card
     let approval: Approval
@@ -10,20 +13,96 @@ struct ApprovalCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: from(approval.agent, approval.project), title: approval.title)
-            if let detail = approval.detail {
-                Text(detail)
-                    .font(approval.code ? .system(.caption, design: .monospaced) : .caption)
-                    .lineLimit(4)
-                    .opacity(0.85)
+            if Self.hasBody(approval) {
+                CardScroll(height: Self.bodyHeight(approval)) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let detail = approval.detail {
+                            Text(detail)
+                                .font(approval.code ? .system(.caption, design: .monospaced) : .caption)
+                                .opacity(0.85)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        if !approval.changes.isEmpty {
+                            ChangeLines(lines: approval.changes)
+                        }
+                    }
+                }
+                // Code reads left to right in every language.
+                .environment(\.layoutDirection, approval.code ? .leftToRight : Lexicon.direction)
+            }
+            if Self.offersAlways(approval) && !approval.rules.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(approval.rules.enumerated()), id: \.offset) { _, rule in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(rule.rule)
+                                .font(.system(.caption2, design: .monospaced))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .environment(\.layoutDirection, .leftToRight)
+                            Text(rule.place).font(.caption2).opacity(0.6).fixedSize()
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.07)))
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "In terminal") { send(Action(source: .agents, card: card.id, name: "terminal")) }
-                IslandButton(label: approval.plan ? "Keep planning" : "Deny") { send(Action(source: .agents, card: card.id, name: "deny")) }
-                if approval.always {
-                    IslandButton(label: approval.plan ? "Accept edits" : "Always") { send(Action(source: .agents, card: card.id, name: "always")) }
+                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
+                IslandButton(label: approval.plan ? L(.keepPlanning) : L(.deny)) { send(Action(source: .agents, card: card.id, name: "deny")) }
+                if Self.offersAlways(approval) {
+                    IslandButton(label: approval.plan ? L(.acceptEdits) : L(.always)) { send(Action(source: .agents, card: card.id, name: "always")) }
                 }
-                IslandButton(label: approval.plan ? "Start" : "Allow", prominent: true) { send(Action(source: .agents, card: card.id, name: "allow")) }
+                if approval.allow {
+                    IslandButton(label: approval.plan ? L(.start) : L(.allow), prominent: true) { send(Action(source: .agents, card: card.id, name: "allow")) }
+                }
+            }
+        }
+    }
+
+    static func offersAlways(_ approval: Approval) -> Bool {
+        approval.allow && approval.always
+    }
+
+    static func hasBody(_ approval: Approval) -> Bool {
+        approval.detail != nil || !approval.changes.isEmpty
+    }
+
+    /// The room the command and the changes take, up to where they scroll.
+    static func bodyHeight(_ approval: Approval) -> CGFloat {
+        var height: CGFloat = 0
+        if let detail = approval.detail {
+            height += textHeight(detail, perLine: approval.code ? 66 : 76, lineHeight: 13)
+        }
+        if !approval.changes.isEmpty {
+            height += (approval.detail == nil ? 0 : 6) + approval.changes.reduce(0) { $0 + textHeight($1.text, perLine: 60, lineHeight: 14) }
+        }
+        return min(max(height, 14), 220)
+    }
+
+    /// The room the rules Always keeps take.
+    static func rulesHeight(_ approval: Approval) -> CGFloat {
+        guard offersAlways(approval), !approval.rules.isEmpty else { return 0 }
+        return 18 + approval.rules.reduce(0) { $0 + textHeight($1.rule, perLine: 52, lineHeight: 15) }
+    }
+}
+
+/// An edit's lines, each whole and wrapped, marked as added, removed or kept.
+struct ChangeLines: View {
+    let lines: [DiffLine]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line.kind == "gap" ? "⋯" : (line.kind == "add" ? "+ " : line.kind == "remove" ? "− " : "  ") + line.text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+                    .background(line.kind == "add" ? Color(hex: "#2EA043").opacity(0.22) : line.kind == "remove" ? Color(hex: "#F85149").opacity(0.22) : .clear)
+                    .opacity(line.kind == "gap" ? 0.5 : 1)
             }
         }
     }
@@ -55,14 +134,16 @@ struct QuestionCardView: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: "In terminal") { send(Action(source: .agents, card: card.id, name: "terminal")) }
+                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
                 if current.multi {
-                    IslandButton(label: step + 1 < question.questions.count ? "Next" : "Send", prominent: true) {
+                    IslandButton(label: step + 1 < question.questions.count ? L(.next) : L(.send), prominent: true) {
                         if !picked.isEmpty { choose(current, .array(picked.map(JSONValue.string))) }
                     }
                 }
             }
         }
+        // The next question's choices take the place of the last one's.
+        .arms(on: step)
         .onChange(of: card.id) { _ in
             step = 0
             answers = [:]
@@ -181,7 +262,7 @@ struct FinishedCardView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(Color(hex: "#7EE787"))
-            CardHeading(from: from(finished.agent, finished.project), title: finished.message ?? "Done")
+            CardHeading(from: from(finished.agent, finished.project), title: finished.message ?? L(.done))
         }
     }
 }
@@ -204,7 +285,7 @@ struct RecapCardView: View {
             }
             HStack {
                 Spacer()
-                IslandButton(label: "Share") { send(Action(source: .agents, card: card.id, name: "shareRecap")) }
+                IslandButton(label: L(.share)) { send(Action(source: .agents, card: card.id, name: "shareRecap")) }
             }
         }
     }
@@ -218,7 +299,7 @@ struct UsageCardView: View {
             Text(usage.agent).font(.caption2.weight(.semibold)).opacity(0.6)
             ForEach(usage.windows, id: \.label) { window in
                 HStack(spacing: 8) {
-                    Text(window.label).font(.caption).frame(width: 64, alignment: .leading)
+                    Text(window.label).font(.caption).lineLimit(1).fixedSize().frame(minWidth: 64, alignment: .leading)
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.white.opacity(0.12))

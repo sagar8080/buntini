@@ -1,6 +1,25 @@
 # Production readiness and release runbook
 
-v0.2.1 fixes the eight Apple workflow scenarios that still failed in v0.2.0, and the two answers whose wording or checks failed on November 1. Its tag is built, signed and notarized by CI as a draft. v0.2.0, built from `e88c603` and published on November 1, 2026, is the latest published release until the draft is published. **Still open: acceptance of the v0.2.1 artifact on a fresh Mac, macOS 13 and the keyed/cloud providers.** No device acceptance of v0.2.0 or v0.2.1 is recorded yet. Source review, dependency audits and automated fixtures provide bounded evidence. They do not establish that every model, macOS permission flow or integration works in the shipped app.
+v0.3.0 answers questions about your own mail, calendar and reminders more reliably and more honestly:
+- A router trained on written questions picks which apps to read.
+- Rust works out counts, dates, gaps and totals on this Mac, and says plainly when it can't.
+- A brain you allow, such as Codex, works out the rest after Buntini asks you once. It can ask for an app it wasn't given rather than guess.
+
+It also adds:
+- the island's second round;
+- a check that keeps health and safety questions from being answered from Apple's own knowledge;
+- cost splits worked out from the record itself;
+- the desktop cat's daily life.
+
+On fresh, blind 80-question exams (November 18–19), Apple's model alone scored 22, Apple with Codex allowed 48–49, and Codex as the whole brain 49–50.
+
+Its tag is built, signed and notarized by CI as a draft. v0.2.1 is the latest published release until that draft is published.
+
+**Still open:**
+- The 38-workflow Apple acceptance suite hasn't been run on v0.3.0.
+- The artifact needs acceptance on a fresh Mac, on macOS 13, and with the keyed and cloud providers.
+
+Source review, dependency audits and automated fixtures provide bounded evidence. They do not establish that every model, macOS permission flow or integration works in the shipped app.
 
 ## Current rollout status
 
@@ -37,7 +56,7 @@ A local production-mode arm64 app bundle built successfully. Strict deep code-si
 - Production resources explicitly include five Python worker/schema files. Native audio and Apple Intelligence helpers are packaged as Tauri sidecars under `Contents/MacOS`, so Developer ID signing includes them as executable code. Development caches, tests, source trees and arbitrary files under `native/` or `worker/` are excluded.
 - Release builds require the Apple Intelligence helper and matching sidecar architectures. The hardened runtime remains enabled without JIT, unsigned-library or debugger exceptions.
 - CI action dependencies use verified full commit hashes. Checkouts do not retain Git credentials. Tests/builds have a read-only GitHub token; only the draft-release job gets repository write access. Each job has a bounded timeout. Dependabot proposes weekly action/npm/Cargo/Python updates.
-- The release gate runs the complete offline checks, full npm audit (including development/build dependencies), RustSec audit and optional MLX/voice dependency resolution audit on Apple silicon. An unavailable audit service fails the job. It does not silently count as a clean result.
+- The release gate runs the complete offline checks, full npm audit (including development/build dependencies, with the one reviewed exception below), RustSec audit and optional MLX/voice dependency resolution audit on Apple silicon. An unavailable audit service fails the job. It does not silently count as a clean result.
 - Tags must match the versions in npm manifests, the npm lockfile, Cargo and Tauri. Missing signing/notarization credentials or an ad-hoc/development identity block the release build before signing.
 - The app and final disk image must pass Developer ID/team verification, strict code-signature validation, arm64 checks, stapled notarization-ticket validation and Gatekeeper assessment. Checksums and a commit/tag record accompany the artifacts. The workflow creates a draft; it does not publish it automatically.
 
@@ -46,6 +65,8 @@ A local production-mode arm64 app bundle built successfully. Strict deep code-si
 The October 29 review found no advisories in the full npm dependency tree. RustSec identified [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html) in Tokio 1.54.0; the manifest floor and lockfile now require the patched 1.54.1. That audit reported zero vulnerabilities; the exception below was added later the same day.
 
 **Resolved exception (November 1):** candle-core 0.11.0, which runs the bundled memory-search model, required `zip` 8.6. RustSec flagged [RUSTSEC-2026-0367](https://rustsec.org/advisories/RUSTSEC-2026-0367.html), [-0368](https://rustsec.org/advisories/RUSTSEC-2026-0368.html) and [-0369](https://rustsec.org/advisories/RUSTSEC-2026-0369.html), and GitHub raised five Dependabot alerts on it (one critical), all in zip's archive reading and extraction. Buntini only loads safetensors and never opens a ZIP archive, so the affected code was unreachable, and CI ignored the three RustSec IDs. candle 0.11.1 moved to zip 9.2, which fixes every one of them. Buntini now uses it, and CI ignores no advisories.
+
+**Current exception (November 17, review by December 17):** GitHub widened [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), a ReDoS through crafted extglob patterns, to every `picomatch` up to 4.0.7, the newest release. No fixed version exists. npm reports five high findings from it: `picomatch` and the four build tools that depend on it (`fdir`, `tinyglobby`, Vite and `@vitejs/plugin-react`). Its only suggested fix is to downgrade Vite from 8 to 6.2.7. All five are development dependencies. Vite matches the project's own build patterns, never outside input, and none of it ships in the app. CI's npm audit (`scripts/npm_audit.mjs`) still fails on any other high or critical advisory. It excuses this one only while the advisory, package and range in `scripts/npm-audit-exceptions.json` match exactly and the review date hasn't passed. When a fix is published, the range changes and the audit fails until the fix is taken. Remove the exception then.
 
 Three Cargo warnings remain, none of them vulnerabilities: the older `glib` branch has an unsoundness advisory in a Linux-only Tauri transitive dependency (GTK, for the tray), and `proc-macro-error` and `paste` are unmaintained. `glib` isn't compiled for macOS, and the other two are compile-time macros that don't ship in the app. Keep these warnings visible and track upstream removal. They must be reassessed before adding Linux support. Passing an audit describes its advisory database at that time, not a guarantee against undisclosed issues.
 

@@ -6,10 +6,15 @@
 //! Fields come back separated by tabs and records by line breaks; `clean` turns both into
 //! spaces inside a field, so a value can't split a record.
 use super::{Mailbox, Message};
+use crate::i18n::t;
 
 /// What a script answers when Mail is closed.
 pub const CLOSED: &str = "__buntini_mail_closed__";
-pub const CLOSED_TEXT: &str = "Mail is closed.";
+
+/// The error `run` gives when Mail is closed.
+pub fn closed_text() -> String {
+    t("mail.status.closed")
+}
 /// The longest single value handed to a script.
 const MAX_ARGUMENT: usize = 64 * 1024;
 
@@ -336,10 +341,10 @@ pub fn source(body: &str) -> String {
 /// read as an option or as script; only what a process argument can't hold is refused.
 pub fn argument(value: &str) -> Result<String, String> {
     if value.contains('\0') {
-        return Err("That has a character Mail can’t take.".into());
+        return Err(t("mail.error.badCharacter"));
     }
     if value.len() > MAX_ARGUMENT {
-        return Err("That’s too long to hand to Mail.".into());
+        return Err(t("mail.error.tooLong"));
     }
     Ok(value.to_string())
 }
@@ -353,11 +358,11 @@ pub fn command(body: &str, argv: &[String]) -> Result<tokio::process::Command, S
     Ok(command)
 }
 
-/// Runs a script. `Err(CLOSED_TEXT)` when Mail is closed, so callers can tell that apart.
+/// Runs a script. `Err(closed_text())` when Mail is closed, so callers can tell that apart.
 pub async fn run(body: &str, argv: &[String], seconds: u64) -> Result<String, String> {
     let output = crate::actions::output(command(body, argv)?, seconds).await.map_err(|error| tidy(&error))?;
     if output.trim() == CLOSED {
-        return Err(CLOSED_TEXT.into());
+        return Err(closed_text());
     }
     Ok(output)
 }
@@ -375,7 +380,7 @@ fn tidy(error: &str) -> String {
 }
 
 pub fn closed(error: &str) -> bool {
-    error == CLOSED_TEXT
+    error == closed_text()
 }
 
 fn fields(line: &str) -> Vec<&str> {
@@ -393,7 +398,7 @@ fn flag(value: &str) -> Result<bool, String> {
     match value {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err("Mail answered with something unexpected.".into()),
+        _ => Err(t("mail.error.unexpectedAnswer")),
     }
 }
 
@@ -405,10 +410,10 @@ pub fn parse_list(output: &str) -> Result<Vec<Message>, String> {
         .map(|line| {
             let row = fields(line);
             if row.len() != 10 {
-                return Err("Mail answered with an incomplete email.".to_string());
+                return Err(t("mail.error.incompleteEmail"));
             }
             Ok(Message {
-                id: row[1].parse().map_err(|_| "Mail answered without an email's number.")?,
+                id: row[1].parse().map_err(|_| t("mail.error.noEmailNumber"))?,
                 header: row[2].to_string(),
                 at: seconds(row[0]).unwrap_or(0),
                 read: flag(row[3])?,
@@ -450,12 +455,12 @@ pub fn parse_read(output: &str) -> Result<Opened, String> {
     let (head, body) = output.split_once('\n').unwrap_or((output, ""));
     let row = fields(head);
     if row.len() != 7 {
-        return Err("Mail answered with an incomplete email.".into());
+        return Err(t("mail.error.incompleteEmail"));
     }
-    let length: usize = row[6].parse().map_err(|_| "Mail answered with an incomplete email.")?;
+    let length: usize = row[6].parse().map_err(|_| t("mail.error.incompleteEmail"))?;
     let body = body.trim_end_matches('\n').replace("\r\n", "\n").replace('\r', "\n");
     Ok(Opened {
-        id: row[1].parse().map_err(|_| "Mail answered without an email's number.")?,
+        id: row[1].parse().map_err(|_| t("mail.error.noEmailNumber"))?,
         at: seconds(row[0]).unwrap_or(0),
         sender: row[2].to_string(),
         subject: row[3].to_string(),
@@ -470,8 +475,8 @@ pub fn parse_read(output: &str) -> Result<Opened, String> {
 pub fn parse_mark(output: &str) -> Result<(bool, bool, i64), String> {
     let row = fields(output.trim());
     match row.as_slice() {
-        [was, now, id] => Ok((flag(was)?, flag(now)?, id.parse().map_err(|_| "Mail answered without the email's number.")?)),
-        _ => Err("Mail didn’t say what changed.".into()),
+        [was, now, id] => Ok((flag(was)?, flag(now)?, id.parse().map_err(|_| t("mail.error.noTheEmailNumber"))?)),
+        _ => Err(t("mail.error.noChangeSaid")),
     }
 }
 
@@ -480,11 +485,11 @@ pub fn parse_move(output: &str) -> Result<(i64, usize, String), String> {
     let row = fields(output.trim());
     match row.as_slice() {
         [id, left, path] => Ok((
-            id.parse().map_err(|_| "Mail answered without the email's number.")?,
-            left.parse().map_err(|_| "Mail didn’t say whether the email moved.")?,
+            id.parse().map_err(|_| t("mail.error.noTheEmailNumber"))?,
+            left.parse().map_err(|_| t("mail.error.noMoveSaid"))?,
             path.to_string(),
         )),
-        _ => Err("Mail didn’t say where the email went.".into()),
+        _ => Err(t("mail.error.noPlaceSaid")),
     }
 }
 
@@ -496,9 +501,9 @@ pub fn parse_junk(output: &str) -> Result<(bool, bool, Mailbox, i64), String> {
             flag(was)?,
             flag(now)?,
             Mailbox { account: account.to_string(), path: path.to_string() },
-            id.parse().map_err(|_| "Mail answered without the email's number.")?,
+            id.parse().map_err(|_| t("mail.error.noTheEmailNumber"))?,
         )),
-        _ => Err("Mail didn’t say where the email went.".into()),
+        _ => Err(t("mail.error.noPlaceSaid")),
     }
 }
 
@@ -514,10 +519,10 @@ pub struct Saved {
 pub fn parse_draft(output: &str) -> Result<Saved, String> {
     let row = fields(output.trim_end_matches(['\n', '\r']));
     if row.len() != 4 {
-        return Err("Mail didn’t say which draft it saved.".into());
+        return Err(t("mail.error.noDraftSaid"));
     }
     Ok(Saved {
-        id: row[0].parse().map_err(|_| "Mail didn’t say which draft it saved.")?,
+        id: row[0].parse().map_err(|_| t("mail.error.noDraftSaid"))?,
         subject: row[1].to_string(),
         to: row[2].split(',').filter(|a| !a.is_empty()).map(str::to_string).collect(),
         attachments: row[3].split('/').filter(|a| !a.is_empty()).map(str::to_string).collect(),

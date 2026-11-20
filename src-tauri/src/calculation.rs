@@ -209,6 +209,26 @@ impl Parser<'_> {
     }
 }
 
+/// A standalone arithmetic question that supplies both numbers and the operation.
+pub(crate) fn simple_request(prompt: &str) -> Option<Value> {
+    let lower = prompt.trim().trim_end_matches(['?', '.', '!']).to_ascii_lowercase();
+    let request = crate::completion::request_clause(&lower);
+    let request = ["what is ", "what's ", "what ", "calculate ", "compute "]
+        .iter().find_map(|prefix| request.strip_prefix(prefix))?;
+    let request = request.split_once(" is as a ").filter(|(_, context)| {
+        context.ends_with(" check") && context.chars().all(|ch| ch.is_ascii_alphabetic() || ch == ' ')
+    }).map_or(request, |(expression, _)| expression);
+    let request = request.strip_suffix(" is").unwrap_or(request);
+    let expression = request.replace(" divided by ", " / ").replace(" multiplied by ", " * ")
+        .replace(" times ", " * ").replace(" plus ", " + ").replace(" minus ", " - ")
+        .replace('×', "*").replace('÷', "/");
+    if !expression.chars().any(|ch| "+-*/%".contains(ch)) {
+        return None;
+    }
+    evaluate(&expression).ok()?;
+    Some(json!({"expressions":[expression]}))
+}
+
 pub fn evaluate(expression: &str) -> Result<f64, String> {
     validate_text(expression)?;
     let mut parser = Parser {

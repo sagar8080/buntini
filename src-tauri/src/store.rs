@@ -1495,6 +1495,19 @@ mod tests {
         assert!(s.saved_search("test").unwrap().is_none());
     }
     #[test]
+    fn an_existing_cursor_selection_survives_loading_settings() {
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        let mut raw = serde_json::to_value(Settings::default()).unwrap();
+        raw["modelBackend"] = serde_json::json!("cloud");
+        raw["cloudProvider"] = serde_json::json!("cursor");
+        raw["cloudModel"] = serde_json::json!("gpt-5");
+        s.db.execute("INSERT INTO preferences VALUES('settings',?1)", [raw.to_string()]).unwrap();
+        let settings = s.settings().unwrap();
+        assert_eq!(settings.cloud_provider, "cursor");
+        assert_eq!(settings.cloud_model, "gpt-5");
+        assert!(settings.validate().is_ok(), "the settings still save");
+    }
+    #[test]
     fn settings_saved_before_pet_customization_get_cat_defaults() {
         let s = Store::open(Path::new(":memory:")).unwrap();
         let mut raw = serde_json::to_value(Settings::default()).unwrap();

@@ -41,6 +41,26 @@ pub fn set_app(app: AppHandle) {
     let _ = APP.set(app);
 }
 
+/// Select the isolated browser only for an explicit request to open/read a supplied URL.
+pub(crate) fn requested_page(goal: &str) -> Option<Value> {
+    let plain = crate::completion::unquoted(goal);
+    let request = crate::completion::request_clause(&plain);
+    if !["open ", "read ", "visit "].iter().any(|prefix| request.starts_with(prefix))
+        || !["private browser workspace", "isolated browser workspace", "buntini's browser workspace"]
+            .iter().any(|scope| request.contains(scope))
+        || !matches!(crate::completion::requested_actions(goal), (actions, false)
+            if matches!(actions.as_slice(), [] | ["open_link"] | ["open_app"]))
+    {
+        return None;
+    }
+    let mut urls = goal.split_whitespace()
+        .map(|word| word.trim_matches(['<', '>', '"', '“', '”', '(', ')', ',', '.', ';']))
+        .filter(|word| word.contains("://"));
+    let url = urls.next().filter(|_| urls.clone().next().is_none());
+    let raw = json!({"url":url.unwrap_or_default()});
+    Some(validate("browse_page", &raw).map_or(raw, Value::Object))
+}
+
 pub fn validate(tool: &str, raw: &Value) -> Result<Map<String, Value>, String> {
     if tool != "browse_page" {
         return Err("Unknown browser workspace action.".into());
@@ -580,7 +600,9 @@ const READ_PAGE: &str = r#"(() => {
       links.push({url,title,description}); seen.add(url);
       if (links.length >= 32) { linksClipped = true; break; }
     }
-    return {ready:true, url:location.href, title:(document.title || '').slice(0,300), text:parts.join('\n').slice(0,6000), truncated:clipped,links,linksTruncated:linksClipped};
+    const heading = [...contentRoot.querySelectorAll('h1,[role="heading"][aria-level="1"]')].slice(0,32)
+      .map(node => visibleText(node, 300)).find(text => text) || '';
+    return {ready:true, url:location.href, title:(document.title || '').slice(0,300), heading, text:parts.join('\n').slice(0,6000), truncated:clipped,links,linksTruncated:linksClipped};
   } catch (_) { return {ready:false}; }
 })()"#;
 
@@ -601,6 +623,8 @@ struct Observation {
     url: String,
     #[serde(default)]
     title: String,
+    #[serde(default)]
+    heading: String,
     #[serde(default)]
     text: String,
     #[serde(default)]
@@ -636,6 +660,7 @@ fn observation(
     }
     if value.url.len() > 4096
         || value.title.chars().count() > 300
+        || value.heading.chars().count() > 300
         || value.text.chars().count() > TEXT_LIMIT
         || value.links.len() > LINK_LIMIT
         || value.links.iter().any(|link| {
@@ -1149,7 +1174,7 @@ async fn read_approved_page(
         let receipt = match result {
             Ok(observed) => ActionReceipt { outcome: ActionOutcome::Succeeded, tool: "browse_page".into(), object_id: workspace.profile.map(|profile| format!("browser-profile:{}", uuid::Uuid::from_bytes(profile))), destination: Some(observed.url.clone()),
                 message: format!("Opened and read “{}” in Buntini’s separate browser. Sign-in status and website actions have not been verified.", observed.title),
-                evidence: json!({"intentId":intent_id,"url":observed.url,"title":observed.title,"text":observed.text,"truncated":observed.truncated,"links":observed.links,"linksTruncated":observed.links_truncated,"sourceKind":"untrusted_web_page","verification":"native_url_and_bounded_page_snapshot","authentication":"not_verified","websiteActionsPerformed":false,"profileScope":workspace.approved_origin}), error: None },
+                evidence: json!({"intentId":intent_id,"url":observed.url,"title":observed.title,"heading":observed.heading,"text":observed.text,"truncated":observed.truncated,"links":observed.links,"linksTruncated":observed.links_truncated,"sourceKind":"untrusted_web_page","verification":"native_url_and_bounded_page_snapshot","authentication":"not_verified","websiteActionsPerformed":false,"profileScope":workspace.approved_origin}), error: None },
             Err(error) => failed(ActionOutcome::Unknown, error),
         };
         if cancel.load(Ordering::Acquire) {

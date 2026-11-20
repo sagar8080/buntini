@@ -90,9 +90,41 @@ pub fn history_with_shares(
     (picked.into_iter().rev().flatten().collect(), shares)
 }
 
+/// Conversation history belongs to the current topic. An explicit question about a
+/// different topic can be answered without inspecting or guessing another topic's history.
+pub(crate) fn asks_about_another_topic(prompt: &str) -> bool {
+    let plain = crate::completion::unquoted(prompt);
+    let request = crate::completion::request_clause(&plain);
+    if !["what ", "which ", "when ", "where ", "who ", "how ", "do you remember "]
+        .iter().any(|opening| request.starts_with(opening))
+    {
+        return false;
+    }
+    let words: Vec<&str> = request.split(|ch: char| !ch.is_alphabetic()).filter(|word| !word.is_empty()).collect();
+    words.windows(3).any(|window| {
+        ["in", "from", "during", "about"].contains(&window[0])
+            && ["previous", "last", "earlier", "other", "different", "separate"].contains(&window[1])
+            && ["chat", "conversation", "topic", "thread"].contains(&window[2])
+    }) || words.windows(4).any(|window| {
+        ["in", "from", "during", "about"].contains(&window[0])
+            && ["my", "our", "the", "a", "another"].contains(&window[1])
+            && ["previous", "last", "earlier", "other", "different", "separate"].contains(&window[2])
+            && ["chat", "conversation", "topic", "thread"].contains(&window[3])
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_cross_topic_questions_are_distinct_from_followups() {
+        assert!(asks_about_another_topic("What number did you calculate in my previous conversation?"));
+        assert!(asks_about_another_topic("What did you say in the last chat?"));
+        assert!(!asks_about_another_topic("Now double that answer."));
+        assert!(!asks_about_another_topic("Translate \"What did you say in the last chat?\""));
+    }
+
 
     fn turn(id: &str, at: &str, prompt: &str, answer: &str, touched: &[&str]) -> TaskRecord {
         TaskRecord {
@@ -114,6 +146,7 @@ mod tests {
             handoff: None,
             action: None,
             choices: vec![],
+            apps: vec![],
         }
     }
 

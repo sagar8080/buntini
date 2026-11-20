@@ -1,4 +1,5 @@
 // Shared shapes for dictation, the pill, call notes and the wake word (stream C). No bridge import, so the bridge can use them.
+import { locale, t } from '../i18n.ts';
 
 export type DictationKey = 'rightOption' | 'rightCommand' | 'rightControl' | 'fn' | 'chord';
 export type Chord = { keyCode: number; modifiers: ('command' | 'option' | 'control' | 'shift')[]; label: string };
@@ -57,16 +58,32 @@ export type FlowOp =
   | { op: 'history'; limit?: number } | { op: 'forgetDictation'; id: number }
   | { op: 'notes' } | { op: 'deleteNote'; id: string } | { op: 'startNotes' } | { op: 'stopNotes' }
   | { op: 'choices' } | { op: 'choose'; mode: Mode; translateTo?: string } | { op: 'setStyle'; bundle: string; style: Style | null }
-  | { op: 'downloadModels' } | { op: 'cancelDownload' } | { op: 'removeModels' } | { op: 'openLibrary' };
+  | { op: 'downloadModels' } | { op: 'cancelDownload' } | { op: 'removeModels' } | { op: 'openLibrary' } | { op: 'language' };
 
-export const keyLabels: Record<Exclude<DictationKey, 'chord'>, string> = { rightOption: 'Right ⌥', rightCommand: 'Right ⌘', rightControl: 'Right ⌃', fn: 'fn' };
+// Read in the language spoken when shown.
+export const keyLabels: Readonly<Record<Exclude<DictationKey, 'chord'>, string>> = {
+  get rightOption() { return t('settings.flow.rightKey', { key: '⌥' }); },
+  get rightCommand() { return t('settings.flow.rightKey', { key: '⌘' }); },
+  get rightControl() { return t('settings.flow.rightKey', { key: '⌃' }); },
+  fn: 'fn',
+};
 
+/** The languages dictation offers, named in English. */
 export const languageNames: Record<string, string> = {
   'en-US': 'English (US)', 'en-GB': 'English (UK)', 'es-ES': 'Spanish', 'fr-FR': 'French', 'de-DE': 'German', 'it-IT': 'Italian',
   'pt-BR': 'Portuguese', 'nl-NL': 'Dutch', 'pl-PL': 'Polish', 'sv-SE': 'Swedish', 'da-DK': 'Danish', 'fi-FI': 'Finnish',
   'ru-RU': 'Russian', 'uk-UA': 'Ukrainian', 'el-GR': 'Greek', 'cs-CZ': 'Czech', 'ro-RO': 'Romanian', 'hu-HU': 'Hungarian',
   'ja-JP': 'Japanese', 'zh-CN': 'Chinese', 'ko-KR': 'Korean', 'hi-IN': 'Hindi', 'ar-SA': 'Arabic', 'tr-TR': 'Turkish',
 };
+
+/** A dictation language named in the language Buntini speaks: English from the list, any other
+    from the system's own names (only English keeps its country, as in the list). */
+export function languageName(tag: string): string {
+  const english = languageNames[tag] ?? tag;
+  const code = locale();
+  if (!code) return english;
+  try { return new Intl.DisplayNames([code], { type: 'language', languageDisplay: 'standard' }).of(tag.startsWith('en-') ? tag : tag.split('-')[0]) ?? english; } catch { return english; }
+}
 
 /** The chord a key press makes, or null for a bare key (it would type). */
 export function chordFrom(event: { code: string; key: string; metaKey: boolean; altKey: boolean; ctrlKey: boolean; shiftKey: boolean }): Chord | null {
@@ -104,11 +121,11 @@ export function preview(op: FlowOp): unknown {
     ] satisfies Dictation[];
     case 'notes': return [{
       id: 'preview-note', title: 'Launch sync', createdAt: new Date().toISOString(), seconds: 1834, state: 'ready',
-      lines: [{ speaker: 'Speaker 1', text: 'Let’s start with the launch plan.' }, { speaker: 'You', text: 'Can we fix those by Wednesday?' }],
+      lines: [{ speaker: t('flow.note.speaker', { number: 1 }), text: 'Let’s start with the launch plan.' }, { speaker: t('flow.note.you'), text: 'Can we fix those by Wednesday?' }],
       summary: 'The launch moves to Thursday once two onboarding fixes land.', keyPoints: ['Two onboarding problems found in review'], todos: ['Daniel fixes the sign-in screen today'],
     }] satisfies Note[];
     case 'choices': return { appStyles: {}, mode: 'dictate', translateTo: '' } satisfies Choices;
     case 'forgetDictation': case 'deleteNote': case 'apply': return null;
-    default: throw new Error('Open the desktop app to use this.');
+    default: throw new Error(t('common.desktopOnly'));
   }
 }

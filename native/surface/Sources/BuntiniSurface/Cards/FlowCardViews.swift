@@ -20,7 +20,7 @@ struct NoteCardView: View {
             }
             HStack {
                 Spacer()
-                IslandButton(label: "Open", prominent: true) {
+                IslandButton(label: L(.open), prominent: true) {
                     send(Action(source: .flow, card: card.id, name: "library"))
                 }
             }
@@ -29,7 +29,7 @@ struct NoteCardView: View {
     }
 
     private var heading: String {
-        guard let seconds = note.seconds, seconds > 0 else { return "Notes" }
-        return "Notes · \(RecordingMark.elapsed(seconds))"
+        guard let seconds = note.seconds, seconds > 0 else { return L(.notes) }
+        return "\(L(.notes)) · \(RecordingMark.elapsed(seconds))"
     }
 }

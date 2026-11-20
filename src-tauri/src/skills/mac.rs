@@ -12,6 +12,8 @@ pub enum Command {
     Timer { seconds: u64 },
     CancelTimers,
     CancelAllTimers,
+    /// The focus timer's cycles (utilities/focus.rs).
+    Focus(crate::utilities::focus::Command),
 }
 
 #[derive(Debug, PartialEq)]
@@ -106,6 +108,10 @@ fn duration(text: &str) -> Option<u64> {
 }
 
 pub fn recognise(text: &str) -> Option<Command> {
+    // "Focus for 25 minutes" is the focus timer, before any plain timer.
+    if let Some(command) = crate::utilities::focus::recognise(text) {
+        return Some(Command::Focus(command));
+    }
     // All controls are direct requests. Mere mentions, explanations and negations
     // must never change the Mac's state.
     from_verb(
@@ -297,6 +303,46 @@ end run
 const LOCK: &str =
     r#"tell application "System Events" to keystroke "q" using {control down, command down}"#;
 
+/// Whether macOS says the screen is locked, from the login session's own record. None when
+/// it can't be told.
+fn screen_locked() -> Option<bool> {
+    use std::ffi::c_void;
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGSessionCopyCurrentDictionary() -> *const c_void;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFDictionaryGetValue(dictionary: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFBooleanGetValue(boolean: *const c_void) -> u8;
+        fn CFBooleanGetTypeID() -> usize;
+        fn CFGetTypeID(object: *const c_void) -> usize;
+        fn CFRelease(object: *const c_void);
+    }
+    let key = objc2_core_foundation::CFString::from_str("CGSSessionScreenIsLocked");
+    // SAFETY: the dictionary is owned here and released once; values are borrowed from it and
+    // checked to be booleans before they are read.
+    unsafe {
+        let session = CGSessionCopyCurrentDictionary();
+        if session.is_null() {
+            return None;
+        }
+        let value = CFDictionaryGetValue(session, (&*key as *const objc2_core_foundation::CFString).cast());
+        // No entry means the session isn't locked.
+        let locked = if value.is_null() { Some(false) } else if CFGetTypeID(value) == CFBooleanGetTypeID() { Some(CFBooleanGetValue(value) != 0) } else { None };
+        CFRelease(session);
+        locked
+    }
+}
+
+/// What to say after asking macOS to lock the screen.
+fn lock_reply(locked: Option<bool>) -> String {
+    match locked {
+        Some(true) => "Your screen is locked.".into(),
+        _ => "Asked your Mac to lock the screen.".into(),
+    }
+}
+
 /// Where finished timers are announced (set at launch).
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
@@ -324,6 +370,7 @@ pub(crate) fn spoken(seconds: u64) -> String {
 
 pub async fn run(command: Command) -> Result<Outcome, String> {
     let answer = match command {
+        Command::Focus(command) => return crate::utilities::run_focus(command),
         Command::Volume(change) => {
             let (action, level) = match change {
                 Volume::Set(level) => ("set", level.to_string()),
@@ -361,7 +408,9 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
                 return Err("To lock the screen for you, allow Buntini under System Settings → Privacy & Security → Accessibility, then ask again.".into());
             }
             osascript(LOCK, &[], 10).await?;
-            "Locking your screen.".to_string()
+            // Read back once, a moment later: only a screen macOS says is locked is claimed.
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            lock_reply(screen_locked())
         }
         Command::Timer { seconds } => {
             let app = APP
@@ -423,6 +472,16 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
 mod tests {
     use super::*;
     use crate::skills::words;
+
+    #[test]
+    fn a_locked_screen_is_claimed_only_when_macos_says_so() {
+        assert_eq!(lock_reply(Some(true)), "Your screen is locked.");
+        assert_eq!(lock_reply(Some(false)), "Asked your Mac to lock the screen.");
+        assert_eq!(lock_reply(None), "Asked your Mac to lock the screen.");
+        // The test runs while the screen is in use, so it reads as unlocked (or unknown in a
+        // session without a screen).
+        assert_ne!(screen_locked(), Some(true));
+    }
 
     fn ask(prompt: &str) -> Option<Command> {
         recognise(&words(prompt))

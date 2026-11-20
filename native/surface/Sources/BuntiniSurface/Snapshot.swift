@@ -8,13 +8,15 @@ public enum SurfaceSnapshot {
     /// A PNG of the island showing `scene` on a screen shaped like `screen`.
     @MainActor
     public static func png(scene: SurfaceScene, screen: ScreenShape, hover: Bool = false, expanded: Bool = false, scale: CGFloat = 2) -> Data? {
+        Lexicon.learn(scene)
         let model = IslandModel(screen: screen)
         model.scene = scene
         model.hover = hover
         model.expanded = expanded
-        let size = IslandGeometry.size(model.mode, screen: screen, openHeight: model.openHeight)
+        let size = model.size
+        let height = model.inCorner ? IslandGeometry.panel.height : max(size.height + 50, 120)
         let view = IslandRoot(model: model, send: { _ in })
-            .frame(width: IslandGeometry.panel.width, height: max(size.height + 40, 120), alignment: .top)
+            .frame(width: IslandGeometry.panel.width, height: height, alignment: .top)
             .clipped()
             .background(Color(white: 0.55))
             .environment(\.inPicture, true)

@@ -666,14 +666,12 @@ fn meeting_checks(text: &str) -> Vec<(&'static str, bool)> {
 
 pub(super) fn general_checks(text: &str) -> Vec<(&'static str, bool)> {
     let lower = text.to_lowercase();
-    // A physical packing item is not controller status. Keep the original
-    // journal guard for every other mention, including an actual task journal.
-    let journal_claim = lower
-        .replace("journal and pen", "")
-        .replace("journal & pen", "")
-        .contains("journal")
-        || lower.contains("task journal")
-        || lower.contains("controller journal");
+    // A journal listed as something to pack is an item, not a status claim.
+    let journal_claim = [
+        "task journal", "controller journal", "workflow journal", "action journal",
+        "in the journal", "to the journal", "the journal shows", "the journal says",
+        "journal:", "journal entry",
+    ].iter().any(|phrase| lower.contains(phrase));
     let cpu_claim = lower.contains("cpu") && (lower.contains('%') || lower.contains("percent"));
     let battery_claim = lower.contains("battery")
         && (lower.contains('%') || lower.contains("percent"))

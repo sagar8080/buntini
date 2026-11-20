@@ -6,6 +6,9 @@ import type { MailSettings } from './mail/model';
 import type { MediaSettings } from './media/model';
 import type { UtilitiesSettings } from './utilities/model';
 export type Mode = 'auto' | 'files' | 'system' | 'web';
+/** Something handed over with a message: a file, or a window the cat was let go over. */
+/** `brain`: the brain it was attached under (`attachments.ts` brainKey), the only one it goes to. */
+export type Attached = { kind: 'file'; path: string; brain: string } | { kind: 'window'; id: string; app: string; title: string; brain: string };
 export type PetState = 'idle' | 'listening' | 'thinking' | 'working' | 'speaking' | 'approval';
 export type CatCoat = 'ginger' | 'gray' | 'black' | 'white' | 'tuxedo' | 'calico' | 'siamese';
 export type CatEyes = 'amber' | 'green' | 'blue' | 'copper' | 'odd';
@@ -22,7 +25,7 @@ export type PetMotion = 'calm' | 'playful' | 'sleepy';
 /** accent is the resolved accessory colour (#RRGGBB). */
 export interface PetLook { coat: CatCoat; eyes: CatEyes; accessory: CatAccessory; motion: PetMotion; accent: string }
 export type ModelBackend = 'apple' | 'mlx' | 'cloud';
-export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'chatgpt' | 'custom';
+export type CloudProvider = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'qwen' | 'moonshot' | 'chatgpt' | 'lmstudio' | 'custom' | 'claude-code' | 'codex' | 'gemini-cli' | 'copilot' | 'cursor';
 export type KeyProvider = 'brave' | 'tavily' | 'ebay' | 'duffel' | CloudProvider;
 export interface Settings {
   modelBackend: ModelBackend;
@@ -41,6 +44,8 @@ export interface Settings {
   corners: 'round' | 'soft' | 'square';
   panelSize: 'compact' | 'standard' | 'large';
   statusText: string;
+  /** The language Buntini speaks (src/i18n.ts `languages`); empty follows the Mac. */
+  language: string;
   companionScale: number;
   catCoat: CatCoat;
   catEyes: CatEyes;
@@ -72,6 +77,10 @@ export interface Settings {
   reducedMotion: boolean;
   ebayMarketplace: string;
   externalShares: string[];
+  /** Brains allowed, once each, to work out questions about the person's own things. */
+  workoutBrains: string[];
+  /** Brains the person kept those questions from. */
+  workoutDeclined: string[];
   /** Apps Buntini may use (Settings → Apps). */
   apps: string[];
   cloudProvider: CloudProvider;
@@ -112,7 +121,9 @@ export interface TaskRecord {
   prices?: PriceOffer[];
   cards?: ResultCard[];
   /** Answers to pick when Buntini asked something. Each sends its prompt. */
-  choices?: { label: string; prompt: string }[];
+  choices?: { label: string; prompt: string; consent?: WorkoutConsent }[];
+  /** The apps the person tagged ("/calendar …"); only these were read. */
+  apps?: string[];
   system?: Record<string, unknown>;
   glance?: MacGlance;
   backend?: string;
@@ -137,6 +148,8 @@ export interface Diagnostics {
   remainingBudgetUsd?: number;
   cloudKeys?: string[];
   cloudSpendUsd?: number;
+  /** Command-line tools installed here that can answer as the brain. */
+  cliTools?: string[];
   chatgptAccount?: string | null;
   chatgptPlan?: 'none' | 'usable' | 'refused';
   chatgptAlwaysAllow?: boolean;
@@ -154,7 +167,7 @@ export interface WebApproval { id: string; prompt: string; provider: string; exp
 export interface ConversationSummary { id: string; title: string; createdAt: string; updatedAt: string; legacy: boolean; turnCount: number }
 export interface ConversationPage { conversation: ConversationSummary; turns: TaskRecord[]; nextCursor: string | null }
 export interface ConversationList { items: ConversationSummary[]; nextCursor: string | null }
-export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean }
+export interface Bootstrap { settings: Settings; tasks: TaskRecord[]; conversation: ConversationPage; conversations: ConversationList; roots: string[]; diagnostics: Diagnostics; audit: AuditEntry[]; savedSearches: SavedSearch[]; priceWatches: PriceWatch[]; routines?: Routine[]; goals?: Goal[]; conversationStart?: string | null; onboarded?: boolean; memories?: Memory[]; briefDue?: boolean; /** The language Buntini speaks when Settings leaves it to the Mac. */ systemLanguage?: string }
 export interface AppStatus { id: string; name: string; can: string[]; note?: string | null; installed: boolean; allowed: boolean }
 export interface AppList { apps: AppStatus[]; others: string[] }
 export type AppConnection = 'ready' | 'noAccount' | 'denied';
@@ -171,7 +184,8 @@ export type LoginStatus = 'enabled' | 'requiresApproval' | 'notRegistered' | 'no
 /** A heads-up the window lists until it is opened, dismissed or no longer relevant. */
 export interface HeadsUp { id: string; kind: 'meeting' | 'reminders' | 'reply'; title: string; detail: string; createdAt: string }
 /** A coding agent's request, shown on the cat (agents.rs). `questions` is set when it asks rather than acts. */
-export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; createdAt: string }
+/** `allow`: everything Allow approves is shown, so it can be offered; otherwise only Deny and In terminal. `changes`: every line an edit changes. `rules`: what Always keeps, and where. */
+export interface AgentRequest { id: string; agent: string; project: string; title: string; detail: string; code: boolean; questions: AgentQuestion[]; always?: boolean; plan?: boolean; allow?: boolean; changes?: { kind: string; text: string }[]; rules?: { rule: string; place: string }[]; createdAt: string }
 export interface AgentQuestion { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
 export interface AgentFinished { agent: string; project: string; message: string }
 export type AgentAnswer = { kind: 'allow' } | { kind: 'always' } | { kind: 'deny' } | { kind: 'terminal' } | { kind: 'answers'; answers: Record<string, string | string[]> };
@@ -200,3 +214,13 @@ export interface MacGlance {
   apps: GlanceApp[];
   capturedAt: string;
 }
+
+/** The person's answer about a brain working questions out, saved before the question is asked again. */
+export interface WorkoutConsent { brain: string; allow: boolean; shares: string[] }
+
+/** The tags that name the person's own apps at the start of a message, and the read each means. */
+export const appTags: { tag: string; app: string; read: string }[] = [
+  { tag: 'mail', app: 'mail', read: 'read_mail' },
+  { tag: 'calendar', app: 'calendar', read: 'read_calendar' },
+  { tag: 'reminders', app: 'reminders', read: 'read_reminders' },
+];

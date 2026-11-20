@@ -375,6 +375,35 @@ fn fts_query(query: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" OR "))
 }
 
+/// For each record of a source `keep` accepts that holds any of `words`: its source, its title
+/// and which of the words it holds, matched as the keyword index matches them ("noticed" holds
+/// "notice"). Says where a question's words are without reading any app.
+pub fn word_match_titles(db: &Connection, words: &[String], keep: impl Fn(&str) -> bool) -> Result<Vec<(String, String, Vec<usize>)>, String> {
+    let mut held: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut statement = db.prepare("SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?1 LIMIT 500").map_err(|e| e.to_string())?;
+    for (at, word) in words.iter().enumerate() {
+        let word: String = word.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+        if word.is_empty() {
+            continue;
+        }
+        let ids = statement.query_map([format!("\"{word}\"")], |row| row.get::<_, i64>(0)).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+        for id in ids {
+            held.entry(id).or_default().push(at);
+        }
+    }
+    let mut found = Vec::new();
+    let mut record = db.prepare("SELECT source, title FROM memory_records WHERE id=?1").map_err(|e| e.to_string())?;
+    let mut ids: Vec<i64> = held.keys().copied().collect();
+    ids.sort_unstable();
+    for id in ids {
+        let (source, title): (String, String) = record.query_row([id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(|e| e.to_string())?;
+        if keep(&source) {
+            found.push((source, title, held.remove(&id).unwrap_or_default()));
+        }
+    }
+    Ok(found)
+}
+
 fn dot(a: &[i8], b: &[i8]) -> i32 {
     a.iter().zip(b).map(|(x, y)| i32::from(*x) * i32::from(*y)).sum()
 }
@@ -937,6 +966,19 @@ mod tests {
             text: text.into(),
             observed_at: "2026-10-29 09:00".into(),
         }
+    }
+
+    #[test]
+    fn word_matches_say_which_words_each_record_holds() {
+        let db = db();
+        replace_source(&db, "mail", &[record("mail", "m1", "GitHub A new sign-in to your account", "We noticed a new sign-in from a Mac in London.", vec![Share::Mail])]).unwrap();
+        replace_source(&db, "calendar", &[record("calendar", "c1", "Dentist", "Harley Street", vec![Share::Calendar])]).unwrap();
+        let words: Vec<String> = ["github", "notice", "dentist", "cake"].iter().map(|word| word.to_string()).collect();
+        let mut found = word_match_titles(&db, &words, |_| true).unwrap();
+        found.sort();
+        assert_eq!(found, [("calendar".to_string(), "Dentist".to_string(), vec![2]), ("mail".to_string(), "GitHub A new sign-in to your account".to_string(), vec![0, 1])], "stemmed, as the index matches");
+        assert!(word_match_titles(&db, &words, |source| source != "mail").unwrap().iter().all(|(source, ..)| source == "calendar"), "only sources it may use");
+        assert!(word_match_titles(&db, &["\"cake\" OR \"dentist".to_string()], |_| true).unwrap().is_empty(), "a word is only a word");
     }
 
     /// Indexes `notes` with the bundled model and counts, for each (question, title label),

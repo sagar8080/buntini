@@ -1,6 +1,7 @@
 // Settings save on their own. The saver lives as long as the app, not the Settings page, so an
 // edit made just before Esc still saves. It sends one save at a time, always the newest edit,
 // and waits out a running task (which keeps the policy it started with) instead of dropping it.
+import { t } from './i18n.ts';
 import type { Settings } from './types';
 
 export type SaveState = 'idle' | 'saving' | 'waiting' | 'saved' | 'error';
@@ -9,7 +10,7 @@ export type SaveState = 'idle' | 'saving' | 'waiting' | 'saved' | 'error';
     That is worth waiting for, not reporting as a failure. */
 export const isBusyRefusal = (message: string) => message.startsWith('Finish or cancel the current task');
 
-const messageOf = (error: unknown) => error instanceof Error ? error.message : typeof error === 'string' ? error : 'Something went wrong. Please try again.';
+const messageOf = (error: unknown) => error instanceof Error ? error.message : typeof error === 'string' ? error : t('settings.save.failed');
 
 export class SettingsSaver {
   state: SaveState = 'idle';

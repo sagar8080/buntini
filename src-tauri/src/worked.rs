@@ -393,6 +393,53 @@ pub fn assignments(goal: &str, steps: &[Step]) -> Option<String> {
     )
 }
 
+/// Compare two quotes whose excerpts give one explicit euro price and say
+/// whether assembly is included. Leave other quote formats to the answer phase.
+pub(crate) fn compare_vendor_quotes(goal: &str, files: &[crate::types::FileHit]) -> Option<String> {
+    let ask = crate::completion::unquoted(goal);
+    if !ask.starts_with("compare ") || !ask.contains("quotes") || !ask.contains("by how many euros")
+        || !ask.contains("assembly") || crate::completion::requested_actions(goal) != (vec![], false)
+    {
+        return None;
+    }
+    let [first, second] = files else { return None; };
+    let read = |file: &crate::types::FileHit| {
+        let excerpt = file.excerpt.as_deref()?;
+        let (label, values) = excerpt.split_once(':')?;
+        if !label.to_ascii_lowercase().contains("vendor quote") {
+            return None;
+        }
+        let (name, values) = values.trim().split_once(" costs ")?;
+        if name.is_empty() || !name.chars().all(|ch| ch.is_alphanumeric() || ch == ' ' || ch == '-') {
+            return None;
+        }
+        let (price, terms) = values.split_once(" euros")?;
+        let price = price.trim().parse::<u64>().ok()?;
+        let included = match terms.trim_matches([' ', ',', '.']).to_ascii_lowercase().as_str() {
+            "including assembly" | "with assembly included" => true,
+            "excluding assembly" | "with assembly not included" => false,
+            _ => return None,
+        };
+        Some((name.to_string(), price, included))
+    };
+    let a = read(first)?;
+    let b = read(second)?;
+    if a.0.eq_ignore_ascii_case(&b.0) {
+        return None;
+    }
+    let describe = |quote: &(String, u64, bool)| {
+        let key = if quote.2 { "chat.answer.quoteAssemblyIncluded" } else { "chat.answer.quoteAssemblyExcluded" };
+        crate::i18n::tf(key, &[("vendor", &quote.0), ("price", &quote.1)])
+    };
+    let comparison = if a.1 == b.1 {
+        crate::i18n::t("chat.answer.quotePriceTie")
+    } else {
+        let cheaper = if a.1 < b.1 { &a.0 } else { &b.0 };
+        crate::i18n::tf("chat.answer.quoteCheaper", &[("vendor", cheaper), ("difference", &a.1.abs_diff(b.1))])
+    };
+    Some(format!("{comparison} {} {}", describe(&a), describe(&b)))
+}
+
 /// The first worked answer that applies to this request and journal.
 pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
     itinerary(goal)
@@ -400,7 +447,102 @@ pub fn answer(goal: &str, steps: &[Step], today: NaiveDate) -> Option<String> {
         .or_else(|| rule_choice(goal, steps, today))
         .or_else(|| assignments(goal, steps))
         .or_else(|| conversion(goal))
+        .or_else(|| leap_year(goal, today))
+        .or_else(|| clock_span(goal))
         .or_else(|| countdown(goal, today))
+        .or_else(|| text_work(goal))
+}
+
+/// Text the question itself gives, worked on as asked, which Apple's model got wrong on two
+/// macOS versions: a word spelled backwards, words in title case, a letter counted, a number
+/// with thousands separators, a clock time in the other format.
+fn text_work(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['’', '‘'], "'");
+    let quoted = quoted_text(goal);
+    let words: Vec<String> = lower.split(|c: char| c.is_whitespace()).map(|word| word.trim_matches(|c: char| ",.?!:;\"“”".contains(c)).to_string()).filter(|word| !word.is_empty()).collect();
+    let at = |word: &str| words.iter().position(|seen| seen == word);
+    // "spell accommodate backwards", "spell 'calendar' backwards", "reverse the word lemon".
+    if lower.contains("backwards") || lower.contains("backward") || words.first().is_some_and(|word| word == "reverse") {
+        let target = quoted.clone().or_else(|| {
+            let start = at("spell").or_else(|| at("reverse"))? + 1;
+            let end = words.iter().position(|word| word.starts_with("backward")).unwrap_or(words.len());
+            let picked: Vec<&String> = words.get(start..end)?.iter().filter(|word| !["the", "word", "name"].contains(&word.as_str())).collect();
+            (picked.len() == 1).then(|| picked[0].trim_matches('\'').to_string())
+        })?;
+        let reversed: String = target.chars().rev().collect();
+        return Some(format!("“{target}” backwards is **{reversed}**."));
+    }
+    // "Put 'the quick brown fox' into title case."
+    if lower.contains("title case") {
+        let target = quoted?;
+        let titled: Vec<String> = target.split(' ').map(|word| {
+            let mut chars = word.chars();
+            chars.next().map(|first| first.to_uppercase().chain(chars.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
+        }).collect();
+        return Some(format!("**{}**", titled.join(" ")));
+    }
+    // "how many e's are in tennessee", "how many times does r appear in strawberry".
+    if let Some(many) = words.windows(2).position(|pair| pair[0] == "how" && pair[1] == "many") {
+        let letter = words.get(many + 2).and_then(|word| {
+            let bare = word.trim_end_matches("'s").trim_end_matches('s');
+            (bare.chars().count() == 1 && bare.chars().all(char::is_alphabetic)).then(|| bare.chars().next()).flatten()
+        }).or_else(|| (words.get(many + 2).map(String::as_str) == Some("times")).then(|| words.iter().position(|word| word == "letter").and_then(|at| words.get(at + 1)).and_then(|word| word.chars().next())).flatten());
+        let target = quoted.clone().or_else(|| words.iter().rposition(|word| word == "in").and_then(|at| words.get(at + 1)).filter(|word| word.chars().all(char::is_alphabetic)).cloned());
+        if let (Some(letter), Some(target)) = (letter, target) {
+            let count = target.to_lowercase().chars().filter(|c| *c == letter).count();
+            return Some(format!("There {} **{count}** {letter}’s in “{target}”.", if count == 1 { "is" } else { "are" }));
+        }
+    }
+    // "Write 1234567 with commas as thousands separators."
+    if lower.contains("comma") || lower.contains("thousands") {
+        let number = words.iter().find(|word| word.len() >= 4 && word.chars().all(|c| c.is_ascii_digit()))?;
+        let digits: Vec<char> = number.chars().collect();
+        let mut grouped = String::new();
+        for (at, digit) in digits.iter().enumerate() {
+            if at > 0 && (digits.len() - at) % 3 == 0 {
+                grouped.push(',');
+            }
+            grouped.push(*digit);
+        }
+        return Some(format!("**{grouped}**"));
+    }
+    // "21:45 in 12 hour time", "what's 9:45 pm in 24-hour time".
+    let twelve = lower.contains("12 hour") || lower.contains("12-hour") || lower.contains("am/pm");
+    let twenty_four = lower.contains("24 hour") || lower.contains("24-hour");
+    // "Tomorrow's calendar with am/pm times" is about their day; only a time written out is converted.
+    let theirs = ["my", "tomorrow", "today", "tomorrow's", "today's", "calendar", "meetings", "events"].iter().any(|word| words.iter().any(|seen| seen == word));
+    if (twelve || twenty_four) && !theirs {
+        let times = crate::literals::times(goal);
+        let [minutes] = times.as_slice() else { return None };
+        let (hour, minute) = (minutes / 60, minutes % 60);
+        return Some(if twelve {
+            let half = if hour < 12 { "am" } else { "pm" };
+            let shown = match hour % 12 { 0 => 12, other => other };
+            format!("**{shown}:{minute:02} {half}**")
+        } else {
+            format!("**{hour:02}:{minute:02}**")
+        });
+    }
+    None
+}
+
+/// The text a question puts in quotes: 'calendar', "the quick brown fox", “fox”. A quote mark
+/// inside a word ("what's") opens nothing.
+fn quoted_text(goal: &str) -> Option<String> {
+    for (open, close) in [('"', '"'), ('“', '”'), ('‘', '’'), ('\'', '\'')] {
+        for (start, _) in goal.match_indices(open) {
+            if goal[..start].chars().last().is_some_and(char::is_alphanumeric) {
+                continue;
+            }
+            let rest = &goal[start + open.len_utf8()..];
+            let Some(end) = rest.find(close) else { continue };
+            let text = rest[..end].trim();
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// A unit, its kind and how many of the kind's base unit it is. Cups, pints, quarts and
@@ -455,6 +597,18 @@ fn shown(value: f64) -> String {
 /// Pounds that become dollars are money, not weight, and aren't answered here.
 fn conversion(goal: &str) -> Option<String> {
     let lower = goal.to_lowercase().replace(['?', '!'], " ").replace("°", " ").replace("degrees", " ").replace("fl oz", "floz");
+    // "22c in fahrenheit", "5km to miles": a unit written against its number.
+    let apart: Vec<String> = lower
+        .split_whitespace()
+        .map(|word| {
+            let at = word.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | ',' | '-'))).unwrap_or(word.len());
+            match word.split_at(at) {
+                (number, rest) if amount(number).is_some() && unit(rest).is_some() => format!("{number} {rest}"),
+                _ => word.to_string(),
+            }
+        })
+        .collect();
+    let lower = apart.join(" ");
     let words: Vec<&str> = lower.split_whitespace().collect();
     // From and to: "N from in|to to", or "how many to in|are in N from".
     let (value, from, to) = if let Some(at) = words.iter().position(|word| *word == "many") {
@@ -498,6 +652,74 @@ fn conversion(goal: &str) -> Option<String> {
     let (from_name, to_name) = (named(value, from.2), named(result, to.2));
     let joiner = if from.0 == "temperature" { "" } else { " " };
     Some(format!("{}{joiner}{from_name} is {}{joiner}{to_name}.", shown(value), shown(result)))
+}
+
+/// "is 2028 a leap yr", "was 1900 a leap year", "is this year a leap year", "when's the next
+/// leap year": by the Gregorian rule, which Apple's model turned round ("2028 is not a century
+/// year, so it is not a leap year"). Counting leap years over a span is left alone.
+fn leap_year(goal: &str, today: NaiveDate) -> Option<String> {
+    let leap = |year: i32| year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let lower = goal.to_lowercase().replace(['?', '!', ',', '.', '’', '\''], " ").replace("leap-year", "leap year").replace("leapyear", "leap year");
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let at = words.windows(2).position(|pair| pair[0] == "leap" && ["year", "yr", "years", "yrs"].contains(&pair[1]))?;
+    if words.iter().any(|word| ["how", "between", "since", "until", "till", "from", "count", "many"].contains(word)) {
+        return None;
+    }
+    let mut years: Vec<i32> = words.iter().filter(|word| word.len() == 4).filter_map(|word| word.parse().ok()).collect();
+    years.dedup();
+    if years.iter().any(|year| !(1583..=9999).contains(year)) {
+        return None;
+    }
+    let now = today.year();
+    // "the next leap year", "the next leap year after 2030", "when was the last leap year".
+    let from = match years.as_slice() {
+        [] => Some(now),
+        [year] => Some(*year),
+        _ => None,
+    };
+    match (at.checked_sub(1).and_then(|before| words.get(before)), from) {
+        (Some(&"next"), Some(from)) => return (from + 1..).find(|year| leap(*year)).map(|year| format!("The next leap year is {year}.")),
+        (Some(&"last") | Some(&"previous"), Some(from)) => return (1583..from).rev().find(|year| leap(*year)).map(|year| format!("The last leap year was {year}.")),
+        (Some(&"next") | Some(&"last") | Some(&"previous"), None) => return None,
+        _ => {}
+    }
+    if years.is_empty() {
+        // "is this year a leap year", "will next year be one".
+        let named = words.windows(2).find(|pair| pair[1] == "year" && ["this", "next", "last"].contains(&pair[0]))?;
+        years.push(match named[0] { "this" => now, "next" => now + 1, _ => now - 1 });
+    }
+    let said: Vec<String> = years
+        .iter()
+        .map(|year| if leap(*year) { format!("Yes, {year} is a leap year: February has 29 days.") } else { format!("No, {year} isn’t a leap year: February has 28 days.") })
+        .collect();
+    Some(said.join("\n"))
+}
+
+/// "if i fall asleep at 23:40 and wake up at 6:15 how long did i sleep", "how many hours from
+/// 9am to 5:30pm": the two clock times the question gives, past midnight when the second is
+/// earlier. Times on their calendar ("my 2pm and 4pm meetings") are theirs to read, not this.
+fn clock_span(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase().replace(['’', '‘'], "'");
+    let asks = ["how long", "how many hours", "how many minutes", "how much time"].iter().any(|cue| lower.contains(cue));
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|word| !word.is_empty()).collect();
+    const THEIRS: [&str; 13] = ["my", "our", "meeting", "meetings", "calendar", "event", "events", "appointment", "appointments", "today", "tomorrow", "today's", "tomorrow's"];
+    // A flight's times are local to two places, so their difference isn't its length.
+    const AWAY: [&str; 12] = ["flight", "flights", "fly", "flying", "lands", "land", "arrives", "arrive", "departs", "depart", "local", "zone"];
+    if !asks || words.iter().any(|word| THEIRS.contains(word) || AWAY.contains(word)) {
+        return None;
+    }
+    let [from, to] = crate::literals::times(goal)[..] else { return None };
+    let minutes = (to + 24 * 60 - from) % (24 * 60);
+    if minutes == 0 {
+        return None;
+    }
+    let (hours, minutes) = (minutes / 60, minutes % 60);
+    let length = match (hours, minutes) {
+        (0, m) => format!("{m} minute{}", if m == 1 { "" } else { "s" }),
+        (h, 0) => format!("{h} hour{}", if h == 1 { "" } else { "s" }),
+        (h, m) => format!("{h} hour{} and {m} minute{}", if h == 1 { "" } else { "s" }, if m == 1 { "" } else { "s" }),
+    };
+    Some(format!("From {} to {} is {length}.", hhmm(from), hhmm(to)))
 }
 
 /// "how many days until christmas", "how long till friday": counted from today.
@@ -544,6 +766,23 @@ fn countdown(goal: &str, today: NaiveDate) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn text_the_question_gives_is_worked_on_by_rust() {
+        let worked = |goal: &str| text_work(goal).unwrap_or_default().replace("**", "");
+        assert_eq!(worked("Spell 'calendar' backwards."), "“calendar” backwards is radnelac.");
+        assert_eq!(worked("spell accommodate backwards"), "“accommodate” backwards is etadommocca.");
+        assert_eq!(worked("Put 'the quick brown fox' into title case."), "The Quick Brown Fox");
+        assert_eq!(worked("how many e's are in tennessee"), "There are 4 e’s in “tennessee”.");
+        assert_eq!(worked("how many r's in strawberry?"), "There are 3 r’s in “strawberry”.");
+        assert_eq!(worked("Write 1234567 with commas as thousands separators."), "1,234,567");
+        assert_eq!(worked("21:45 in 12 hour time?"), "9:45 pm");
+        assert_eq!(worked("what's 9:45 pm in 24-hour time"), "21:45");
+        assert_eq!(worked("what's 00:30 in 12-hour time"), "12:30 am");
+        for other in ["what's on my calendar backwards compatible", "how many emails did I get", "what time is it", "write a note with commas", "tomorrow's work calendar pls, with am/pm times, not 24h", "list my meetings at 9:30 in 12-hour time"] {
+            assert_eq!(text_work(other), None, "{other}");
+        }
+    }
+
     use serde_json::json;
 
     #[test]
@@ -558,6 +797,47 @@ mod tests {
         assert_eq!(countdown("how many days until christmas", saturday).as_deref(), Some("48 days until Christmas, Friday 25 December."));
         assert_eq!(countdown("how long until friday?", saturday).as_deref(), Some("6 days, until Friday 13 November."));
         assert_eq!(countdown("how many days until my birthday", saturday), None);
+    }
+
+    #[test]
+    fn a_unit_written_against_its_number_is_still_converted() {
+        assert_eq!(conversion("22c in fahrenheit?").as_deref(), Some("22°C is 71.6°F."));
+        assert_eq!(conversion("5km to miles").as_deref(), Some("5 km is 3.11 miles."));
+        assert_eq!(conversion("-40f in c").as_deref(), Some("-40°F is -40°C."));
+        assert_eq!(conversion("2.5kg in lbs").as_deref(), Some("2.5 kg is 5.51 pounds."));
+        // Ordinals and times aren't units.
+        assert_eq!(conversion("who came 1st in the race"), None);
+        assert_eq!(conversion("is 30c hot"), None);
+    }
+
+    #[test]
+    fn leap_years_follow_the_gregorian_rule() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+        assert_eq!(leap_year("is 2028 a leap yr", today).as_deref(), Some("Yes, 2028 is a leap year: February has 29 days."));
+        assert_eq!(leap_year("was 1900 a leap year?", today).as_deref(), Some("No, 1900 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("Is 2000 a leap-year", today).as_deref(), Some("Yes, 2000 is a leap year: February has 29 days."));
+        assert_eq!(leap_year("is this year a leap year", today).as_deref(), Some("No, 2026 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("will next year be a leap year", today).as_deref(), Some("No, 2027 isn’t a leap year: February has 28 days."));
+        assert_eq!(leap_year("when's the next leap year", today).as_deref(), Some("The next leap year is 2028."));
+        assert_eq!(leap_year("next leap year after 2028?", today).as_deref(), Some("The next leap year is 2032."));
+        assert_eq!(leap_year("when was the last leap year", today).as_deref(), Some("The last leap year was 2024."));
+        assert_eq!(leap_year("are 2024 and 2100 leap years", today).as_deref(), Some("Yes, 2024 is a leap year: February has 29 days.\nNo, 2100 isn’t a leap year: February has 28 days."));
+        // Counting over a span, or a day of their own, isn't this.
+        assert_eq!(leap_year("how many leap years between 2000 and 2100", today), None);
+        assert_eq!(leap_year("is my anniversary in a leap year", today), None);
+        assert_eq!(leap_year("what's a leap year", today), None);
+    }
+
+    #[test]
+    fn the_length_between_two_given_clock_times_is_worked_out() {
+        assert_eq!(clock_span("if i fall asleep at 23:40 and wake up at 6:15 how long did i sleep").as_deref(), Some("From 23:40 to 06:15 is 6 hours and 35 minutes."));
+        assert_eq!(clock_span("how many hours from 9am to 5:30pm?").as_deref(), Some("From 09:00 to 17:30 is 8 hours and 30 minutes."));
+        assert_eq!(clock_span("went to bed at 11pm and got up at 7am, how long is that").as_deref(), Some("From 23:00 to 07:00 is 8 hours."));
+        // Their own day is read, not worked out from the words.
+        assert_eq!(clock_span("how long between my 2pm and 4pm meetings"), None);
+        assert_eq!(clock_span("how many hours between 9:15 and 17:00").as_deref(), Some("From 09:15 to 17:00 is 7 hours and 45 minutes."));
+        assert_eq!(clock_span("how long is the walk at 3pm"), None);
+        assert_eq!(clock_span("the flight leaves at 9:40 and lands at 13:05, how long is it"), None);
     }
 
     fn note(body: &str) -> Vec<Step> {

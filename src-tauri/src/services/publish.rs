@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 
 use super::{Kind, Row, Snapshot};
+use crate::i18n::{t, tf};
 use crate::surface::cards::services::{ServiceCard, ServiceRow};
 use crate::surface::{Card, CardBody, Contribution, Offer, Pill, PillState, Source, Urgency, ERROR_MS};
 
@@ -78,7 +79,7 @@ pub fn contribution(views: &[View]) -> Contribution {
     let mut contribution = Contribution::default();
     for view in views {
         let id = card_id(view.kind);
-        let pill = |state, badge| Pill { id: id.clone(), source: Source::Services, label: view.kind.name().into(), tint: view.kind.tint().into(), state, badge, progress: None };
+        let pill = |state, badge| Pill { id: id.clone(), source: Source::Services, label: view.kind.name().into(), tint: view.kind.tint().into(), state, badge, progress: None, card: None };
         let Some(snapshot) = view.snapshot else {
             if view.rejected {
                 contribution.pills.push(pill(PillState::Error, None));
@@ -94,8 +95,11 @@ pub fn contribution(views: &[View]) -> Contribution {
         });
         let fresh: Vec<&Row> = view.shown.fresh.iter().filter_map(|fresh| snapshot.rows.iter().find(|row| &row.id == fresh)).collect();
         if let Some(first) = fresh.first() {
-            let more = if fresh.len() > 1 { format!(" +{}", fresh.len() - 1) } else { String::new() };
-            let title = format!("{}: {}{more}", first.alert.unwrap_or("New"), first.title);
+            let alert = first.alert.clone().unwrap_or_else(|| t("services.alert.new"));
+            let title = match fresh.len() {
+                1 => tf("services.alert.title", &[("alert", &alert), ("title", &first.title)]),
+                count => tf("services.alert.titleMore", &[("alert", &alert), ("title", &first.title), ("more", &(count - 1))]),
+            };
             let rows: Vec<&Row> = fresh.iter().copied().chain(snapshot.rows.iter().filter(|row| !view.shown.fresh.contains(&row.id))).collect();
             contribution.offers.push(Offer {
                 card: card(view.kind, format!("{id}.alert"), title, rows, None),
@@ -140,7 +144,7 @@ mod tests {
 
     fn row(id: &str, state: PillState, alert: Option<&'static str>) -> Row {
         let mut row = Row::new(id, format!("Title {id}")).state(Some(state));
-        row.alert = alert;
+        row.alert = alert.map(String::from);
         row
     }
 
@@ -240,12 +244,15 @@ mod tests {
             pills: picked.pills,
             overflow: picked.overflow,
             card: picked.card,
+            shelf: picked.shelf,
             held: picked.held,
             interrupt: picked.interrupt,
             cat: Cat::default(),
             flow: None,
             overlay: None,
             sound: None,
+            line: None,
+            words: None,
         };
         assert!(!scene.held);
         assert_eq!(scene.pills[0].state, PillState::Waiting);

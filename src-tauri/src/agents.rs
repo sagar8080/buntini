@@ -9,6 +9,7 @@
 //!
 //! Nothing here goes to a model or leaves the Mac.
 
+mod codex;
 mod dialect;
 mod diff;
 pub mod recap;
@@ -30,6 +31,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 
+use crate::i18n::{t, tf};
+use crate::surface::cards::agents::{AgentRule, DiffLine};
+
 /// Longest event read from a hook. Events Buntini listens to are a few KB.
 const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 /// How long a hook may take to hand over its event.
@@ -49,8 +53,15 @@ const HOOK_CHECK: Duration = Duration::from_millis(400);
 const LONG_TURN: Duration = Duration::from_secs(20);
 /// A session quiet this long leaves the island.
 const SESSION_IDLE: Duration = Duration::from_secs(15 * 60);
-/// Longest command, path or plan shown on a request.
-const MAX_DETAIL: usize = 1_200;
+/// Longest command, path or plan shown on a request, whole. A longer one is cut, and then
+/// only the terminal can allow it.
+const MAX_DETAIL: usize = 16_000;
+/// Most lines of an edit shown, and the longest line. Past them, only the terminal can allow it.
+const MAX_CHANGE_LINES: usize = 400;
+const MAX_CHANGE_CHARS: usize = 400;
+/// How long a request shows before a click on it counts, as in the chat's card
+/// (src/AgentRequests.tsx) and on the island.
+pub const ARMING_MS: u64 = 700;
 /// macOS keeps socket paths under 104 bytes, the terminating zero included.
 const MAX_SOCKET_PATH: usize = 103;
 
@@ -124,10 +135,17 @@ pub struct AgentRequest {
     pub code: bool,
     /// Set when the agent is asking the user something rather than asking to act.
     pub questions: Vec<AgentQuestion>,
-    /// "Always" can be offered: the agent suggested a rule, or this is its plan.
+    /// "Always" can be offered: the agent suggested rules the card can show, or this is its plan.
     pub always: bool,
     /// The agent's plan, waiting to be started.
     pub plan: bool,
+    /// "Allow" can be offered: everything it approves is on the card. Otherwise only Deny
+    /// and In terminal are.
+    pub allow: bool,
+    /// What an edit changes, line by line.
+    pub changes: Vec<DiffLine>,
+    /// The rules "Always" keeps, and where.
+    pub rules: Vec<AgentRule>,
     pub created_at: String,
 }
 
@@ -187,6 +205,7 @@ struct Hub {
     next: u64,
     waiting: Vec<Waiting>,
     sessions: HashMap<(Agent, String), session::Session>,
+    codex_app_server_threads: HashMap<String, usize>,
     /// Last week's recap while it shows.
     recap: Option<(crate::surface::Card, u64)>,
     /// Each agent's plan windows, as last heard.
@@ -222,13 +241,9 @@ pub fn start(app: AppHandle, dir: PathBuf) {
     hub().app = Some(app);
     surface::listen();
     let dir = DIR.get_or_init(|| dir).clone();
-    // Hooks written by an earlier Buntini listen to fewer events.
-    std::thread::spawn(|| {
-        crate::agent_setup::refresh();
-        if heard(Agent::Codex) {
-            refresh_codex_usage();
-        }
-    });
+    // Hooks written by an earlier Buntini listen to fewer events. Codex's plan windows wait
+    // for its next turn (`finished`), as PRIVACY.md says.
+    std::thread::spawn(crate::agent_setup::refresh);
     // On Monday morning, last week once.
     tauri::async_runtime::spawn(async {
         loop {
@@ -245,6 +260,19 @@ pub fn start(app: AppHandle, dir: PathBuf) {
             }
         });
     }
+}
+
+/// Forgets what Buntini holds about the agents in memory: the week so far, the sessions on
+/// the island and their plan windows. For Delete everything (`agent_setup::erase`), once
+/// the files are gone, so nothing is saved back.
+pub fn forget() {
+    *RECAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = recap::Recap::default();
+    let mut hub = hub();
+    hub.recap = None;
+    hub.diff = None;
+    hub.sessions.clear();
+    hub.usage.clear();
+    surface::publish(&hub);
 }
 
 /// Removes the sockets, so hooks find nothing and stay out of the way.
@@ -317,7 +345,10 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
         return;
     };
     mark_heard(agent);
-    // Antigravity waits for a word on every tool: "allow" hands the call to its own rules.
+    // Antigravity waits for a word on every tool (`decision` is required). "allow" is its
+    // neutral one: "allows the tool call to proceed, delegating to the next hook or default
+    // policy" (antigravity.google/docs/hooks), so its own rules and prompts still decide.
+    // Approving outright would be `auto_approve`, which Buntini never sends.
     if agent == Agent::Antigravity && hint == "PreToolUse" {
         let _ = stream.write_all(b"{\"decision\":\"allow\"}\n").await;
         let _ = stream.shutdown().await;
@@ -336,6 +367,10 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
     let socket_agent = agent;
     let Some((agent, payload)) = dialect::normalize(agent, &hint, &payload) else { return };
     let Some(mut event) = HookEvent::from_payload(&payload) else { return };
+    // Buntini's own brain runs (`cli.rs`) aren't the person's sessions.
+    if crate::cli::is_brain_folder(&event.cwd) {
+        return;
+    }
     event.host = host;
     match event.name.as_str() {
         "SessionStart" => track(agent, &event, |_, _| {}),
@@ -372,6 +407,11 @@ async fn serve(mut stream: UnixStream, agent: Agent) {
             surface::publish(&hub);
         }
         "PermissionRequest" => {
+            // App Server asks after the hooks and includes the execution directory and
+            // permissions. Leave shell decisions to it for threads on its connection.
+            if agent == Agent::Codex && is_shell(&event.tool) && hub().codex_app_server_threads.contains_key(&event.session) {
+                return;
+            }
             if let Some(reply) = ask(agent, socket_agent, &event, &stream).await {
                 let mut line = reply.into_bytes();
                 line.push(b'\n');
@@ -506,10 +546,11 @@ fn track(agent: Agent, event: &HookEvent, update: impl FnOnce(&mut session::Sess
     crate::island::agent_activity();
 }
 
-/// Sessions a dropped file's path can be pasted into, newest first: (pill, label).
+/// Sessions a dropped file's path can be pasted into, newest first: (pill, label). Only
+/// those running in a terminal app.
 pub fn drop_targets() -> Vec<(String, String)> {
     let hub = hub();
-    let mut sessions: Vec<&session::Session> = hub.sessions.values().filter(|session| terminal::app_for(&session.host).is_some()).collect();
+    let mut sessions: Vec<&session::Session> = hub.sessions.values().filter(|session| terminal::terminal_for(&session.host).is_some()).collect();
     sessions.sort_by_key(|session| std::cmp::Reverse(session.last_ms));
     sessions
         .into_iter()
@@ -582,35 +623,39 @@ fn finished(agent: Agent, event: &HookEvent) {
     }
 }
 
+/// A card belongs to a single live request. Dropping its owner withdraws it.
+struct Pending(String);
+
+impl Pending {
+    fn show(view: AgentRequest, agent: Agent, session: String, tool: String, input: Value) -> (Self, oneshot::Receiver<Answer>) {
+        let pending = Self(view.id.clone());
+        let (sender, receiver) = oneshot::channel();
+        let mut hub = hub();
+        hub.waiting.push(Waiting { view, agent, session, tool, input, reply: Some(sender), at_ms: crate::surface::now_ms() });
+        emit_requests(&hub);
+        (pending, receiver)
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut hub = hub();
+        hub.waiting.retain(|waiting| waiting.view.id != self.0);
+        emit_requests(&hub);
+    }
+}
+
 /// Shows the request and waits for the click, the hook going away, or the time limit.
 /// Returns what the hook prints back, if anything.
 async fn ask(agent: Agent, socket_agent: Agent, event: &HookEvent, stream: &UnixStream) -> Option<String> {
     let view = describe(agent, event)?;
-    let id = view.id.clone();
-    let (sender, receiver) = oneshot::channel();
-    {
-        let mut hub = hub();
-        hub.waiting.push(Waiting {
-            view,
-            agent,
-            session: event.session.clone(),
-            tool: event.tool.clone(),
-            input: event.input.clone(),
-            reply: Some(sender),
-            at_ms: crate::surface::now_ms(),
-        });
-        emit_requests(&hub);
-    }
+    let (pending, receiver) = Pending::show(view, agent, event.session.clone(), event.tool.clone(), event.input.clone());
     let answer = tokio::select! {
         answer = receiver => answer.ok(),
         _ = hook_gone(stream) => None,
         _ = tokio::time::sleep(decision_budget(agent)) => None,
     };
-    {
-        let mut hub = hub();
-        hub.waiting.retain(|waiting| waiting.view.id != id);
-        emit_requests(&hub);
-    }
+    drop(pending);
     let answer = answer?;
     let line = decision(&answer, event).map(|decision| dialect::reply(socket_agent, decision).to_string());
     if line.is_some() && event.tool != "AskUserQuestion" {
@@ -649,26 +694,40 @@ fn next_id() -> String {
     format!("agent-{}-{}", std::process::id(), hub.next)
 }
 
-/// What the request is, in words. None for something Buntini can't show faithfully,
-/// which then stays with the terminal.
+fn is_shell(tool: &str) -> bool {
+    matches!(tool, "Bash" | "shell" | "local_shell" | "exec_command" | "unified_exec")
+}
+
+/// What the request is, in words. None for something Buntini can't show at all, which then
+/// stays with the terminal. Allow is offered only when everything it approves is on the
+/// card: the whole command, every line an edit changes, no setting that changes how it runs.
 fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
     let input = &event.input;
     let string = |key: &str| input.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
     let path = |key: &str| relative(&string(key), &event.cwd);
     let mut questions = Vec::new();
+    // Nothing Allow would approve is missing from the card.
+    let mut shown = true;
+    let mut changes = Vec::new();
     let (title, detail, code) = match event.tool.as_str() {
         "AskUserQuestion" => {
             questions = parse_questions(input)?;
             (String::new(), String::new(), false)
         }
-        "Bash" | "shell" | "local_shell" | "exec_command" | "unified_exec" => {
+        tool if is_shell(tool) => {
             let command = match input.get("command").or_else(|| input.get("cmd")) {
                 Some(Value::Array(parts)) => parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "),
                 Some(Value::String(command)) => command.trim().to_string(),
                 _ => return None,
             };
+            // Claude Code's own settings for the run; outside the sandbox is one the card doesn't show.
+            shown = only(input, &["command", "cmd", "description", "timeout", "run_in_background", "dangerouslyDisableSandbox"])
+                && input.get("dangerouslyDisableSandbox").is_none_or(|value| *value == Value::Bool(false))
+                // Codex's hook isn't told whether the command would run outside its sandbox or
+                // with more permissions, which its own prompt shows.
+                && agent != Agent::Codex;
             let said = string("description");
-            (if said.is_empty() { "Run a command".into() } else { said }, command, true)
+            (if said.is_empty() { t("agents.request.runCommand") } else { said }, command, true)
         }
         "apply_patch" => {
             let patch = match input.get("command").or_else(|| input.get("patch")).or_else(|| input.get("input")) {
@@ -676,42 +735,225 @@ fn describe(agent: Agent, event: &HookEvent) -> Option<AgentRequest> {
                 Some(Value::String(patch)) => patch.clone(),
                 _ => String::new(),
             };
-            let files = patch_files(&patch, &event.cwd);
-            ("Change files".into(), if files.is_empty() { patch } else { files.join("\n") }, true)
+            match patch_lines(&patch) {
+                Some(lines) if !patch.trim().is_empty() && only(input, &["command", "patch", "input"]) => changes = lines,
+                _ => shown = false,
+            }
+            (t("agents.request.changeFiles"), patch_files(&patch, &event.cwd).join("\n"), true)
         }
-        "Edit" | "MultiEdit" => (format!("Edit {}", file_name(&string("file_path"))), path("file_path"), true),
-        "Write" => (format!("Write {}", file_name(&string("file_path"))), path("file_path"), true),
-        "NotebookEdit" => (format!("Edit {}", file_name(&string("notebook_path"))), path("notebook_path"), true),
-        "Read" => (format!("Read {}", file_name(&string("file_path"))), path("file_path"), true),
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
+            match edit_changes(&event.tool, input, &event.cwd) {
+                Some(lines) => changes = lines,
+                None => shown = false,
+            }
+            let notebook = event.tool == "NotebookEdit";
+            let file = file_name(&string(if notebook { "notebook_path" } else { "file_path" }));
+            let title = match (event.tool.as_str(), file) {
+                ("Write", Some(file)) => tf("agents.request.write", &[("file", &file)]),
+                ("Write", None) => t("agents.request.writeAFile"),
+                (_, Some(file)) => tf("agents.request.edit", &[("file", &file)]),
+                (_, None) => t("agents.request.editAFile"),
+            };
+            let mut detail = path(if notebook { "notebook_path" } else { "file_path" });
+            // Which cell, and whether it is replaced, added or removed.
+            if notebook {
+                let cell = [string("edit_mode"), string("cell_id"), string("cell_type")].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ");
+                if !cell.is_empty() {
+                    detail = format!("{detail}\n{cell}");
+                }
+            }
+            (title, detail, true)
+        }
+        "Read" => (file_name(&string("file_path")).map_or_else(|| t("agents.request.readAFile"), |file| tf("agents.request.read", &[("file", &file)])), path("file_path"), true),
         "Glob" | "Grep" => {
             let place = string("path");
-            ("Search files".into(), [string("pattern"), relative(&place, &event.cwd)].iter().filter(|part| !part.is_empty()).cloned().collect::<Vec<_>>().join("  ·  "), true)
+            (t("agents.request.searchFiles"), [string("pattern"), relative(&place, &event.cwd)].iter().filter(|part| !part.is_empty()).cloned().collect::<Vec<_>>().join("  ·  "), true)
         }
-        "WebFetch" => ("Open a web page".into(), string("url"), true),
-        "WebSearch" => ("Search the web".into(), string("query"), false),
-        "ExitPlanMode" => ("Start on its plan".into(), string("plan"), false),
+        "WebFetch" => (t("agents.request.openWebPage"), string("url"), true),
+        "WebSearch" => (t("agents.request.searchWeb"), string("query"), false),
+        "ExitPlanMode" => (t("agents.request.startPlan"), string("plan"), false),
         tool if tool.starts_with("mcp__") => {
             let mut parts = tool.splitn(3, "__").skip(1);
             let server = parts.next().unwrap_or_default();
             let name = parts.next().unwrap_or_default();
-            (format!("Use {} from {}", words(name), server), compact(input), true)
+            (tf("agents.request.useFrom", &[("tool", &words(name)), ("server", &server)]), compact(input), true)
         }
         "" => return None,
-        tool => (format!("Use {}", words(tool)), compact(input), true),
+        tool => (tf("agents.request.use", &[("tool", &words(tool))]), compact(input), true),
     };
-    let always = agent == Agent::Claude && (event.tool == "ExitPlanMode" || (!event.suggestions.is_empty() && questions.is_empty()));
+    let plan = event.tool == "ExitPlanMode";
+    let allow = questions.is_empty() && shown && detail.chars().count() <= MAX_DETAIL;
+    // Always keeps exactly the rules the agent suggested; the card shows each and where it's kept.
+    let rules = if agent == Agent::Claude && allow && !plan { kept_rules(&event.suggestions).unwrap_or_default() } else { Vec::new() };
+    let always = agent == Agent::Claude && allow && (plan || !rules.is_empty());
     Some(AgentRequest {
         id: next_id(),
         agent: agent.name().into(),
-        project: project(&event.cwd),
-        title: clip(&title, 140),
-        detail: clip(&detail, MAX_DETAIL),
+        project: visible(&project(&event.cwd)),
+        title: visible(&clip(&title, 140)),
+        detail: visible(&clip(&detail, MAX_DETAIL)),
         code,
         questions,
         always,
-        plan: event.tool == "ExitPlanMode",
+        plan,
+        allow,
+        changes,
+        rules,
         created_at: crate::types::now(),
     })
+}
+
+/// The input has no fields but these.
+fn only(input: &Value, keys: &[&str]) -> bool {
+    input.as_object().is_some_and(|fields| fields.keys().all(|key| keys.contains(&key.as_str())))
+}
+
+/// Every line an edit changes, from its input alone. None when it can't all be shown: a
+/// field the card doesn't show (Edit's "every match", say), or too many or too long lines.
+fn edit_changes(tool: &str, input: &Value, cwd: &str) -> Option<Vec<DiffLine>> {
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
+    let one_match = |value: &Value| value.get("replace_all").is_none_or(|all| *all == Value::Bool(false));
+    let changes = match tool {
+        "Edit" => {
+            if !only(input, &["file_path", "old_string", "new_string", "replace_all"]) || !one_match(input) {
+                return None;
+            }
+            diff::diff(&text(input, "old_string")?, &text(input, "new_string")?)
+        }
+        "MultiEdit" => {
+            let edits = input.get("edits")?.as_array()?;
+            let each = |edit: &Value| only(edit, &["old_string", "new_string", "replace_all"]) && one_match(edit) && text(edit, "old_string").is_some() && text(edit, "new_string").is_some();
+            if !only(input, &["file_path", "edits"]) || edits.is_empty() || !edits.iter().all(each) {
+                return None;
+            }
+            session::edit_diff("MultiEdit", input, cwd)?.1
+        }
+        "Write" => {
+            if !only(input, &["file_path", "content"]) {
+                return None;
+            }
+            diff::diff("", &text(input, "content")?)
+        }
+        "NotebookEdit" => {
+            if !only(input, &["notebook_path", "new_source", "cell_id", "cell_type", "edit_mode"]) {
+                return None;
+            }
+            match text(input, "edit_mode").as_deref().unwrap_or("replace") {
+                "delete" => diff::Diff::default(),
+                "replace" | "insert" => diff::diff("", &text(input, "new_source")?),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    // Counted only, too long to compare line by line.
+    if changes.lines.is_empty() && changes.added + changes.removed > 0 {
+        return None;
+    }
+    change_lines(changes.lines.into_iter().map(|line| (line.kind, line.text)).collect())
+}
+
+/// A patch's every line, its headers and context included, as the island shows them.
+fn patch_lines(patch: &str) -> Option<Vec<DiffLine>> {
+    change_lines(
+        patch
+            .lines()
+            .filter(|line| !matches!(line.trim(), "*** Begin Patch" | "*** End Patch"))
+            .map(|line| match (line.strip_prefix('+'), line.strip_prefix('-')) {
+                (Some(added), _) => (diff::Kind::Add, added.to_string()),
+                (_, Some(removed)) => (diff::Kind::Remove, removed.to_string()),
+                _ => (diff::Kind::Same, line.to_string()),
+            })
+            .collect(),
+    )
+}
+
+fn change_lines(lines: Vec<(diff::Kind, String)>) -> Option<Vec<DiffLine>> {
+    if lines.len() > MAX_CHANGE_LINES || lines.iter().any(|(_, text)| text.chars().count() > MAX_CHANGE_CHARS) {
+        return None;
+    }
+    Some(
+        lines
+            .into_iter()
+            .map(|(kind, text)| DiffLine {
+                kind: match kind {
+                    diff::Kind::Add => "add",
+                    diff::Kind::Remove => "remove",
+                    diff::Kind::Same => "same",
+                    diff::Kind::Gap => "gap",
+                }
+                .into(),
+                text: visible(&text),
+            })
+            .collect(),
+    )
+}
+
+/// The rules Claude Code suggested for "don't ask again", each in its own words and where it
+/// would be kept. None unless every one can be shown and is kept no wider than this project:
+/// nothing in the person's own settings for every project, nothing that widens the mode.
+fn kept_rules(suggestions: &[Value]) -> Option<Vec<AgentRule>> {
+    let mut rules = Vec::new();
+    for suggestion in suggestions {
+        if !only(suggestion, &["type", "rules", "behavior", "destination", "mode", "directories"]) {
+            return None;
+        }
+        let field = |key: &str| suggestion.get(key).and_then(Value::as_str);
+        let place = match field("destination")? {
+            "session" => t("agents.rule.session"),
+            "localSettings" => t("agents.rule.project"),
+            "projectSettings" => t("agents.rule.shared"),
+            // `userSettings` reaches every project; anything else is unknown.
+            _ => return None,
+        };
+        match field("type")? {
+            "addRules" if field("behavior") == Some("allow") => {
+                let list = suggestion.get("rules")?.as_array()?;
+                if list.is_empty() {
+                    return None;
+                }
+                for rule in list {
+                    let tool = rule.get("toolName")?.as_str().filter(|tool| !tool.is_empty())?;
+                    if !only(rule, &["toolName", "ruleContent"]) {
+                        return None;
+                    }
+                    let text = match rule.get("ruleContent") {
+                        None => tool.to_string(),
+                        Some(Value::String(content)) => format!("{tool}({content})"),
+                        Some(_) => return None,
+                    };
+                    rules.push(AgentRule { rule: visible(&text), place: place.clone() });
+                }
+            }
+            // Edits asked one by one from now on, or accepted: never past them.
+            "setMode" if field("mode") == Some("acceptEdits") => rules.push(AgentRule { rule: t("agentRequests.acceptEdits"), place }),
+            "addDirectories" => {
+                let folders = suggestion.get("directories")?.as_array()?;
+                if folders.is_empty() {
+                    return None;
+                }
+                for folder in folders {
+                    rules.push(AgentRule { rule: tf("agents.rule.folder", &[("folder", &visible(folder.as_str()?))]), place: place.clone() });
+                }
+            }
+            _ => return None,
+        }
+    }
+    (!rules.is_empty()).then_some(rules)
+}
+
+/// `text` with the characters that hide or reorder what's around them written out, so a
+/// command reads on the card as it runs: control characters other than new lines and tabs,
+/// the direction marks and overrides, and zero-width characters.
+fn visible(text: &str) -> String {
+    let hidden = |c: char| {
+        (c.is_control() && c != '\n' && c != '\t')
+            || matches!(c, '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+    };
+    if !text.chars().any(hidden) {
+        return text.to_string();
+    }
+    text.chars().map(|c| if hidden(c) { format!("<U+{:04X}>", c as u32) } else { c.to_string() }).collect()
 }
 
 /// Claude Code's AskUserQuestion: one to four questions, each with its options.
@@ -769,11 +1011,8 @@ fn relative(path: &str, cwd: &str) -> String {
     }
 }
 
-fn file_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "a file".into())
+fn file_name(path: &str) -> Option<String> {
+    Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned())
 }
 
 fn words(name: &str) -> String {
@@ -826,8 +1065,9 @@ fn decision(answer: &Answer, event: &HookEvent) -> Option<Value> {
                 "updatedPermissions": [{ "type": "setMode", "mode": mode, "destination": "session" }],
             })
         }
-        // Only the rules the agent itself suggested for this request, unchanged.
-        Answer::Always if event.tool != "AskUserQuestion" && !event.suggestions.is_empty() => {
+        // Only the rules the agent itself suggested for this request, unchanged, and only
+        // when the card could show every one of them.
+        Answer::Always if event.tool != "AskUserQuestion" && kept_rules(&event.suggestions).is_some() => {
             json!({ "behavior": "allow", "updatedPermissions": event.suggestions })
         }
         Answer::Allow if event.tool != "AskUserQuestion" => json!({ "behavior": "allow" }),
@@ -928,11 +1168,15 @@ pub fn answer_agent(id: String, answer: Answer) -> Result<(), String> {
     let mut hub = hub();
     let gone = || "That request was already answered.".to_string();
     let waiting = hub.waiting.iter_mut().find(|waiting| waiting.view.id == id).ok_or_else(gone)?;
+    // A click in its first moment was aimed at whatever was there before.
+    if crate::surface::now_ms().saturating_sub(waiting.at_ms) < ARMING_MS {
+        return Err("That request only just showed.".into());
+    }
     let asking = !waiting.view.questions.is_empty();
-    let always = waiting.view.always;
+    let (allow, always) = (waiting.view.allow, waiting.view.always);
     let fits = match &answer {
-        Answer::Allow => !asking,
-        Answer::Always => !asking && always,
+        Answer::Allow => !asking && allow,
+        Answer::Always => !asking && allow && always,
         Answer::Answers { .. } => asking,
         Answer::Deny | Answer::Terminal => true,
     };
@@ -1081,6 +1325,109 @@ mod tests {
     }
 
     #[test]
+    fn always_shows_each_rule_and_where_and_never_keeps_one_for_every_project() {
+        let mut command = event("Bash", json!({ "command": "npm test" }));
+        command.suggestions = vec![
+            json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm test" }, { "toolName": "Read" }], "behavior": "allow", "destination": "localSettings" }),
+            json!({ "type": "setMode", "mode": "acceptEdits", "destination": "session" }),
+            json!({ "type": "addDirectories", "directories": ["/Users/me/other"], "destination": "session" }),
+        ];
+        let view = describe(Agent::Claude, &command).unwrap();
+        assert!(view.always);
+        let shown: Vec<(&str, &str)> = view.rules.iter().map(|rule| (rule.rule.as_str(), rule.place.as_str())).collect();
+        assert_eq!(shown, [("Bash(npm test)", "This project"), ("Read", "This project"), ("Accept edits", "This session"), ("Access to /Users/me/other", "This session")]);
+        // One the card can't show, or one kept for every project, takes Always away entirely.
+        for odd in [
+            json!({ "type": "addRules", "rules": [{ "toolName": "Bash" }], "behavior": "allow", "destination": "userSettings" }),
+            json!({ "type": "addRules", "rules": [{ "toolName": "Bash" }], "behavior": "allow" }),
+            json!({ "type": "addRules", "rules": [{ "toolName": "Bash" }], "behavior": "deny", "destination": "session" }),
+            json!({ "type": "replaceRules", "rules": [{ "toolName": "Bash" }], "behavior": "allow", "destination": "session" }),
+            json!({ "type": "setMode", "mode": "bypassPermissions", "destination": "session" }),
+            json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "extra": 1 }], "behavior": "allow", "destination": "session" }),
+            json!({ "type": "addRules", "rules": [], "behavior": "allow", "destination": "session" }),
+        ] {
+            let mut widened = command.clone();
+            widened.suggestions.push(odd.clone());
+            let view = describe(Agent::Claude, &widened).unwrap();
+            assert!(!view.always && view.rules.is_empty(), "{odd}");
+            assert!(view.allow, "Allow alone still fits: {odd}");
+            assert!(reply(&Answer::Always, &widened).is_none(), "{odd}");
+        }
+        // The shared project file says so.
+        let mut shared = event("Bash", json!({ "command": "make" }));
+        shared.suggestions = vec![json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "make" }], "behavior": "allow", "destination": "projectSettings" })];
+        assert_eq!(describe(Agent::Claude, &shared).unwrap().rules[0].place, "This project, shared");
+    }
+
+    #[test]
+    fn only_a_command_shown_whole_and_as_it_runs_can_be_allowed_here() {
+        let allowed = |agent: Agent, input: Value| describe(agent, &event("Bash", input)).unwrap();
+        let plain = allowed(Agent::Claude, json!({ "command": "npm test", "description": "Test", "timeout": 120000, "run_in_background": false }));
+        assert!(plain.allow);
+        // Cut short, it goes to the terminal: no Allow, no Always.
+        let mut long = event("Bash", json!({ "command": format!("echo {}", "x".repeat(MAX_DETAIL)) }));
+        long.suggestions = vec![json!({ "type": "addRules", "rules": [{ "toolName": "Bash" }], "behavior": "allow", "destination": "session" })];
+        let long = describe(Agent::Claude, &long).unwrap();
+        assert!(!long.allow && !long.always);
+        // Outside the sandbox, or with a setting the card doesn't know.
+        assert!(!allowed(Agent::Claude, json!({ "command": "ls", "dangerouslyDisableSandbox": true })).allow);
+        assert!(allowed(Agent::Claude, json!({ "command": "ls", "dangerouslyDisableSandbox": false })).allow);
+        assert!(!allowed(Agent::Claude, json!({ "command": "ls", "shell": "/bin/zsh" })).allow);
+        // Codex's hook doesn't say whether it would leave the sandbox.
+        assert!(!allowed(Agent::Codex, json!({ "command": "git push", "description": "Push it" })).allow);
+        // Newlines stay, so every line of a script shows.
+        assert_eq!(allowed(Agent::Claude, json!({ "command": "cd x\nrm -rf y" })).detail, "cd x\nrm -rf y");
+        // The answer must fit: Allow is refused when it wasn't offered.
+        let request = allowed(Agent::Codex, json!({ "command": "ls" }));
+        let (sender, _receiver) = oneshot::channel();
+        let id = request.id.clone();
+        hub().waiting.push(Waiting { view: request, agent: Agent::Codex, session: String::new(), tool: "Bash".into(), input: Value::Null, reply: Some(sender), at_ms: crate::surface::now_ms() });
+        std::thread::sleep(Duration::from_millis(ARMING_MS + 50));
+        assert!(answer_agent(id.clone(), Answer::Allow).is_err());
+        assert!(answer_agent(id.clone(), Answer::Deny).is_ok());
+        hub().waiting.retain(|waiting| waiting.view.id != id);
+    }
+
+    #[test]
+    fn an_edit_shows_every_line_it_changes() {
+        let changes = |tool: &str, input: Value| {
+            let view = describe(Agent::Claude, &event(tool, input)).unwrap();
+            (view.allow, view.changes.iter().map(|line| format!("{}{}", &line.kind[..1], line.text)).collect::<Vec<_>>())
+        };
+        let (allow, lines) = changes("Edit", json!({ "file_path": "/Users/me/projects/shop/a.rs", "old_string": "let a = 1;", "new_string": "let a = 2;\nlet b = 3;" }));
+        assert!(allow);
+        assert_eq!(lines, ["rlet a = 1;", "alet a = 2;", "alet b = 3;"]);
+        let (allow, lines) = changes("Write", json!({ "file_path": "/Users/me/projects/shop/new.txt", "content": "one\ntwo" }));
+        assert!(allow);
+        assert_eq!(lines, ["aone", "atwo"]);
+        let (allow, lines) = changes("MultiEdit", json!({ "file_path": "/a.rs", "edits": [{ "old_string": "x", "new_string": "y" }, { "old_string": "p", "new_string": "q" }] }));
+        assert!(allow);
+        assert_eq!(lines, ["rx", "ay", "g", "rp", "aq"]);
+        let notebook = describe(Agent::Claude, &event("NotebookEdit", json!({ "notebook_path": "/Users/me/projects/shop/n.ipynb", "cell_id": "c7", "edit_mode": "insert", "cell_type": "code", "new_source": "print(1)" }))).unwrap();
+        assert!(notebook.allow);
+        assert_eq!(notebook.detail, "n.ipynb\ninsert · c7 · code");
+        let patch = describe(Agent::Codex, &event("apply_patch", json!({ "command": "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch" }))).unwrap();
+        assert!(patch.allow);
+        assert_eq!(patch.changes.iter().map(|line| line.kind.as_str()).collect::<Vec<_>>(), ["same", "same", "remove", "add"]);
+        // Every match, too many lines, a line too long, or nothing to compare: the terminal.
+        assert!(!changes("Edit", json!({ "file_path": "/a.rs", "old_string": "a", "new_string": "b", "replace_all": true })).0);
+        assert!(!changes("Write", json!({ "file_path": "/a.rs", "content": "line\n".repeat(MAX_CHANGE_LINES + 1) })).0);
+        assert!(!changes("Write", json!({ "file_path": "/a.rs", "content": "x".repeat(MAX_CHANGE_CHARS + 1) })).0);
+        assert!(!changes("Edit", json!({ "file_path": "/a.rs" })).0);
+        assert!(!changes("Edit", json!({ "file_path": "/a.rs", "old_string": "a", "new_string": "b", "mode": "fuzzy" })).0);
+    }
+
+    #[test]
+    fn hidden_characters_are_written_out() {
+        let tricked = describe(Agent::Claude, &event("Bash", json!({ "command": "echo safe \u{202E}fdsa\u{202C} && rm\u{200B} -rf ~\recho", "description": "List \u{2066}files" }))).unwrap();
+        assert_eq!(tricked.detail, "echo safe <U+202E>fdsa<U+202C> && rm<U+200B> -rf ~<U+000D>echo");
+        assert_eq!(tricked.title, "List <U+2066>files");
+        assert_eq!(visible("tabs\tand\nnew lines"), "tabs\tand\nnew lines");
+        let edit = describe(Agent::Claude, &event("Edit", json!({ "file_path": "/a.rs", "old_string": "a", "new_string": "b\u{200F}" }))).unwrap();
+        assert_eq!(edit.changes[1].text, "b<U+200F>");
+    }
+
+    #[test]
     fn a_plan_is_accepted_with_the_mode_to_work_in() {
         let plan = event("ExitPlanMode", json!({ "plan": "1. Do it" }));
         let view = describe(Agent::Claude, &plan).unwrap();
@@ -1154,8 +1501,9 @@ mod tests {
         // What can't be shown faithfully stays with the terminal.
         assert!(describe(Agent::Claude, &event("AskUserQuestion", json!({ "questions": [] }))).is_none());
         assert!(describe(Agent::Claude, &event("Bash", json!({}))).is_none());
-        let long = describe(Agent::Claude, &event("Bash", json!({ "command": "x".repeat(5000) }))).unwrap();
+        let long = describe(Agent::Claude, &event("Bash", json!({ "command": "x".repeat(MAX_DETAIL * 2) }))).unwrap();
         assert!(long.detail.chars().count() <= MAX_DETAIL + 1);
+        assert!(!long.allow);
     }
 
     #[test]
@@ -1170,18 +1518,24 @@ mod tests {
         let waiting = |questions: Vec<AgentQuestion>| {
             let (sender, receiver) = oneshot::channel();
             let id = next_id();
-            let view = AgentRequest { id: id.clone(), agent: "Claude Code".into(), project: String::new(), title: String::new(), detail: String::new(), code: false, questions, always: false, plan: false, created_at: String::new() };
-            hub().waiting.push(Waiting { view, agent: Agent::Claude, session: String::new(), tool: String::new(), input: Value::Null, reply: Some(sender), at_ms: 0 });
+            let view = AgentRequest { id: id.clone(), agent: "Claude Code".into(), project: String::new(), title: String::new(), detail: String::new(), code: false, questions, always: false, plan: false, allow: true, changes: Vec::new(), rules: Vec::new(), created_at: String::new() };
+            hub().waiting.push(Waiting { view, agent: Agent::Claude, session: String::new(), tool: String::new(), input: Value::Null, reply: Some(sender), at_ms: crate::surface::now_ms() });
             (id, receiver)
         };
         let (id, mut receiver) = waiting(Vec::new());
+        // A click in the card's first moment was aimed at what was there before.
+        assert!(answer_agent(id.clone(), Answer::Allow).is_err());
+        assert!(receiver.try_recv().is_err());
+        std::thread::sleep(Duration::from_millis(ARMING_MS + 50));
         assert!(answer_agent(id.clone(), Answer::Answers { answers: Map::new() }).is_err());
+        assert!(answer_agent(id.clone(), Answer::Always).is_err(), "Always wasn't offered");
         assert!(answer_agent(id.clone(), Answer::Allow).is_ok());
         assert!(matches!(receiver.try_recv(), Ok(Answer::Allow)));
         // One click per request.
         assert!(answer_agent(id.clone(), Answer::Deny).is_err());
         let question = parse_questions(&question_input()).unwrap();
         let (asked, _receiver) = waiting(question);
+        std::thread::sleep(Duration::from_millis(ARMING_MS + 50));
         assert!(answer_agent(asked.clone(), Answer::Allow).is_err());
         assert!(answer_agent(asked.clone(), Answer::Terminal).is_ok());
         assert!(answer_agent("missing".into(), Answer::Allow).is_err());
@@ -1299,6 +1653,7 @@ mod tests {
             })
             .expect("the request never showed");
         assert_eq!((shown.detail.as_str(), shown.project.as_str()), ("make", "shop"));
+        std::thread::sleep(Duration::from_millis(ARMING_MS));
         answer_agent(shown.id.clone(), Answer::Allow).unwrap();
         let (status, out) = run.join().unwrap();
         assert!(status.success());
@@ -1372,6 +1727,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(200));
                 for request in agent_requests().into_iter().filter(|request| request.project == project) {
                     if !seen.iter().any(|other: &AgentRequest| other.id == request.id) {
+                        std::thread::sleep(Duration::from_millis(ARMING_MS));
                         answer_agent(request.id.clone(), choose(&request)).unwrap();
                         seen.push(request);
                     }
@@ -1417,6 +1773,7 @@ mod tests {
                 for request in agent_requests().into_iter().filter(|request| request.project == folder) {
                     if !seen.iter().any(|other| other.id == request.id) {
                         println!("request: {} · {} · always {} · plan {}", request.title, request.detail.lines().next().unwrap_or_default(), request.always, request.plan);
+                        std::thread::sleep(Duration::from_millis(ARMING_MS));
                         answer_agent(request.id.clone(), choose(&request)).unwrap();
                         seen.push(request);
                     }
