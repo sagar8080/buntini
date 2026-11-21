@@ -894,6 +894,7 @@
   "settings.apps.allowInSettings": "সিস্টেম সেটিংসে অনুমতি দিন…",
   "settings.apps.allowed": "অনুমতি আছে",
   "settings.apps.notOnMac": "এই Mac-এ নেই",
+  "settings.apps.otherPlayers": "অন্যান্য প্লেয়ার",
   "settings.apps.others": "অন্যান্য অ্যাপ ({number})",
   "settings.apps.title": "যেসব অ্যাপ Buntini ব্যবহার করতে পারে",
   "settings.brain.apiKeyFor": "{provider} API কী",

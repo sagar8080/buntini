@@ -879,6 +879,7 @@
   "settings.apps.allowInSettings": "อนุญาตในการตั้งค่าระบบ…",
   "settings.apps.allowed": "อนุญาตแล้ว",
   "settings.apps.notOnMac": "ไม่มีใน Mac เครื่องนี้",
+  "settings.apps.otherPlayers": "เครื่องเล่นอื่นๆ",
   "settings.apps.others": "แอปอื่นๆ ({number})",
   "settings.apps.title": "แอปที่ Buntini ใช้ได้",
   "settings.brain.apiKeyFor": "คีย์ API ของ {provider}",

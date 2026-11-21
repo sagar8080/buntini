@@ -879,6 +879,7 @@
   "settings.apps.allowInSettings": "Izinkan di Pengaturan Sistem…",
   "settings.apps.allowed": "Diizinkan",
   "settings.apps.notOnMac": "Tidak ada di Mac ini",
+  "settings.apps.otherPlayers": "Pemutar lain",
   "settings.apps.others": "App lain ({number})",
   "settings.apps.title": "App yang bisa dipakai Buntini",
   "settings.brain.apiKeyFor": "Kunci API {provider}",

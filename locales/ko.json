@@ -879,6 +879,7 @@
   "settings.apps.allowInSettings": "시스템 설정에서 허용…",
   "settings.apps.allowed": "허용됨",
   "settings.apps.notOnMac": "이 Mac에 없음",
+  "settings.apps.otherPlayers": "기타 플레이어",
   "settings.apps.others": "기타 앱({number})",
   "settings.apps.title": "Buntini가 사용할 수 있는 앱",
   "settings.brain.apiKeyFor": "{provider} API 키",

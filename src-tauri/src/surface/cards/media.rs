@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NowPlaying {
-    /// `music`, `spotify`, `tv` or `browser`.
+    /// `music`, `spotify`, `tv`, `browser` or `other`.
     pub player: String,
     pub title: String,
     pub artist: Option<String>,
@@ -29,4 +29,8 @@ pub struct NowPlaying {
     pub can_previous: Option<bool>,
     #[serde(default)]
     pub can_next: Option<bool>,
+    /// The bundle id of the app that plays, for one of the other players, whose card shows
+    /// the app's own icon. Left out for the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
 }

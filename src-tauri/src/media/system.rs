@@ -1,11 +1,12 @@
-//! What a browser plays, a YouTube video in Chrome for one, as macOS itself has it: the
-//! title, the channel, where it is and whether it plays, the same that Control Center shows.
-//! macOS tells that only to its own programs, so `osascript` asks on Buntini's behalf. A
-//! watcher keeps running and writes a line each time it changes, while a browser is switched
-//! on in Settings → Apps; only those browsers show. Nothing is asked of the browser, so no
-//! macOS permission is needed and none is asked for. The card's controls reach the
-//! browser as a media key would, sent from Buntini itself (`native::command`), which macOS
-//! allows any app.
+//! What macOS itself says plays, the same that Control Center shows: a YouTube video in
+//! Chrome, a podcast in Podcasts, a film in VLC or IINA, an audiobook in Books. The title, the
+//! artist or channel, where it is and whether it plays. macOS tells that only to its own
+//! programs, so `osascript` asks on Buntini's behalf. A watcher keeps running and writes a
+//! line each time it changes, while a browser or "Other players" is switched on in Settings →
+//! Apps; only those show. Nothing is asked of the app that plays, so no macOS permission is
+//! needed and none is asked for. The card's controls reach it as a media key would, sent from
+//! Buntini itself (`native::command`), which macOS allows any app. Music, Spotify and TV are
+//! read through their own scripts instead (player.rs), so they never show from here.
 use std::process::Stdio;
 
 use serde::Deserialize;
@@ -27,6 +28,39 @@ const BROWSERS: [(&str, &str); 5] = [
     ("com.microsoft.edgemac", "edge"),
     ("company.thebrowser.browser", "arc"),
     ("com.apple.safari", "safari"),
+];
+
+/// Browsers without a switch, by the start of their bundle id: a web page never shows as one of
+/// the other players, and these can't be switched on.
+const UNSWITCHED_BROWSERS: [&str; 11] = [
+    "org.mozilla.",
+    "company.thebrowser.",
+    "com.apple.safaritechnologypreview",
+    "com.operasoftware.",
+    "com.vivaldi.",
+    "app.zen-browser.",
+    "org.chromium.",
+    "com.kagi.kagimacos",
+    "ai.perplexity.comet",
+    "com.openai.atlas",
+    "net.waterfox.",
+];
+
+/// Not players of their own: WebKit's helpers play for an app that's named as their parent,
+/// and Buntini itself.
+const NEVER: [&str; 2] = ["com.apple.webkit.", "app.buntini."];
+
+/// Apps that play music, for the cat to dance to. Any other player may be playing a podcast,
+/// a book or a film.
+const MUSIC: [&str; 8] = [
+    "com.tidal.desktop",
+    "com.amazon.music",
+    "com.deezer.deezer-desktop",
+    "tv.plex.plexamp",
+    "com.swinsian.swinsian",
+    "com.coppertino.vox",
+    "com.github.th-ch.youtube-music",
+    "com.ciderapp.cider",
 ];
 
 /// MediaRemote's commands, as it numbers them.
@@ -79,8 +113,32 @@ pub fn is_browser(bundle: &str) -> bool {
     switch(bundle).is_some()
 }
 
-/// Reads one line. `None` for one that isn't the watcher's. Something other than a browser
-/// playing counts as no browser playing: Music, Spotify and TV are read on their own.
+fn starts(bundle: &str, prefixes: &[&str]) -> bool {
+    let bundle = bundle.to_ascii_lowercase();
+    prefixes.iter().any(|prefix| bundle.starts_with(prefix))
+}
+
+/// How the app `bundle` shows when macOS says it plays: as a browser, one of the other
+/// players, or not from here at all.
+pub fn kind(bundle: &str) -> Option<Player> {
+    let bundle = bundle.trim();
+    if is_browser(bundle) {
+        return Some(Player::Browser);
+    }
+    let scripted = Player::SCRIPTED.into_iter().filter_map(Player::bundle).any(|own| own.eq_ignore_ascii_case(bundle));
+    if bundle.is_empty() || scripted || starts(bundle, &UNSWITCHED_BROWSERS) || starts(bundle, &NEVER) {
+        return None;
+    }
+    Some(Player::Other)
+}
+
+/// Whether the cat dances to what `bundle` plays.
+pub fn plays_music(bundle: &str) -> bool {
+    MUSIC.iter().any(|music| music.eq_ignore_ascii_case(bundle.trim()))
+}
+
+/// Reads one line. `None` for one that isn't the watcher's. An app that doesn't show from here
+/// counts as nothing playing: Music, Spotify and TV are read on their own.
 pub fn parse(line: &str, now: f64) -> Option<Heard> {
     if line.len() > LONGEST {
         return None;
@@ -89,16 +147,20 @@ pub fn parse(line: &str, now: f64) -> Option<Heard> {
     if line.unavailable {
         return Some(Heard::Unavailable);
     }
-    let app = [&line.bundle, &line.parent].into_iter().find(|bundle| is_browser(bundle));
-    let Some(app) = app else { return Some(Heard::Read(Read::Closed)) };
+    // Safari plays through WebKit, which names Safari as its parent; so does any other app.
+    let app = [&line.bundle, &line.parent]
+        .into_iter()
+        .find(|bundle| is_browser(bundle))
+        .or_else(|| [&line.parent, &line.bundle].into_iter().find(|bundle| !bundle.trim().is_empty()));
+    let Some((app, player)) = app.and_then(|app| Some((app.trim().to_string(), kind(app)?))) else { return Some(Heard::Read(Read::Closed)) };
     let text = |value: &str| Some(value.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|value| !value.is_empty());
     let Some(title) = text(&line.title) else { return Some(Heard::Read(Read::Stopped)) };
     let artist = text(&line.artist);
     let seconds = |value: Option<f64>| value.filter(|value| value.is_finite() && *value >= 0.0);
     let at = seconds(line.stamp).map(|stamp| stamp + APPLE_EPOCH).filter(|at| *at <= now + 60.0).unwrap_or(now);
-    let family = switch(app).unwrap_or_default();
+    let family = switch(&app).map_or_else(|| app.to_ascii_lowercase(), str::to_string);
     Some(Heard::Read(Read::Track(Reading {
-        player: Player::Browser,
+        player,
         playing: line.playing,
         track: format!("{family}\u{1f}{title}\u{1f}{}", artist.clone().unwrap_or_default()),
         title,
@@ -111,7 +173,7 @@ pub fn parse(line: &str, now: f64) -> Option<Heard> {
         volume: None,
         artwork_url: None,
         at,
-        app: Some(app.clone()),
+        app: Some(app),
         previous: Some(line.commands.contains(&PREVIOUS)),
         next: Some(line.commands.contains(&NEXT)),
     })))
@@ -149,8 +211,8 @@ impl Watcher {
     }
 }
 
-/// Play, pause, next, previous, or a seek to `to` seconds, for the browser `app` while it's
-/// what macOS says plays.
+/// Play, pause, next, previous, or a seek to `to` seconds, for `app` while it's what macOS says
+/// plays.
 pub async fn control(action: &str, to: Option<f64>, app: &str) -> Result<(), String> {
     let command = match action {
         "play" => PLAY,
@@ -158,14 +220,14 @@ pub async fn control(action: &str, to: Option<f64>, app: &str) -> Result<(), Str
         "next" => NEXT,
         "previous" => PREVIOUS,
         "seek" => SEEK,
-        _ => return Err(format!("A browser doesn't take “{action}”.")),
+        _ => return Err(format!("A player doesn't take “{action}” this way.")),
     };
     let position = match command {
         SEEK => to.filter(|to| to.is_finite() && *to >= 0.0).ok_or("No position came with it.")?,
         _ => 0.0,
     };
-    if !is_browser(app) {
-        return Err(format!("{app} isn't a browser."));
+    if kind(app).is_none() {
+        return Err(format!("{app} isn't controlled this way."));
     }
     let app = app.to_string();
     let sent = tokio::task::spawn_blocking(move || super::native::command(command, position, &app))
@@ -174,7 +236,7 @@ pub async fn control(action: &str, to: Option<f64>, app: &str) -> Result<(), Str
     match sent {
         super::native::Sent::Taken => Ok(()),
         super::native::Sent::Elsewhere => Err("Something else plays now.".into()),
-        super::native::Sent::Refused => Err("The browser didn't take it.".into()),
+        super::native::Sent::Refused => Err("The player didn't take it.".into()),
     }
 }
 
@@ -321,13 +383,43 @@ mod tests {
         assert_ne!(first.track, next.track);
     }
 
+    /// An episode in Podcasts, the way macOS reports one.
+    const PODCAST: &str = r#"{"bundle":"com.apple.podcasts","parent":"","title":"The Daily","artist":"The New York Times","album":"","duration":1800,"elapsed":42,"stamp":816932189.0,"playing":true,"commands":[24,3,2,1,0,17,18]}"#;
+
     #[test]
-    fn other_apps_playing_count_as_no_browser_playing() {
-        for bundle in ["com.apple.Music", "com.spotify.client", "com.apple.podcasts", "com.google.chromecast", "org.mozilla.firefox", ""] {
+    fn any_other_app_that_says_it_plays_is_one_of_the_other_players() {
+        let reading = track(parse(PODCAST, 1_795_239_400.0));
+        assert_eq!(reading.player, Player::Other);
+        assert_eq!((reading.title.as_str(), reading.artist.as_deref()), ("The Daily", Some("The New York Times")));
+        assert_eq!(reading.app.as_deref(), Some("com.apple.podcasts"));
+        assert_eq!((reading.previous, reading.next), (Some(false), Some(false)));
+        // The same episode in another app is another track.
+        let vlc = track(parse(&PODCAST.replace("com.apple.podcasts", "org.videolan.vlc"), 1_795_239_400.0));
+        assert_eq!(vlc.player, Player::Other);
+        assert_ne!(reading.track, vlc.track);
+        // An app's own web view plays through WebKit, which names the app.
+        let webview = PODCAST.replace(r#""bundle":"com.apple.podcasts","parent":"""#, r#""bundle":"com.apple.WebKit.GPU","parent":"com.example.Reader""#);
+        assert_eq!(track(parse(&webview, 0.0)).app.as_deref(), Some("com.example.Reader"));
+    }
+
+    #[test]
+    fn the_scripted_players_unswitched_browsers_and_buntini_never_show_from_here() {
+        for bundle in ["com.apple.Music", "com.spotify.client", "com.apple.TV", "org.mozilla.firefox", "company.thebrowser.dia", "com.apple.SafariTechnologyPreview", "com.operasoftware.Opera", "app.buntini.companion", "com.apple.WebKit.GPU", "  ", ""] {
             let line = YOUTUBE.replace("com.google.Chrome", bundle);
             assert_eq!(parse(&line, 0.0), Some(Heard::Read(Read::Closed)), "{bundle}");
+            assert_eq!(kind(bundle), None, "{bundle}");
         }
         assert_eq!(parse("{}", 0.0), Some(Heard::Read(Read::Closed)));
+        assert_eq!(kind("company.thebrowser.Browser"), Some(Player::Browser));
+        assert_eq!(kind("com.colliderli.iina"), Some(Player::Other));
+    }
+
+    #[test]
+    fn the_cat_dances_only_to_apps_that_play_music() {
+        assert!(plays_music("com.tidal.desktop"));
+        assert!(plays_music("com.Amazon.Music"));
+        assert!(!plays_music("com.apple.podcasts"));
+        assert!(!plays_music("org.videolan.vlc"));
     }
 
     #[test]
@@ -385,12 +477,14 @@ mod tests {
 
     /// None of these reach macOS: each is turned away first.
     #[test]
-    fn only_known_controls_go_to_a_browser() {
+    fn only_known_controls_go_out_and_only_to_apps_read_here() {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         assert!(runtime.block_on(control("shuffle", None, "com.google.Chrome")).is_err());
         assert!(runtime.block_on(control("seek", None, "com.google.Chrome")).is_err());
         assert!(runtime.block_on(control("seek", Some(f64::NAN), "com.google.Chrome")).is_err());
         assert!(runtime.block_on(control("pause", None, "com.apple.Music")).is_err());
+        assert!(runtime.block_on(control("pause", None, "org.mozilla.firefox")).is_err());
+        assert!(runtime.block_on(control("volume", None, "com.apple.podcasts")).is_err());
     }
 
     #[test]

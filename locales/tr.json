@@ -894,6 +894,7 @@
   "settings.apps.allowInSettings": "Sistem Ayarları’nda izin ver…",
   "settings.apps.allowed": "İzin verildi",
   "settings.apps.notOnMac": "Bu Mac’te yok",
+  "settings.apps.otherPlayers": "Diğer oynatıcılar",
   "settings.apps.others": "Diğer uygulamalar ({number})",
   "settings.apps.title": "Buntini’nin kullanabileceği uygulamalar",
   "settings.brain.apiKeyFor": "{provider} API anahtarı",

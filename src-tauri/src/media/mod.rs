@@ -1,13 +1,14 @@
-//! Music, Spotify, TV and browsers in the island (stream F). What's playing is read only from
-//! a player that is open, allowed in Settings → Apps, and that macOS already lets Buntini ask,
-//! so a read never opens a player or puts a permission prompt on screen. What a browser plays
-//! comes from macOS itself, which shows it in Control Center too, and asks nothing of the
-//! browser (browser.rs); it shows only for a browser allowed in Settings → Apps. The card's
+//! Music, Spotify, TV, browsers and any other player in the island (stream F). What's playing
+//! is read only from a player that is open, allowed in Settings → Apps, and that macOS already
+//! lets Buntini ask, so a read never opens a player or puts a permission prompt on screen.
+//! What a browser or another player (Podcasts, VLC, IINA, Books) plays comes from macOS itself,
+//! which shows it in Control Center too, and asks nothing of the app (system.rs); it shows
+//! only for a browser allowed in Settings → Apps, or while "Other players" is. The card's
 //! controls are the person's own clicks and act at once. The cat dances while music plays.
 mod artwork;
-mod browser;
 mod native;
 mod player;
+mod system;
 
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
@@ -39,9 +40,9 @@ const DRIFT: f64 = 1.5;
 const PILL_STEP: f64 = 0.02;
 /// Reads that fail in a row before a player counts as showing nothing.
 const FAILURES: u8 = 3;
-/// After a control, how long a browser has to say it took it before the card goes back to
-/// what the browser last said.
-const BROWSER_ANSWER: Duration = Duration::from_secs(2);
+/// After a control, how long a browser or another player has to say it took it before the
+/// card goes back to what macOS last said.
+const ANSWER: Duration = Duration::from_secs(2);
 const CARD: &str = "now-playing";
 
 /// Saved under `settings.media`.
@@ -94,17 +95,32 @@ struct Shown {
     paused_at: Option<Instant>,
 }
 
+/// What may show from what macOS says plays, as Settings → Apps has it.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Watched {
+    /// The browsers switched on, by their id there.
+    browsers: Vec<&'static str>,
+    /// "Other players" is switched on.
+    others: bool,
+}
+
+impl Watched {
+    fn any(&self) -> bool {
+        self.others || !self.browsers.is_empty()
+    }
+}
+
 #[derive(Default)]
 struct Hub {
     app: Option<AppHandle>,
     covers: Option<PathBuf>,
     slots: [Slot; 4],
-    /// What the browser watcher last said, before any control changed the card.
-    browser_heard: Option<Read>,
-    /// Counts the controls sent to a browser, so only the last one's answer is waited for.
-    browser_controls: u64,
-    /// The browsers switched on in Settings → Apps, by their id there.
-    browsers: Vec<&'static str>,
+    /// What the watcher last said, before any control changed the card.
+    heard: Option<Read>,
+    /// Counts the controls sent to what macOS says plays, so only the last one's answer is
+    /// waited for.
+    reported_controls: u64,
+    watched: Watched,
     shown: Option<Shown>,
     /// The card is on screen.
     visible: bool,
@@ -116,8 +132,8 @@ struct Hub {
 
 static HUB: LazyLock<Mutex<Hub>> = LazyLock::new(Default::default);
 static WAKE: LazyLock<Notify> = LazyLock::new(Notify::new);
-/// The screen slept or woke: the browser watcher stops or starts.
-static BROWSER_WAKE: LazyLock<Notify> = LazyLock::new(Notify::new);
+/// The screen slept or woke, or what may show changed: the watcher stops or starts.
+static WATCH_WAKE: LazyLock<Notify> = LazyLock::new(Notify::new);
 static CONTROLS: OnceLock<mpsc::UnboundedSender<Action>> = OnceLock::new();
 
 fn hub() -> MutexGuard<'static, Hub> {
@@ -154,7 +170,7 @@ pub fn start(app: AppHandle) {
         eprintln!("The players' notifications aren't watched; reading on a timer only");
     }
     tauri::async_runtime::spawn(controls(receiver));
-    tauri::async_runtime::spawn(browsers());
+    tauri::async_runtime::spawn(watch());
     tauri::async_runtime::spawn(async {
         // Launch is busy enough; the card can wait a moment.
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -184,7 +200,7 @@ extern "C" fn noticed(bytes: *const u8, length: usize) {
             if !value {
                 hub.slots.iter_mut().for_each(|slot| slot.force = true);
             }
-            BROWSER_WAKE.notify_one();
+            WATCH_WAKE.notify_one();
         }
     }
     drop(hub);
@@ -222,12 +238,12 @@ async fn look() -> Duration {
     if asleep {
         return ASLEEP;
     }
-    let (allowed, browsers) = allowed_apps(&app);
+    let (allowed, watched) = allowed_apps(&app);
     {
         let mut hub = hub();
-        if hub.browsers != browsers {
-            hub.browsers = browsers;
-            BROWSER_WAKE.notify_one();
+        if hub.watched != watched {
+            hub.watched = watched;
+            WATCH_WAKE.notify_one();
         }
     }
     for player in Player::SCRIPTED {
@@ -260,8 +276,8 @@ async fn look() -> Duration {
     }
     let mut hub = hub();
     settle(&mut hub);
-    // A browser says when it changes; while it plays the pill's progress still moves on.
-    let browser = matches!(&hub.slots[Player::Browser.index()].read, Some(Read::Track(reading)) if reading.playing).then_some(PLAYING);
+    // macOS says when what it reports changes; while it plays the pill's progress still moves on.
+    let reported = matches!(&hub.slots[Player::Browser.index()].read, Some(Read::Track(reading)) if reading.playing).then_some(PLAYING);
     Player::SCRIPTED
         .into_iter()
         .map(|player| {
@@ -271,26 +287,26 @@ async fn look() -> Duration {
             }
             slot.at.map_or(Duration::ZERO, |at| cadence(&hub, player).saturating_sub(at.elapsed()))
         })
-        .chain(browser)
+        .chain(reported)
         .min()
         .unwrap_or(IDLE)
         .max(Duration::from_millis(200))
 }
 
-/// Keeps the browser watcher running while the screen is on and a browser is switched on, and
-/// starts it again if it stops.
-async fn browsers() {
+/// Keeps the watcher of what macOS says plays running while the screen is on and a browser or
+/// "Other players" is switched on, and starts it again if it stops.
+async fn watch() {
     let idle = || {
         let hub = hub();
-        hub.asleep || hub.browsers.is_empty()
+        hub.asleep || !hub.watched.any()
     };
     let mut failures: u32 = 0;
     loop {
         while idle() {
-            BROWSER_WAKE.notified().await;
+            WATCH_WAKE.notified().await;
         }
         let started = Instant::now();
-        let mut watcher = match browser::Watcher::start() {
+        let mut watcher = match system::Watcher::start() {
             Ok(watcher) => Some(watcher),
             Err(problem) => {
                 eprintln!("{problem}");
@@ -300,16 +316,16 @@ async fn browsers() {
         if let Some(watcher) = watcher.as_mut() {
             loop {
                 tokio::select! {
-                    heard = watcher.next() => match heard {
-                        Some(browser::Heard::Read(read)) => heard_browser(Some(read)),
-                        Some(browser::Heard::Unavailable) => {
-                            eprintln!("macOS doesn't say what browsers play on this Mac");
-                            heard_browser(None);
+                    said = watcher.next() => match said {
+                        Some(system::Heard::Read(read)) => heard(Some(read)),
+                        Some(system::Heard::Unavailable) => {
+                            eprintln!("macOS doesn't say what plays on this Mac");
+                            heard(None);
                             return;
                         }
                         None => break,
                     },
-                    _ = BROWSER_WAKE.notified() => if idle() { break },
+                    _ = WATCH_WAKE.notified() => if idle() { break },
                 }
             }
         }
@@ -319,21 +335,21 @@ async fn browsers() {
             continue;
         }
         if idle() {
-            // Every browser was switched off.
-            heard_browser(None);
+            // Every browser and "Other players" were switched off.
+            heard(None);
             continue;
         }
         // It stopped by itself, so what it said may no longer hold.
-        heard_browser(None);
+        heard(None);
         failures = if started.elapsed() > Duration::from_secs(60) { 0 } else { failures + 1 };
         tokio::time::sleep(Duration::from_secs(1 << failures.min(6))).await;
     }
 }
 
-/// What the browser watcher said, on the card.
-fn heard_browser(read: Option<Read>) {
+/// What the watcher said, on the card.
+fn heard(read: Option<Read>) {
     let mut hub = hub();
-    hub.browser_heard = read.clone();
+    hub.heard = read.clone();
     let slot = &mut hub.slots[Player::Browser.index()];
     slot.read = read;
     slot.at = Some(Instant::now());
@@ -366,19 +382,24 @@ async fn ask(player: Player, allowed: bool) -> Option<Read> {
     }
 }
 
-/// The players and the browsers switched on in Settings → Apps.
-fn allowed_apps(app: &AppHandle) -> (Vec<Player>, Vec<&'static str>) {
+/// The players switched on in Settings → Apps, and what may show of what macOS says plays.
+fn allowed_apps(app: &AppHandle) -> (Vec<Player>, Watched) {
     let settings = app.try_state::<crate::controller::AppState>().and_then(|state| state.store.lock().ok()?.settings().ok());
-    let Some(settings) = settings else { return (Vec::new(), Vec::new()) };
+    let Some(settings) = settings else { return (Vec::new(), Watched::default()) };
     let players = Player::SCRIPTED.into_iter().filter(|player| crate::apps::allowed(&settings, player.id())).collect();
-    let browsers = crate::apps::BROWSERS.into_iter().filter(|id| crate::apps::allowed(&settings, id)).collect();
-    (players, browsers)
+    let watched = Watched {
+        browsers: crate::apps::BROWSERS.into_iter().filter(|id| crate::apps::allowed(&settings, id)).collect(),
+        others: crate::apps::allowed(&settings, crate::apps::OTHER_PLAYERS),
+    };
+    (players, watched)
 }
 
-/// A browser's video, unless its browser is switched off in Settings → Apps.
-fn shown_browser<'a>(read: Option<&'a Read>, browsers: &[&str]) -> Option<&'a Read> {
+/// What macOS says plays, unless its browser, or "Other players", is switched off in
+/// Settings → Apps.
+fn shown_reported<'a>(read: Option<&'a Read>, watched: &Watched) -> Option<&'a Read> {
     read.filter(|read| match read {
-        Read::Track(reading) => reading.app.as_deref().and_then(browser::switch).is_some_and(|id| browsers.contains(&id)),
+        Read::Track(reading) if reading.player == Player::Other => watched.others,
+        Read::Track(reading) => reading.app.as_deref().and_then(system::switch).is_some_and(|id| watched.browsers.contains(&id)),
         _ => true,
     })
 }
@@ -417,8 +438,9 @@ fn follow(shown: Option<Shown>, pick: Option<Reading>, now_ms: u64, now: Instant
     };
     if old.reading.track != reading.track {
         // Another video that comes paused is another tab's, found paused: a closed tab hands
-        // the card back to whatever played before it.
-        let paused_at = paused_at.filter(|_| reading.player != Player::Browser || reading.playing);
+        // the card back to whatever played before it. The same goes for a player macOS goes
+        // back to when another quits.
+        let paused_at = paused_at.filter(|_| !reading.player.reported() || reading.playing);
         return Some(Shown { reading, since_ms: now_ms, artwork: None, cover_asked: false, paused_at });
     }
     let expected = old.reading.position_now(reading.at);
@@ -442,8 +464,8 @@ fn pill_shows(shown: &Shown) -> bool {
 
 fn settle(hub: &mut Hub) {
     let current = hub.shown.as_ref().map(|shown| shown.reading.player);
-    let browser = shown_browser(hub.slots[3].read.as_ref(), &hub.browsers);
-    let reads = [hub.slots[0].read.as_ref(), hub.slots[1].read.as_ref(), hub.slots[2].read.as_ref(), browser];
+    let reported = shown_reported(hub.slots[3].read.as_ref(), &hub.watched);
+    let reads = [hub.slots[0].read.as_ref(), hub.slots[1].read.as_ref(), hub.slots[2].read.as_ref(), reported];
     let pick = choose(reads, current);
     hub.shown = follow(hub.shown.take(), pick, surface::now_ms(), Instant::now());
     if let (Some(shown), Some(dir)) = (hub.shown.as_mut(), hub.covers.clone()) {
@@ -482,7 +504,19 @@ fn now_playing(shown: &Shown) -> NowPlaying {
         position_at: reading.position.map(|_| reading.at),
         can_previous: reading.previous,
         can_next: reading.next,
+        app: reading.app.clone().filter(|_| reading.player == Player::Other),
     }
+}
+
+/// Whether the cat dances to it: to music, not to a film, a video in a browser, a podcast
+/// or a book.
+fn dances(reading: &Reading) -> bool {
+    reading.playing
+        && match reading.player {
+            Player::Spotify | Player::Music => true,
+            Player::Tv | Player::Browser => false,
+            Player::Other => reading.app.as_deref().is_some_and(system::plays_music),
+        }
 }
 
 /// What the island gets: the card, shown when the island is opened, and while it plays the
@@ -535,8 +569,7 @@ fn publish(hub: &mut Hub) {
         surface::publish(Source::Media, next.clone());
         hub.published = Some(next);
     }
-    // The cat dances to music, not to a film or a video in a browser.
-    let dancing = hub.shown.as_ref().is_some_and(|shown| shown.reading.playing && !matches!(shown.reading.player, Player::Tv | Player::Browser));
+    let dancing = hub.shown.as_ref().is_some_and(|shown| dances(&shown.reading));
     if dancing != hub.dancing {
         hub.dancing = dancing;
         crate::island::media_playing(dancing);
@@ -574,8 +607,8 @@ fn coalesce(batch: Vec<Action>) -> Vec<Action> {
 
 async fn act(action: &Action) -> Result<(), String> {
     let Some(player) = hub().shown.as_ref().map(|shown| shown.reading.player) else { return Ok(()) };
-    if player == Player::Browser {
-        return act_in_browser(action).await;
+    if player.reported() {
+        return act_reported(player, action).await;
     }
     if !player.running() {
         refresh(player);
@@ -627,54 +660,54 @@ async fn act(action: &Action) -> Result<(), String> {
     Ok(())
 }
 
-/// Play, pause, skipping and seeking reach a browser the way a media key does; the watcher
-/// says what came of it.
-async fn act_in_browser(action: &Action) -> Result<(), String> {
+/// Play, pause, skipping and seeking reach a browser or another player the way a media key
+/// does; the watcher says what came of it.
+async fn act_reported(player: Player, action: &Action) -> Result<(), String> {
     let (app, duration) = {
         let hub = hub();
         let reading = hub.shown.as_ref().map(|shown| &shown.reading);
         (reading.and_then(|reading| reading.app.clone()), reading.and_then(|reading| reading.duration))
     };
-    let Some(app) = app.filter(|app| browser::is_browser(app)) else { return Ok(()) };
+    let Some(app) = app.filter(|app| system::kind(app) == Some(player)) else { return Ok(()) };
     let number = action.value.as_ref().and_then(Value::as_f64).filter(|value| value.is_finite());
     let sent = match action.name.as_str() {
         name @ ("play" | "pause") => {
             let playing = name == "play";
-            adjust(Player::Browser, |reading| reading.playing = playing);
-            browser::control(name, None, &app).await
+            adjust(player, |reading| reading.playing = playing);
+            system::control(name, None, &app).await
         }
-        name @ ("next" | "previous") => browser::control(name, None, &app).await,
+        name @ ("next" | "previous") => system::control(name, None, &app).await,
         "seek" => {
             let to = number.ok_or("No position came with it.")?.clamp(0.0, duration.unwrap_or(f64::MAX));
-            adjust(Player::Browser, |reading| reading.position = Some(to));
-            browser::control("seek", Some(to), &app).await
+            adjust(player, |reading| reading.position = Some(to));
+            system::control("seek", Some(to), &app).await
         }
-        // The browser, in front. Which tab plays isn't known without asking the browser.
+        // The app, in front. Which tab plays isn't known without asking the browser.
         "open" | "pill" => {
             let _ = tokio::process::Command::new("/usr/bin/open").args(["-b", &app]).status().await;
             return Ok(());
         }
         _ => return Ok(()),
     };
-    await_browser();
+    await_answer();
     sent
 }
 
-/// A control the browser ignores leaves nothing for the watcher to say, so after a moment the
-/// card goes back to what the browser last said. A newer control waits on its own.
-fn await_browser() {
+/// A control the app ignores leaves nothing for the watcher to say, so after a moment the
+/// card goes back to what macOS last said. A newer control waits on its own.
+fn await_answer() {
     let control = {
         let mut hub = hub();
-        hub.browser_controls += 1;
-        hub.browser_controls
+        hub.reported_controls += 1;
+        hub.reported_controls
     };
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(BROWSER_ANSWER).await;
+        tokio::time::sleep(ANSWER).await;
         let mut hub = hub();
-        if hub.browser_controls != control {
+        if hub.reported_controls != control {
             return;
         }
-        let heard = hub.browser_heard.clone();
+        let heard = hub.heard.clone();
         hub.slots[Player::Browser.index()].read = heard;
         settle(&mut hub);
     });
@@ -834,12 +867,63 @@ mod tests {
         assert!(!pill_shows(&follow(Some(shown(video.clone())), Some(other), 99, Instant::now()).unwrap()));
         let paused = Reading { playing: false, ..video.clone() };
         assert!(pill_shows(&follow(Some(shown(video.clone())), Some(paused), 99, Instant::now()).unwrap()));
-        // Only while its browser is switched on in Settings → Apps.
-        assert!(shown_browser(Some(&browser), &["chrome"]).is_some());
-        assert!(shown_browser(Some(&browser), &["safari", "arc"]).is_none());
-        assert!(shown_browser(Some(&browser), &[]).is_none());
+        // Only while its browser is switched on in Settings → Apps; "Other players" isn't it.
+        assert!(shown_reported(Some(&browser), &watched(&["chrome"], false)).is_some());
+        assert!(shown_reported(Some(&browser), &watched(&["safari", "arc"], true)).is_none());
+        assert!(shown_reported(Some(&browser), &watched(&[], false)).is_none());
         let brave = Read::Track(Reading { app: Some("com.brave.Browser".into()), ..video });
-        assert!(shown_browser(Some(&brave), &["brave"]).is_some());
+        assert!(shown_reported(Some(&brave), &watched(&["brave"], false)).is_some());
+    }
+
+    fn watched(browsers: &[&'static str], others: bool) -> Watched {
+        Watched { browsers: browsers.to_vec(), others }
+    }
+
+    fn podcast(playing: bool) -> Reading {
+        Reading {
+            artist: Some("The New York Times".into()),
+            shuffle: None,
+            repeat: None,
+            volume: None,
+            app: Some("com.apple.podcasts".into()),
+            previous: Some(false),
+            next: Some(false),
+            ..reading(Player::Other, "The Daily", playing, 42.0, 1_000.0)
+        }
+    }
+
+    #[test]
+    fn another_player_shows_while_other_players_is_switched_on_with_its_app() {
+        let episode = Read::Track(podcast(true));
+        assert!(shown_reported(Some(&episode), &watched(&[], true)).is_some());
+        assert!(shown_reported(Some(&episode), &watched(&["chrome", "safari"], false)).is_none());
+        // Switching every browser and "Other players" off stops the watcher.
+        assert!(!watched(&[], false).any());
+        assert!(watched(&[], true).any() && watched(&["arc"], false).any());
+        let given = contribution(&shown(podcast(true)), true, Some(0.02));
+        assert_eq!(given.pills[0].tint, "#BF5AF2");
+        let CardBody::NowPlaying(card) = &given.offers[0].card.body else { panic!() };
+        assert_eq!((card.player.as_str(), card.app.as_deref()), ("other", Some("com.apple.podcasts")));
+        // Only another player's card names its app; a browser's doesn't.
+        let video = Reading { app: Some("com.google.Chrome".into()), ..reading(Player::Browser, "Sintel", true, 0.0, 0.0) };
+        let CardBody::NowPlaying(card) = &contribution(&shown(video), true, None).offers[0].card.body else { panic!() };
+        assert_eq!(card.app, None);
+        // Music that plays doesn't give way to a podcast that starts later, and a podcast
+        // found paused after another app quit gets no pill.
+        let music = Read::Track(reading(Player::Music, "b", true, 0.0, 0.0));
+        assert_eq!(choose([None, Some(&music), None, Some(&episode)], Some(Player::Music)).unwrap().player, Player::Music);
+        let found = follow(Some(shown(reading(Player::Other, "Earlier", true, 0.0, 0.0))), Some(podcast(false)), 99, Instant::now()).unwrap();
+        assert!(!pill_shows(&found));
+    }
+
+    #[test]
+    fn the_cat_dances_to_music_only() {
+        assert!(dances(&reading(Player::Spotify, "a", true, 0.0, 0.0)));
+        assert!(!dances(&reading(Player::Music, "a", false, 0.0, 0.0)));
+        assert!(!dances(&reading(Player::Tv, "a", true, 0.0, 0.0)));
+        assert!(!dances(&podcast(true)));
+        assert!(dances(&Reading { app: Some("com.tidal.desktop".into()), ..podcast(true) }));
+        assert!(!dances(&Reading { app: Some("com.google.Chrome".into()), ..reading(Player::Browser, "a", true, 0.0, 0.0) }));
     }
 
     /// The real players, on this Mac: `cargo test --lib media::tests::live_players -- --ignored
@@ -915,22 +999,22 @@ mod tests {
         }
     }
 
-    /// What a browser plays on this Mac, as the island gets it: `cargo test --lib
-    /// media::tests::live_browser -- --ignored --nocapture`. Runs the real watcher for
+    /// What a browser or another player plays on this Mac, as the island gets it: `cargo test
+    /// --lib media::tests::live_reported -- --ignored --nocapture`. Runs the real watcher for
     /// `BUNTINI_LIVE_SECONDS` (60 unless set) and prints the card and pill each time they
     /// change, with the seconds since it started and the Unix time: play, pause, change videos
     /// or close the tab meanwhile. With `BUNTINI_LIVE_CONTROLS=1` it also sends the card's
-    /// pause, a seek 20 seconds back and play to the first video that plays whose title has
-    /// `BUNTINI_LIVE_TITLE` in it, timing each answer. Nothing here asks the browser anything,
+    /// pause, a seek 20 seconds back and play to the first thing that plays whose title has
+    /// `BUNTINI_LIVE_TITLE` in it, timing each answer. Nothing here asks the app anything,
     /// so it never shows a prompt.
     #[tokio::test]
     #[ignore]
-    async fn live_browser() {
+    async fn live_reported() {
         let seconds = std::env::var("BUNTINI_LIVE_SECONDS").ok().and_then(|value| value.parse().ok()).unwrap_or(60);
         let controls = std::env::var("BUNTINI_LIVE_CONTROLS").is_ok_and(|value| value == "1");
         let only = std::env::var("BUNTINI_LIVE_TITLE").unwrap_or_default();
         let start = Instant::now();
-        let mut watcher = browser::Watcher::start().expect("the watcher starts");
+        let mut watcher = system::Watcher::start().expect("the watcher starts");
         let mut shown: Option<Shown> = None;
         let mut last = String::new();
         // Settles what was heard as the hub does, printing what changes.
@@ -948,7 +1032,7 @@ mod tests {
         let deadline = start + Duration::from_secs(seconds);
         let mut controlled = !controls;
         while let Ok(Some(heard)) = tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), watcher.next()).await {
-            let browser::Heard::Read(read) = heard else { panic!("macOS doesn't say what browsers play here") };
+            let system::Heard::Read(read) = heard else { panic!("macOS doesn't say what plays here") };
             follow_until(&mut shown, read);
             let Some(reading) = shown.as_ref().map(|shown| shown.reading.clone()).filter(|reading| reading.playing && !controlled && reading.title.contains(&only)) else { continue };
             controlled = true;
@@ -958,10 +1042,10 @@ mod tests {
                 ("play", None, Box::new(|reading: &Reading| reading.playing)),
             ] {
                 let sent = Instant::now();
-                browser::control(what, to, reading.app.as_deref().unwrap_or_default()).await.unwrap_or_else(|problem| panic!("{what}: {problem}"));
+                system::control(what, to, reading.app.as_deref().unwrap_or_default()).await.unwrap_or_else(|problem| panic!("{what}: {problem}"));
                 loop {
                     let heard = tokio::time::timeout(Duration::from_secs(5), watcher.next()).await;
-                    let Ok(Some(browser::Heard::Read(read))) = heard else { panic!("{what}: no answer within 5 s") };
+                    let Ok(Some(system::Heard::Read(read))) = heard else { panic!("{what}: no answer within 5 s") };
                     follow_until(&mut shown, read);
                     let now = shown.as_ref().map(|shown| shown.reading.clone()).expect("still shown");
                     let moved = to.is_none_or(|to| now.position.is_some_and(|at| (at - to).abs() < 2.0));
@@ -972,7 +1056,7 @@ mod tests {
                 }
             }
         }
-        assert!(controlled, "nothing played in a browser to try the controls on");
+        assert!(controlled, "nothing played to try the controls on");
     }
 
     #[test]

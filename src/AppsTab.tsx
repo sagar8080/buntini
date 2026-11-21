@@ -34,7 +34,7 @@ export default function AppsTab({ draft, update, onError }: Props) {
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.apps.title')}</h3></div>
       {list.apps.map(app => <div key={app.id} className="app-permission">
-        <Toggle label={app.name} detail={app.installed ? app.can.join(' · ') : t('settings.apps.notOnMac')} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
+        <Toggle label={app.id === 'other_players' ? t('settings.apps.otherPlayers') : app.name} detail={app.installed ? app.can.join(' · ') : t('settings.apps.notOnMac')} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
         {app.note && app.installed && <p className="field-help app-note">{app.note}</p>}
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}

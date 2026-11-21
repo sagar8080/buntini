@@ -894,6 +894,7 @@
   "settings.apps.allowInSettings": "सिस्टम सेटिंग्स में अनुमति दें…",
   "settings.apps.allowed": "अनुमति है",
   "settings.apps.notOnMac": "इस Mac पर नहीं",
+  "settings.apps.otherPlayers": "अन्य प्लेयर",
   "settings.apps.others": "दूसरे ऐप्स ({number})",
   "settings.apps.title": "ऐप्स जो Buntini इस्तेमाल कर सकता है",
   "settings.brain.apiKeyFor": "{provider} API कुंजी",

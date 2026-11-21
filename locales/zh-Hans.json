@@ -879,6 +879,7 @@
   "settings.apps.allowInSettings": "在“系统设置”中允许…",
   "settings.apps.allowed": "已允许",
   "settings.apps.notOnMac": "不在这台 Mac 上",
+  "settings.apps.otherPlayers": "其他播放器",
   "settings.apps.others": "其他应用（{number}）",
   "settings.apps.title": "Buntini 可以使用的应用",
   "settings.brain.apiKeyFor": "{provider} API 密钥",

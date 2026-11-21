@@ -924,6 +924,7 @@
   "settings.apps.allowInSettings": "Разрешить в Системных настройках…",
   "settings.apps.allowed": "Разрешено",
   "settings.apps.notOnMac": "Нет на этом Mac",
+  "settings.apps.otherPlayers": "Другие плееры",
   "settings.apps.others": "Другие приложения ({number})",
   "settings.apps.title": "Приложения, которые может использовать Buntini",
   "settings.brain.apiKeyFor": "Ключ API {provider}",

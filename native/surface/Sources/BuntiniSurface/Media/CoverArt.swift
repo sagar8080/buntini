@@ -115,10 +115,32 @@ final class CoverArt {
     }
 }
 
-/// The cover with its light, or the player's own colour and a note while there is none.
+/// The icon of an app on this Mac, by bundle id, as Finder draws it: the cover of one of the
+/// other players, which say what they play but not its picture. Looked up once per app.
+enum AppIcon {
+    @MainActor private static var icons: [String: NSImage] = [:]
+    @MainActor private static var missing: Set<String> = []
+
+    @MainActor
+    static func of(_ bundle: String?) -> NSImage? {
+        guard let bundle, !bundle.isEmpty, !missing.contains(bundle) else { return nil }
+        if let icon = icons[bundle] { return icon }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else {
+            missing.insert(bundle)
+            return nil
+        }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icons[bundle] = icon
+        return icon
+    }
+}
+
+/// The cover with its light, or the player's own colour and a note while there is none. One
+/// of the other players shows its app's icon instead of the note.
 struct CoverView: View {
     let art: CoverArt?
     let player: String
+    var app: String? = nil
     let tint: RGB
     let size: CGFloat
 
@@ -144,6 +166,15 @@ struct CoverView: View {
         .animation(.easeOut(duration: 0.35), value: art.map(ObjectIdentifier.init))
     }
 
+    static func symbol(_ player: String) -> String {
+        switch player {
+        case "tv": return "tv"
+        case "browser": return "play.rectangle.fill"
+        case "other": return "waveform"
+        default: return "music.note"
+        }
+    }
+
     @ViewBuilder
     private var cover: some View {
         if let art {
@@ -155,9 +186,17 @@ struct CoverView: View {
         } else {
             ZStack {
                 LinearGradient(colors: [tint.mix(RGB(0, 0, 0), 0.35).color, tint.mix(RGB(0, 0, 0), 0.75).color], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: player == "tv" ? "tv" : player == "browser" ? "play.rectangle.fill" : "music.note")
-                    .font(.system(size: size * 0.34, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.85))
+                if player == "other", let icon = AppIcon.of(app) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .padding(size * 0.1)
+                } else {
+                    Image(systemName: Self.symbol(player))
+                        .font(.system(size: size * 0.34, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
             }
         }
     }

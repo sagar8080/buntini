@@ -2,7 +2,7 @@
 import Foundation
 
 public struct NowPlaying: Codable, Equatable, Sendable {
-    /// `music`, `spotify`, `tv` or `browser`.
+    /// `music`, `spotify`, `tv`, `browser` or `other`.
     public let player: String
     public let title: String
     public let artist: String?
@@ -24,6 +24,9 @@ public struct NowPlaying: Codable, Equatable, Sendable {
     /// them; a browser says, as a YouTube video only skips in a playlist.
     public let canPrevious: Bool?
     public let canNext: Bool?
+    /// The bundle id of the app that plays, for one of the other players (Podcasts, VLC):
+    /// its card shows the app's own icon.
+    public let app: String?
 
     /// The player's own colour, until a cover gives one. Mirror: `Player::tint` in
     /// src-tauri/src/media/player.rs.
@@ -32,6 +35,7 @@ public struct NowPlaying: Codable, Equatable, Sendable {
         case "spotify": return "#1ED760"
         case "tv": return "#8EA2FF"
         case "browser": return "#5E9EFF"
+        case "other": return "#BF5AF2"
         default: return "#FA2D48"
         }
     }

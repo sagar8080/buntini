@@ -1,7 +1,7 @@
 //! Reading and changing Music, Spotify and TV through their own AppleScript. Every script
 //! returns at once when its app isn't open, so nothing here ever launches a player. Play,
 //! pause and skipping go through `apps::control_music`, the same path a chat request uses.
-//! What a browser plays isn't scripted: macOS says it (browser.rs).
+//! What a browser or any other app plays isn't scripted: macOS says it (system.rs).
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::i18n::tf;
@@ -13,21 +13,29 @@ pub enum Player {
     Tv,
     /// Whichever browser macOS says is playing, a YouTube video in Chrome for one.
     Browser,
+    /// Any other app macOS says is playing: Podcasts, VLC, IINA, Books.
+    Other,
 }
 
 impl Player {
     /// The players read through their own AppleScript, in the order a tie is settled:
-    /// Spotify first, as `apps::player` does. A browser comes after them (`index`).
+    /// Spotify first, as `apps::player` does. What macOS says plays comes after them (`index`).
     pub const SCRIPTED: [Player; 3] = [Player::Spotify, Player::Music, Player::Tv];
 
-    /// The id in Settings → Apps and on the wire.
+    /// The id on the wire.
     pub fn id(self) -> &'static str {
         match self {
             Player::Spotify => "spotify",
             Player::Music => "music",
             Player::Tv => "tv",
             Player::Browser => "browser",
+            Player::Other => "other",
         }
+    }
+
+    /// Read from what macOS says plays (system.rs), one app at a time, rather than scripted.
+    pub fn reported(self) -> bool {
+        matches!(self, Player::Browser | Player::Other)
     }
 
     /// One of the scripted players, as the watcher names them.
@@ -42,16 +50,17 @@ impl Player {
             Player::Music => "Music",
             Player::Tv => "TV",
             Player::Browser => "Browser",
+            Player::Other => "Other player",
         }
     }
 
-    /// A browser's comes with what it plays (`Reading::app`).
+    /// A browser's and another player's come with what they play (`Reading::app`).
     pub fn bundle(self) -> Option<&'static str> {
         match self {
             Player::Spotify => Some("com.spotify.client"),
             Player::Music => Some("com.apple.Music"),
             Player::Tv => Some("com.apple.TV"),
-            Player::Browser => None,
+            Player::Browser | Player::Other => None,
         }
     }
 
@@ -62,15 +71,18 @@ impl Player {
             Player::Music => "#FA2D48",
             Player::Tv => "#8EA2FF",
             Player::Browser => "#5E9EFF",
+            Player::Other => "#BF5AF2",
         }
     }
 
+    /// Its slot. macOS says what one app plays at a time, so a browser and another player
+    /// share one.
     pub fn index(self) -> usize {
         match self {
             Player::Spotify => 0,
             Player::Music => 1,
             Player::Tv => 2,
-            Player::Browser => 3,
+            Player::Browser | Player::Other => 3,
         }
     }
 
@@ -84,7 +96,7 @@ impl Player {
             Player::Spotify => Some(SPOTIFY_READ),
             Player::Music => Some(MUSIC_READ),
             Player::Tv => Some(TV_READ),
-            Player::Browser => None,
+            Player::Browser | Player::Other => None,
         }
     }
 
@@ -93,7 +105,7 @@ impl Player {
             Player::Spotify => Some(SPOTIFY_SET),
             Player::Music => Some(MUSIC_SET),
             Player::Tv => Some(TV_SET),
-            Player::Browser => None,
+            Player::Browser | Player::Other => None,
         }
     }
 }
@@ -129,7 +141,7 @@ pub struct Reading {
     pub track: String,
     /// Unix seconds when `position` was read.
     pub at: f64,
-    /// The app that plays it, when the player is a browser.
+    /// The app that plays it, when macOS says what plays (a browser or another player).
     pub app: Option<String>,
     /// Whether going back and skipping work. `None` for a player that always takes them.
     pub previous: Option<bool>,

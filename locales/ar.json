@@ -954,6 +954,7 @@
   "settings.apps.allowInSettings": "السماح في إعدادات النظام…",
   "settings.apps.allowed": "مسموح",
   "settings.apps.notOnMac": "غير موجود على هذا الـ Mac",
+  "settings.apps.otherPlayers": "مشغلات أخرى",
   "settings.apps.others": "تطبيقات أخرى ({number})",
   "settings.apps.title": "التطبيقات التي يمكن لـ Buntini استخدامها",
   "settings.brain.apiKeyFor": "مفتاح API لـ {provider}",

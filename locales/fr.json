@@ -894,6 +894,7 @@
   "settings.apps.allowInSettings": "Autoriser dans Réglages Système…",
   "settings.apps.allowed": "Autorisé",
   "settings.apps.notOnMac": "Pas sur ce Mac",
+  "settings.apps.otherPlayers": "Autres lecteurs",
   "settings.apps.others": "Autres apps ({number})",
   "settings.apps.title": "Apps que Buntini peut utiliser",
   "settings.brain.apiKeyFor": "Clé API {provider}",

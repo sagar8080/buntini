@@ -94,7 +94,7 @@ public func buntiniMediaCommand(_ command: UInt32, _ position: Double, _ bundle:
 }
 
 /// MediaRemote's own request, which macOS lets any app use to send a command and to ask which
-/// app plays, though not what it plays: that's read in src-tauri/src/media/browser.rs.
+/// app plays, though not what it plays: that's read in src-tauri/src/media/system.rs.
 enum MediaCommand {
     static let seek: UInt32 = 24
     private static let loaded = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW) != nil

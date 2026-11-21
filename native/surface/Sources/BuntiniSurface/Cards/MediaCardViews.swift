@@ -32,7 +32,7 @@ struct NowPlayingCardView: View {
     var body: some View {
         let tint = shownArt?.tint ?? playerTint
         HStack(alignment: .center, spacing: 14) {
-            CoverView(art: shownArt, player: playing.player, tint: tint, size: Self.coverSide)
+            CoverView(art: shownArt, player: playing.player, app: playing.app, tint: tint, size: Self.coverSide)
                 .onTapGesture { act("open") }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(playing.album ?? playing.title)
