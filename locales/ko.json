@@ -1278,6 +1278,7 @@
   "surface.timer.round": "라운드 {round}/{rounds}",
   "surface.tryAgain": "다시 시도",
   "surface.undo": "실행 취소",
+  "surface.upcoming.join": "참가",
   "surface.update.ask": "Buntini를 최신 상태로 유지할까요?",
   "surface.update.available": "새 버전",
   "surface.update.checkDaily": "매일 확인",

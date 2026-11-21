@@ -146,6 +146,7 @@
      "surface.timer.round": "Round {round} of {rounds}",
      "surface.tryAgain": "Try again",
      "surface.undo": "Undo",
+     "surface.upcoming.join": "Join",
      "surface.update.ask": "Keep Buntini up to date?",
      "surface.update.available": "New version",
      "surface.update.checkDaily": "Check daily",
@@ -1551,6 +1552,51 @@
    "overlay": null,
    "sound": null,
    "interrupt": true
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "upcoming.meeting",
+     "source": "island",
+     "label": "Standup",
+     "tint": "#FF453A",
+     "state": "working",
+     "badge": "10:00",
+     "progress": 0.53
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "upcoming.meeting",
+    "source": "island",
+    "body": {
+     "kind": "upcoming",
+     "item": "meeting",
+     "title": "Standup",
+     "starts": 1795248000,
+     "due": null,
+     "detail": "https://zoom.us/j/123",
+     "link": "https://zoom.us/j/123",
+     "id": null,
+     "more": 0
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
   }
  ],
  "actions": [

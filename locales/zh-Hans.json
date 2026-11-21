@@ -1278,6 +1278,7 @@
   "surface.timer.round": "第 {round} 轮，共 {rounds} 轮",
   "surface.tryAgain": "重试",
   "surface.undo": "撤销",
+  "surface.upcoming.join": "加入",
   "surface.update.ask": "让 Buntini 保持最新？",
   "surface.update.available": "新版本",
   "surface.update.checkDaily": "每天检查",

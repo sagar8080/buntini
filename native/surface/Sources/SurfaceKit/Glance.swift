@@ -119,6 +119,8 @@ public enum Chips {
             return (timer.label, nil, "#FF7A59", "timer")
         case .answer(let answer):
             return (answer.question, nil, "#F2B33D", "text.bubble")
+        case .upcoming(let upcoming):
+            return (upcoming.title, nil, upcoming.item == "meeting" ? "#FF453A" : "#FF9F0A", upcoming.item == "meeting" ? "calendar" : "checklist")
         default:
             return nil
         }

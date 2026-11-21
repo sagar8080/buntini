@@ -20,6 +20,25 @@ public struct Answer: Codable, Equatable, Sendable {
     public let answer: String
 }
 
+/// What's next: a meeting about to start (`item` is `meeting`) or reminders past due
+/// (`reminders`).
+public struct Upcoming: Codable, Equatable, Sendable {
+    public let item: String
+    public let title: String
+    /// When the meeting starts, in Unix seconds.
+    public let starts: Int64?
+    /// When the reminder was due, `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+    public let due: String?
+    /// Where, or the reminder's list.
+    public let detail: String?
+    /// The meeting's call link.
+    public let link: String?
+    /// The reminder Done marks done.
+    public let id: String?
+    /// More reminders past due besides this one.
+    public let more: UInt32
+}
+
 /// Hello on launch.
 public struct Greeting: Codable, Equatable, Sendable {
     public let name: String?

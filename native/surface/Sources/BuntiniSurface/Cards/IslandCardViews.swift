@@ -48,6 +48,55 @@ struct AnswerCardView: View {
     }
 }
 
+/// What's next: a meeting, how long until it and where, with Join for its call; or a reminder
+/// past due, when it was due and its list, with Done.
+struct UpcomingCardView: View {
+    let card: Card
+    let upcoming: Upcoming
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardHeading(from: heading, title: upcoming.title)
+            HStack(spacing: 6) {
+                Spacer()
+                if upcoming.item == "meeting", let link = upcoming.link {
+                    IslandButton(label: L(.join), prominent: true) { send(Action(source: .island, card: card.id, name: "join", value: .string(link))) }
+                }
+                if upcoming.item == "reminders", let id = upcoming.id {
+                    IslandButton(label: L(.done), prominent: true) { send(Action(source: .island, card: card.id, name: "done", value: .string(id))) }
+                }
+            }
+        }
+    }
+
+    /// "in 8 min · Zoom", or "Sat 09:00 · Home · +2", in the person's language.
+    private var heading: String {
+        var parts: [String] = []
+        if let starts = upcoming.starts {
+            let relative = RelativeDateTimeFormatter()
+            relative.locale = Lexicon.locale
+            relative.unitsStyle = .short
+            parts.append(relative.localizedString(for: Date(timeIntervalSince1970: TimeInterval(starts)), relativeTo: Date()))
+        }
+        if let due = upcoming.due.flatMap(Self.due) { parts.append(due) }
+        if let detail = upcoming.detail, !detail.isEmpty { parts.append(detail) }
+        if upcoming.more > 0 { parts.append("+\(upcoming.more)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func due(_ stamp: String) -> String? {
+        let parse = DateFormatter()
+        parse.locale = Locale(identifier: "en_US_POSIX")
+        parse.dateFormat = stamp.count > 10 ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd"
+        guard let date = parse.date(from: stamp) else { return nil }
+        let show = DateFormatter()
+        show.locale = Lexicon.locale
+        show.setLocalizedDateFormatFromTemplate(stamp.count > 10 ? (Calendar.current.isDateInToday(date) ? "HHmm" : "EEEHHmm") : "EEEdMMM")
+        return show.string(from: date)
+    }
+}
+
 struct GreetingCardView: View {
     let greeting: Greeting
 

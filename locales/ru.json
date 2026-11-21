@@ -1323,6 +1323,7 @@
   "surface.timer.round": "Раунд {round} из {rounds}",
   "surface.tryAgain": "Повторить",
   "surface.undo": "Отменить",
+  "surface.upcoming.join": "Войти",
   "surface.update.ask": "Обновлять Buntini?",
   "surface.update.available": "Новая версия",
   "surface.update.checkDaily": "Проверять ежедневно",

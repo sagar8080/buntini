@@ -12,6 +12,7 @@ public enum Word: String, CaseIterable, Sendable {
     case cancel = "surface.cancel"
     case close = "surface.close"
     case done = "surface.done"
+    case join = "surface.upcoming.join"
     case next = "surface.next"
     case send = "surface.send"
     case open = "surface.open"

@@ -46,6 +46,8 @@ struct PillMark: View {
             Image(systemName: "pause.fill").foregroundStyle(color.opacity(0.85))
         case (.mail?, _):
             Image(systemName: "envelope.fill").foregroundStyle(color)
+        case (.island?, _) where pill?.id == "upcoming.reminders":
+            Image(systemName: "checklist").foregroundStyle(color)
         case (_, _) where pill?.progress != nil:
             Ring(progress: pill?.progress ?? 0, tint: tint, width: size / 6)
         default:

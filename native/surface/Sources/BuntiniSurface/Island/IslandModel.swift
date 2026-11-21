@@ -146,6 +146,8 @@ final class IslandModel: ObservableObject {
         case .capture(let capture) where !capture.path.isEmpty: return Action(source: .utilities, card: card.id, name: "paste")
         case .recap: return Action(source: .agents, card: card.id, name: "shareRecap")
         case .note: return Action(source: .flow, card: card.id, name: "library")
+        case .upcoming(let upcoming) where upcoming.item == "meeting" && upcoming.link != nil:
+            return Action(source: .island, card: card.id, name: "join", value: .string(upcoming.link ?? ""))
         default: return nil
         }
     }

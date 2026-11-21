@@ -159,7 +159,7 @@ fn local(stamp: &str) -> Option<DateTime<Local>> {
     Local.from_local_datetime(&naive).earliest()
 }
 
-fn event_start(event: &Event) -> Option<DateTime<Local>> {
+pub(crate) fn event_start(event: &Event) -> Option<DateTime<Local>> {
     event
         .start_at
         .as_deref()
@@ -168,7 +168,7 @@ fn event_start(event: &Event) -> Option<DateTime<Local>> {
         .or_else(|| local(&event.start))
 }
 
-fn event_end(event: &Event) -> Option<DateTime<Local>> {
+pub(crate) fn event_end(event: &Event) -> Option<DateTime<Local>> {
     event
         .end_at
         .as_deref()
@@ -253,7 +253,7 @@ const DUE_TODAY_HOUR: u32 = 14;
 /// Older than this, a reminder is something the user chose to leave, not something missed.
 const OVERDUE_DAYS: i64 = 3;
 
-fn past_due(now: DateTime<Local>, reminder: &Reminder) -> bool {
+pub(crate) fn past_due(now: DateTime<Local>, reminder: &Reminder) -> bool {
     let due = reminder.due.trim();
     if let Some(at) = local(due) {
         return now - at >= Duration::minutes(OVERDUE_MINUTES) && now - at <= Duration::days(OVERDUE_DAYS);
@@ -624,11 +624,14 @@ pub async fn run_due(app: &tauri::AppHandle) {
             (today, Some(tomorrow)) => crate::apps::events_between(&helper, &today, &tomorrow).await,
         };
         if let Ok(events) = events {
+            // The island shows the next one while it holds (island/upcoming.rs).
+            crate::island::upcoming::events(&events.items);
             found.extend(meeting(now, &events.items));
         }
     }
     if crate::apps::allowed(&settings, "reminders") && active.contains(now.hour()) && due(&LAST_REMINDERS, REMINDERS_EVERY) {
         if let Ok(open) = crate::apps::reminders(&helper).await {
+            crate::island::upcoming::reminders(&open.items);
             found.extend(reminders(now, &open.items));
         }
     }

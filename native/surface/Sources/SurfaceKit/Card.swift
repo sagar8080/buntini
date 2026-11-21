@@ -33,6 +33,7 @@ public enum CardBody: Equatable, Sendable {
     case drop(DropCard)
     case greeting(Greeting)
     case answer(Answer)
+    case upcoming(Upcoming)
     // Voice
     case note(Note)
 
@@ -40,7 +41,7 @@ public enum CardBody: Equatable, Sendable {
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case approval, question, ticker, diff, finished, recap, usage
         case service, mail, nowPlaying, timer, capture, vitals, update, whatsNew
-        case drop, greeting, answer, note
+        case drop, greeting, answer, upcoming, note
     }
 
     public var kind: Kind {
@@ -63,6 +64,7 @@ public enum CardBody: Equatable, Sendable {
         case .drop: return .drop
         case .greeting: return .greeting
         case .answer: return .answer
+        case .upcoming: return .upcoming
         case .note: return .note
         }
     }
@@ -91,6 +93,7 @@ extension CardBody: Codable {
         case .drop: self = .drop(try DropCard(from: decoder))
         case .greeting: self = .greeting(try Greeting(from: decoder))
         case .answer: self = .answer(try Answer(from: decoder))
+        case .upcoming: self = .upcoming(try Upcoming(from: decoder))
         case .note: self = .note(try Note(from: decoder))
         }
     }
@@ -117,6 +120,7 @@ extension CardBody: Codable {
         case .drop(let card): try card.encode(to: encoder)
         case .greeting(let card): try card.encode(to: encoder)
         case .answer(let card): try card.encode(to: encoder)
+        case .upcoming(let card): try card.encode(to: encoder)
         case .note(let card): try card.encode(to: encoder)
         }
     }

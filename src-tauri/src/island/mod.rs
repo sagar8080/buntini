@@ -11,6 +11,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod demo;
+pub mod upcoming;
 pub mod updates;
 
 use crate::i18n::{t, tf};
@@ -248,6 +249,15 @@ pub fn start(app: AppHandle) {
     surface::set_island(shown.clone());
     watch_health();
     updates::start(app.clone());
+    // What's next counts down beside the notch.
+    tauri::async_runtime::spawn(async {
+        loop {
+            tokio::time::sleep(upcoming::TICK).await;
+            if !crate::media::screen_away() {
+                refresh();
+            }
+        }
+    });
     publish(vec![Offer {
         card: Card { id: "greeting".into(), source: Source::Island, body: CardBody::Greeting(cards::Greeting { name: (!name.is_empty()).then(|| first_word(&name)) }) },
         urgency: Urgency::Alert,
@@ -282,13 +292,27 @@ fn publish(mut offers: Vec<Offer>) {
     let now = surface::now_ms();
     kept.retain(|offer| offer.ttl_ms.is_none_or(|ttl| now < offer.at_ms + ttl) && !offers.iter().any(|new| new.card.id == offer.card.id));
     kept.append(&mut offers);
-    surface::publish(Source::Island, Contribution { pills: vec![], offers: kept.clone() });
+    send(&kept);
 }
 
 fn forget(id: &str) {
     let mut kept = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     kept.retain(|offer| offer.card.id != id);
-    surface::publish(Source::Island, Contribution { pills: vec![], offers: kept.clone() });
+    send(&kept);
+}
+
+/// Shows what's next again: the countdown moved, or the heads-ups read something new.
+pub(crate) fn refresh() {
+    let kept = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    send(&kept);
+}
+
+/// The island's own cards, with what's next and its pills (upcoming.rs).
+fn send(kept: &[Offer]) {
+    let (pills, mut next) = upcoming::shown(chrono::Local::now());
+    let mut offers = kept.to_vec();
+    offers.append(&mut next);
+    surface::publish(Source::Island, Contribution { pills, offers });
 }
 
 fn first_word(name: &str) -> String {
@@ -357,6 +381,30 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     }
     if action.card.as_deref() == Some("update") {
         return updates::act(app, &action.name);
+    }
+    // Joining the next meeting's call, or marking a reminder past due done.
+    match (action.card.as_deref(), action.name.as_str()) {
+        (Some(upcoming::MEETING), "join") => {
+            let link = action.value.as_ref().and_then(Value::as_str).and_then(upcoming::call_link).ok_or("That isn't a call link.")?;
+            let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
+            return Ok(());
+        }
+        (Some(upcoming::REMINDERS), "done") => {
+            let id = action.value.as_ref().and_then(Value::as_str).ok_or("No reminder came with it.")?;
+            let (id, title) = upcoming::reminder(id).ok_or("That reminder is no longer here.")?;
+            let state = app.try_state::<crate::controller::AppState>().ok_or("Buntini is still starting.")?;
+            let helper = state.models.apple_helper().to_path_buf();
+            tauri::async_runtime::spawn(async move {
+                let args: serde_json::Map<String, Value> = [("id".to_string(), Value::String(id.clone())), ("title".to_string(), Value::String(title))].into_iter().collect();
+                let receipt = crate::actions::execute_with("complete_reminder", &args, &helper).await;
+                match receipt.outcome {
+                    crate::actions::ActionOutcome::Succeeded => upcoming::done(&id),
+                    _ => eprintln!("A reminder wasn't marked done: {}", receipt.error.unwrap_or(receipt.message)),
+                }
+            });
+            return Ok(());
+        }
+        _ => {}
     }
     match action.name.as_str() {
         "openChat" => {

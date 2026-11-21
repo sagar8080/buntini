@@ -1293,6 +1293,7 @@
   "surface.timer.round": "Cycle {round} sur {rounds}",
   "surface.tryAgain": "Réessayer",
   "surface.undo": "Annuler",
+  "surface.upcoming.join": "Rejoindre",
   "surface.update.ask": "Garder Buntini à jour ?",
   "surface.update.available": "Nouvelle version",
   "surface.update.checkDaily": "Vérifier chaque jour",

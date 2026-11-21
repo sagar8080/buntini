@@ -1278,6 +1278,7 @@
   "surface.timer.round": "ラウンド{round}/{rounds}",
   "surface.tryAgain": "再試行",
   "surface.undo": "取り消す",
+  "surface.upcoming.join": "参加",
   "surface.update.ask": "Buntiniを最新の状態に保ちますか？",
   "surface.update.available": "新しいバージョン",
   "surface.update.checkDaily": "毎日確認",

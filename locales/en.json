@@ -1293,6 +1293,7 @@
   "surface.timer.round": "Round {round} of {rounds}",
   "surface.tryAgain": "Try again",
   "surface.undo": "Undo",
+  "surface.upcoming.join": "Join",
   "surface.update.ask": "Keep Buntini up to date?",
   "surface.update.available": "New version",
   "surface.update.checkDaily": "Check daily",

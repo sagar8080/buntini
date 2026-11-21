@@ -206,6 +206,7 @@ pub enum CardBody {
     Drop(island::DropCard),
     Greeting(island::Greeting),
     Answer(island::Answer),
+    Upcoming(island::Upcoming),
     // Voice
     Note(flow::Note),
 }
