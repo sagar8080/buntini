@@ -29,6 +29,18 @@ pub struct Capture {
     pub height: i64,
 }
 
+/// A screen recording: running since a time, or finished as a film.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recording {
+    /// While it records: when it started, in Unix seconds.
+    pub since: Option<i64>,
+    /// Once finished: the film's path, its name and how long it is.
+    pub path: Option<String>,
+    pub name: Option<String>,
+    pub seconds: Option<f64>,
+}
+
 /// The Mac kept awake as asked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

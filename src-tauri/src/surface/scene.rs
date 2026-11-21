@@ -201,6 +201,7 @@ pub enum CardBody {
     Capture(utilities::Capture),
     Vitals(utilities::Vitals),
     Awake(utilities::Awake),
+    Recording(utilities::Recording),
     Update(utilities::Update),
     WhatsNew(utilities::WhatsNew),
     // The island itself

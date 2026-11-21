@@ -171,6 +171,47 @@ struct CaptureThumb: View {
 
 /// One line: how the Mac is doing, or a word such as "Sounds off" (Rust writes it from the
 /// same words).
+/// A screen recording: a clock and Stop while it records, then the film to open, show in
+/// Finder or drag out.
+struct RecordingCardView: View {
+    let card: Card
+    let recording: Recording
+    let send: (Action) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let since = recording.since {
+                if inPicture {
+                    heading(since: since, at: Date())
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in heading(since: since, at: context.date) }
+                }
+                HStack(spacing: 6) {
+                    Spacer()
+                    IslandButton(label: L(.stop), prominent: true) { act("stop") }
+                }
+            } else {
+                CardHeading(from: playbackTime(recording.seconds ?? 0), title: recording.name ?? "")
+                    .onDrag { NSItemProvider(contentsOf: recording.path.map { URL(fileURLWithPath: $0) }) ?? NSItemProvider() }
+                HStack(spacing: 6) {
+                    Spacer()
+                    MoreButton { Button(L(.showInFinder)) { act("show") } }
+                    IslandButton(label: L(.open), prominent: true) { act("open") }
+                }
+            }
+        }
+    }
+
+    private func heading(since: Int64, at date: Date) -> some View {
+        CardHeading(from: "● \(playbackTime(date.timeIntervalSince1970 - Double(since)))", title: L(.recording))
+    }
+
+    private func act(_ name: String) {
+        send(Action(source: .utilities, card: card.id, name: name))
+    }
+}
+
 /// The Mac kept awake as asked: until when, and Stop.
 struct AwakeCardView: View {
     let card: Card

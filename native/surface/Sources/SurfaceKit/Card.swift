@@ -28,6 +28,7 @@ public enum CardBody: Equatable, Sendable {
     case capture(Capture)
     case vitals(Vitals)
     case awake(Awake)
+    case recording(Recording)
     case update(Update)
     case whatsNew(WhatsNew)
     // The island itself
@@ -45,7 +46,7 @@ public enum CardBody: Equatable, Sendable {
     /// The `kind` each card is sent with.
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case approval, question, ticker, diff, finished, recap, usage
-        case service, mail, nowPlaying, timer, capture, vitals, awake, update, whatsNew
+        case service, mail, nowPlaying, timer, capture, vitals, awake, recording, update, whatsNew
         case drop, greeting, answer, upcoming, call, unread, request, shortcuts, note
     }
 
@@ -65,6 +66,7 @@ public enum CardBody: Equatable, Sendable {
         case .capture: return .capture
         case .vitals: return .vitals
         case .awake: return .awake
+        case .recording: return .recording
         case .update: return .update
         case .whatsNew: return .whatsNew
         case .drop: return .drop
@@ -99,6 +101,7 @@ extension CardBody: Codable {
         case .capture: self = .capture(try Capture(from: decoder))
         case .vitals: self = .vitals(try Vitals(from: decoder))
         case .awake: self = .awake(try Awake(from: decoder))
+        case .recording: self = .recording(try Recording(from: decoder))
         case .update: self = .update(try Update(from: decoder))
         case .whatsNew: self = .whatsNew(try WhatsNew(from: decoder))
         case .drop: self = .drop(try DropCard(from: decoder))
@@ -131,6 +134,7 @@ extension CardBody: Codable {
         case .capture(let card): try card.encode(to: encoder)
         case .vitals(let card): try card.encode(to: encoder)
         case .awake(let card): try card.encode(to: encoder)
+        case .recording(let card): try card.encode(to: encoder)
         case .update(let card): try card.encode(to: encoder)
         case .whatsNew(let card): try card.encode(to: encoder)
         case .drop(let card): try card.encode(to: encoder)

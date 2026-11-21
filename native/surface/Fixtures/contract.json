@@ -153,6 +153,7 @@
      "surface.call.unmute": "Unmute",
      "surface.call.muted": "Muted",
      "surface.awake.until": "Until {time}",
+     "surface.showInFinder": "Show in Finder",
      "surface.update.ask": "Keep Buntini up to date?",
      "surface.update.available": "New version",
      "surface.update.checkDaily": "Check daily",
@@ -1785,6 +1786,78 @@
        "name": "Leaving home"
       }
      ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.recording",
+     "source": "utilities",
+     "label": "Recording",
+     "tint": "#FF453A",
+     "state": "working",
+     "badge": "2 min",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.recording",
+    "source": "utilities",
+    "body": {
+     "kind": "recording",
+     "since": 1795250000,
+     "path": null,
+     "name": null,
+     "seconds": null
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "utilities.recording",
+    "source": "utilities",
+    "body": {
+     "kind": "recording",
+     "since": null,
+     "path": "/Users/me/Movies/Screen Recording 2026-11-21 at 09.15.02.mov",
+     "name": "Screen Recording 2026-11-21 at 09.15.02.mov",
+     "seconds": 134.5
     }
    },
    "held": false,

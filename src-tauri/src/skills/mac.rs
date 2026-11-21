@@ -16,6 +16,8 @@ pub enum Command {
     Focus(crate::utilities::focus::Command),
     /// Keeping the Mac awake (utilities/awake.rs).
     Awake(crate::utilities::awake::Command),
+    /// Recording the screen (utilities/recording.rs).
+    Record(crate::utilities::recording::Command),
 }
 
 #[derive(Debug, PartialEq)]
@@ -117,6 +119,9 @@ pub fn recognise(text: &str) -> Option<Command> {
     // "Don't let my Mac sleep" is a request, before negations are turned away.
     if let Some(command) = crate::utilities::awake::recognise(text) {
         return Some(Command::Awake(command));
+    }
+    if let Some(command) = crate::utilities::recording::recognise(text) {
+        return Some(Command::Record(command));
     }
     // All controls are direct requests. Mere mentions, explanations and negations
     // must never change the Mac's state.
@@ -378,6 +383,7 @@ pub async fn run(command: Command) -> Result<Outcome, String> {
     let answer = match command {
         Command::Focus(command) => return crate::utilities::run_focus(command),
         Command::Awake(command) => return crate::utilities::awake::run(command),
+        Command::Record(command) => return crate::utilities::recording::run(command),
         Command::Volume(change) => {
             let (action, level) = match change {
                 Volume::Set(level) => ("set", level.to_string()),

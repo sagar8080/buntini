@@ -11,6 +11,7 @@
 pub mod awake;
 pub mod capture;
 pub mod focus;
+pub mod recording;
 mod native;
 pub mod shortcuts;
 
@@ -320,6 +321,9 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     let card = action.card.as_deref();
     if card == Some(awake::ID) {
         return awake::act(&action.name);
+    }
+    if card == Some(recording::ID) {
+        return recording::act(&action.name);
     }
     match action.name.as_str() {
         "shortcut" => {
@@ -669,6 +673,9 @@ fn publish() {
         }
     }
     let (pill, offer) = awake::shown();
+    pills.extend(pill);
+    offers.extend(offer);
+    let (pill, offer) = recording::shown();
     pills.extend(pill);
     offers.extend(offer);
     offers.extend(capture::offers());

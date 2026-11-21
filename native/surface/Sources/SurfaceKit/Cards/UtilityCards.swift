@@ -29,6 +29,15 @@ public struct Vitals: Codable, Equatable, Sendable {
     public let line: String
 }
 
+/// A screen recording: running since a time, or finished as a film. Mirror: `Recording` in
+/// src-tauri/src/surface/cards/utilities.rs.
+public struct Recording: Codable, Equatable, Sendable {
+    public let since: Int64?
+    public let path: String?
+    public let name: String?
+    public let seconds: Double?
+}
+
 /// The Mac kept awake as asked. Mirror: `Awake` in src-tauri/src/surface/cards/utilities.rs.
 public struct Awake: Codable, Equatable, Sendable {
     public let label: String

@@ -115,6 +115,8 @@ public enum Chips {
             return (playing.title, playing.artist, playing.player == "spotify" ? "#1ED760" : "#FA2D48", "pause.fill")
         case .service(let service):
             return (service.title, nil, "#8B949E", "circle.fill")
+        case .recording(let recording):
+            return (recording.name ?? "●", nil, "#FF453A", "record.circle")
         case .awake(let awake):
             return (awake.label, nil, "#FFD60A", "cup.and.saucer.fill")
         case .timer(let timer):

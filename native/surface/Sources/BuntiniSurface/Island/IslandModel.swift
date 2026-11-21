@@ -150,6 +150,7 @@ final class IslandModel: ObservableObject {
             return Action(source: .island, card: card.id, name: "join", value: .string(upcoming.link ?? ""))
         case .call(let call) where call.muted != nil: return Action(source: .island, card: card.id, name: "mute")
         case .awake: return Action(source: .utilities, card: card.id, name: "stop")
+        case .recording(let recording): return Action(source: .utilities, card: card.id, name: recording.since != nil ? "stop" : "open")
         case .unread: return Action(source: .island, card: card.id, name: "open")
         default: return nil
         }

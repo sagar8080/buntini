@@ -58,6 +58,8 @@ struct PillMark: View {
             if moving { Spinner(tint: tint).frame(width: size, height: size) } else { Ring(progress: 0.7, tint: tint, width: size / 6) }
         case (.island?, _) where pill?.id.hasPrefix("unread.") == true:
             Image(systemName: "bubble.left.fill").foregroundStyle(color)
+        case (.utilities?, _) where pill?.id == "utilities.recording":
+            Image(systemName: "record.circle").foregroundStyle(Color(hex: errorTint))
         case (.utilities?, _) where pill?.id == "utilities.awake":
             Image(systemName: "cup.and.saucer.fill").foregroundStyle(color)
         case (_, _) where pill?.progress != nil:
