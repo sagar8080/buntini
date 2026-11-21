@@ -79,34 +79,28 @@ struct IslandButton: View {
     }
 }
 
-/// Scrolls what doesn't fit in `height`. A picture can't hold a scroll view, so it gets
-/// the top of it.
+/// As tall as its content up to `maxHeight`, scrolling past it, and shorter still when the
+/// island has less room, so what comes after it stays in view. A picture can't hold a scroll
+/// view, so it gets the top of the content, sized the same way.
 struct CardScroll<Content: View>: View {
-    let height: CGFloat
+    let maxHeight: CGFloat
     @ViewBuilder let content: () -> Content
     @Environment(\.inPicture) private var inPicture
 
     var body: some View {
         if inPicture {
             content()
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                .frame(height: height, alignment: .top)
+                .frame(minHeight: 0, maxHeight: maxHeight, alignment: .top)
                 .clipped()
         } else {
             ScrollView {
                 content().frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: height)
+            .frame(maxHeight: maxHeight)
         }
     }
-}
-
-/// About how tall `text` sets in a column `perLine` characters wide, `lineHeight` a line.
-func textHeight(_ text: String, perLine: Int, lineHeight: CGFloat) -> CGFloat {
-    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { total, line in
-        total + max(1, Int((Double(line.count) / Double(perLine)).rounded(.up)))
-    }
-    return CGFloat(lines) * lineHeight
 }
 
 func from(_ agent: String, _ project: String?) -> String {

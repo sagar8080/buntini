@@ -167,11 +167,14 @@ struct IslandRoot: View {
             if beside, let cat = model.scene?.cat {
                 HStack(alignment: .top, spacing: 14) {
                     self.cat(cat).frame(width: 64, height: 68)
-                    CardView(card: card, send: send).frame(maxWidth: .infinity, alignment: .leading)
+                    CardView(card: card, send: send)
+                        .fixedSize(horizontal: false, vertical: model.fits(card, beside: true))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .id(card.id)
             } else {
                 CardView(card: card, send: send)
+                    .fixedSize(horizontal: false, vertical: model.fits(card, beside: false))
                     .id(card.id)
                     .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
@@ -255,6 +258,7 @@ struct Home: View {
             }
             if let card = selected {
                 CardView(card: card, send: send)
+                    .fixedSize(horizontal: false, vertical: model.fits(card, beside: false))
                     .id(card.id)
                     .transition(.opacity)
             }

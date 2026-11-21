@@ -134,4 +134,57 @@ if let asking = fixture.scenes.first(where: { $0.opens && $0.card?.body.kind == 
 // The row fits: each as wide as it wants while they fit, the widest cut to share the rest.
 guard Chips.share([50, 60], room: 200) == [50, 60], Chips.share([50, 300, 400], room: 350) == [50, 150, 150] else { fail("chips don't share the row") }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs")
+// Opened heights: a card is measured and rounded up to one of three steps; past the largest
+// only a card with a part that scrolls goes, and it scrolls; with the pointer on it the island
+// only grows. In English, German (long words) and Arabic (right to left).
+guard CardSteps.snap(10) == 86, CardSteps.snap(86) == 86, CardSteps.snap(87) == 142, CardSteps.snap(222) == 222, CardSteps.snap(900) == 222,
+      CardSteps.hold(144, held: 200, pointerIn: true) == 200, CardSteps.hold(144, held: 200, pointerIn: false) == 144 else { fail("opened heights don't snap or hold") }
+let notched = ScreenShape(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 944), safeTop: 32, auxLeft: 664, auxRight: 664, statusBar: 24)
+let band = IslandGeometry.notch(notched)!.height
+let scrolls: Set<CardBody.Kind> = [.approval, .mail, .diff]
+let steps = CardSteps.all
+// What an opened island may measure: a card that opened it, or the question field, chips and
+// the chosen card.
+var opened = Set(steps.map { band + 10 + $0 + 16 })
+for chipRow: CGFloat in [0, 40] {
+    opened.insert(band + 56 + chipRow)
+    for step in steps { opened.insert(band + 56 + chipRow + 12 + step) }
+}
+let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+let raw = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+var heights: [String: [String]] = [:]
+for code in ["en", "de", "ar"] {
+    guard let catalog = (try? Data(contentsOf: root.appendingPathComponent("locales/\(code).json"))).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) else { fail("no catalog for \(code)") }
+    var first = (raw["scenes"] as! [[String: Any]])[0]
+    first["words"] = ["language": code, "rtl": code == "ar", "labels": Dictionary(uniqueKeysWithValues: words.labels.map { ($0.key, catalog[$0.key] as? String ?? $0.value) })]
+    let worded = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: first))
+    let width = MainActor.assumeIsolated { IslandSizing.cardWidth(worded, screen: notched) }
+    guard width == IslandGeometry.openWidth - 36 else { fail("cards are laid out \(width) pt wide") }
+    for scene in fixture.scenes {
+        for card in [scene.card].compactMap({ $0 }) + (scene.shelf ?? []) {
+            let height = MainActor.assumeIsolated { IslandSizing.cardHeight(card, width: width) }
+            heights[card.body.kind.rawValue, default: []].append("\(code) \(Int(height))→\(Int(CardSteps.snap(height)))")
+            if height > CardSteps.largest + 0.5 && !scrolls.contains(card.body.kind) {
+                fail("a \(card.body.kind.rawValue) card is \(Int(height)) pt in \(code), past the largest step with nothing that scrolls")
+            }
+        }
+        for expanded in [false, true] where scene.placement == .auto {
+            let size = MainActor.assumeIsolated { IslandSizing.size(scene, screen: notched, expanded: expanded) }
+            guard size.height > band else { continue }
+            guard size.width == IslandGeometry.openWidth, opened.contains(size.height) else { fail("a \(scene.card?.body.kind.rawValue ?? "home") scene opens at \(size) in \(code), not on a step") }
+        }
+    }
+    // Switching chips with the pointer on the island: it holds the taller card's height, then
+    // settles once the pointer leaves.
+    let cards = Chips.cards(busy).filter { $0.body.kind != .diff }
+    let measured = cards.map { card in (card.id, CardSteps.snap(MainActor.assumeIsolated { IslandSizing.cardHeight(card, width: width) })) }
+    if let tallest = measured.max(by: { $0.1 < $1.1 }), let shortest = measured.min(by: { $0.1 < $1.1 }), tallest.1 > shortest.1 {
+        let held = MainActor.assumeIsolated { IslandSizing.held(busy, screen: notched, tallest: tallest.0, shortest: shortest.0) }
+        guard held.short == held.tall, held.left < held.tall else { fail("the island shrank under the pointer, or stayed tall once it left: \(held)") }
+    }
+}
+if CommandLine.arguments.contains("--heights") {
+    for (kind, values) in heights.sorted(by: { $0.key < $1.key }) { print(kind, values.joined(separator: ", ")) }
+}
+
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs; cards open at three heights in English, German and Arabic")

@@ -46,7 +46,7 @@ if let flag = arguments.firstIndex(of: "--render"), arguments.indices.contains(f
             for (state, hover, expanded) in [("rest", false, false), ("hover", true, false), ("open", true, true)] {
                 // A card that opens the island shows at rest; news shows once it's opened.
                 if scene.opens && state != "rest" { continue }
-                guard let png = MainActor.assumeIsolated({ SurfaceSnapshot.png(scene: scene, screen: screen, hover: hover, expanded: expanded) }) else { continue }
+                guard let png = MainActor.assumeIsolated({ SurfaceSnapshot.png(scene: scene, screen: screen, hover: hover, expanded: expanded, live: arguments.contains("--live")) }) else { continue }
                 try? png.write(to: folder.appendingPathComponent(String(format: "%02d-%@-%@-%@.png", number, kind, name, state)))
             }
         }

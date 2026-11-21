@@ -49,7 +49,8 @@ On the React side, each part has its own folder: `src/<part>/model.ts` and `src/
 
 - `swift run --package-path native/surface-lab SurfaceLab native/surface/Fixtures/contract.json [index]` opens the real island with fixture scenes and prints every action.
 - `cargo run --example surface_host [kind]` does the same through Rust and the C entry points. Here `kind` is a card kind, for example `approval`.
-- `swift run --package-path native/surface-lab SurfaceLab <fixture> --render <folder>` draws every scene into pictures without a screen. AppKit views (the Metal glow, the pointer probe) are left out of pictures.
+- `swift run --package-path native/surface-lab SurfaceLab <fixture> --render <folder>` draws every scene into pictures without a screen. AppKit views (the Metal glow, the pointer probe) are left out of pictures. Add `--live` to draw the views as they are on screen, scroll views included, in a window nobody sees.
+- `SurfaceChecks <fixture> --heights` lists what each card measures and the step it opens at, in English, German and Arabic. An opened card is measured as laid out and rounded up to one of three heights (`CardSteps`); past the largest only a part that scrolls may go, and it gives way so the buttons stay.
 - `SurfaceLab <fixture> <index> --seconds 10 --frames` shows a scene live and reports frame times while the cat moves. Add `--open` to see it opened, as a click opens it.
 - `--capture` lets screenshots see the island; Buntini itself keeps it out of them.
 - Measured on a 14-inch MacBook Pro at 120 Hz, release build, on 2026-11-17, as CPU time over eight seconds:

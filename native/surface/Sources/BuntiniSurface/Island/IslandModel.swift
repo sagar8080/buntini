@@ -9,14 +9,20 @@ final class IslandModel: ObservableObject {
             // A chip chosen stays chosen while the island is open; only a diff asked for from
             // a step comes forward in its place.
             if let card = scene?.card, card.id != oldValue?.card?.id, case .diff = card.body { chosen = nil }
+            measureAhead()
         }
     }
-    @Published var screen: ScreenShape
+    @Published var screen: ScreenShape {
+        didSet { measureAhead() }
+    }
     /// The pointer is on the island (or on the notch while it hides).
     @Published var hover = false
     /// Opened by a click, with no card.
     @Published var expanded = false {
-        didSet { if !expanded { chosen = nil } }
+        didSet {
+            if !expanded { chosen = nil }
+            measureAhead()
+        }
     }
     /// The card picked from the chips in the opened island, until it closes.
     @Published var chosen: String?
@@ -30,6 +36,19 @@ final class IslandModel: ObservableObject {
     @Published var typing = false
     /// Set by the window: the cat was picked up, moved, or let go.
     var carry: (CarryPhase) -> Void = { _ in }
+    /// Drawn into a picture rather than on screen, where a card shows the top of what scrolls.
+    var inPicture = false
+    /// Each card's height as last measured, by card id.
+    private var measured: [String: Measured] = [:]
+    /// The tallest the opened island has been while the pointer stayed on it.
+    private var held: CGFloat?
+
+    private struct Measured {
+        let card: Card
+        let width: CGFloat
+        let words: String
+        let height: CGFloat
+    }
 
     enum CarryPhase { case moved, ended }
 
@@ -57,9 +76,12 @@ final class IslandModel: ObservableObject {
     var band: CGFloat { IslandGeometry.notch(screen)?.height ?? IslandGeometry.menuBar(screen) }
 
     var size: CGSize {
-        inCorner
-            ? IslandGeometry.cornerSize(mode, openHeight: openHeight, pills: scene?.pills.count ?? 0, glance: glance?.width ?? 0)
-            : IslandGeometry.size(mode, screen: screen, openHeight: openHeight, wings: glance?.wings ?? IslandGeometry.peekWings)
+        let mode = mode
+        // Only an opened island has a card to measure.
+        let open = mode == .open ? openHeight : 0
+        return inCorner
+            ? IslandGeometry.cornerSize(mode, openHeight: open, pills: scene?.pills.count ?? 0, glance: glance?.width ?? 0)
+            : IslandGeometry.size(mode, screen: screen, openHeight: open, wings: glance?.wings ?? IslandGeometry.peekWings)
     }
 
     /// Beside the notch: the most pressing thing running.
@@ -86,44 +108,75 @@ final class IslandModel: ObservableObject {
         }
     }
 
-    /// The room below the top band.
+    /// The room below the top band: the card as tall as it measures, rounded up to a step, and
+    /// never shorter than it was while the pointer stays on the island.
     var openHeight: CGFloat {
-        if dragging && scene?.card == nil { return 110 }
-        if let card = interrupting { return Self.height(card) }
-        // Opened by a click: the question field, the chips and the chosen card, 12 apart.
-        var height: CGFloat = 10 + 30 + 16
-        if !chips.isEmpty { height += 12 + 28 }
-        if let card = selected { height += 12 + Self.height(card) - 24 }
+        let natural = naturalOpenHeight
+        guard mode == .open else {
+            held = nil
+            return natural
+        }
+        let height = CardSteps.hold(natural, held: held, pointerIn: hover)
+        held = height
         return height
     }
 
-    /// What a card needs below the top band, with room around it.
-    static func height(_ card: Card) -> CGFloat {
-        switch card.body {
-        // The whole command and every changed line, scrolling past a point, and the rules
-        // Always keeps.
-        case .approval(let approval):
-            return 100 + (approval.title.count > 52 ? 18 : 0) + (ApprovalCardView.hasBody(approval) ? ApprovalCardView.bodyHeight(approval) + 8 : 0) + ApprovalCardView.rulesHeight(approval)
-        case .question(let q): return 120 + CGFloat(min(q.questions.first?.options.count ?? 2, 4) > 3 ? 40 : 0)
-        // The heading, then the last four steps.
-        case .ticker(let ticker): return 24 + 16 + CGFloat(min(max(ticker.steps.count, 1), 4)) * 21
-        case .diff: return 230
-        case .finished: return 92
-        case .recap: return 150
-        case .usage: return 110
-        case .service: return 150
-        // A change or a plan waiting for Allow or Run lists every line it carries out.
-        case .mail(let mail): return mail.pending != nil || mail.plan != nil ? 290 : 200
-        case .nowPlaying: return 112
-        case .timer: return 100
-        case .capture: return 150
-        case .vitals: return 92
-        // A failure's reason may take two lines in longer languages.
-        case .update(let update): return update.stage == "failed" ? 128 : 112
-        case .whatsNew: return 130
-        case .drop: return 112
-        case .greeting: return 84
-        case .note: return 160
+    private var naturalOpenHeight: CGFloat {
+        if dragging && scene?.card == nil { return 110 }
+        if let card = interrupting {
+            let beside = Self.catBeside(card)
+            // Beside the cat a card is at least as tall as the cat.
+            let content = beside ? max(68, contentHeight(card, beside: true)) : contentHeight(card, beside: false)
+            return 10 + CardSteps.snap(content) + 16
+        }
+        // Opened by a click: the question field, the chips and the chosen card, 12 apart.
+        var height: CGFloat = 10 + 30 + 16
+        if !chips.isEmpty { height += 12 + 28 }
+        if let card = selected { height += 12 + CardSteps.snap(contentHeight(card, beside: false)) }
+        return height
+    }
+
+    /// The width cards are laid out at once opened: the island less its 18 pt sides.
+    var cardWidth: CGFloat {
+        let width = inCorner
+            ? IslandGeometry.openWidth
+            : IslandGeometry.size(.open, screen: screen, openHeight: 0, wings: glance?.wings ?? IslandGeometry.peekWings).width
+        return width - 36
+    }
+
+    /// How tall `card` sets, measured as the island lays it out in the person's language. Beside
+    /// the cat it's narrower by the cat and the space after it.
+    func contentHeight(_ card: Card, beside: Bool) -> CGFloat {
+        let width = cardWidth - (beside ? 78 : 0)
+        let words = Lexicon.locale.identifier + (Lexicon.direction == .rightToLeft ? "/rtl" : "")
+        let key = (beside ? "beside:" : "") + card.id
+        if let known = measured[key], known.card == card, known.width == width, known.words == words {
+            return known.height
+        }
+        let height = CardMeasure.height(card, width: width, inPicture: inPicture)
+        measured[key] = Measured(card: card, width: width, words: words, height: height)
+        return height
+    }
+
+    /// Whether `card` fits the largest step as it is. One that doesn't is laid out in what the
+    /// island has, and its scrolling part gives way.
+    func fits(_ card: Card, beside: Bool) -> Bool {
+        contentHeight(card, beside: beside) <= CardSteps.largest + 0.5
+    }
+
+    /// Measures the cards that may show next, while nothing is being drawn: the one opening the
+    /// island, and once it's open, the ones its chips switch to. Cards no longer around are
+    /// forgotten.
+    private func measureAhead() {
+        guard let scene, !asleep else {
+            measured.removeAll()
+            return
+        }
+        let cards = Chips.cards(scene) + [scene.card].compactMap { $0 }
+        measured = measured.filter { entry in cards.contains { $0.id == entry.value.card.id } }
+        if let card = interrupting { _ = contentHeight(card, beside: Self.catBeside(card)) }
+        if expanded || typing {
+            for card in Chips.cards(scene) { _ = contentHeight(card, beside: false) }
         }
     }
 }

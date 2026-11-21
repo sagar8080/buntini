@@ -14,7 +14,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: from(approval.agent, approval.project), title: approval.title)
             if Self.hasBody(approval) {
-                CardScroll(height: Self.bodyHeight(approval)) {
+                CardScroll(maxHeight: Self.bodyCap) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let detail = approval.detail {
                             Text(detail)
@@ -70,23 +70,9 @@ struct ApprovalCardView: View {
         approval.detail != nil || !approval.changes.isEmpty
     }
 
-    /// The room the command and the changes take, up to where they scroll.
-    static func bodyHeight(_ approval: Approval) -> CGFloat {
-        var height: CGFloat = 0
-        if let detail = approval.detail {
-            height += textHeight(detail, perLine: approval.code ? 66 : 76, lineHeight: 13)
-        }
-        if !approval.changes.isEmpty {
-            height += (approval.detail == nil ? 0 : 6) + approval.changes.reduce(0) { $0 + textHeight($1.text, perLine: 60, lineHeight: 14) }
-        }
-        return min(max(height, 14), 220)
-    }
-
-    /// The room the rules Always keeps take.
-    static func rulesHeight(_ approval: Approval) -> CGFloat {
-        guard offersAlways(approval), !approval.rules.isEmpty else { return 0 }
-        return 18 + approval.rules.reduce(0) { $0 + textHeight($1.rule, perLine: 52, lineHeight: 15) }
-    }
+    /// The most of the command and the changes shown before they scroll. With less room in the
+    /// island they scroll sooner, and the buttons stay.
+    static let bodyCap: CGFloat = 220
 }
 
 /// An edit's lines, each whole and wrapped, marked as added, removed or kept.
@@ -238,7 +224,7 @@ struct DiffCardView: View {
                 Text("+\(diff.added)").font(.caption.monospacedDigit()).foregroundStyle(Color(hex: "#7EE787"))
                 Text("−\(diff.removed)").font(.caption.monospacedDigit()).foregroundStyle(Color(hex: "#FF7B72"))
             }
-            ScrollView {
+            CardScroll(maxHeight: 170) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in
                         Text(line.kind == "gap" ? "⋯" : (line.kind == "add" ? "+ " : line.kind == "remove" ? "− " : "  ") + line.text)
@@ -251,7 +237,6 @@ struct DiffCardView: View {
                     }
                 }
             }
-            .frame(maxHeight: 170)
         }
     }
 }

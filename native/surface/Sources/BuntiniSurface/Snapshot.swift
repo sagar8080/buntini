@@ -5,11 +5,14 @@ import SwiftUI
 import SurfaceKit
 
 public enum SurfaceSnapshot {
-    /// A PNG of the island showing `scene` on a screen shaped like `screen`.
+    /// A PNG of the island showing `scene` on a screen shaped like `screen`. `live` draws the
+    /// views as they are on screen, scroll views included, in a window nobody sees, so no
+    /// screen recording is needed.
     @MainActor
-    public static func png(scene: SurfaceScene, screen: ScreenShape, hover: Bool = false, expanded: Bool = false, scale: CGFloat = 2) -> Data? {
+    public static func png(scene: SurfaceScene, screen: ScreenShape, hover: Bool = false, expanded: Bool = false, scale: CGFloat = 2, live: Bool = false) -> Data? {
         Lexicon.learn(scene)
         let model = IslandModel(screen: screen)
+        model.inPicture = !live
         model.scene = scene
         model.hover = hover
         model.expanded = expanded
@@ -19,7 +22,19 @@ public enum SurfaceSnapshot {
             .frame(width: IslandGeometry.panel.width, height: height, alignment: .top)
             .clipped()
             .background(Color(white: 0.55))
-            .environment(\.inPicture, true)
+            .environment(\.inPicture, !live)
+        if live {
+            let frame = NSRect(x: 0, y: 0, width: IslandGeometry.panel.width, height: height)
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = frame
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: frame) else { return nil }
+            host.cacheDisplay(in: frame, to: rep)
+            return rep.representation(using: .png, properties: [:])
+        }
         let renderer = ImageRenderer(content: view)
         renderer.scale = scale
         guard let image = renderer.cgImage else { return nil }

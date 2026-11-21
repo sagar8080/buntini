@@ -178,3 +178,27 @@ extension IslandGeometry {
         return nil
     }
 }
+
+// MARK: - Opened heights
+
+/// The few heights an opened island's card takes. Each card is measured as laid out and
+/// rounded up to the next step, so the island opens at one of three sizes rather than as tall
+/// as whatever it holds.
+public enum CardSteps {
+    /// Room for a card below the band, not counting the 10 pt above it and 16 below: S, M and
+    /// L. Under a 32 pt notch they make an island 144, 200 or 280 pt tall.
+    public static let all: [CGFloat] = [86, 142, 222]
+    public static var largest: CGFloat { all[all.count - 1] }
+
+    /// The smallest step that holds `content`. Past the largest it's the largest, and the card
+    /// scrolls inside it.
+    public static func snap(_ content: CGFloat) -> CGFloat {
+        all.first(where: { content <= $0 + 0.5 }) ?? largest
+    }
+
+    /// While the pointer stays on the island it only grows, so what it's aiming at doesn't move
+    /// away; it settles once the pointer leaves.
+    public static func hold(_ height: CGFloat, held: CGFloat?, pointerIn: Bool) -> CGFloat {
+        pointerIn ? max(height, held ?? 0) : height
+    }
+}
