@@ -1,4 +1,4 @@
-//! Mac controls: volume, mute, dark mode, locking the screen and timers. Each change is
+//! Mac controls: volume, mute, dark mode, locking the screen, timers and keeping the Mac awake. Each change is
 //! read back, so the reply says the Mac's actual state ("Volume is at 30%").
 use super::{from_verb, osascript, Outcome};
 use std::sync::OnceLock;
@@ -14,6 +14,8 @@ pub enum Command {
     CancelAllTimers,
     /// The focus timer's cycles (utilities/focus.rs).
     Focus(crate::utilities::focus::Command),
+    /// Keeping the Mac awake (utilities/awake.rs).
+    Awake(crate::utilities::awake::Command),
 }
 
 #[derive(Debug, PartialEq)]
@@ -66,7 +68,7 @@ fn number(word: &str) -> Option<u64> {
 }
 
 /// "10 minutes", "a minute and a half", "half an hour", "90 seconds", "2 hours".
-fn duration(text: &str) -> Option<u64> {
+pub(crate) fn duration(text: &str) -> Option<u64> {
     let words: Vec<&str> = text.split(' ').collect();
     if words
         .iter()
@@ -111,6 +113,10 @@ pub fn recognise(text: &str) -> Option<Command> {
     // "Focus for 25 minutes" is the focus timer, before any plain timer.
     if let Some(command) = crate::utilities::focus::recognise(text) {
         return Some(Command::Focus(command));
+    }
+    // "Don't let my Mac sleep" is a request, before negations are turned away.
+    if let Some(command) = crate::utilities::awake::recognise(text) {
+        return Some(Command::Awake(command));
     }
     // All controls are direct requests. Mere mentions, explanations and negations
     // must never change the Mac's state.
@@ -371,6 +377,7 @@ pub(crate) fn spoken(seconds: u64) -> String {
 pub async fn run(command: Command) -> Result<Outcome, String> {
     let answer = match command {
         Command::Focus(command) => return crate::utilities::run_focus(command),
+        Command::Awake(command) => return crate::utilities::awake::run(command),
         Command::Volume(change) => {
             let (action, level) = match change {
                 Volume::Set(level) => ("set", level.to_string()),

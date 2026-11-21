@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod calls;
 pub mod demo;
+pub mod power;
 pub mod upcoming;
 pub mod updates;
 
@@ -251,6 +252,7 @@ pub fn start(app: AppHandle) {
     watch_health();
     updates::start(app.clone());
     calls::start(&app);
+    power::start();
     // What's next counts down beside the notch.
     tauri::async_runtime::spawn(async {
         loop {

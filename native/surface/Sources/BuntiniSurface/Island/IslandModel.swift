@@ -149,6 +149,7 @@ final class IslandModel: ObservableObject {
         case .upcoming(let upcoming) where upcoming.item == "meeting" && upcoming.link != nil:
             return Action(source: .island, card: card.id, name: "join", value: .string(upcoming.link ?? ""))
         case .call(let call) where call.muted != nil: return Action(source: .island, card: card.id, name: "mute")
+        case .awake: return Action(source: .utilities, card: card.id, name: "stop")
         default: return nil
         }
     }

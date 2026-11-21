@@ -546,6 +546,14 @@ fn track(agent: Agent, event: &HookEvent, update: impl FnOnce(&mut session::Sess
     crate::island::agent_activity();
 }
 
+/// A coding agent is working on a turn and was heard from lately: the Mac stays awake for it
+/// (utilities/awake.rs). One that went quiet this long no longer counts, whatever it said last.
+pub fn working() -> bool {
+    const QUIET_MS: u64 = 15 * 60 * 1000;
+    let now = crate::surface::now_ms();
+    hub().sessions.values().any(|session| session.phase == session::Phase::Working && now.saturating_sub(session.last_ms) < QUIET_MS)
+}
+
 /// Sessions a dropped file's path can be pasted into, newest first: (pill, label). Only
 /// those running in a terminal app.
 pub fn drop_targets() -> Vec<(String, String)> {

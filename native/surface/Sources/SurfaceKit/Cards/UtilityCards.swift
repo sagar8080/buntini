@@ -29,6 +29,13 @@ public struct Vitals: Codable, Equatable, Sendable {
     public let line: String
 }
 
+/// The Mac kept awake as asked. Mirror: `Awake` in src-tauri/src/surface/cards/utilities.rs.
+public struct Awake: Codable, Equatable, Sendable {
+    public let label: String
+    /// When it ends, in Unix seconds; `nil` until stopped.
+    public let until: Int64?
+}
+
 public struct Update: Codable, Equatable, Sendable {
     public let version: String
     public let notes: [String]

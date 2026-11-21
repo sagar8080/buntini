@@ -171,6 +171,35 @@ struct CaptureThumb: View {
 
 /// One line: how the Mac is doing, or a word such as "Sounds off" (Rust writes it from the
 /// same words).
+/// The Mac kept awake as asked: until when, and Stop.
+struct AwakeCardView: View {
+    let card: Card
+    let awake: Awake
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let until = awake.until {
+                CardHeading(from: L(.awakeUntil, ["time": Self.time(until)]), title: awake.label)
+            } else {
+                Text(awake.label).font(.callout.weight(.semibold))
+            }
+            HStack(spacing: 6) {
+                Spacer()
+                IslandButton(label: L(.stop), prominent: true) { send(Action(source: .utilities, card: card.id, name: "stop")) }
+            }
+        }
+    }
+
+    /// The hour and minute it ends, as the person's language writes a time.
+    private static func time(_ until: Int64) -> String {
+        let format = DateFormatter()
+        format.locale = Lexicon.locale
+        format.setLocalizedDateFormatFromTemplate("jmm")
+        return format.string(from: Date(timeIntervalSince1970: TimeInterval(until)))
+    }
+}
+
 struct VitalsCardView: View {
     let vitals: Vitals
 

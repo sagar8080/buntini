@@ -31,6 +31,7 @@ public enum Word: String, CaseIterable, Sendable {
     case resume = "surface.resume"
     case skip = "surface.skip"
     case stop = "surface.stop"
+    case awakeUntil = "surface.awake.until"
     case share = "surface.share"
     // The island
     case chat = "surface.island.chat"

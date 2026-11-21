@@ -404,6 +404,7 @@ struct CardView: View {
         case .timer(let value): TimerCardView(card: card, timer: value, send: send)
         case .capture(let value): CaptureCardView(card: card, capture: value, send: send)
         case .vitals(let value): VitalsCardView(vitals: value)
+        case .awake(let value): AwakeCardView(card: card, awake: value, send: send)
         case .update(let value): UpdateCardView(card: card, update: value, send: send)
         case .whatsNew(let value): WhatsNewCardView(whatsNew: value)
         case .drop(let value): DropCardView(card: card, drop: value, send: send)

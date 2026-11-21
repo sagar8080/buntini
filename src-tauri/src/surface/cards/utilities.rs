@@ -29,6 +29,15 @@ pub struct Capture {
     pub height: i64,
 }
 
+/// The Mac kept awake as asked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Awake {
+    pub label: String,
+    /// When it ends, in Unix seconds; left out until stopped.
+    pub until: Option<i64>,
+}
+
 /// One line about how the Mac is doing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

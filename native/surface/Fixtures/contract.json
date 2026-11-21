@@ -151,6 +151,7 @@
      "surface.call.mute": "Mute",
      "surface.call.unmute": "Unmute",
      "surface.call.muted": "Muted",
+     "surface.awake.until": "Until {time}",
      "surface.update.ask": "Keep Buntini up to date?",
      "surface.update.available": "New version",
      "surface.update.checkDaily": "Check daily",
@@ -1628,6 +1629,45 @@
      "since": 1795247220,
      "muted": true,
      "recording": false
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.awake",
+     "source": "utilities",
+     "label": "Awake",
+     "tint": "#FFD60A",
+     "state": "working",
+     "badge": "45 min",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.awake",
+    "source": "utilities",
+    "body": {
+     "kind": "awake",
+     "label": "Awake",
+     "until": 1795250000
     }
    },
    "held": false,

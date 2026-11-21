@@ -200,6 +200,7 @@ pub enum CardBody {
     Timer(utilities::TimerCard),
     Capture(utilities::Capture),
     Vitals(utilities::Vitals),
+    Awake(utilities::Awake),
     Update(utilities::Update),
     WhatsNew(utilities::WhatsNew),
     // The island itself
