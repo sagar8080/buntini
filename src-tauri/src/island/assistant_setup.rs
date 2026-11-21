@@ -76,9 +76,16 @@ impl Target {
     }
 }
 
-/// The server entry each assistant gets: the relay to Buntini's socket.
-fn entry(socket: &Path) -> Value {
-    json!({ "command": "/usr/bin/nc", "args": ["-U", socket.to_string_lossy()] })
+/// The server entry each assistant gets: the relay to Buntini's socket in `data`.
+fn entry(data: &Path) -> Value {
+    let (command, args) = super::assistants::command(data);
+    json!({ "command": command, "args": args })
+}
+
+/// An `mcp add` command line ending in the relay to Buntini's socket in `data`.
+fn add_args(head: &[&str], data: &Path) -> Vec<String> {
+    let (command, args) = super::assistants::command(data);
+    head.iter().map(|word| word.to_string()).chain([command]).chain(args).collect()
 }
 
 /// `bytes` of a JSON settings file with Buntini's server set under `key`, or taken out.
@@ -130,14 +137,13 @@ fn write(path: &Path, before: Option<&[u8]>, contents: &[u8], backups: &Path, ta
 /// Adds Buntini to `target`, or takes it out. `home` stands in for the home folder in tests;
 /// `open` opens an install link (Cursor and VS Code ask in the app before adding).
 pub async fn set(target: Target, on: bool, home: &Path, data: &Path, open: impl Fn(&str)) -> Result<(), String> {
-    let socket = super::assistants::socket(data);
     let backups = data.join("assistant-backups");
     let (path, key) = target.file(home);
     let file_name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     match (target, on) {
         (Target::ClaudeCode, _) => {
             let args: Vec<String> = if on {
-                ["mcp", "add", "--scope", "user", NAME, "--", "/usr/bin/nc", "-U"].map(str::to_string).into_iter().chain([socket.to_string_lossy().into_owned()]).collect()
+                add_args(&["mcp", "add", "--scope", "user", NAME, "--"], data)
             } else {
                 ["mcp", "remove", "--scope", "user", NAME].map(str::to_string).to_vec()
             };
@@ -145,19 +151,19 @@ pub async fn set(target: Target, on: bool, home: &Path, data: &Path, open: impl 
         }
         (Target::Codex, _) => {
             let args: Vec<String> = if on {
-                ["mcp", "add", NAME, "--", "/usr/bin/nc", "-U"].map(str::to_string).into_iter().chain([socket.to_string_lossy().into_owned()]).collect()
+                add_args(&["mcp", "add", NAME, "--"], data)
             } else {
                 ["mcp", "remove", NAME].map(str::to_string).to_vec()
             };
             crate::cli::run_own("codex", &args, Some(home)).await.map(|_| ())
         }
         (Target::Cursor, true) => {
-            let config = base64::engine::general_purpose::STANDARD.encode(entry(&socket).to_string());
+            let config = base64::engine::general_purpose::STANDARD.encode(entry(data).to_string());
             open(&format!("cursor://anysphere.cursor-deeplink/mcp/install?name={NAME}&config={config}"));
             Ok(())
         }
         (Target::VsCode, true) => {
-            let mut server = entry(&socket);
+            let mut server = entry(data);
             server["name"] = json!(NAME);
             let encoded: String = server.to_string().bytes().map(|byte| if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) { (byte as char).to_string() } else { format!("%{byte:02X}") }).collect();
             open(&format!("vscode:mcp/install?{encoded}"));
@@ -170,7 +176,7 @@ pub async fn set(target: Target, on: bool, home: &Path, data: &Path, open: impl 
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
                 Err(error) => return Err(error.to_string()),
             };
-            let server = on.then(|| entry(&socket));
+            let server = on.then(|| entry(data));
             if let Some(after) = edited(before.as_deref().unwrap_or_default(), key, server.as_ref(), &file_name)? {
                 write(&path, before.as_deref(), &after, &backups, target)?;
             }
@@ -186,7 +192,7 @@ mod tests {
     #[test]
     fn buntini_s_entry_goes_in_and_out_leaving_the_rest_in_order() {
         let before = b"{\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"github\": { \"command\": \"gh-mcp\" }\n  },\n  \"zoom\": 1\n}\n";
-        let server = entry(Path::new("/data/assistants.sock"));
+        let server = entry(Path::new("/data"));
         let added = edited(before, "mcpServers", Some(&server), "claude_desktop_config.json").unwrap().unwrap();
         let value: Value = serde_json::from_slice(&added).unwrap();
         assert_eq!(value["mcpServers"]["buntini"], server);
@@ -234,7 +240,7 @@ mod tests {
         let opened = opened.into_inner().unwrap();
         let config = opened[0].split("config=").nth(1).unwrap();
         let decoded: Value = serde_json::from_slice(&base64::engine::general_purpose::STANDARD.decode(config).unwrap()).unwrap();
-        assert_eq!(decoded, entry(&data.join("assistants.sock")));
+        assert_eq!(decoded, entry(data));
         assert!(opened[0].starts_with("cursor://anysphere.cursor-deeplink/mcp/install?name=buntini&config="));
         let encoded = opened[1].strip_prefix("vscode:mcp/install?").unwrap();
         let bytes: Vec<u8> = {
