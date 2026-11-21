@@ -99,7 +99,7 @@ public enum Chips {
             let most = usage.windows.map(\.percent).max()
             return (usage.agent, most.map { "\(Int($0.rounded()))%" }, usage.agent.lowercased().contains("codex") ? "#10A37F" : "#D97757", "speedometer")
         case .nowPlaying(let playing):
-            return (playing.title, playing.artist, playing.player == "spotify" ? "#1ED760" : "#FA2D48", "pause.fill")
+            return (playing.title, playing.artist, playing.playerTint, "pause.fill")
         case .service(let service):
             return (service.title, nil, "#8B949E", "circle.fill")
         case .timer(let timer):

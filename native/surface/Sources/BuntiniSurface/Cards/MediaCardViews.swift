@@ -20,7 +20,7 @@ struct NowPlayingCardView: View {
 
     /// The player's own colour, until the cover gives one.
     private var playerTint: RGB {
-        RGB(hex: playing.player == "spotify" ? "#1ED760" : playing.player == "tv" ? "#8EA2FF" : "#FA2D48")
+        RGB(hex: playing.playerTint)
     }
 
     private var shownArt: CoverArt? {
@@ -87,9 +87,13 @@ struct NowPlayingCardView: View {
             if let shuffle = playing.shuffle {
                 GlyphButton(symbol: "shuffle", size: 12, on: shuffle, tint: tint, label: L(.shuffle)) { act("shuffle", .bool(!shuffle)) }
             }
-            GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: L(.previous)) { act("previous") }
+            if playing.canPrevious != false {
+                GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: L(.previous)) { act("previous") }
+            }
             PlayButton(playing: playing.playing, tint: tint) { act(playing.playing ? "pause" : "play") }
-            GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: L(.nextTrack)) { act("next") }
+            if playing.canNext != false {
+                GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: L(.nextTrack)) { act("next") }
+            }
             if let mode = playing.repeatMode {
                 GlyphButton(symbol: mode == "one" ? "repeat.1" : "repeat", size: 12, on: mode != "off", tint: tint, label: L(.repeatMode)) {
                     act("repeat", .string(Self.nextRepeat(mode, player: playing.player)))
@@ -100,8 +104,9 @@ struct NowPlayingCardView: View {
                 VolumeBar(volume: volume, tint: tint) { level in act("volume", .number((level * 100).rounded() / 100)) }
             }
         }
-        // The first symbol lines up with the title, not its button's edge.
-        .padding(.leading, -5)
+        // The first symbol lines up with the title, not its button's edge; a play button
+        // that comes first is round, so its edge does.
+        .padding(.leading, playing.shuffle != nil || playing.canPrevious != false ? -5 : 0)
         // Playback controls keep their order in every language, as in Apple's players.
         .environment(\.layoutDirection, .leftToRight)
     }

@@ -1,6 +1,7 @@
 //! The C entry points of native/surface/Sources/BuntiniSurface/Media/MediaExports.swift:
 //! the players' own "something changed" notifications, players opening and quitting, and
 //! the screen sleeping or locking. Only that something happened arrives here, never what.
+//! Commands for what macOS says plays, a browser's video for one, go out the same way.
 use serde::Deserialize;
 
 type Callback = extern "C" fn(*const u8, usize);
@@ -8,6 +9,38 @@ type Callback = extern "C" fn(*const u8, usize);
 #[cfg(target_os = "macos")]
 extern "C" {
     fn buntini_media_watch(callback: Callback) -> bool;
+    fn buntini_media_command(command: u32, position: f64, bundle: *const std::ffi::c_char) -> i32;
+}
+
+/// What came of a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sent {
+    Taken,
+    /// The player didn't take it, or didn't answer in time.
+    Refused,
+    /// Another app plays now, so it wasn't sent.
+    Elsewhere,
+}
+
+/// Sends a MediaRemote command (play 0, pause 1, next 4, previous 5, seek 24 to `position`
+/// seconds) to what macOS says plays, only while `bundle` is what plays. Blocks for up to two
+/// seconds; call it on a blocking thread.
+pub fn command(command: u32, position: f64, bundle: &str) -> Sent {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(bundle) = std::ffi::CString::new(bundle) else { return Sent::Refused };
+        // SAFETY: the string outlives the call, and Swift copies it before returning.
+        match unsafe { buntini_media_command(command, position, bundle.as_ptr()) } {
+            1 => Sent::Taken,
+            -1 => Sent::Elsewhere,
+            _ => Sent::Refused,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (command, position, bundle);
+        Sent::Refused
+    }
 }
 
 /// What the watcher noticed.

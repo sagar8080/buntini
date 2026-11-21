@@ -2,7 +2,7 @@
 import Foundation
 
 public struct NowPlaying: Codable, Equatable, Sendable {
-    /// `music`, `spotify` or `tv`.
+    /// `music`, `spotify`, `tv` or `browser`.
     public let player: String
     public let title: String
     public let artist: String?
@@ -20,4 +20,19 @@ public struct NowPlaying: Codable, Equatable, Sendable {
     public let volume: Double?
     /// When `position` was read, in Unix seconds: the island runs the clock on from there.
     public let positionAt: Double?
+    /// Whether going back and skipping work right now. `nil` for a player that always takes
+    /// them; a browser says, as a YouTube video only skips in a playlist.
+    public let canPrevious: Bool?
+    public let canNext: Bool?
+
+    /// The player's own colour, until a cover gives one. Mirror: `Player::tint` in
+    /// src-tauri/src/media/player.rs.
+    public var playerTint: String {
+        switch player {
+        case "spotify": return "#1ED760"
+        case "tv": return "#8EA2FF"
+        case "browser": return "#5E9EFF"
+        default: return "#FA2D48"
+        }
+    }
 }

@@ -32,7 +32,7 @@ The island at the notch, the dictation pill and the overlays. This package is Sw
 | Voice (C) | `flow/`, `surface/cards/flow.rs` | `Cards/FlowCards.swift` | `Cards/FlowCardViews.swift`, `Pill/`, `Flow/` (keys, paste, text field; C entry points in `Flow/FlowExports.swift`, called from `flow/native.rs`) |
 | Services (D) | `services/`, `surface/cards/services.rs` | `Cards/ServiceCards.swift` | `Cards/ServiceCardViews.swift` |
 | Mail (E) | `mail/`, `surface/cards/mail.rs` | `Cards/MailCards.swift` | `Cards/MailCardViews.swift` |
-| Media, utilities (F) | `media/`, `utilities/`, `surface/cards/{media,utilities}.rs` | `Cards/{Media,Utility}Cards.swift` | `Cards/{Media,Utility}CardViews.swift`, `Media/` (covers, the progress and level bars; the players' watcher, its C entry point in `Media/MediaExports.swift`, called from `media/native.rs`), `Overlay/`, `Utilities/` (hot keys, the thumbnail, the capture dimmer, mark-up; C entry points in `Utilities/UtilityExports.swift`, called from `utilities/native.rs`) |
+| Media, utilities (F) | `media/`, `utilities/`, `surface/cards/{media,utilities}.rs` | `Cards/{Media,Utility}Cards.swift` | `Cards/{Media,Utility}CardViews.swift`, `Media/` (covers, the progress and level bars; the players' watcher and the command for what macOS says plays, their C entry points in `Media/MediaExports.swift`, called from `media/native.rs`), `Overlay/`, `Utilities/` (hot keys, the thumbnail, the capture dimmer, mark-up; C entry points in `Utilities/UtilityExports.swift`, called from `utilities/native.rs`) |
 
 On the React side, each part has its own folder: `src/<part>/model.ts` and `src/<part>/api.ts`. Each also has one command, `<part>_call`, which is already registered and allowed.
 

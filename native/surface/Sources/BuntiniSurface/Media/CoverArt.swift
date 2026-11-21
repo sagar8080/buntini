@@ -155,7 +155,7 @@ struct CoverView: View {
         } else {
             ZStack {
                 LinearGradient(colors: [tint.mix(RGB(0, 0, 0), 0.35).color, tint.mix(RGB(0, 0, 0), 0.75).color], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: player == "tv" ? "tv" : "music.note")
+                Image(systemName: player == "tv" ? "tv" : player == "browser" ? "play.rectangle.fill" : "music.note")
                     .font(.system(size: size * 0.34, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.85))
             }

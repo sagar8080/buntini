@@ -1,6 +1,7 @@
 //! Covers for the now-playing card, as files the island can draw. Music and TV hand over
-//! the cover they keep; Spotify's comes from its image server over HTTPS. Only the last few
-//! are kept, and the folder starts empty each time Buntini does.
+//! the cover they keep; Spotify's comes from its image server over HTTPS. A browser's isn't
+//! readable, so its card keeps the placeholder. Only the last few are kept, and the folder
+//! starts empty each time Buntini does.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ pub fn reset(dir: &Path) {
 /// The cover for what `reading` plays, fetched or saved once and then reused.
 pub async fn cover(dir: &Path, reading: &Reading) -> Option<PathBuf> {
     let key = match (reading.player, &reading.artwork_url) {
+        (Player::Browser, _) => return None,
         (Player::Spotify, Some(url)) => hash(url),
         (Player::Spotify, None) => return None,
         (player, None) => hash(&format!("{}\u{1f}{}", player.id(), reading.track)),

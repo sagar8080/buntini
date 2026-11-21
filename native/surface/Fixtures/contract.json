@@ -688,7 +688,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
@@ -1301,7 +1303,9 @@
       "shuffle": false,
       "repeatMode": "off",
       "volume": 0.6,
-      "positionAt": null
+      "positionAt": null,
+      "canPrevious": null,
+      "canNext": null
      }
     },
     {
@@ -1505,7 +1509,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
