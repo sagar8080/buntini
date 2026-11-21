@@ -1,8 +1,9 @@
 //! What a browser plays, a YouTube video in Chrome for one, as macOS itself has it: the
 //! title, the channel, where it is and whether it plays, the same that Control Center shows.
 //! macOS tells that only to its own programs, so `osascript` asks on Buntini's behalf. A
-//! watcher keeps running and writes a line each time it changes. Nothing is asked of the
-//! browser, so no permission is needed and none is asked for. The card's controls reach the
+//! watcher keeps running and writes a line each time it changes, while a browser is switched
+//! on in Settings → Apps; only those browsers show. Nothing is asked of the browser, so no
+//! macOS permission is needed and none is asked for. The card's controls reach the
 //! browser as a media key would, sent from Buntini itself (`native::command`), which macOS
 //! allows any app.
 use std::process::Stdio;
@@ -18,24 +19,14 @@ const APPLE_EPOCH: f64 = 978_307_200.0;
 /// A line longer than this isn't the watcher's.
 const LONGEST: usize = 16 * 1024;
 
-/// Browsers, by bundle id. One ending in `.` takes every app of that maker; the others also
-/// take their editions and web apps (`com.google.Chrome.beta`, `com.google.Chrome.app.…`).
-const BROWSERS: [&str; 15] = [
-    "com.google.chrome",
-    "com.brave.browser",
-    "com.microsoft.edgemac",
-    "company.thebrowser.",
-    "com.apple.safari",
-    "com.apple.safaritechnologypreview",
-    "org.mozilla.firefox",
-    "org.mozilla.firefoxdeveloperedition",
-    "org.mozilla.nightly",
-    "org.chromium.chromium",
-    "com.operasoftware.opera",
-    "com.vivaldi.vivaldi",
-    "app.zen-browser.zen",
-    "com.kagi.kagimacos",
-    "net.imput.helium",
+/// The browsers Settings → Apps can switch on, by bundle id, with their id there. Each also
+/// takes its editions and web apps (`com.google.Chrome.beta`, `com.google.Chrome.app.…`).
+const BROWSERS: [(&str, &str); 5] = [
+    ("com.google.chrome", "chrome"),
+    ("com.brave.browser", "brave"),
+    ("com.microsoft.edgemac", "edge"),
+    ("company.thebrowser.browser", "arc"),
+    ("com.apple.safari", "safari"),
 ];
 
 /// MediaRemote's commands, as it numbers them.
@@ -74,13 +65,18 @@ struct Line {
     commands: Vec<u32>,
 }
 
-/// Whether `bundle` is a browser, its editions and web apps included.
-pub fn is_browser(bundle: &str) -> bool {
+/// The Settings → Apps switch for the browser `bundle` belongs to, its editions and web apps
+/// included.
+pub fn switch(bundle: &str) -> Option<&'static str> {
     let bundle = bundle.to_ascii_lowercase();
-    BROWSERS.iter().any(|family| match bundle.strip_prefix(family) {
-        Some(rest) => rest.is_empty() || family.ends_with('.') || rest.starts_with('.'),
-        None => false,
+    BROWSERS.iter().find_map(|(family, id)| match bundle.strip_prefix(family) {
+        Some(rest) if rest.is_empty() || rest.starts_with('.') => Some(*id),
+        _ => None,
     })
+}
+
+pub fn is_browser(bundle: &str) -> bool {
+    switch(bundle).is_some()
 }
 
 /// Reads one line. `None` for one that isn't the watcher's. Something other than a browser
@@ -100,7 +96,7 @@ pub fn parse(line: &str, now: f64) -> Option<Heard> {
     let artist = text(&line.artist);
     let seconds = |value: Option<f64>| value.filter(|value| value.is_finite() && *value >= 0.0);
     let at = seconds(line.stamp).map(|stamp| stamp + APPLE_EPOCH).filter(|at| *at <= now + 60.0).unwrap_or(now);
-    let family = BROWSERS.iter().find(|family| app.to_ascii_lowercase().starts_with(*family)).copied().unwrap_or_default();
+    let family = switch(app).unwrap_or_default();
     Some(Heard::Read(Read::Track(Reading {
         player: Player::Browser,
         playing: line.playing,
@@ -327,7 +323,7 @@ mod tests {
 
     #[test]
     fn other_apps_playing_count_as_no_browser_playing() {
-        for bundle in ["com.apple.Music", "com.spotify.client", "com.apple.podcasts", "com.google.chromecast", ""] {
+        for bundle in ["com.apple.Music", "com.spotify.client", "com.apple.podcasts", "com.google.chromecast", "org.mozilla.firefox", ""] {
             let line = YOUTUBE.replace("com.google.Chrome", bundle);
             assert_eq!(parse(&line, 0.0), Some(Heard::Read(Read::Closed)), "{bundle}");
         }
@@ -335,9 +331,21 @@ mod tests {
     }
 
     #[test]
-    fn editions_web_apps_and_safari_through_webkit_are_browsers() {
-        for bundle in ["com.google.Chrome.beta", "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml", "company.thebrowser.Browser", "org.mozilla.firefox", "com.microsoft.edgemac.Dev"] {
-            assert!(is_browser(bundle), "{bundle}");
+    fn editions_web_apps_and_safari_through_webkit_follow_their_browser_s_switch() {
+        for (bundle, id) in [
+            ("com.google.Chrome", "chrome"),
+            ("com.google.Chrome.beta", "chrome"),
+            ("com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml", "chrome"),
+            ("company.thebrowser.Browser", "arc"),
+            ("com.microsoft.edgemac.Dev", "edge"),
+            ("com.brave.Browser", "brave"),
+            ("com.apple.Safari", "safari"),
+        ] {
+            assert_eq!(switch(bundle), Some(id), "{bundle}");
+        }
+        // No switch, so never shown.
+        for bundle in ["org.mozilla.firefox", "company.thebrowser.dia", "com.apple.SafariTechnologyPreview"] {
+            assert_eq!(switch(bundle), None, "{bundle}");
         }
         let safari = YOUTUBE.replace(r#""bundle":"com.google.Chrome","parent":"""#, r#""bundle":"com.apple.WebKit.GPU","parent":"com.apple.Safari""#);
         assert_eq!(track(parse(&safari, 0.0)).app.as_deref(), Some("com.apple.Safari"));

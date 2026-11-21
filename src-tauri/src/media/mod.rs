@@ -2,8 +2,8 @@
 //! a player that is open, allowed in Settings → Apps, and that macOS already lets Buntini ask,
 //! so a read never opens a player or puts a permission prompt on screen. What a browser plays
 //! comes from macOS itself, which shows it in Control Center too, and asks nothing of the
-//! browser (browser.rs). The card's controls are the person's own clicks and act at once. The
-//! cat dances while music plays.
+//! browser (browser.rs); it shows only for a browser allowed in Settings → Apps. The card's
+//! controls are the person's own clicks and act at once. The cat dances while music plays.
 mod artwork;
 mod browser;
 mod native;
@@ -103,6 +103,8 @@ struct Hub {
     browser_heard: Option<Read>,
     /// Counts the controls sent to a browser, so only the last one's answer is waited for.
     browser_controls: u64,
+    /// The browsers switched on in Settings → Apps, by their id there.
+    browsers: Vec<&'static str>,
     shown: Option<Shown>,
     /// The card is on screen.
     visible: bool,
@@ -125,6 +127,12 @@ fn hub() -> MutexGuard<'static, Hub> {
 /// The display sleeps or the session is locked, so the island isn't on screen.
 pub fn screen_away() -> bool {
     hub().asleep
+}
+
+/// An app was switched on or off in Settings → Apps: the card follows at once.
+pub fn apps_changed() {
+    hub().slots.iter_mut().for_each(|slot| slot.force = true);
+    WAKE.notify_one();
 }
 
 /// Starts reading the players and handling the card. Call once the island is up.
@@ -214,7 +222,14 @@ async fn look() -> Duration {
     if asleep {
         return ASLEEP;
     }
-    let allowed = allowed_players(&app);
+    let (allowed, browsers) = allowed_apps(&app);
+    {
+        let mut hub = hub();
+        if hub.browsers != browsers {
+            hub.browsers = browsers;
+            BROWSER_WAKE.notify_one();
+        }
+    }
     for player in Player::SCRIPTED {
         let due = {
             let hub = hub();
@@ -262,11 +277,16 @@ async fn look() -> Duration {
         .max(Duration::from_millis(200))
 }
 
-/// Keeps the browser watcher running while the screen is on, and starts it again if it stops.
+/// Keeps the browser watcher running while the screen is on and a browser is switched on, and
+/// starts it again if it stops.
 async fn browsers() {
+    let idle = || {
+        let hub = hub();
+        hub.asleep || hub.browsers.is_empty()
+    };
     let mut failures: u32 = 0;
     loop {
-        while hub().asleep {
+        while idle() {
             BROWSER_WAKE.notified().await;
         }
         let started = Instant::now();
@@ -289,13 +309,18 @@ async fn browsers() {
                         }
                         None => break,
                     },
-                    _ = BROWSER_WAKE.notified() => if hub().asleep { break },
+                    _ = BROWSER_WAKE.notified() => if idle() { break },
                 }
             }
         }
         drop(watcher);
         if hub().asleep {
             // It's asked again on waking; until then the card is out of sight anyway.
+            continue;
+        }
+        if idle() {
+            // Every browser was switched off.
+            heard_browser(None);
             continue;
         }
         // It stopped by itself, so what it said may no longer hold.
@@ -341,10 +366,21 @@ async fn ask(player: Player, allowed: bool) -> Option<Read> {
     }
 }
 
-fn allowed_players(app: &AppHandle) -> Vec<Player> {
+/// The players and the browsers switched on in Settings → Apps.
+fn allowed_apps(app: &AppHandle) -> (Vec<Player>, Vec<&'static str>) {
     let settings = app.try_state::<crate::controller::AppState>().and_then(|state| state.store.lock().ok()?.settings().ok());
-    let Some(settings) = settings else { return Vec::new() };
-    Player::SCRIPTED.into_iter().filter(|player| crate::apps::allowed(&settings, player.id())).collect()
+    let Some(settings) = settings else { return (Vec::new(), Vec::new()) };
+    let players = Player::SCRIPTED.into_iter().filter(|player| crate::apps::allowed(&settings, player.id())).collect();
+    let browsers = crate::apps::BROWSERS.into_iter().filter(|id| crate::apps::allowed(&settings, id)).collect();
+    (players, browsers)
+}
+
+/// A browser's video, unless its browser is switched off in Settings → Apps.
+fn shown_browser<'a>(read: Option<&'a Read>, browsers: &[&str]) -> Option<&'a Read> {
+    read.filter(|read| match read {
+        Read::Track(reading) => reading.app.as_deref().and_then(browser::switch).is_some_and(|id| browsers.contains(&id)),
+        _ => true,
+    })
 }
 
 /// Which track the card shows: one that plays, keeping the one shown; else the one shown,
@@ -406,7 +442,8 @@ fn pill_shows(shown: &Shown) -> bool {
 
 fn settle(hub: &mut Hub) {
     let current = hub.shown.as_ref().map(|shown| shown.reading.player);
-    let reads = [hub.slots[0].read.as_ref(), hub.slots[1].read.as_ref(), hub.slots[2].read.as_ref(), hub.slots[3].read.as_ref()];
+    let browser = shown_browser(hub.slots[3].read.as_ref(), &hub.browsers);
+    let reads = [hub.slots[0].read.as_ref(), hub.slots[1].read.as_ref(), hub.slots[2].read.as_ref(), browser];
     let pick = choose(reads, current);
     hub.shown = follow(hub.shown.take(), pick, surface::now_ms(), Instant::now());
     if let (Some(shown), Some(dir)) = (hub.shown.as_mut(), hub.covers.clone()) {
@@ -796,7 +833,13 @@ mod tests {
         let other = Reading { playing: false, title: "Sintel".into(), track: "Sintel".into(), ..video.clone() };
         assert!(!pill_shows(&follow(Some(shown(video.clone())), Some(other), 99, Instant::now()).unwrap()));
         let paused = Reading { playing: false, ..video.clone() };
-        assert!(pill_shows(&follow(Some(shown(video)), Some(paused), 99, Instant::now()).unwrap()));
+        assert!(pill_shows(&follow(Some(shown(video.clone())), Some(paused), 99, Instant::now()).unwrap()));
+        // Only while its browser is switched on in Settings → Apps.
+        assert!(shown_browser(Some(&browser), &["chrome"]).is_some());
+        assert!(shown_browser(Some(&browser), &["safari", "arc"]).is_none());
+        assert!(shown_browser(Some(&browser), &[]).is_none());
+        let brave = Read::Track(Reading { app: Some("com.brave.Browser".into()), ..video });
+        assert!(shown_browser(Some(&brave), &["brave"]).is_some());
     }
 
     /// The real players, on this Mac: `cargo test --lib media::tests::live_players -- --ignored

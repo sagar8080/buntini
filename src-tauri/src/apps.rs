@@ -43,11 +43,11 @@ pub const APPS: [App; 18] = [
     App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "photos", name: "Photos", can: &["Find and show photos"], tools: &[], share: Some(Share::Photos), note: None },
     App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
-    App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
-    App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "brave", name: "Brave Browser", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "arc", name: "Arc", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "safari", name: "Safari", can: &["Tabs", "read pages", "Now playing"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
+    App { id: "chrome", name: "Google Chrome", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "brave", name: "Brave Browser", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "arc", name: "Arc", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
     App { id: "mac_settings", name: "System Settings", can: &["Wallpaper", "Dock", "appearance", "Wi-Fi", "Finder"], tools: &["change_mac_setting"], share: None, note: None },
 ];
 
