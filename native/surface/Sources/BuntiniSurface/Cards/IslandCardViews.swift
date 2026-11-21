@@ -11,7 +11,8 @@ struct DropCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: drop.files.count > 1 ? "doc.on.doc.fill" : "doc.fill").font(.title3).opacity(0.85)
-                Text(drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).font(.callout.weight(.semibold)).lineLimit(2)
+                let names = drop.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+                Text(names).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle).help(names)
             }
             FlowRow(spacing: 6) {
                 // Into the chat, attached to the next message.

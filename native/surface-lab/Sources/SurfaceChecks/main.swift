@@ -167,6 +167,14 @@ if let single = fixture.scenes.first(where: { $0.pills.count == 1 && $0.card != 
 }
 let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let raw = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+// A chip is never wider than the widest, however long its name.
+guard MainActor.assumeIsolated({ IslandSizing.chipWidths(busy, screen: notched) }).allSatisfy({ $0 <= Chips.widest }) else { fail("a chip is wider than \(Chips.widest) pt") }
+var longRaw = (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })!
+var longPills = longRaw["pills"] as! [[String: Any]]
+longPills[0]["label"] = String(repeating: "A long name for a check run ", count: 4)
+longRaw["pills"] = [longPills[0]]
+let lone = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: longRaw))
+guard let loneWidth = MainActor.assumeIsolated({ IslandSizing.chipWidths(lone, screen: notched) }).first, loneWidth <= Chips.widest else { fail("a lone chip with a long name grows past \(Chips.widest) pt") }
 var heights: [String: [String]] = [:]
 for code in ["en", "de", "ar"] {
     guard let catalog = (try? Data(contentsOf: root.appendingPathComponent("locales/\(code).json"))).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) else { fail("no catalog for \(code)") }

@@ -258,19 +258,20 @@ struct ChipRow: View {
         ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
-    /// Each chip as wide as it says, with its badge while there's room for it, in order;
-    /// when even the names don't fit, the longest are cut to share what is left.
+    /// Each chip as wide as it says, up to `Chips.widest`, with its badge while there's room
+    /// for it, in order; when even the names don't fit, the longest are cut to share what is
+    /// left.
     static func layout(_ chips: [Chip], selected: String?, width: CGFloat) -> ([CGFloat], [Bool]) {
         let room = width - spacing * CGFloat(max(chips.count - 1, 0))
         var widths = chips.map { chip in
-            20 + 12 + 6 + measure(chip.label) + (ChipLabel.jumps(chip, on: on(chip, selected)) ? 6 + 9 : 0) + 1
+            min(Chips.widest, 20 + 12 + 6 + measure(chip.label) + (ChipLabel.jumps(chip, on: on(chip, selected)) ? 6 + 9 : 0) + 1)
         }
         var badges = chips.map { _ in false }
         guard widths.reduce(0, +) <= room else { return (Chips.share(widths, room: room), badges) }
         for (index, chip) in chips.enumerated() {
             guard let text = chip.badge, !text.isEmpty else { continue }
             let extra = 6 + measure(text)
-            if widths.reduce(0, +) + extra <= room {
+            if widths.reduce(0, +) + extra <= room, widths[index] + extra <= Chips.widest {
                 widths[index] += extra
                 badges[index] = true
             }

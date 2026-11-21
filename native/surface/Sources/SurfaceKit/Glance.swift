@@ -69,6 +69,8 @@ public struct Chip: Equatable, Identifiable, Sendable {
 public enum Chips {
     /// The most chips in a row.
     public static let most = 5
+    /// The widest a chip grows, its badge included.
+    public static let widest: CGFloat = 150
 
     /// The cards that can be looked at: the card in front when it is news, then the shelf.
     public static func cards(_ scene: SurfaceScene) -> [Card] {

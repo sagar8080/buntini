@@ -10,7 +10,7 @@ struct ServiceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             CardHeading(from: serviceName(service.service), title: service.title)
-            ForEach(service.rows.prefix(4), id: \.id) { row in
+            ForEach(service.rows.prefix(3), id: \.id) { row in
                 ServiceRowLine(row: row) { url in
                     send(Action(source: .services, card: card.id, name: "open", value: .string(url)))
                 }

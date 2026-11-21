@@ -69,6 +69,14 @@ public enum IslandSizing {
         return (model.showsField, model.showsChips, model.showsControls)
     }
 
+    /// How wide each chip is drawn when the island opens for `scene`.
+    @MainActor
+    public static func chipWidths(_ scene: SurfaceScene, screen: ScreenShape) -> [CGFloat] {
+        let model = model(scene, screen: screen)
+        model.expanded = true
+        return ChipRow.layout(model.chips, selected: model.selected?.id, width: model.cardWidth).0
+    }
+
     @MainActor
     private static func model(_ scene: SurfaceScene, screen: ScreenShape) -> IslandModel {
         Lexicon.learn(scene)

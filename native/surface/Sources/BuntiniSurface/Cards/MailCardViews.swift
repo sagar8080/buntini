@@ -246,12 +246,18 @@ private struct MailOpenView: View {
             } else {
                 HStack(spacing: 6) {
                     IslandButton(label: L(.reply), prominent: true) { replying = true }
-                    IslandButton(label: open.unread ? L(.markRead) : L(.markUnread)) { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
-                    IslandButton(label: open.flagged ? L(.unflag) : L(.flag)) { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
-                    IslandButton(label: L(.junk)) { act("junk", .string(open.id)) }
+                    MoreButton { more }
                 }
             }
         }
+        .contextMenu { if !replying { more } }
+    }
+
+    /// Read or unread, flagged or not, and Junk.
+    @ViewBuilder private var more: some View {
+        Button(open.unread ? L(.markRead) : L(.markUnread)) { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
+        Button(open.flagged ? L(.unflag) : L(.flag)) { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
+        Button(L(.junk)) { act("junk", .string(open.id)) }
     }
 }
 

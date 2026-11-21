@@ -1,16 +1,53 @@
 import SwiftUI
 import SurfaceKit
 
-/// The heading every card starts with: who it is from, and its title.
+/// The heading every card starts with: who it is from, and its title on one line, the whole of
+/// it on hover. A question, which is what's being asked, takes up to three.
 struct CardHeading: View {
     let from: String
     let title: String
+    var titleLines = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(from).font(.caption2.weight(.semibold)).opacity(0.6).lineLimit(1)
-            Text(title).font(.callout.weight(.semibold)).lineLimit(2)
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(titleLines)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(title)
         }
+    }
+}
+
+/// A card's other actions, behind ⋯ beside its buttons; the card offers the same on a
+/// right-click (`.contextMenu`). A picture can't hold a menu, so it gets the button's look.
+struct MoreButton<Items: View>: View {
+    @ViewBuilder let items: () -> Items
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        Group {
+            if inPicture {
+                mark
+            } else {
+                Menu(content: items) { mark }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+            }
+        }
+        .fixedSize()
+        .accessibilityLabel(L(.more))
+    }
+
+    private var mark: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 11, weight: .bold))
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(Color.white.opacity(0.12)))
+            .contentShape(Circle())
     }
 }
 

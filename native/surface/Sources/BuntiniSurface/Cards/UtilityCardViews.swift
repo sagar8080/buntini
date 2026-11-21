@@ -2,7 +2,7 @@
 import SwiftUI
 import SurfaceKit
 
-/// The focus timer: a ring counting down, the rounds, and pause, skip and stop.
+/// The focus timer: a ring counting down, the rounds, pause and stop, and skip behind ⋯.
 struct TimerCardView: View {
     let card: Card
     let timer: TimerCard
@@ -55,13 +55,18 @@ struct TimerCardView: View {
                         IslandButton(label: L(.timerAgain), prominent: true) { act("focus") }
                     } else {
                         IslandButton(label: timer.paused ? L(.resume) : L(.pause), prominent: true) { act(timer.paused ? "resume" : "pause") }
-                        IslandButton(label: L(.skip)) { act("skip") }
                         IslandButton(label: L(.stop)) { act("stop") }
+                        MoreButton { skip }
                     }
                 }
             }
             Spacer(minLength: 0)
         }
+        .contextMenu { if !done { skip } }
+    }
+
+    private var skip: some View {
+        Button(L(.skip)) { act("skip") }
     }
 }
 
@@ -86,7 +91,8 @@ private struct Rounds: View {
     }
 }
 
-/// An area just captured: paste it where you were typing, copy, mark it up, or ask about it.
+/// An area just captured: paste it where you were typing; copy, mark it up or ask about it
+/// behind ⋯.
 struct CaptureCardView: View {
     let card: Card
     let capture: Capture
@@ -119,16 +125,22 @@ struct CaptureCardView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(L(.dismiss))
                     }
-                    FlowRow(spacing: 6) {
+                    HStack(spacing: 6) {
                         IslandButton(label: L(.paste), prominent: true) { act("paste") }
-                        IslandButton(label: L(.copy)) { act("copy") }
-                        IslandButton(label: L(.markUp)) { act("annotate") }
-                        IslandButton(label: L(.ask)) { act("ask") }
+                        MoreButton { more }
                     }
                 }
             }
             .frame(maxHeight: .infinity)
+            .contextMenu { more }
         }
+    }
+
+    /// Copy, mark up, ask.
+    @ViewBuilder private var more: some View {
+        Button(L(.copy)) { act("copy") }
+        Button(L(.markUp)) { act("annotate") }
+        Button(L(.ask)) { act("ask") }
     }
 }
 
@@ -227,15 +239,13 @@ struct UpdateCardView: View {
                         IslandButton(label: L(.notNow)) { act("notNow") }
                     case "available":
                         IslandButton(label: L(.install), prominent: true) { act("install") }
-                        IslandButton(label: L(.releaseNotes)) { act("open") }
-                        IslandButton(label: L(.later)) { act("later") }
+                        MoreButton { more }
                     case "ready":
                         IslandButton(label: L(.restart), prominent: true) { act("restart") }
                         IslandButton(label: L(.later)) { act("later") }
                     case "failed":
                         IslandButton(label: L(.tryAgain), prominent: true) { act("install") }
-                        IslandButton(label: L(.download)) { act("open") }
-                        IslandButton(label: L(.close)) { act("later") }
+                        MoreButton { more }
                     default:
                         EmptyView()
                     }
@@ -243,7 +253,22 @@ struct UpdateCardView: View {
             }
             Spacer(minLength: 0)
         }
+        .contextMenu { more }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Release notes and Later for a new version; the download page and Close after a failure.
+    @ViewBuilder private var more: some View {
+        switch stage {
+        case "available":
+            Button(L(.releaseNotes)) { act("open") }
+            Button(L(.later)) { act("later") }
+        case "failed":
+            Button(L(.download)) { act("open") }
+            Button(L(.close)) { act("later") }
+        default:
+            EmptyView()
+        }
     }
 }
 
@@ -308,7 +333,7 @@ struct WhatsNewCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: "Buntini \(whatsNew.version)", title: L(.whatsNew))
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(whatsNew.lines.prefix(4).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(whatsNew.lines.prefix(3).enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "sparkle").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(red: 0.72, green: 0.5, blue: 1))
                         Text(line).font(.caption).lineLimit(1).opacity(0.85)

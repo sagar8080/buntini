@@ -216,13 +216,15 @@ struct HealthLine: View {
     let text: String
 
     var body: some View {
+        // No wider than the island it hangs from: its frame is the island's width.
         Text(text)
             .font(.caption.weight(.medium))
             .foregroundStyle(.white)
+            .lineLimit(1)
+            .truncationMode(.tail)
             .padding(.horizontal, 10)
             .frame(height: 22)
             .background(Capsule().fill(.black.opacity(0.78)))
-            .fixedSize()
             .accessibilityLabel(text)
     }
 }
