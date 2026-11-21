@@ -305,7 +305,7 @@ fn remove_socket(path: &Path) {
     }
 }
 
-fn bind(path: &Path) -> std::io::Result<UnixListener> {
+pub(crate) fn bind(path: &Path) -> std::io::Result<UnixListener> {
     if path.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(std::io::Error::other("the socket path is too long"));
     }

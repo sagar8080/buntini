@@ -52,6 +52,8 @@ struct PillMark: View {
             Image(systemName: "phone.fill").foregroundStyle(color)
         case (.island?, _) where pill?.id == "call.muted":
             Image(systemName: "mic.slash.fill").foregroundStyle(Color(hex: errorTint))
+        case (.island?, _) where pill?.id.hasPrefix("command.") == true:
+            if moving { Spinner(tint: tint).frame(width: size, height: size) } else { Ring(progress: 0.7, tint: tint, width: size / 6) }
         case (.island?, _) where pill?.id.hasPrefix("unread.") == true:
             Image(systemName: "bubble.left.fill").foregroundStyle(color)
         case (.utilities?, _) where pill?.id == "utilities.awake":

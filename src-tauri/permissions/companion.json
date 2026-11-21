@@ -8,6 +8,8 @@
           "agent_requests",
           "answer_agent",
           "coding_agents",
+          "terminal_commands",
+          "set_terminal_commands",
           "connect_coding_agent",
           "agents_call",
           "island_call",

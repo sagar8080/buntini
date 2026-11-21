@@ -17,11 +17,13 @@ export default function AgentsSection({ onError }: { onError: (error: string) =>
   const [busy, setBusy] = useState('');
   const [projects, setProjects] = useState<string[]>([]);
   const [week, setWeek] = useState<RecapWeek | null>(null);
+  const [terminal, setTerminal] = useState<boolean | null>(null);
   const [starting, setStarting] = useState({ agent: 'claude', project: '', prompt: '' });
   useEffect(() => {
     command<CodingAgent[]>('coding_agents').then(setAgents).catch(() => {});
     callAgents<string[]>({ op: 'projects' }).then(found => { setProjects(found); setStarting(previous => ({ ...previous, project: previous.project || found[0] || '' })); }).catch(() => {});
     callAgents<RecapWeek[]>({ op: 'recap' }).then(weeks => setWeek(weeks[0] ?? null)).catch(() => {});
+    command<boolean>('terminal_commands').then(setTerminal).catch(() => setTerminal(null));
   }, []);
   const replace = (next: CodingAgent) => setAgents(previous => previous.map(agent => agent.id === next.id ? next : agent));
   async function act(key: string, run: () => Promise<void>) {
@@ -41,8 +43,8 @@ export default function AgentsSection({ onError }: { onError: (error: string) =>
     await callAgents({ op: 'start', agent: starting.agent, project: starting.project, prompt: starting.prompt.trim() });
     setStarting(previous => ({ ...previous, prompt: '' }));
   });
+  const terminalCommands = (on: boolean) => act('terminal', async () => setTerminal(await command<boolean>('set_terminal_commands', { on })));
   const available = agents.filter(agent => agent.available);
-  if (!available.length) return null;
   const connectedStartable = available.filter(agent => agent.connected && startable.includes(agent.id));
   return <section className="settings-section">
     <div className="settings-section-heading"><h3>{t('settings.agents.title')}</h3></div>
@@ -52,6 +54,9 @@ export default function AgentsSection({ onError }: { onError: (error: string) =>
       {agent.id === 'codex' && agent.connected && !agent.heard && <p className="field-help app-note">{t('settings.agents.codexTrust')}</p>}
       {agent.usage !== undefined && agent.usage !== null && agent.connected && <Toggle label={t('settings.agents.planUsage')} detail={t('settings.agents.planUsageDetail')} checked={agent.usage} disabled={busy === `${agent.id}-usage`} onChange={on => void usage(agent, on)} />}
     </div>)}
+    {terminal !== null && <div className="app-permission">
+      <Toggle label={t('settings.agents.terminal')} checked={terminal} disabled={busy === 'terminal'} onChange={on => void terminalCommands(on)} />
+    </div>}
     {connectedStartable.length > 0 && <form className="saved-search-form agent-start" onSubmit={event => { event.preventDefault(); void start(); }}>
       <input aria-label={t('settings.agents.firstMessage')} placeholder={t('settings.agents.newSession')} value={starting.prompt} maxLength={8000} onChange={event => setStarting({ ...starting, prompt: event.target.value })} />
       <div>

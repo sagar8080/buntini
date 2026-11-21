@@ -408,6 +408,8 @@ pub fn run() {
             agents::agent_requests,
             agents::answer_agent,
             agent_setup::coding_agents,
+            island::commands::terminal_commands,
+            island::commands::set_terminal_commands,
             agent_setup::connect_coding_agent,
             agents::agents_call,
             island::island_call,

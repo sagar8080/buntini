@@ -11,6 +11,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod calls;
+pub mod commands;
 pub mod demo;
 pub mod power;
 pub mod share;
@@ -256,6 +257,7 @@ pub fn start(app: AppHandle) {
     calls::start(&app);
     power::start();
     unread::start(&app);
+    commands::start();
     // What's next counts down beside the notch.
     tauri::async_runtime::spawn(async {
         loop {
@@ -318,6 +320,7 @@ pub(crate) fn refresh() {
 /// their pills.
 fn send(kept: &[Offer]) {
     let (mut pills, mut offers) = calls::shown();
+    pills.extend(commands::shown());
     let (mut next_pills, mut next) = upcoming::shown(chrono::Local::now());
     pills.append(&mut next_pills);
     let (mut unread_pills, mut unread) = unread::shown();
@@ -406,6 +409,13 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     }
     if action.card.as_deref() == Some("update") {
         return updates::act(app, &action.name);
+    }
+    // A long terminal command's pill: its terminal, in front.
+    if action.name == "pill" {
+        if let Some(pill) = action.value.as_ref().and_then(Value::as_str).filter(|pill| pill.starts_with(commands::PREFIX)) {
+            commands::open(pill);
+            return Ok(());
+        }
     }
     // Joining the next meeting's call, marking a reminder past due done, or a call's controls.
     match (action.card.as_deref(), action.name.as_str()) {
