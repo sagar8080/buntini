@@ -1,5 +1,6 @@
 // The C entry points Rust calls (src-tauri/src/surface/ffi.rs). Every call may come from any
 // thread: the bytes are copied and checked here, and the work then runs on the main thread.
+import AppKit
 import Foundation
 import SurfaceKit
 
@@ -37,6 +38,18 @@ public func buntiniSurfaceUpdate(_ bytes: UnsafePointer<UInt8>?, _ length: Int) 
 public func buntiniSurfaceLevels(_ values: UnsafePointer<Float>?, _ count: Int) {
     guard let values, count == Levels.count else { return }
     SurfaceRuntime.shared.levels.set(Array(UnsafeBufferPointer(start: values, count: count)))
+}
+
+/// Opens macOS's own AirDrop picker for files: `bytes` is a JSON array of absolute paths.
+/// False when AirDrop can't take them (Wi-Fi or Bluetooth off, say).
+@_cdecl("buntini_surface_airdrop")
+public func buntiniSurfaceAirDrop(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> Bool {
+    guard let bytes, length > 0, length <= 64 * 1024,
+          let paths = try? JSONDecoder().decode([String].self, from: Data(bytes: bytes, count: length)), !paths.isEmpty else { return false }
+    let urls = paths.map { URL(fileURLWithPath: $0) }
+    guard let service = NSSharingService(named: .sendViaAirDrop), service.canPerform(withItems: urls) else { return false }
+    onMain { service.perform(withItems: urls) }
+    return true
 }
 
 /// Closes the windows. Safe to call more than once.

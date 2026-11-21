@@ -20,7 +20,7 @@ struct NowPlayingCardView: View {
 
     /// The player's own colour, until the cover gives one.
     private var playerTint: RGB {
-        RGB(hex: playing.player == "spotify" ? "#1ED760" : playing.player == "tv" ? "#8EA2FF" : "#FA2D48")
+        RGB(hex: playing.playerTint)
     }
 
     private var shownArt: CoverArt? {
@@ -32,7 +32,7 @@ struct NowPlayingCardView: View {
     var body: some View {
         let tint = shownArt?.tint ?? playerTint
         HStack(alignment: .center, spacing: 14) {
-            CoverView(art: shownArt, player: playing.player, tint: tint, size: Self.coverSide)
+            CoverView(art: shownArt, player: playing.player, app: playing.app, tint: tint, size: Self.coverSide)
                 .onTapGesture { act("open") }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(playing.album ?? playing.title)
@@ -87,9 +87,13 @@ struct NowPlayingCardView: View {
             if let shuffle = playing.shuffle {
                 GlyphButton(symbol: "shuffle", size: 12, on: shuffle, tint: tint, label: L(.shuffle)) { act("shuffle", .bool(!shuffle)) }
             }
-            GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: L(.previous)) { act("previous") }
+            if playing.canPrevious != false {
+                GlyphButton(symbol: "backward.fill", size: 14, tint: tint, label: L(.previous)) { act("previous") }
+            }
             PlayButton(playing: playing.playing, tint: tint) { act(playing.playing ? "pause" : "play") }
-            GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: L(.nextTrack)) { act("next") }
+            if playing.canNext != false {
+                GlyphButton(symbol: "forward.fill", size: 14, tint: tint, label: L(.nextTrack)) { act("next") }
+            }
             if let mode = playing.repeatMode {
                 GlyphButton(symbol: mode == "one" ? "repeat.1" : "repeat", size: 12, on: mode != "off", tint: tint, label: L(.repeatMode)) {
                     act("repeat", .string(Self.nextRepeat(mode, player: playing.player)))
@@ -99,9 +103,14 @@ struct NowPlayingCardView: View {
             if let volume = playing.volume {
                 VolumeBar(volume: volume, tint: tint) { level in act("volume", .number((level * 100).rounded() / 100)) }
             }
+            // Where the sound goes, when there's somewhere else for it to go.
+            if let outputs = playing.outputs, outputs.count > 1 {
+                OutputMenu(outputs: outputs) { uid in act("output", .string(uid)) }
+            }
         }
-        // The first symbol lines up with the title, not its button's edge.
-        .padding(.leading, -5)
+        // The first symbol lines up with the title, not its button's edge; a play button
+        // that comes first is round, so its edge does.
+        .padding(.leading, playing.shuffle != nil || playing.canPrevious != false ? -5 : 0)
         // Playback controls keep their order in every language, as in Apple's players.
         .environment(\.layoutDirection, .leftToRight)
     }
@@ -131,5 +140,49 @@ struct NowPlayingCardView: View {
             guard artPath == path else { return }
             withAnimation(.easeOut(duration: 0.35)) { art = loaded }
         }
+    }
+}
+
+/// The Mac's sound outputs, the one in use showing as the button and ticked in the menu.
+struct OutputMenu: View {
+    let outputs: [Output]
+    let choose: (String) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        let current = outputs.first(where: \.current)
+        Group {
+            if inPicture {
+                mark(current)
+            } else {
+                Menu {
+                    ForEach(outputs, id: \.uid) { output in
+                        Button {
+                            if !output.current { choose(output.uid) }
+                        } label: {
+                            Label(output.name, systemImage: output.current ? "checkmark" : output.symbol)
+                        }
+                    }
+                } label: {
+                    mark(current)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+            }
+        }
+        .fixedSize()
+        .help(current?.name ?? L(.output))
+        .accessibilityLabel(L(.output))
+        .accessibilityValue(current?.name ?? "")
+    }
+
+    private func mark(_ current: Output?) -> some View {
+        Image(systemName: current?.symbol ?? "speaker.wave.2.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(Color.white.opacity(0.92))
+            .frame(width: 26, height: 26)
+            .contentShape(Circle())
     }
 }

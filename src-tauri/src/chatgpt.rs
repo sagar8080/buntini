@@ -26,7 +26,7 @@ pub const RESOURCE: &str = "https://api.openai.com/v1";
 const SCOPES: &str =
     "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const PLAN_SCOPE: &str = "chatgpt.tokens.use.direct";
-const CALLBACK_PATH: &str = "/auth/callback";
+pub(crate) const CALLBACK_PATH: &str = "/auth/callback";
 /// Where the session lives in the Keychain (alongside API keys, under its own name).
 pub const KEYCHAIN_ID: &str = "chatgpt";
 
@@ -49,7 +49,7 @@ impl Session {
     }
 }
 
-fn random(bytes: usize) -> Result<String, String> {
+pub(crate) fn random(bytes: usize) -> Result<String, String> {
     let mut buffer = vec![0u8; bytes];
     getrandom::fill(&mut buffer).map_err(|_| "Couldn’t prepare a secure sign-in.".to_string())?;
     Ok(URL_SAFE_NO_PAD.encode(buffer))
@@ -243,7 +243,7 @@ const PAGE: &str = "<!doctype html><meta charset=utf-8><title>Buntini</title><bo
 
 /// Waits for the browser to come back to the loopback address, answering it with a
 /// short page. Other requests (such as a favicon) get a 404.
-async fn wait_for_callback(
+pub(crate) async fn wait_for_callback(
     listener: tokio::net::TcpListener,
     cancel: Arc<AtomicBool>,
     expected_state: &str,

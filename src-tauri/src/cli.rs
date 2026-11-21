@@ -297,6 +297,24 @@ pub fn ready(tool: &Tool) -> Result<(), String> {
     }
 }
 
+/// Runs one of a tool's own commands (`claude mcp add …`) with the environment it needs, to set
+/// it up. `home` stands in for the home folder, for tests.
+pub(crate) async fn run_own(id: &str, args: &[String], home: Option<&Path>) -> Result<String, String> {
+    let tool: &'static Tool = TOOLS.iter().find(|tool| tool.id == id).ok_or("That tool isn't known.")?;
+    let program = tokio::task::spawn_blocking(move || find_now(tool)).await.ok().flatten().ok_or_else(|| format!("{} isn’t installed on this Mac.", tool.name))?;
+    let mut env = environment(tool, &program, Path::new("/tmp"));
+    if let Some(home) = home {
+        env.retain(|(name, _)| *name != "HOME");
+        env.push(("HOME", home.display().to_string()));
+        let codex = home.join(".codex");
+        let _ = std::fs::create_dir_all(&codex);
+        env.push(("CODEX_HOME", codex.display().to_string()));
+    }
+    let mut command = tokio::process::Command::new(&program);
+    command.args(args).env_clear().envs(env).current_dir(home.unwrap_or(Path::new("/tmp"))).stdin(std::process::Stdio::null());
+    crate::actions::output(command, 30).await
+}
+
 /// The basic environment a tool needs, and nothing of Buntini's own, with the tool's own
 /// telemetry, updates and plugin discovery switched off where it has a switch for them.
 fn environment(tool: &Tool, program: &Path, run: &Path) -> Vec<(&'static str, String)> {

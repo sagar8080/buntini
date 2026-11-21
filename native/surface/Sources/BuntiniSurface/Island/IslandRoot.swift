@@ -45,7 +45,7 @@ struct IslandRoot: View {
         let rect = model.localRect
         let corner = model.inCorner
         let notch = model.hasNotch && !corner
-        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? 24 : mode == .peek ? model.band / 2 : 8
+        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? (model.line == nil ? 24 : 18) : mode == .peek ? model.band / 2 : 8
         let flare: CGFloat = notch ? (mode == .open ? 10 : mode == .peek ? 7 : 0) : 0
         let shape = corner ? AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) : AnyShape(IslandShape(bottomRadius: radius, shoulder: flare))
         ZStack(alignment: .topLeading) {
@@ -111,16 +111,23 @@ struct IslandRoot: View {
         let scene = model.scene
         let corner = model.inCorner
         let trailing = model.placement == .topRight || model.placement == .bottomRight
-        // The cat steps out of its wing only to sit beside a hello, a finished turn or files.
-        let beside = mode == .open && model.interrupting.map(IslandModel.catBeside) == true
+        // The cat steps out of its wing only to sit beside files, or a hello or a finished turn
+        // in a corner, where they aren't a line.
+        let beside = mode == .open && model.line == nil && model.interrupting.map(IslandModel.catBeside) == true
         let catSide: CGFloat = corner ? (mode == .open ? 26 : IslandGeometry.tile.width - 10) : model.band - 2
+        // Opened by a click, the band holds Ask beside the cat (until the field itself shows)
+        // and Focus and Chat across from it, each kept to its side of the notch.
+        let controls = model.showsControls
+        let wing = model.hasNotch && !corner ? (model.size.width - (IslandGeometry.notch(model.screen)?.width ?? 0)) / 2 : model.size.width / 2
         VStack(spacing: 0) {
             // The top band: the cat in one wing, what's running in the other. In a corner
             // the cat rests in its tile, nearest the corner.
             HStack(spacing: corner ? 10 : 0) {
                 if trailing {
+                    if controls { far(width: wing - 20).padding(.leading, 12) }
                     glance(mode: mode).padding(.leading, 9)
                     Spacer(minLength: 0)
+                    if controls && !model.showsField { ask(width: wing - catSide - 40, toward: .trailing).padding(.trailing, 8) }
                 }
                 if !beside, let cat = scene?.cat {
                     self.cat(cat)
@@ -129,8 +136,10 @@ struct IslandRoot: View {
                         .padding(.trailing, corner && trailing ? (mode == .open ? 14 : 5) : 0)
                 }
                 if !trailing {
+                    if controls && !model.showsField { ask(width: wing - catSide - 40, toward: .leading).padding(.leading, 8) }
                     Spacer(minLength: 0)
                     glance(mode: mode).padding(.trailing, corner ? 9 : 14)
+                    if controls { far(width: wing - 20).padding(.trailing, corner ? 9 : 12) }
                 }
             }
             .frame(height: corner ? (mode == .open ? 40 : IslandGeometry.tile.height) : model.band)
@@ -138,7 +147,13 @@ struct IslandRoot: View {
             .onTapGesture {
                 if model.interrupting == nil { model.expanded.toggle() }
             }
-            if mode == .open {
+            if mode == .open, let card = model.line {
+                LineView(card: card)
+                    .id(card.id)
+                    .inLanguage()
+                    .padding(.horizontal, 18)
+                    .transition(.opacity)
+            } else if mode == .open {
                 opened(beside: beside)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .inLanguage()
@@ -149,6 +164,25 @@ struct IslandRoot: View {
             }
         }
         .foregroundStyle(.white)
+    }
+
+    /// Ask, beside the cat: the question field opens with the cursor in it.
+    private func ask(width: CGFloat, toward cat: Alignment) -> some View {
+        BandButton(label: L(.ask), symbol: "magnifyingglass", spoken: L(.askBuntini)) {
+            model.asking = true
+            model.typing = true
+        }
+        .frame(maxWidth: max(width, 22), alignment: cat)
+    }
+
+    /// Focus and Chat, across the notch from the cat.
+    private func far(width: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            UtilityHomeButtons(pills: model.scene?.pills ?? [], send: send)
+            BandButton(label: L(.chat), prominent: !model.asking) { send(Action(source: .island, card: nil, name: "openChat")) }
+        }
+        .frame(maxWidth: max(width, 22), alignment: .trailing)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// The wing's readout while peeking; nothing once opened, where the chips say it.
@@ -167,11 +201,14 @@ struct IslandRoot: View {
             if beside, let cat = model.scene?.cat {
                 HStack(alignment: .top, spacing: 14) {
                     self.cat(cat).frame(width: 64, height: 68)
-                    CardView(card: card, send: send).frame(maxWidth: .infinity, alignment: .leading)
+                    CardView(card: card, send: send)
+                        .fixedSize(horizontal: false, vertical: model.fits(card, beside: true))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .id(card.id)
             } else {
                 CardView(card: card, send: send)
+                    .fixedSize(horizontal: false, vertical: model.fits(card, beside: false))
                     .id(card.id)
                     .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
@@ -186,13 +223,15 @@ struct HealthLine: View {
     let text: String
 
     var body: some View {
+        // No wider than the island it hangs from: its frame is the island's width.
         Text(text)
             .font(.caption.weight(.medium))
             .foregroundStyle(.white)
+            .lineLimit(1)
+            .truncationMode(.tail)
             .padding(.horizontal, 10)
             .frame(height: 22)
             .background(Capsule().fill(.black.opacity(0.78)))
-            .fixedSize()
             .accessibilityLabel(text)
     }
 }
@@ -227,8 +266,9 @@ struct Wardrobe: View {
     }
 }
 
-/// Opened by a click: a question for Buntini and the way to the chat, then a chip for each
-/// thing running and the chosen one's card.
+/// Opened by a click: a chip for each thing running once there's more than one, and the chosen
+/// one's card. The question field shows once Ask is chosen in the band, or when nothing runs;
+/// Ask, Focus and Chat themselves sit in the band.
 struct Home: View {
     @ObservedObject var model: IslandModel
     let width: CGFloat
@@ -241,26 +281,31 @@ struct Home: View {
         let chips = model.chips
         let selected = model.selected
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+            if model.showsField {
                 field
                     .font(.callout)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
-                UtilityHomeButtons(pills: model.scene?.pills ?? [], send: send)
-                IslandButton(label: L(.chat), prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
+                    .transition(.opacity)
             }
-            if !chips.isEmpty {
+            if model.showsChips {
                 ChipRow(chips: chips, selected: selected?.id, width: width, choose: choose)
             }
             if let card = selected {
                 CardView(card: card, send: send)
+                    .fixedSize(horizontal: false, vertical: model.fits(card, beside: false))
                     .id(card.id)
                     .transition(.opacity)
             }
         }
         .animation(.easeOut(duration: 0.18), value: selected?.id)
-        .onChange(of: focused) { now in model.typing = now }
+        .animation(.easeOut(duration: 0.18), value: model.showsField)
+        .onChange(of: focused) { now in
+            model.typing = now
+            // Left empty, the field goes back into the band.
+            if !now && question.isEmpty { model.asking = false }
+        }
         .onDisappear { model.typing = false }
     }
 
@@ -285,6 +330,25 @@ struct Home: View {
                     focused = false
                     model.expanded = false
                 }
+                // Chosen from the band, or typed on the opened island: the cursor goes straight
+                // in, after what was typed, once the island has the keyboard.
+                .onAppear { if model.asking { takeAsk() } }
+                .onChange(of: model.asking) { now in if now { takeAsk() } }
+        }
+    }
+
+    /// Takes over from the band or the keys: what was typed goes in, and the cursor after it.
+    /// Should the cursor not get there, the island doesn't stay held open for it.
+    private func takeAsk() {
+        if !model.askPrefill.isEmpty {
+            question += model.askPrefill
+            model.askPrefill = ""
+        }
+        DispatchQueue.main.async { focused = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !focused else { return }
+            model.typing = false
+            if question.isEmpty { model.asking = false }
         }
     }
 
@@ -340,10 +404,18 @@ struct CardView: View {
         case .timer(let value): TimerCardView(card: card, timer: value, send: send)
         case .capture(let value): CaptureCardView(card: card, capture: value, send: send)
         case .vitals(let value): VitalsCardView(vitals: value)
+        case .awake(let value): AwakeCardView(card: card, awake: value, send: send)
+        case .recording(let value): RecordingCardView(card: card, recording: value, send: send)
         case .update(let value): UpdateCardView(card: card, update: value, send: send)
         case .whatsNew(let value): WhatsNewCardView(whatsNew: value)
         case .drop(let value): DropCardView(card: card, drop: value, send: send)
         case .greeting(let value): GreetingCardView(greeting: value)
+        case .answer(let value): AnswerCardView(card: card, answer: value, send: send)
+        case .upcoming(let value): UpcomingCardView(card: card, upcoming: value, send: send)
+        case .call(let value): CallCardView(card: card, call: value, send: send)
+        case .unread(let value): UnreadCardView(card: card, unread: value, send: send)
+        case .request(let value): RequestCardView(card: card, request: value, send: send)
+        case .shortcuts(let value): ShortcutsCardView(card: card, shortcuts: value, send: send)
         case .note(let value): NoteCardView(card: card, note: value, send: send)
         }
     }

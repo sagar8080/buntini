@@ -17,6 +17,17 @@ public struct Glance: Equatable, Sendable {
     /// Characters of a badge shown beside the notch.
     public static let longest = 9
 
+    /// Most urgent first, as the board ranks them (`board::rank` in Rust).
+    public static func rank(_ state: PillState) -> Int {
+        switch state {
+        case .waiting: return 0
+        case .error: return 1
+        case .working: return 2
+        case .done: return 3
+        case .idle: return 4
+        }
+    }
+
     public static func of(_ pills: [Pill], overflow: Int = 0) -> Glance? {
         guard let lead = pills.first else { return nil }
         let rest = Array(pills.dropFirst())
@@ -69,6 +80,8 @@ public struct Chip: Equatable, Identifiable, Sendable {
 public enum Chips {
     /// The most chips in a row.
     public static let most = 5
+    /// The widest a chip grows, its badge included.
+    public static let widest: CGFloat = 150
 
     /// The cards that can be looked at: the card in front when it is news, then the shelf.
     public static func cards(_ scene: SurfaceScene) -> [Card] {
@@ -99,11 +112,27 @@ public enum Chips {
             let most = usage.windows.map(\.percent).max()
             return (usage.agent, most.map { "\(Int($0.rounded()))%" }, usage.agent.lowercased().contains("codex") ? "#10A37F" : "#D97757", "speedometer")
         case .nowPlaying(let playing):
-            return (playing.title, playing.artist, playing.player == "spotify" ? "#1ED760" : "#FA2D48", "pause.fill")
+            return (playing.title, playing.artist, playing.playerTint, "pause.fill")
         case .service(let service):
             return (service.title, nil, "#8B949E", "circle.fill")
+        case .recording(let recording):
+            return (recording.name ?? "●", nil, "#FF453A", "record.circle")
+        case .awake(let awake):
+            return (awake.label, nil, "#FFD60A", "cup.and.saucer.fill")
         case .timer(let timer):
             return (timer.label, nil, "#FF7A59", "timer")
+        case .answer(let answer):
+            return (answer.question, nil, "#F2B33D", "text.bubble")
+        case .upcoming(let upcoming):
+            return (upcoming.title, nil, upcoming.item == "meeting" ? "#FF453A" : "#FF9F0A", upcoming.item == "meeting" ? "calendar" : "checklist")
+        case .shortcuts(let shortcuts):
+            return (shortcuts.title, nil, "#FF375F", "square.stack.3d.up.fill")
+        case .request(let request):
+            return (request.from, nil, "#BF5AF2", "hand.raised.fill")
+        case .unread(let unread):
+            return (unread.name, nil, "#34C759", "bubble.left.fill")
+        case .call(let call):
+            return (call.name, nil, "#30D158", call.muted == true ? "mic.slash.fill" : "phone.fill")
         default:
             return nil
         }

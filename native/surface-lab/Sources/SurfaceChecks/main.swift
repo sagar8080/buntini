@@ -94,6 +94,7 @@ if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(pr
 if let problem = SurfaceSounds.problem() { fail(problem) }
 if let problem = MarkupCheck.problem() { fail(problem) }
 if let problem = MainActor.assumeIsolated({ IslandKeyCheck.problem() }) { fail(problem) }
+if let problem = MainActor.assumeIsolated({ IslandPanelKeysCheck.problem() }) { fail(problem) }
 
 // Placeholders fill in one pass: a value is never filled again.
 guard Lexicon.fill("{a} and {b}", ["a": "{b}", "b": "x"]) == "{b} and x",
@@ -134,4 +135,129 @@ if let asking = fixture.scenes.first(where: { $0.opens && $0.card?.body.kind == 
 // The row fits: each as wide as it wants while they fit, the widest cut to share the rest.
 guard Chips.share([50, 60], room: 200) == [50, 60], Chips.share([50, 300, 400], room: 350) == [50, 150, 150] else { fail("chips don't share the row") }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs")
+// Opened heights: a card is measured and rounded up to one of three steps; past the largest
+// only a card with a part that scrolls goes, and it scrolls; with the pointer on it the island
+// only grows. In English, German (long words) and Arabic (right to left).
+guard CardSteps.snap(10) == 86, CardSteps.snap(86) == 86, CardSteps.snap(87) == 142, CardSteps.snap(222) == 222, CardSteps.snap(900) == 222,
+      CardSteps.hold(144, held: 200, pointerIn: true) == 200, CardSteps.hold(144, held: 200, pointerIn: false) == 144 else { fail("opened heights don't snap or hold") }
+let notched = ScreenShape(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 944), safeTop: 32, auxLeft: 664, auxRight: 664, statusBar: 24)
+let band = IslandGeometry.notch(notched)!.height
+let scrolls: Set<CardBody.Kind> = [.approval, .mail, .diff]
+let steps = CardSteps.all
+// What an opened island may measure: a card that opened it, or whichever of the question
+// field, the chips and the chosen card show, 12 apart.
+var opened = Set<CGFloat>()
+for field: CGFloat in [0, 30] {
+    for chipRow: CGFloat in [0, 28] {
+        for card in [0] + steps {
+            let rows = [field, chipRow, card].filter { $0 > 0 }
+            guard !rows.isEmpty else { continue }
+            opened.insert(band + 10 + rows.reduce(0, +) + CGFloat(rows.count - 1) * 12 + 16)
+        }
+    }
+}
+// A card that says one thing opens as a line under the band.
+opened.insert(band + CardSteps.line)
+// Opened by a click, the band holds Ask, Focus and Chat; the field shows only once asked for
+// or when nothing runs, and the chips once there's more than one thing to switch between.
+let home = MainActor.assumeIsolated { IslandSizing.home(busy, screen: notched) }
+guard home == (false, true, true) else { fail("opened with several things running, the home shows \(home)") }
+if let empty = fixture.scenes.first(where: { $0.card == nil && $0.pills.isEmpty && $0.placement == .auto }) {
+    guard MainActor.assumeIsolated({ IslandSizing.home(empty, screen: notched) }) == (true, false, true) else { fail("opened with nothing running, the question field doesn't show") }
+}
+if let single = fixture.scenes.first(where: { $0.pills.count == 1 && $0.card != nil && !$0.opens && $0.pills[0].cardID == $0.card?.id && $0.placement == .auto }) {
+    guard MainActor.assumeIsolated({ IslandSizing.home(single, screen: notched) }).chips == false else { fail("one thing running gets a chip row of one") }
+}
+let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+let raw = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+func longRaw0() -> [String: Any] { (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })! }
+// A finished turn that opens the island is a line under the band, as wide as the island
+// opens; its session's mark leads beside the notch, news, until the island is opened.
+var lineRaw = (raw["scenes"] as! [[String: Any]]).first(where: { (($0["card"] as? [String: Any])?["body"] as? [String: Any])?["kind"] as? String == "finished" })!
+lineRaw["interrupt"] = true
+var agentPill = (longRaw0()["pills"] as! [[String: Any]]).first(where: { $0["source"] as? String == "agents" })!
+agentPill["state"] = "done"
+var idlePill = agentPill
+idlePill["id"] = "other"
+idlePill["state"] = "idle"
+lineRaw["pills"] = [idlePill, agentPill]
+let finishedLine = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: lineRaw))
+let lineSize = MainActor.assumeIsolated { IslandSizing.size(finishedLine, screen: notched, expanded: false) }
+guard lineSize == CGSize(width: IslandGeometry.openWidth, height: band + CardSteps.line) else { fail("a finished turn opens at \(lineSize), not as a line") }
+var calm = lineRaw
+calm["interrupt"] = false
+calm["card"] = NSNull()
+let lead = MainActor.assumeIsolated { IslandSizing.lead(try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: calm)), screen: notched) }
+guard lead.before?.state == .done, lead.before?.id == agentPill["id"] as? String, lead.after?.state != .done else { fail("a finished turn's mark doesn't lead until the island is opened: \(String(describing: lead))") }
+
+// Keys on the island opened by a click: ← and → in reading order, Return, Esc, and typing
+// that starts Ask; shortcuts and keys that type nothing aren't the island's.
+guard IslandKey.of(keyCode: 123, characters: "\u{F702}", command: false, control: false, rightToLeft: false) == .previous,
+      IslandKey.of(keyCode: 123, characters: "\u{F702}", command: false, control: false, rightToLeft: true) == .next,
+      IslandKey.of(keyCode: 124, characters: "\u{F703}", command: false, control: false, rightToLeft: false) == .next,
+      IslandKey.of(keyCode: 36, characters: "\r", command: false, control: false, rightToLeft: false) == .primary,
+      IslandKey.of(keyCode: 53, characters: "\u{1B}", command: false, control: false, rightToLeft: false) == .close,
+      IslandKey.of(keyCode: 0, characters: "a", command: false, control: false, rightToLeft: false) == .type("a"),
+      IslandKey.of(keyCode: 8, characters: "c", command: true, control: false, rightToLeft: false) == nil,
+      IslandKey.of(keyCode: 126, characters: "\u{F700}", command: false, control: false, rightToLeft: false) == nil,
+      IslandKey.of(keyCode: 48, characters: "\t", command: false, control: false, rightToLeft: false) == nil else { fail("the island's keys do the wrong thing") }
+// A swipe steps once, however far it goes on, and a mostly vertical one scrolls the card.
+var swiping = IslandSwipe()
+guard swiping.add(dx: -10, dy: 2, began: true, ended: false) == nil, swiping.add(dx: -30, dy: 1, began: false, ended: false) == 1,
+      swiping.add(dx: -60, dy: 0, began: false, ended: false) == nil, swiping.add(dx: -5, dy: 0, began: false, ended: true) == nil,
+      swiping.add(dx: 40, dy: 0, began: true, ended: false) == -1, swiping.add(dx: 5, dy: 50, began: true, ended: false) == nil else { fail("a swipe doesn't step once") }
+// ← and → move through the chips' cards and stop at either end; Return waits out the arming
+// delay, and does the card's one button or nothing.
+let switchable = Chips.of(busy).compactMap(\.card?.id)
+let walked = MainActor.assumeIsolated { IslandSizing.keys(busy, screen: notched, moves: Array(repeating: 1, count: switchable.count + 2) + [-99]) }
+guard walked.cards.dropLast().last == switchable.last, walked.cards.last == switchable.first, walked.early == nil,
+      walked.late == nil || walked.late?.card == switchable.first else { fail("the keys don't walk the chips: \(walked)") }
+if let asking = fixture.scenes.first(where: { $0.opens && $0.card?.body.kind == .approval }) {
+    let keys = MainActor.assumeIsolated { IslandSizing.keys(asking, screen: notched, moves: [1]) }
+    guard keys.late == nil else { fail("Return answers an approval") }
+}
+
+// A chip is never wider than the widest, however long its name.
+guard MainActor.assumeIsolated({ IslandSizing.chipWidths(busy, screen: notched) }).allSatisfy({ $0 <= Chips.widest }) else { fail("a chip is wider than \(Chips.widest) pt") }
+var longRaw = (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })!
+var longPills = longRaw["pills"] as! [[String: Any]]
+longPills[0]["label"] = String(repeating: "A long name for a check run ", count: 4)
+longRaw["pills"] = [longPills[0]]
+let lone = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: longRaw))
+guard let loneWidth = MainActor.assumeIsolated({ IslandSizing.chipWidths(lone, screen: notched) }).first, loneWidth <= Chips.widest else { fail("a lone chip with a long name grows past \(Chips.widest) pt") }
+var heights: [String: [String]] = [:]
+for code in ["en", "de", "ar"] {
+    guard let catalog = (try? Data(contentsOf: root.appendingPathComponent("locales/\(code).json"))).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) else { fail("no catalog for \(code)") }
+    var first = (raw["scenes"] as! [[String: Any]])[0]
+    first["words"] = ["language": code, "rtl": code == "ar", "labels": Dictionary(uniqueKeysWithValues: words.labels.map { ($0.key, catalog[$0.key] as? String ?? $0.value) })]
+    let worded = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: first))
+    let width = MainActor.assumeIsolated { IslandSizing.cardWidth(worded, screen: notched) }
+    guard width == IslandGeometry.openWidth - 36 else { fail("cards are laid out \(width) pt wide") }
+    for scene in fixture.scenes {
+        for card in [scene.card].compactMap({ $0 }) + (scene.shelf ?? []) {
+            let height = MainActor.assumeIsolated { IslandSizing.cardHeight(card, width: width) }
+            heights[card.body.kind.rawValue, default: []].append("\(code) \(Int(height))→\(Int(CardSteps.snap(height)))")
+            if height > CardSteps.largest + 0.5 && !scrolls.contains(card.body.kind) {
+                fail("a \(card.body.kind.rawValue) card is \(Int(height)) pt in \(code), past the largest step with nothing that scrolls")
+            }
+        }
+        for expanded in [false, true] where scene.placement == .auto {
+            let size = MainActor.assumeIsolated { IslandSizing.size(scene, screen: notched, expanded: expanded) }
+            guard size.height > band else { continue }
+            guard size.width == IslandGeometry.openWidth, opened.contains(size.height) else { fail("a \(scene.card?.body.kind.rawValue ?? "home") scene opens at \(size) in \(code), not on a step") }
+        }
+    }
+    // Switching chips with the pointer on the island: it holds the taller card's height, then
+    // settles once the pointer leaves.
+    let cards = Chips.cards(busy).filter { $0.body.kind != .diff }
+    let measured = cards.map { card in (card.id, CardSteps.snap(MainActor.assumeIsolated { IslandSizing.cardHeight(card, width: width) })) }
+    if let tallest = measured.max(by: { $0.1 < $1.1 }), let shortest = measured.min(by: { $0.1 < $1.1 }), tallest.1 > shortest.1 {
+        let held = MainActor.assumeIsolated { IslandSizing.held(busy, screen: notched, tallest: tallest.0, shortest: shortest.0) }
+        guard held.short == held.tall, held.left < held.tall else { fail("the island shrank under the pointer, or stayed tall once it left: \(held)") }
+    }
+}
+if CommandLine.arguments.contains("--heights") {
+    for (kind, values) in heights.sorted(by: { $0.key < $1.key }) { print(kind, values.joined(separator: ", ")) }
+}
+
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs; cards open at three heights in English, German and Arabic; keys and swipes move between them")

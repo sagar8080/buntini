@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// A borderless panel that never takes focus from the app you're in, above the menu bar.
-/// It takes the keyboard only while one of its text fields is being typed in, so a click on
+/// It takes the keyboard only while one of its text fields is being typed in, or while it's
+/// open from a click with the pointer on it (for ←, →, Return, Esc and typing), so a click on
 /// a card's button leaves your keystrokes going to your app. It asks to be left out of
 /// screenshots and screen sharing, since its cards can show commands and mail; tools that
 /// capture through ScreenCaptureKit may still show it on macOS 15.4 and later.
@@ -18,6 +19,14 @@ final class IslandPanel: NSPanel {
     }
     /// The last click went into a text field, which needs the keyboard to be typed in.
     private var clickedField = false
+    /// Opened by a click with the pointer on it (set by the window): keys are the island's.
+    var holdsKeys = false {
+        didSet { if !holdsKeys { giveKeyBack() } }
+    }
+    /// A key pressed while nothing is typed in; true when the island took it.
+    var onKey: ((NSEvent) -> Bool)?
+    /// A scroll; true when it was the island's sideways swipe rather than a card's scroll.
+    var onScroll: ((NSEvent) -> Bool)?
 
     init() {
         super.init(contentRect: NSRect(origin: .zero, size: IslandGeometryPanel.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -33,12 +42,15 @@ final class IslandPanel: NSPanel {
         sharingType = .none
     }
 
-    override var canBecomeKey: Bool { typing || clickedField }
+    override var canBecomeKey: Bool { typing || clickedField || holdsKeys }
     override var canBecomeMain: Bool { false }
     // AppKit would push the panel below the menu bar.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 
     override func sendEvent(_ event: NSEvent) {
+        // A field being typed in keeps its keys.
+        if event.type == .keyDown, !(firstResponder is NSText), onKey?(event) == true { return }
+        if event.type == .scrollWheel, onScroll?(event) == true { return }
         if event.type == .leftMouseDown {
             clickedField = IslandPanel.takesTyping(contentView?.hitTest(event.locationInWindow))
         }
@@ -49,9 +61,10 @@ final class IslandPanel: NSPanel {
         }
     }
 
-    /// Hands the keyboard back, unless the island's field is being typed in.
+    /// Hands the keyboard back, unless the island's field is being typed in or the island is
+    /// open from a click with the pointer on it.
     func giveKeyBack() {
-        if isKeyWindow && !typing { resignKey() }
+        if isKeyWindow && !typing && !holdsKeys { resignKey() }
     }
 
     /// A view that is typed into: an editable text field, or the editor typing into one.
@@ -96,6 +109,29 @@ public enum IslandKeyCheck {
         let button = host.hitTest(NSPoint(x: 240, y: 40))
         if !IslandPanel.takesTyping(field) { return "a click on the island's text field doesn't reach a field (\(field.map { "\(type(of: $0))" } ?? "nothing"))" }
         if IslandPanel.takesTyping(button) { return "a click on an island button would take the keyboard" }
+        return nil
+    }
+}
+
+/// Checks, for SurfaceChecks, that the panel takes the keyboard only while it's typed in or
+/// held open from a click, and that a key pressed then reaches the island.
+public enum IslandPanelKeysCheck {
+    @MainActor
+    public static func problem() -> String? {
+        let panel = IslandPanel()
+        if panel.canBecomeKey { return "the island takes the keyboard by itself" }
+        panel.holdsKeys = true
+        if !panel.canBecomeKey { return "the island opened from a click can't take the keyboard" }
+        var heard: [UInt16] = []
+        panel.onKey = { event in
+            heard.append(event.keyCode)
+            return true
+        }
+        guard let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0) else { return "no key to press" }
+        panel.sendEvent(key)
+        if heard != [0] { return "a key pressed on the opened island didn't reach it" }
+        panel.holdsKeys = false
+        if panel.canBecomeKey { return "the island keeps the keyboard once the pointer leaves" }
         return nil
     }
 }

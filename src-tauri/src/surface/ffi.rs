@@ -7,6 +7,7 @@ extern "C" {
     fn buntini_surface_update(bytes: *const u8, length: usize) -> bool;
     fn buntini_surface_levels(values: *const f32, count: usize);
     fn buntini_surface_stop();
+    fn buntini_surface_airdrop(bytes: *const u8, length: usize) -> bool;
 }
 
 pub fn contract() -> u32 {
@@ -28,6 +29,12 @@ pub fn update(json: &[u8]) -> bool {
 pub fn levels(values: &[f32; 9]) {
     // SAFETY: as for `update`.
     unsafe { buntini_surface_levels(values.as_ptr(), values.len()) }
+}
+
+/// Swift copies the bytes before returning.
+pub fn airdrop(json: &[u8]) -> bool {
+    // SAFETY: as for `update`.
+    unsafe { buntini_surface_airdrop(json.as_ptr(), json.len()) }
 }
 
 pub fn stop() {

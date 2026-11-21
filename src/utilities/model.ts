@@ -128,7 +128,7 @@ export const settingsIndex: SettingEntry[] = [
   setting('brain', 'settings.brain.provider', ['anthropic', 'claude', 'openai', 'gpt', 'gemini', 'chatgpt', 'api key']),
   setting('brain', 'settings.brain.cap', ['budget', 'spending', 'cost', 'limit', 'money', 'price']),
   setting('brain', 'settings.brain.serverAddress', ['ollama', 'lm studio', 'own server', 'localhost', 'host']),
-  setting('apps', 'settings.apps.title', ['permissions', 'mail', 'calendar', 'reminders', 'notes', 'music', 'spotify', 'safari', 'chrome', 'photos', 'messages', 'contacts', 'facetime']),
+  setting('apps', 'settings.apps.title', ['permissions', 'mail', 'calendar', 'reminders', 'notes', 'music', 'spotify', 'safari', 'chrome', 'photos', 'messages', 'contacts', 'facetime', 'podcasts', 'vlc', 'iina', 'players']),
   setting('apps', 'settings.agents.title', ['claude code', 'codex', 'copilot', 'gemini cli', 'hooks', 'agents']),
   setting('apps', 'settings.apps.accessibility', ['permission', 'control', 'screen lock', 'system settings']),
   setting('connections', 'settings.connections.webSearch', ['brave', 'tavily', 'search api key', 'internet']),

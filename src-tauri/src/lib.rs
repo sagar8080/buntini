@@ -20,7 +20,10 @@ mod source_fields;
 mod edit_targets;
 mod location_fields;
 mod chat_threads;
+mod archive;
 mod chatgpt;
+mod intents;
+mod mastodon;
 mod cli;
 mod attach;
 mod helper;
@@ -238,6 +241,8 @@ pub fn run() {
             // The island and the dictation pill: drawn natively, empty until something shows.
             if surface::start() {
                 island::start(app.handle().clone());
+                // Shortcuts and Spotlight run Buntini's actions through this.
+                intents::start();
                 media::start(app.handle().clone());
             } else {
                 eprintln!("Native surfaces unavailable");
@@ -408,6 +413,13 @@ pub fn run() {
             agents::agent_requests,
             agents::answer_agent,
             agent_setup::coding_agents,
+            island::commands::terminal_commands,
+            island::commands::set_terminal_commands,
+            island::assistants::assistants,
+            island::assistants::set_assistant,
+            mastodon::mastodon_account,
+            mastodon::mastodon_sign_in,
+            mastodon::mastodon_sign_out,
             agent_setup::connect_coding_agent,
             agents::agents_call,
             island::island_call,
@@ -441,6 +453,8 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if !SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
                     api.prevent_exit();
+                    // A microphone muted from a call's card doesn't stay muted after Buntini.
+                    island::calls::lift();
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app.state::<controller::AppState>();

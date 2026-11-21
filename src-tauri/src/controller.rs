@@ -371,6 +371,9 @@ pub(crate) async fn save_settings_in(
         state.active.lock().unwrap().remove(&reservation);
     }
     saved?;
+    if previous.apps != settings.apps {
+        crate::media::apps_changed();
+    }
     // A key for "Your server" stays with the address it was given for.
     crate::model::keep_server_key_with_its_address(&previous, &settings);
     state.audit("settings.saved", "Local preferences updated");

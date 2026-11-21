@@ -2,7 +2,7 @@
 import SwiftUI
 import SurfaceKit
 
-/// The focus timer: a ring counting down, the rounds, and pause, skip and stop.
+/// The focus timer: a ring counting down, the rounds, pause and stop, and skip behind ⋯.
 struct TimerCardView: View {
     let card: Card
     let timer: TimerCard
@@ -55,13 +55,18 @@ struct TimerCardView: View {
                         IslandButton(label: L(.timerAgain), prominent: true) { act("focus") }
                     } else {
                         IslandButton(label: timer.paused ? L(.resume) : L(.pause), prominent: true) { act(timer.paused ? "resume" : "pause") }
-                        IslandButton(label: L(.skip)) { act("skip") }
                         IslandButton(label: L(.stop)) { act("stop") }
+                        MoreButton { skip }
                     }
                 }
             }
             Spacer(minLength: 0)
         }
+        .contextMenu { if !done { skip } }
+    }
+
+    private var skip: some View {
+        Button(L(.skip)) { act("skip") }
     }
 }
 
@@ -86,7 +91,8 @@ private struct Rounds: View {
     }
 }
 
-/// An area just captured: paste it where you were typing, copy, mark it up, or ask about it.
+/// An area just captured: paste it where you were typing; copy, mark it up or ask about it
+/// behind ⋯.
 struct CaptureCardView: View {
     let card: Card
     let capture: Capture
@@ -119,16 +125,22 @@ struct CaptureCardView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(L(.dismiss))
                     }
-                    FlowRow(spacing: 6) {
+                    HStack(spacing: 6) {
                         IslandButton(label: L(.paste), prominent: true) { act("paste") }
-                        IslandButton(label: L(.copy)) { act("copy") }
-                        IslandButton(label: L(.markUp)) { act("annotate") }
-                        IslandButton(label: L(.ask)) { act("ask") }
+                        MoreButton { more }
                     }
                 }
             }
             .frame(maxHeight: .infinity)
+            .contextMenu { more }
         }
+    }
+
+    /// Copy, mark up, ask.
+    @ViewBuilder private var more: some View {
+        Button(L(.copy)) { act("copy") }
+        Button(L(.markUp)) { act("annotate") }
+        Button(L(.ask)) { act("ask") }
     }
 }
 
@@ -159,11 +171,81 @@ struct CaptureThumb: View {
 
 /// One line: how the Mac is doing, or a word such as "Sounds off" (Rust writes it from the
 /// same words).
+/// A screen recording: a clock and Stop while it records, then the film to open, show in
+/// Finder or drag out.
+struct RecordingCardView: View {
+    let card: Card
+    let recording: Recording
+    let send: (Action) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let since = recording.since {
+                if inPicture {
+                    heading(since: since, at: Date())
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in heading(since: since, at: context.date) }
+                }
+                HStack(spacing: 6) {
+                    Spacer()
+                    IslandButton(label: L(.stop), prominent: true) { act("stop") }
+                }
+            } else {
+                CardHeading(from: playbackTime(recording.seconds ?? 0), title: recording.name ?? "")
+                    .onDrag { NSItemProvider(contentsOf: recording.path.map { URL(fileURLWithPath: $0) }) ?? NSItemProvider() }
+                HStack(spacing: 6) {
+                    Spacer()
+                    MoreButton { Button(L(.showInFinder)) { act("show") } }
+                    IslandButton(label: L(.open), prominent: true) { act("open") }
+                }
+            }
+        }
+    }
+
+    private func heading(since: Int64, at date: Date) -> some View {
+        CardHeading(from: "● \(playbackTime(date.timeIntervalSince1970 - Double(since)))", title: L(.recording))
+    }
+
+    private func act(_ name: String) {
+        send(Action(source: .utilities, card: card.id, name: name))
+    }
+}
+
+/// The Mac kept awake as asked: until when, and Stop.
+struct AwakeCardView: View {
+    let card: Card
+    let awake: Awake
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let until = awake.until {
+                CardHeading(from: L(.awakeUntil, ["time": Self.time(until)]), title: awake.label)
+            } else {
+                Text(awake.label).font(.callout.weight(.semibold))
+            }
+            HStack(spacing: 6) {
+                Spacer()
+                IslandButton(label: L(.stop), prominent: true) { send(Action(source: .utilities, card: card.id, name: "stop")) }
+            }
+        }
+    }
+
+    /// The hour and minute it ends, as the person's language writes a time.
+    private static func time(_ until: Int64) -> String {
+        let format = DateFormatter()
+        format.locale = Lexicon.locale
+        format.setLocalizedDateFormatFromTemplate("jmm")
+        return format.string(from: Date(timeIntervalSince1970: TimeInterval(until)))
+    }
+}
+
 struct VitalsCardView: View {
     let vitals: Vitals
 
-    private var symbol: String {
-        switch vitals.line {
+    static func symbol(_ line: String) -> String {
+        switch line {
         case L(.soundsOff): return "speaker.slash.fill"
         case L(.soundsOn): return "speaker.wave.2.fill"
         case L(.nothingWaiting): return "checkmark.circle"
@@ -173,7 +255,7 @@ struct VitalsCardView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol).font(.callout).opacity(0.85)
+            Image(systemName: Self.symbol(vitals.line)).font(.callout).opacity(0.85)
             Text(vitals.line).font(.callout.weight(.semibold)).lineLimit(1)
         }
         .frame(maxHeight: .infinity)
@@ -227,15 +309,13 @@ struct UpdateCardView: View {
                         IslandButton(label: L(.notNow)) { act("notNow") }
                     case "available":
                         IslandButton(label: L(.install), prominent: true) { act("install") }
-                        IslandButton(label: L(.releaseNotes)) { act("open") }
-                        IslandButton(label: L(.later)) { act("later") }
+                        MoreButton { more }
                     case "ready":
                         IslandButton(label: L(.restart), prominent: true) { act("restart") }
                         IslandButton(label: L(.later)) { act("later") }
                     case "failed":
                         IslandButton(label: L(.tryAgain), prominent: true) { act("install") }
-                        IslandButton(label: L(.download)) { act("open") }
-                        IslandButton(label: L(.close)) { act("later") }
+                        MoreButton { more }
                     default:
                         EmptyView()
                     }
@@ -243,7 +323,22 @@ struct UpdateCardView: View {
             }
             Spacer(minLength: 0)
         }
+        .contextMenu { more }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Release notes and Later for a new version; the download page and Close after a failure.
+    @ViewBuilder private var more: some View {
+        switch stage {
+        case "available":
+            Button(L(.releaseNotes)) { act("open") }
+            Button(L(.later)) { act("later") }
+        case "failed":
+            Button(L(.download)) { act("open") }
+            Button(L(.close)) { act("later") }
+        default:
+            EmptyView()
+        }
     }
 }
 
@@ -308,7 +403,7 @@ struct WhatsNewCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: "Buntini \(whatsNew.version)", title: L(.whatsNew))
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(whatsNew.lines.prefix(4).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(whatsNew.lines.prefix(3).enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "sparkle").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(red: 0.72, green: 0.5, blue: 1))
                         Text(line).font(.caption).lineLimit(1).opacity(0.85)
@@ -321,14 +416,14 @@ struct WhatsNewCardView: View {
     }
 }
 
-/// On the island's home: start focusing, unless a focus timer already runs.
+/// In the band of the opened island: start focusing, unless a focus timer already runs.
 struct UtilityHomeButtons: View {
     let pills: [Pill]
     let send: (Action) -> Void
 
     var body: some View {
         if !pills.contains(where: { $0.source == .utilities && $0.id == "utilities.focus" }) {
-            IslandButton(label: L(.focus)) { send(Action(source: .utilities, card: nil, name: "focus")) }
+            BandButton(label: L(.focus), symbol: "timer", iconOnly: true) { send(Action(source: .utilities, card: nil, name: "focus")) }
         }
     }
 }

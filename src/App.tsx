@@ -459,10 +459,10 @@ export default function App() {
     const brain = listen<string>('brain-changed', event => { setNotice(event.payload); void refresh().catch(() => {}); });
     // The island's wardrobe changed the cat's look.
     const look = listen('settings-changed', () => { void refresh().catch(() => {}); });
-    // Typed in the island: asked here, where the answer shows.
+    // Typed in the island: asked here. A short answer goes back to the island; anything else
+    // opens the chat with it (see `submit`).
     // It goes without the composer's attachments; dropped because something is under way, the island says so.
     const asked = listen<string>('island-ask', event => {
-      void expand(true);
       void submitRef.current(event.payload, undefined, undefined, false, true).then(taken => { if (taken === false) void callIsland({ op: 'busy' }).catch(() => {}); });
     });
     // Buntini's language changed, from Settings or on the Mac.
@@ -587,11 +587,14 @@ export default function App() {
     if (!prompt.trim() || (sheetWaiting.current && !approvalId) || switchingThreadRef.current || taskBusy.current || planningBusy.current || actionBusy.current || (!spoken && (recording || transcribing)) || voiceStoppingRef.current) return false;
     // What's attached goes with an ordinary message only, never a lookup or a resumed one.
     const sending = chosenMode === 'auto' && !approvalId && !fromIsland ? attachedRef.current : [];
+    // From the island, the chat opens for anything but a short answer, which goes back there.
+    let answeredInIsland = false;
+    const forChatGpt = chosenMode === 'auto' && !approvalId && !sending.length ? askChatGptQuestion(prompt) : null;
+    if (fromIsland && (chosenMode === 'web' || forChatGpt)) void expand(true);
     if (chosenMode === 'web' && !approvalId) {
       await planOnline(prompt.trim(), false);
       return;
     }
-    const forChatGpt = chosenMode === 'auto' && !approvalId && !sending.length ? askChatGptQuestion(prompt) : null;
     if (forChatGpt) {
       if (data?.diagnostics.chatgptPlan === 'usable') await askChatGpt(forChatGpt);
       else { setInput(''); await openChatGpt(forChatGpt); }
@@ -631,6 +634,9 @@ export default function App() {
       if (result.handoff === 'online') { goOnline = result.id; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       if (result.handoff === 'action' && result.action) { setActionError(''); setProposal(result.action); askAction = true; await speechQueue.current?.cancel(); await refresh().catch(e => setError(errorMessage(e))); return; }
       setTurns(previous => mergeTurns(previous, [result]));
+      if (fromIsland && result.state === 'completed' && !result.handoff) {
+        answeredInIsland = await callIsland<boolean>({ op: 'answer', question: prompt.trim(), answer: result.answer }).catch(() => false) === true;
+      }
       if (result.state === 'completed') setAnnouncement(`${data?.settings.assistantName || 'Buntini'}: ${result.answer.slice(0, 400)}`);
       if (result.state !== 'cancelled') react(result.state === 'completed' ? 'happy' : 'sad');
       if (result.state === 'completed' && useSpeech) {
@@ -648,6 +654,7 @@ export default function App() {
       setLive(null); setTurns(thread => mergeTurns(thread, [{ ...provisional, id: liveId || `local-${provisional.createdAt}`, state: 'error', answer: answerSoFar || message }])); await speechQueue.current?.cancel().catch(() => {});
     } finally {
       taskBusy.current = false; setBusy(false); setActivity(''); activeId.current = ''; if (!speechActive.current) setPetState('idle');
+      if (fromIsland && !answeredInIsland) void expand(true);
       // The model wants to look this up online: show the approval sheet for the same message.
       if (goOnline) void planOnline(prompt.trim(), false, goOnline);
       // ChatGPT couldn't take it: the browser route needs its own approval.

@@ -98,7 +98,7 @@ fn changed(state: &mut State) {
 /// Whether Buntini may record the screen. macOS asks once, at the first capture; after that a
 /// card on the island leads to System Settings, where macOS offers to reopen Buntini once it's
 /// allowed. Without it, screencapture would only see the desktop picture.
-fn allowed() -> bool {
+pub(super) fn allowed() -> bool {
     if super::native::capture_allowed(false) {
         return true;
     }
@@ -109,7 +109,7 @@ fn allowed() -> bool {
     false
 }
 
-fn blocked() {
+pub(super) fn blocked() {
     state().blocked = Some(surface::now_ms());
     super::publish();
 }

@@ -1,6 +1,7 @@
 //! Reading and changing Music, Spotify and TV through their own AppleScript. Every script
 //! returns at once when its app isn't open, so nothing here ever launches a player. Play,
 //! pause and skipping go through `apps::control_music`, the same path a chat request uses.
+//! What a browser or any other app plays isn't scripted: macOS says it (system.rs).
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::i18n::tf;
@@ -10,23 +11,36 @@ pub enum Player {
     Spotify,
     Music,
     Tv,
+    /// Whichever browser macOS says is playing, a YouTube video in Chrome for one.
+    Browser,
+    /// Any other app macOS says is playing: Podcasts, VLC, IINA, Books.
+    Other,
 }
 
 impl Player {
-    /// In the order a tie is settled: Spotify first, as `apps::player` does.
-    pub const ALL: [Player; 3] = [Player::Spotify, Player::Music, Player::Tv];
+    /// The players read through their own AppleScript, in the order a tie is settled:
+    /// Spotify first, as `apps::player` does. What macOS says plays comes after them (`index`).
+    pub const SCRIPTED: [Player; 3] = [Player::Spotify, Player::Music, Player::Tv];
 
-    /// The id in Settings → Apps and on the wire.
+    /// The id on the wire.
     pub fn id(self) -> &'static str {
         match self {
             Player::Spotify => "spotify",
             Player::Music => "music",
             Player::Tv => "tv",
+            Player::Browser => "browser",
+            Player::Other => "other",
         }
     }
 
+    /// Read from what macOS says plays (system.rs), one app at a time, rather than scripted.
+    pub fn reported(self) -> bool {
+        matches!(self, Player::Browser | Player::Other)
+    }
+
+    /// One of the scripted players, as the watcher names them.
     pub fn from_id(id: &str) -> Option<Player> {
-        Player::ALL.into_iter().find(|player| player.id() == id)
+        Player::SCRIPTED.into_iter().find(|player| player.id() == id)
     }
 
     /// The name AppleScript and macOS's consent check know it by.
@@ -35,14 +49,18 @@ impl Player {
             Player::Spotify => "Spotify",
             Player::Music => "Music",
             Player::Tv => "TV",
+            Player::Browser => "Browser",
+            Player::Other => "Other player",
         }
     }
 
-    pub fn bundle(self) -> &'static str {
+    /// A browser's and another player's come with what they play (`Reading::app`).
+    pub fn bundle(self) -> Option<&'static str> {
         match self {
-            Player::Spotify => "com.spotify.client",
-            Player::Music => "com.apple.Music",
-            Player::Tv => "com.apple.TV",
+            Player::Spotify => Some("com.spotify.client"),
+            Player::Music => Some("com.apple.Music"),
+            Player::Tv => Some("com.apple.TV"),
+            Player::Browser | Player::Other => None,
         }
     }
 
@@ -52,35 +70,42 @@ impl Player {
             Player::Spotify => "#1ED760",
             Player::Music => "#FA2D48",
             Player::Tv => "#8EA2FF",
+            Player::Browser => "#5E9EFF",
+            Player::Other => "#BF5AF2",
         }
     }
 
+    /// Its slot. macOS says what one app plays at a time, so a browser and another player
+    /// share one.
     pub fn index(self) -> usize {
         match self {
             Player::Spotify => 0,
             Player::Music => 1,
             Player::Tv => 2,
+            Player::Browser | Player::Other => 3,
         }
     }
 
     /// Open right now, asked of macOS without sending the player anything.
     pub fn running(self) -> bool {
-        crate::ax::pid(self.bundle()).is_some()
+        self.bundle().is_some_and(|bundle| crate::ax::pid(bundle).is_some())
     }
 
-    fn read_script(self) -> &'static str {
+    fn read_script(self) -> Option<&'static str> {
         match self {
-            Player::Spotify => SPOTIFY_READ,
-            Player::Music => MUSIC_READ,
-            Player::Tv => TV_READ,
+            Player::Spotify => Some(SPOTIFY_READ),
+            Player::Music => Some(MUSIC_READ),
+            Player::Tv => Some(TV_READ),
+            Player::Browser | Player::Other => None,
         }
     }
 
-    fn set_script(self) -> &'static str {
+    fn set_script(self) -> Option<&'static str> {
         match self {
-            Player::Spotify => SPOTIFY_SET,
-            Player::Music => MUSIC_SET,
-            Player::Tv => TV_SET,
+            Player::Spotify => Some(SPOTIFY_SET),
+            Player::Music => Some(MUSIC_SET),
+            Player::Tv => Some(TV_SET),
+            Player::Browser | Player::Other => None,
         }
     }
 }
@@ -116,6 +141,11 @@ pub struct Reading {
     pub track: String,
     /// Unix seconds when `position` was read.
     pub at: f64,
+    /// The app that plays it, when macOS says what plays (a browser or another player).
+    pub app: Option<String>,
+    /// Whether going back and skipping work. `None` for a player that always takes them.
+    pub previous: Option<bool>,
+    pub next: Option<bool>,
 }
 
 impl Reading {
@@ -142,14 +172,16 @@ pub fn unix_now() -> f64 {
 
 /// Reads one player. Call only when it's open and macOS already allows asking it.
 pub async fn read(player: Player) -> Result<Read, String> {
-    let output = run(player.read_script(), &[], 5).await?;
+    let script = player.read_script().ok_or("Only Music, Spotify and TV are scripted.")?;
+    let output = run(script, &[], 5).await?;
     Ok(parse(player, &output, unix_now()))
 }
 
 /// Seeks, shuffles, repeats or sets the player's own volume. `value` is milliseconds for a
 /// seek, `true`/`false` for shuffle, `off`/`one`/`all` for repeat and 0–100 for volume.
 pub async fn set(player: Player, what: &str, value: &str) -> Result<(), String> {
-    match run(player.set_script(), &[what.to_string(), value.to_string()], 5).await?.trim() {
+    let script = player.set_script().ok_or("Only Music, Spotify and TV are scripted.")?;
+    match run(script, &[what.to_string(), value.to_string()], 5).await?.trim() {
         "closed" => Err(format!("{} isn’t open.", player.app())),
         _ => Ok(()),
     }
@@ -214,6 +246,9 @@ pub fn parse(player: Player, output: &str, at: f64) -> Read {
         artwork_url: text(artwork).filter(|url| url.starts_with("https://")),
         track,
         at,
+        app: None,
+        previous: None,
+        next: None,
     })
 }
 

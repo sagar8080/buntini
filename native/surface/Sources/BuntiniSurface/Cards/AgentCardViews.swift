@@ -2,9 +2,11 @@
 import SwiftUI
 import SurfaceKit
 
-/// What an agent asks to do, shown whole: every line of the command, every line an edit
-/// changes, and every rule Always keeps with where it's kept. When Rust couldn't show all of
-/// it (`allow` off), only Deny and In terminal are offered.
+/// What an agent asks to do, shown whole: every line of the command and every line an edit
+/// changes, scrolling past the room there is. Deny and Allow are on the card; In terminal and
+/// Always, with every rule Always keeps and where, are behind ⋯ and a right-click. When Rust
+/// couldn't show all of it (`allow` off), only Deny and In terminal are offered, both on the
+/// card.
 struct ApprovalCardView: View {
     let card: Card
     let approval: Approval
@@ -14,7 +16,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: from(approval.agent, approval.project), title: approval.title)
             if Self.hasBody(approval) {
-                CardScroll(height: Self.bodyHeight(approval)) {
+                CardScroll(maxHeight: Self.bodyCap) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let detail = approval.detail {
                             Text(detail)
@@ -31,33 +33,34 @@ struct ApprovalCardView: View {
                 // Code reads left to right in every language.
                 .environment(\.layoutDirection, approval.code ? .leftToRight : Lexicon.direction)
             }
-            if Self.offersAlways(approval) && !approval.rules.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(approval.rules.enumerated()), id: \.offset) { _, rule in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(rule.rule)
-                                .font(.system(.caption2, design: .monospaced))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .environment(\.layoutDirection, .leftToRight)
-                            Text(rule.place).font(.caption2).opacity(0.6).fixedSize()
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.07)))
-            }
             HStack(spacing: 6) {
                 Spacer()
-                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
-                IslandButton(label: approval.plan ? L(.keepPlanning) : L(.deny)) { send(Action(source: .agents, card: card.id, name: "deny")) }
-                if Self.offersAlways(approval) {
-                    IslandButton(label: approval.plan ? L(.acceptEdits) : L(.always)) { send(Action(source: .agents, card: card.id, name: "always")) }
-                }
                 if approval.allow {
-                    IslandButton(label: approval.plan ? L(.start) : L(.allow), prominent: true) { send(Action(source: .agents, card: card.id, name: "allow")) }
+                    MoreButton { more }
+                    IslandButton(label: approval.plan ? L(.keepPlanning) : L(.deny)) { act("deny") }
+                    IslandButton(label: approval.plan ? L(.start) : L(.allow), prominent: true) { act("allow") }
+                } else {
+                    IslandButton(label: approval.plan ? L(.keepPlanning) : L(.deny)) { act("deny") }
+                    IslandButton(label: L(.inTerminal), prominent: true) { act("terminal") }
                 }
+            }
+        }
+        .contextMenu { if approval.allow { more } }
+    }
+
+    private func act(_ name: String) {
+        send(Action(source: .agents, card: card.id, name: name))
+    }
+
+    /// In terminal, and Always with each rule it would keep and where.
+    @ViewBuilder private var more: some View {
+        Button(L(.inTerminal)) { act("terminal") }
+        if Self.offersAlways(approval) {
+            let always = approval.plan ? L(.acceptEdits) : L(.always)
+            if approval.rules.isEmpty {
+                Button(always) { act("always") }
+            } else {
+                Button(([always] + approval.rules.map { "\($0.rule) · \($0.place)" }).joined(separator: " — ")) { act("always") }
             }
         }
     }
@@ -70,23 +73,9 @@ struct ApprovalCardView: View {
         approval.detail != nil || !approval.changes.isEmpty
     }
 
-    /// The room the command and the changes take, up to where they scroll.
-    static func bodyHeight(_ approval: Approval) -> CGFloat {
-        var height: CGFloat = 0
-        if let detail = approval.detail {
-            height += textHeight(detail, perLine: approval.code ? 66 : 76, lineHeight: 13)
-        }
-        if !approval.changes.isEmpty {
-            height += (approval.detail == nil ? 0 : 6) + approval.changes.reduce(0) { $0 + textHeight($1.text, perLine: 60, lineHeight: 14) }
-        }
-        return min(max(height, 14), 220)
-    }
-
-    /// The room the rules Always keeps take.
-    static func rulesHeight(_ approval: Approval) -> CGFloat {
-        guard offersAlways(approval), !approval.rules.isEmpty else { return 0 }
-        return 18 + approval.rules.reduce(0) { $0 + textHeight($1.rule, perLine: 52, lineHeight: 15) }
-    }
+    /// The most of the command and the changes shown before they scroll. With less room in the
+    /// island they scroll sooner, and the buttons stay.
+    static let bodyCap: CGFloat = 220
 }
 
 /// An edit's lines, each whole and wrapped, marked as added, removed or kept.
@@ -119,7 +108,7 @@ struct QuestionCardView: View {
     var body: some View {
         let current = question.questions[min(step, question.questions.count - 1)]
         VStack(alignment: .leading, spacing: 8) {
-            CardHeading(from: [from(question.agent, question.project), question.questions.count > 1 ? (current.header ?? "\(step + 1) / \(question.questions.count)") : nil].compactMap { $0 }.joined(separator: " · "), title: current.question)
+            CardHeading(from: [from(question.agent, question.project), question.questions.count > 1 ? (current.header ?? "\(step + 1) / \(question.questions.count)") : nil].compactMap { $0 }.joined(separator: " · "), title: current.question, titleLines: 3)
             FlowRow(spacing: 6) {
                 ForEach(current.options, id: \.label) { option in
                     IslandButton(label: option.label, prominent: picked.contains(option.label)) {
@@ -131,17 +120,20 @@ struct QuestionCardView: View {
                     }
                     .help(option.description ?? "")
                 }
+                // With nothing to send, ⋯ ends the row of choices rather than taking a row.
+                if !current.multi { MoreButton { inTerminal } }
             }
-            HStack(spacing: 6) {
-                Spacer()
-                IslandButton(label: L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
-                if current.multi {
+            if current.multi {
+                HStack(spacing: 6) {
+                    Spacer()
+                    MoreButton { inTerminal }
                     IslandButton(label: step + 1 < question.questions.count ? L(.next) : L(.send), prominent: true) {
                         if !picked.isEmpty { choose(current, .array(picked.map(JSONValue.string))) }
                     }
                 }
             }
         }
+        .contextMenu { inTerminal }
         // The next question's choices take the place of the last one's.
         .arms(on: step)
         .onChange(of: card.id) { _ in
@@ -149,6 +141,10 @@ struct QuestionCardView: View {
             answers = [:]
             picked = []
         }
+    }
+
+    private var inTerminal: some View {
+        Button(L(.inTerminal)) { send(Action(source: .agents, card: card.id, name: "terminal")) }
     }
 
     private func choose(_ current: AgentQuestion, _ value: JSONValue) {
@@ -206,7 +202,7 @@ struct TickerCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(from(ticker.agent, ticker.project)).font(.caption2.weight(.semibold)).opacity(0.6)
-            let shown = Array(ticker.steps.enumerated()).suffix(4)
+            let shown = Array(ticker.steps.enumerated()).suffix(3)
             ForEach(shown, id: \.offset) { index, step in
                 let changed = step.added != nil || step.removed != nil
                 Button {
@@ -234,11 +230,11 @@ struct DiffCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(diff.file).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.head)
+                Text(diff.file).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle).help(diff.file)
                 Text("+\(diff.added)").font(.caption.monospacedDigit()).foregroundStyle(Color(hex: "#7EE787"))
                 Text("−\(diff.removed)").font(.caption.monospacedDigit()).foregroundStyle(Color(hex: "#FF7B72"))
             }
-            ScrollView {
+            CardScroll(maxHeight: 170) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in
                         Text(line.kind == "gap" ? "⋯" : (line.kind == "add" ? "+ " : line.kind == "remove" ? "− " : "  ") + line.text)
@@ -251,7 +247,6 @@ struct DiffCardView: View {
                     }
                 }
             }
-            .frame(maxHeight: 170)
         }
     }
 }

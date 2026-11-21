@@ -1,7 +1,7 @@
 {
  "scenes": [
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -111,6 +111,7 @@
      "surface.media.repeat": "Repeat",
      "surface.media.shuffle": "Shuffle",
      "surface.media.volume": "Volume",
+     "surface.media.output": "Sound output",
      "surface.next": "Next",
      "surface.notNow": "Not now",
      "surface.note.notes": "Notes",
@@ -146,6 +147,14 @@
      "surface.timer.round": "Round {round} of {rounds}",
      "surface.tryAgain": "Try again",
      "surface.undo": "Undo",
+     "surface.upcoming.join": "Join",
+     "surface.call.inCall": "In a call",
+     "surface.answer.sendTo": "Send to",
+     "surface.call.mute": "Mute",
+     "surface.call.unmute": "Unmute",
+     "surface.call.muted": "Muted",
+     "surface.awake.until": "Until {time}",
+     "surface.showInFinder": "Show in Finder",
      "surface.update.ask": "Keep Buntini up to date?",
      "surface.update.available": "New version",
      "surface.update.checkDaily": "Check daily",
@@ -169,7 +178,7 @@
    }
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -251,7 +260,7 @@
    "interrupt": true
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -313,7 +322,7 @@
    "interrupt": true
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -365,7 +374,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -417,7 +426,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -447,7 +456,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -485,7 +494,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -525,7 +534,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -587,7 +596,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -667,7 +676,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -688,7 +697,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
@@ -706,7 +717,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -742,7 +753,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -773,7 +784,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -802,7 +813,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -834,7 +845,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -866,7 +877,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -903,7 +914,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -931,7 +942,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -972,7 +983,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "desktop",
    "placement": "topRight",
    "pills": [],
@@ -1009,7 +1020,7 @@
    }
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [],
@@ -1083,7 +1094,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -1181,7 +1192,7 @@
    "interrupt": true
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -1301,7 +1312,9 @@
       "shuffle": false,
       "repeatMode": "off",
       "volume": 0.6,
-      "positionAt": null
+      "positionAt": null,
+      "canPrevious": null,
+      "canNext": null
      }
     },
     {
@@ -1429,7 +1442,7 @@
    ]
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -1474,7 +1487,7 @@
    "sound": null
   },
   {
-   "contract": 2,
+   "contract": 3,
    "home": "island",
    "placement": "auto",
    "pills": [
@@ -1505,7 +1518,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
@@ -1517,6 +1532,350 @@
     "accent": "#F2B33D",
     "mood": "calm",
     "outfit": null
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "answer",
+    "source": "island",
+    "body": {
+     "kind": "answer",
+     "question": "When is my dentist appointment?",
+     "answer": "Thursday at 4:30 pm, at Bright Smile Dental on 2 Elm Street.",
+     "sendTo": [
+      "whatsapp",
+      "x",
+      "threads",
+      "bluesky"
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null,
+   "interrupt": true
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "upcoming.meeting",
+     "source": "island",
+     "label": "Standup",
+     "tint": "#FF453A",
+     "state": "working",
+     "badge": "10:00",
+     "progress": 0.53
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "upcoming.meeting",
+    "source": "island",
+    "body": {
+     "kind": "upcoming",
+     "item": "meeting",
+     "title": "Standup",
+     "starts": 1795248000,
+     "due": null,
+     "detail": "https://zoom.us/j/123",
+     "link": "https://zoom.us/j/123",
+     "id": null,
+     "more": 0
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "call.muted",
+     "source": "island",
+     "label": "Zoom",
+     "tint": "#30D158",
+     "state": "working",
+     "badge": "Muted",
+     "progress": null,
+     "card": "call"
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "call",
+    "source": "island",
+    "body": {
+     "kind": "call",
+     "name": "Zoom",
+     "since": 1795247220,
+     "muted": true,
+     "recording": false
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.awake",
+     "source": "utilities",
+     "label": "Awake",
+     "tint": "#FFD60A",
+     "state": "working",
+     "badge": "45 min",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.awake",
+    "source": "utilities",
+    "body": {
+     "kind": "awake",
+     "label": "Awake",
+     "until": 1795250000
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "unread.whatsapp",
+     "source": "island",
+     "label": "WhatsApp",
+     "tint": "#25D366",
+     "state": "idle",
+     "badge": "3",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "unread.whatsapp",
+    "source": "island",
+    "body": {
+     "kind": "unread",
+     "name": "WhatsApp",
+     "line": "3 unread"
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "assistant.ask.0",
+    "source": "island",
+    "body": {
+     "kind": "request",
+     "from": "Claude Code",
+     "what": "Add the reminder “Call the bank”"
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "shortcuts",
+    "source": "island",
+    "body": {
+     "kind": "shortcuts",
+     "title": "Shortcuts",
+     "buttons": [
+      {
+       "id": "11111111-2222-3333-4444-555555555555",
+       "name": "Movie night"
+      },
+      {
+       "id": "22222222-2222-3333-4444-555555555555",
+       "name": "Lights off"
+      },
+      {
+       "id": "33333333-2222-3333-4444-555555555555",
+       "name": "Leaving home"
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "utilities.recording",
+     "source": "utilities",
+     "label": "Recording",
+     "tint": "#FF453A",
+     "state": "working",
+     "badge": "2 min",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "utilities.recording",
+    "source": "utilities",
+    "body": {
+     "kind": "recording",
+     "since": 1795250000,
+     "path": null,
+     "name": null,
+     "seconds": null
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "utilities.recording",
+    "source": "utilities",
+    "body": {
+     "kind": "recording",
+     "since": null,
+     "path": "/Users/me/Movies/Screen Recording 2026-11-21 at 09.15.02.mov",
+     "name": "Screen Recording 2026-11-21 at 09.15.02.mov",
+     "seconds": 134.5
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
    },
    "flow": null,
    "overlay": null,

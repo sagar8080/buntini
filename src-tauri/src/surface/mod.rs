@@ -196,6 +196,16 @@ pub fn running() -> bool {
     STARTED.load(Ordering::SeqCst)
 }
 
+/// Opens macOS's AirDrop picker for `paths`. False when AirDrop can't take them.
+pub fn airdrop(paths: &[String]) -> bool {
+    #[cfg(target_os = "macos")]
+    if STARTED.load(Ordering::SeqCst) {
+        return serde_json::to_vec(paths).is_ok_and(|json| ffi::airdrop(&json));
+    }
+    let _ = paths;
+    false
+}
+
 /// Closes the native surfaces.
 pub fn stop() {
     if STARTED.swap(false, Ordering::SeqCst) {
@@ -220,7 +230,7 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
     // The cat reacts to what the island shows.
     match (&picked.card, picked.urgency) {
         (_, Some(Urgency::Waiting)) => cat.mood = Mood::Alert,
-        (Some(card), Some(Urgency::Alert)) if matches!(card.body, CardBody::Finished(_) | CardBody::Greeting(_) | CardBody::Recap(_)) => cat.mood = Mood::Happy,
+        (Some(card), Some(Urgency::Alert)) if matches!(card.body, CardBody::Finished(_) | CardBody::Greeting(_) | CardBody::Recap(_) | CardBody::Answer(_)) => cat.mood = Mood::Happy,
         _ => {}
     }
     // A sound when something new asks for you, or news arrives.
@@ -381,7 +391,7 @@ mod tests {
         kinds.dedup();
         let mut every = [
             "approval", "question", "ticker", "diff", "finished", "recap", "usage", "service", "mail", "nowPlaying", "timer",
-            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "note",
+            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "answer", "upcoming", "call", "awake", "unread", "request", "shortcuts", "recording", "note",
         ]
         .map(String::from)
         .to_vec();

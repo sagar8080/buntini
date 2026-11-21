@@ -1,6 +1,8 @@
 //! Covers for the now-playing card, as files the island can draw. Music and TV hand over
-//! the cover they keep; Spotify's comes from its image server over HTTPS. Only the last few
-//! are kept, and the folder starts empty each time Buntini does.
+//! the cover they keep; Spotify's comes from its image server over HTTPS. A browser's isn't
+//! readable, so its card keeps the placeholder; another player's shows the app's own icon.
+//! Only the last few are kept, and the folder
+//! starts empty each time Buntini does.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,6 +24,8 @@ pub fn reset(dir: &Path) {
 /// The cover for what `reading` plays, fetched or saved once and then reused.
 pub async fn cover(dir: &Path, reading: &Reading) -> Option<PathBuf> {
     let key = match (reading.player, &reading.artwork_url) {
+        // Nothing is asked of an app that macOS says plays; the card shows the app instead.
+        (Player::Browser | Player::Other, _) => return None,
         (Player::Spotify, Some(url)) => hash(url),
         (Player::Spotify, None) => return None,
         (player, None) => hash(&format!("{}\u{1f}{}", player.id(), reading.track)),
@@ -145,6 +149,34 @@ mod tests {
         assert_eq!(image_kind(b"\x89PNG\r\n\x1a\n\0\0\0\0"), Some("png"));
         assert_eq!(image_kind(b"RIFF\0\0\0\0WEBP"), Some("webp"));
         assert_eq!(image_kind(b"<html><body>"), None);
+    }
+
+    /// No script goes to an app named after the player, which macOS would look for.
+    #[tokio::test]
+    async fn nothing_is_asked_of_an_app_macos_says_plays() {
+        let dir = tempfile::tempdir().unwrap();
+        for (player, app) in [(Player::Browser, "com.google.Chrome"), (Player::Other, "com.apple.podcasts")] {
+            let reading = Reading {
+                player,
+                playing: true,
+                title: "The Daily".into(),
+                artist: None,
+                album: None,
+                duration: None,
+                position: None,
+                shuffle: None,
+                repeat: None,
+                volume: None,
+                artwork_url: Some("https://i.scdn.co/image/ab67".into()),
+                track: "t".into(),
+                at: 0.0,
+                app: Some(app.into()),
+                previous: None,
+                next: None,
+            };
+            assert_eq!(cover(dir.path(), &reading).await, None);
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]

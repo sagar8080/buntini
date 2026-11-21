@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::cards::{agents, flow, island, mail, media, services, utilities};
 
 /// Bumped whenever a change on one side would break the other.
-pub const CONTRACT: u32 = 2;
+pub const CONTRACT: u32 = 3;
 
 /// Which part of Buntini a pill, card or action belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -200,11 +200,19 @@ pub enum CardBody {
     Timer(utilities::TimerCard),
     Capture(utilities::Capture),
     Vitals(utilities::Vitals),
+    Awake(utilities::Awake),
+    Recording(utilities::Recording),
     Update(utilities::Update),
     WhatsNew(utilities::WhatsNew),
     // The island itself
     Drop(island::DropCard),
     Greeting(island::Greeting),
+    Answer(island::Answer),
+    Upcoming(island::Upcoming),
+    Call(island::Call),
+    Unread(island::Unread),
+    Request(island::Request),
+    Shortcuts(island::Shortcuts),
     // Voice
     Note(flow::Note),
 }

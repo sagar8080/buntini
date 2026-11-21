@@ -305,7 +305,7 @@ fn remove_socket(path: &Path) {
     }
 }
 
-fn bind(path: &Path) -> std::io::Result<UnixListener> {
+pub(crate) fn bind(path: &Path) -> std::io::Result<UnixListener> {
     if path.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(std::io::Error::other("the socket path is too long"));
     }
@@ -544,6 +544,14 @@ fn track(agent: Agent, event: &HookEvent, update: impl FnOnce(&mut session::Sess
     update(session, now);
     surface::publish(&hub);
     crate::island::agent_activity();
+}
+
+/// A coding agent is working on a turn and was heard from lately: the Mac stays awake for it
+/// (utilities/awake.rs). One that went quiet this long no longer counts, whatever it said last.
+pub fn working() -> bool {
+    const QUIET_MS: u64 = 15 * 60 * 1000;
+    let now = crate::surface::now_ms();
+    hub().sessions.values().any(|session| session.phase == session::Phase::Working && now.saturating_sub(session.last_ms) < QUIET_MS)
 }
 
 /// Sessions a dropped file's path can be pasted into, newest first: (pill, label). Only

@@ -307,6 +307,26 @@ pub fn read_text(file: &mut File, path: &Path, documents: &Documents) -> Option<
     let Ok(metadata) = file.metadata() else {
         return Some(String::new());
     };
+    // A network's export, read as its conversations and kept like a document's text, as it
+    // is far larger than other text read here (archive.rs).
+    if let Some(kind) = crate::archive::kind(path).filter(|_| metadata.len() <= crate::archive::LARGEST) {
+        let key = cache_key(path, &metadata);
+        if let Some(Cached::Text(text)) = cached(&key) {
+            return Some(text);
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        if file.take(crate::archive::LARGEST + 1).read_to_end(&mut bytes).is_ok() {
+            if let Some(text) = crate::archive::readable(kind, path, &bytes) {
+                remember(key, Cached::Text(text.clone()));
+                return Some(text);
+            }
+        }
+        // Not the export its name says: read as any other file.
+        use std::io::Seek;
+        if file.seek(std::io::SeekFrom::Start(0)).is_err() {
+            return Some(String::new());
+        }
+    }
     match content_kind(path) {
         Some(Content::Text) if metadata.len() <= MAX_READ => {
             let mut bytes = Vec::with_capacity(metadata.len() as usize);

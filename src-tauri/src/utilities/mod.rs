@@ -8,8 +8,10 @@
 //!
 //! The shortcuts, the focus timer and muting change outside the settings sheet, so they're
 //! kept as preferences of their own rather than in `settings.utilities`.
+pub mod awake;
 pub mod capture;
 pub mod focus;
+pub mod recording;
 mod native;
 pub mod shortcuts;
 
@@ -105,6 +107,8 @@ pub fn start(app: AppHandle) {
             eprintln!("A utilities action didn't go through: {problem}");
         }
     });
+    // Awake while an agent works, from the start.
+    awake::start();
     surface::set_muted(preference(MUTED).as_deref() == Some("true"));
     {
         let mut keys = keys();
@@ -315,6 +319,12 @@ fn recording(on: bool) {
 
 fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     let card = action.card.as_deref();
+    if card == Some(awake::ID) {
+        return awake::act(&action.name);
+    }
+    if card == Some(recording::ID) {
+        return recording::act(&action.name);
+    }
     match action.name.as_str() {
         "shortcut" => {
             let id = action.value.as_ref().and_then(Value::as_str).unwrap_or_default();
@@ -662,6 +672,12 @@ fn publish() {
             offers.push(Offer { card: Card { id: NOTICE_ID.into(), source: Source::Utilities, body: CardBody::Vitals(Vitals { line: line.clone() }) }, urgency: Urgency::Alert, at_ms: *at, ttl_ms: Some(NOTICE_MS) });
         }
     }
+    let (pill, offer) = awake::shown();
+    pills.extend(pill);
+    offers.extend(offer);
+    let (pill, offer) = recording::shown();
+    pills.extend(pill);
+    offers.extend(offer);
     offers.extend(capture::offers());
     surface::publish(Source::Utilities, Contribution { pills, offers });
 }

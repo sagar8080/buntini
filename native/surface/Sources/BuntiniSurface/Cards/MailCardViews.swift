@@ -65,33 +65,14 @@ private enum MailTime {
     }
 }
 
-/// As tall as its content up to `maxHeight`, scrolling beyond it. A picture can't hold a
-/// scroll view, so it gets the top of the content.
+/// As tall as its content up to `maxHeight`, scrolling beyond it (`CardScroll`).
 private struct MailFit<Content: View>: View {
     let maxHeight: CGFloat
     @ViewBuilder let content: () -> Content
-    @State private var height: CGFloat = 0
-    @Environment(\.inPicture) private var inPicture
 
     var body: some View {
-        if inPicture {
-            content().frame(maxHeight: maxHeight, alignment: .top).clipped()
-        } else {
-            ScrollView {
-                content()
-                    .background(GeometryReader { proxy in
-                        Color.clear.preference(key: MailFitHeight.self, value: proxy.size.height)
-                    })
-            }
-            .frame(height: min(max(height, 1), maxHeight))
-            .onPreferenceChange(MailFitHeight.self) { height = $0 }
-        }
+        CardScroll(maxHeight: maxHeight, content: content)
     }
-}
-
-private struct MailFitHeight: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct FilterChip: View {
@@ -265,12 +246,18 @@ private struct MailOpenView: View {
             } else {
                 HStack(spacing: 6) {
                     IslandButton(label: L(.reply), prominent: true) { replying = true }
-                    IslandButton(label: open.unread ? L(.markRead) : L(.markUnread)) { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
-                    IslandButton(label: open.flagged ? L(.unflag) : L(.flag)) { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
-                    IslandButton(label: L(.junk)) { act("junk", .string(open.id)) }
+                    MoreButton { more }
                 }
             }
         }
+        .contextMenu { if !replying { more } }
+    }
+
+    /// Read or unread, flagged or not, and Junk.
+    @ViewBuilder private var more: some View {
+        Button(open.unread ? L(.markRead) : L(.markUnread)) { act(open.unread ? "markRead" : "markUnread", .string(open.id)) }
+        Button(open.flagged ? L(.unflag) : L(.flag)) { act(open.flagged ? "unflag" : "flag", .string(open.id)) }
+        Button(L(.junk)) { act("junk", .string(open.id)) }
     }
 }
 

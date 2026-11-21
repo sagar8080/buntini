@@ -12,6 +12,11 @@ public enum Word: String, CaseIterable, Sendable {
     case cancel = "surface.cancel"
     case close = "surface.close"
     case done = "surface.done"
+    case join = "surface.upcoming.join"
+    case inCall = "surface.call.inCall"
+    case sendTo = "surface.answer.sendTo"
+    case mute = "surface.call.mute"
+    case unmute = "surface.call.unmute"
     case next = "surface.next"
     case send = "surface.send"
     case open = "surface.open"
@@ -27,6 +32,8 @@ public enum Word: String, CaseIterable, Sendable {
     case resume = "surface.resume"
     case skip = "surface.skip"
     case stop = "surface.stop"
+    case awakeUntil = "surface.awake.until"
+    case showInFinder = "surface.showInFinder"
     case share = "surface.share"
     // The island
     case chat = "surface.island.chat"
@@ -131,6 +138,7 @@ public enum Word: String, CaseIterable, Sendable {
     case pauseMedia = "surface.media.pause"
     case position = "surface.media.position"
     case volume = "surface.media.volume"
+    case output = "surface.media.output"
     // The dictation pill
     case listening = "surface.pill.listening"
     case handsFree = "surface.pill.handsFree"

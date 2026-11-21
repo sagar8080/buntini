@@ -5,6 +5,8 @@ import { command, errorMessage } from './bridge';
 import { number, t } from './i18n.ts';
 import type { AppList, Settings } from './types';
 import AgentsSection from './agents/AgentsSection';
+import AssistantsSection from './AssistantsSection';
+import MastodonSection from './MastodonSection';
 
 type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void };
 
@@ -34,13 +36,15 @@ export default function AppsTab({ draft, update, onError }: Props) {
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.apps.title')}</h3></div>
       {list.apps.map(app => <div key={app.id} className="app-permission">
-        <Toggle label={app.name} detail={app.installed ? app.can.join(' · ') : t('settings.apps.notOnMac')} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
+        <Toggle label={app.id === 'other_players' ? t('settings.apps.otherPlayers') : app.name} detail={app.installed ? app.can.join(' · ') : t('settings.apps.notOnMac')} checked={app.installed && draft.apps.includes(app.id)} disabled={!app.installed} onChange={value => void toggle(app.id, value)} />
         {app.note && app.installed && <p className="field-help app-note">{app.note}</p>}
         {notes[app.id] && <p className="field-help">{notes[app.id]}</p>}
       </div>)}
     </section>
     {draft.apps.includes('mail') && <MailSection value={draft.mail} onChange={mail => update('mail', mail)} onError={onError} />}
     <AgentsSection onError={onError} />
+    <AssistantsSection onError={onError} />
+    <MastodonSection onError={onError} />
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.apps.accessibility')}</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>
       <p className="field-help">{assisting ? t('settings.apps.allowed') : t('settings.apps.accessibilityDetail')}</p>

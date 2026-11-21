@@ -10,7 +10,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod assistant_setup;
+pub mod assistants;
+pub mod calls;
+pub mod commands;
 pub mod demo;
+pub mod power;
+pub mod share;
+pub mod shortcuts;
+pub mod unread;
+pub mod upcoming;
 pub mod updates;
 
 use crate::i18n::{t, tf};
@@ -142,10 +151,27 @@ pub enum Op {
     Ping,
     /// A question typed in the island wasn't asked: the chat was busy. The island says so.
     Busy,
+    /// The answer to a question typed in the island. Short enough, it shows there and this
+    /// answers true; otherwise false, and the chat opens with it.
+    Answer { question: String, answer: String },
 }
 
 /// How long the island says a question wasn't asked.
 const BUSY_MS: u64 = 4_000;
+/// How long an answer shows in the island by itself.
+const ANSWER_MS: u64 = 30_000;
+/// The most an answer in the island says: about three lines of the card.
+const ANSWER_CHARS: usize = 280;
+const ANSWER_LINES: usize = 3;
+
+/// An answer the island can show whole: a few plain lines. A longer one, a table or code
+/// reads better in the chat.
+fn short_answer(answer: &str) -> Option<String> {
+    let lines: Vec<&str> = answer.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let text = lines.join("\n");
+    let plain = !text.contains("```") && !lines.iter().any(|line| line.starts_with('|'));
+    (!lines.is_empty() && lines.len() <= ANSWER_LINES && text.chars().count() <= ANSWER_CHARS && plain).then_some(text)
+}
 
 #[tauri::command]
 pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
@@ -159,6 +185,17 @@ pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
                 ttl_ms: Some(BUSY_MS),
             }]);
             Ok(serde_json::Value::Null)
+        }
+        Op::Answer { question, answer } => {
+            let Some(answer) = short_answer(&answer) else { return Ok(serde_json::Value::Bool(false)) };
+            let question: String = question.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+            publish(vec![Offer {
+                card: Card { id: "answer".into(), source: Source::Island, body: CardBody::Answer(cards::Answer { question, answer, send_to: share::places() }) },
+                urgency: Urgency::Alert,
+                at_ms: surface::now_ms(),
+                ttl_ms: Some(ANSWER_MS),
+            }]);
+            Ok(serde_json::Value::Bool(true))
         }
     }
 }
@@ -220,6 +257,22 @@ pub fn start(app: AppHandle) {
     surface::set_island(shown.clone());
     watch_health();
     updates::start(app.clone());
+    calls::start(&app);
+    crate::mastodon::start();
+    shortcuts::start(&app);
+    power::start();
+    unread::start(&app);
+    commands::start();
+    assistants::start(&app);
+    // What's next counts down beside the notch.
+    tauri::async_runtime::spawn(async {
+        loop {
+            tokio::time::sleep(upcoming::TICK).await;
+            if !crate::media::screen_away() {
+                refresh();
+            }
+        }
+    });
     publish(vec![Offer {
         card: Card { id: "greeting".into(), source: Source::Island, body: CardBody::Greeting(cards::Greeting { name: (!name.is_empty()).then(|| first_word(&name)) }) },
         urgency: Urgency::Alert,
@@ -254,13 +307,48 @@ fn publish(mut offers: Vec<Offer>) {
     let now = surface::now_ms();
     kept.retain(|offer| offer.ttl_ms.is_none_or(|ttl| now < offer.at_ms + ttl) && !offers.iter().any(|new| new.card.id == offer.card.id));
     kept.append(&mut offers);
-    surface::publish(Source::Island, Contribution { pills: vec![], offers: kept.clone() });
+    send(&kept);
 }
 
 fn forget(id: &str) {
     let mut kept = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     kept.retain(|offer| offer.card.id != id);
-    surface::publish(Source::Island, Contribution { pills: vec![], offers: kept.clone() });
+    send(&kept);
+}
+
+/// Shows what's next again: the countdown moved, or the heads-ups read something new.
+pub(crate) fn refresh() {
+    let kept = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    send(&kept);
+}
+
+/// The island's own cards, with a call going on (calls.rs) and what's next (upcoming.rs), and
+/// their pills.
+fn send(kept: &[Offer]) {
+    let (mut pills, mut offers) = calls::shown();
+    pills.extend(commands::shown());
+    pills.extend(assistants::shown());
+    let (mut next_pills, mut next) = upcoming::shown(chrono::Local::now());
+    pills.append(&mut next_pills);
+    let (mut unread_pills, mut unread) = unread::shown();
+    pills.append(&mut unread_pills);
+    next.append(&mut unread);
+    next.extend(shortcuts::shown());
+    offers.extend(kept.iter().cloned());
+    offers.append(&mut next);
+    surface::publish(Source::Island, Contribution { pills, offers });
+}
+
+/// The files a drop card sends by AirDrop: absolute paths to files or folders that exist,
+/// as many as a drop takes.
+fn airdrop_paths(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|value| value.get("paths"))
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths.iter().filter_map(Value::as_str).filter(|path| path.starts_with('/') && !path.contains('\0') && std::path::Path::new(path).exists()).take(20).map(str::to_string).collect()
+        })
+        .unwrap_or_default()
 }
 
 fn first_word(name: &str) -> String {
@@ -330,6 +418,85 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     if action.card.as_deref() == Some("update") {
         return updates::act(app, &action.name);
     }
+    // A long terminal command's pill: its terminal, in front.
+    if action.name == "pill" {
+        if let Some(pill) = action.value.as_ref().and_then(Value::as_str).filter(|pill| pill.starts_with(commands::PREFIX)) {
+            commands::open(pill);
+            return Ok(());
+        }
+    }
+    // Joining the next meeting's call, marking a reminder past due done, or a call's controls.
+    match (action.card.as_deref(), action.name.as_str()) {
+        (Some(calls::CALL), "mute") => return calls::toggle_mute(),
+        // Another assistant's request: Allow or Deny.
+        (Some(card), name @ ("allow" | "deny")) if card.starts_with(assistants::PREFIX) => {
+            assistants::answer(card, name == "allow");
+            return Ok(());
+        }
+        (Some(shortcuts::CARD), "run") => return shortcuts::run(action.value.as_ref().and_then(Value::as_str).ok_or("No shortcut came with it.")?),
+        (Some(unread::MASTODON), "open") => {
+            crate::mastodon::open();
+            return Ok(());
+        }
+        (Some(card), "open") if card.starts_with(unread::PREFIX) => {
+            unread::open(card);
+            return Ok(());
+        }
+        // The answer, in another app's compose window: only a place the card offered.
+        (Some("answer"), "sendTo") => {
+            let place = action.value.as_ref().and_then(Value::as_str).ok_or("No place came with it.")?;
+            let answer = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find_map(|offer| match &offer.card.body {
+                CardBody::Answer(answer) if offer.card.id == "answer" && answer.send_to.iter().any(|offered| offered == place) => Some(answer.answer.clone()),
+                _ => None,
+            });
+            // Mastodon takes the post itself, once the person allows it in the island.
+            if place == "mastodon" {
+                let text = answer.ok_or("That answer can't go there.")?;
+                tauri::async_runtime::spawn(async move {
+                    let what = tf("mastodon.post", &[("text", &text)]);
+                    if assistants::ask("Mastodon", what).await {
+                        if let Err(problem) = crate::mastodon::post(&text).await {
+                            eprintln!("Mastodon didn't take the post: {problem}");
+                        }
+                    }
+                });
+                return Ok(());
+            }
+            let link = answer.and_then(|answer| share::link(place, &answer)).ok_or("That answer can't go there.")?;
+            let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
+            return Ok(());
+        }
+        (Some(calls::CALL), "open") => {
+            calls::open();
+            return Ok(());
+        }
+        // Notes are Flow's call recording, as its own pill starts and stops it.
+        (Some(calls::CALL), "record") => {
+            surface::act(Action { source: Source::Flow, card: None, name: "record".into(), value: None });
+            return Ok(());
+        }
+        (Some(upcoming::MEETING), "join") => {
+            let link = action.value.as_ref().and_then(Value::as_str).and_then(upcoming::call_link).ok_or("That isn't a call link.")?;
+            let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
+            return Ok(());
+        }
+        (Some(upcoming::REMINDERS), "done") => {
+            let id = action.value.as_ref().and_then(Value::as_str).ok_or("No reminder came with it.")?;
+            let (id, title) = upcoming::reminder(id).ok_or("That reminder is no longer here.")?;
+            let state = app.try_state::<crate::controller::AppState>().ok_or("Buntini is still starting.")?;
+            let helper = state.models.apple_helper().to_path_buf();
+            tauri::async_runtime::spawn(async move {
+                let args: serde_json::Map<String, Value> = [("id".to_string(), Value::String(id.clone())), ("title".to_string(), Value::String(title))].into_iter().collect();
+                let receipt = crate::actions::execute_with("complete_reminder", &args, &helper).await;
+                match receipt.outcome {
+                    crate::actions::ActionOutcome::Succeeded => upcoming::done(&id),
+                    _ => eprintln!("A reminder wasn't marked done: {}", receipt.error.unwrap_or(receipt.message)),
+                }
+            });
+            return Ok(());
+        }
+        _ => {}
+    }
     match action.name.as_str() {
         "openChat" => {
             show_chat(app);
@@ -362,6 +529,18 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             let paths: Vec<String> = value.get("paths").and_then(Value::as_array).map(|paths| paths.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
             forget("drop");
             crate::agents::terminal::drop_files(pill, &paths)
+        }
+        // To another Mac or iPhone nearby: macOS's own AirDrop picker, for files that are there.
+        "dropAirDrop" => {
+            let paths = airdrop_paths(action.value.as_ref());
+            if paths.is_empty() {
+                return Err("Nothing to send.".into());
+            }
+            forget("drop");
+            if !surface::airdrop(&paths) {
+                return Err("AirDrop can't take them now.".into());
+            }
+            Ok(())
         }
         // To the chat, which takes them from here.
         "dropChat" => {
@@ -425,6 +604,29 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn airdrop_sends_only_files_that_are_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("report.pdf");
+        std::fs::write(&file, b"%PDF").unwrap();
+        let file = file.to_string_lossy().to_string();
+        let value = serde_json::json!({"paths": [file, "relative.txt", "/no/such/file", 7, format!("{}/../{}", dir.path().display(), "x\u{0}y")]});
+        assert_eq!(airdrop_paths(Some(&value)), vec![file]);
+        assert!(airdrop_paths(Some(&serde_json::json!(["/tmp"]))).is_empty());
+        assert!(airdrop_paths(None).is_empty());
+    }
+
+    #[test]
+    fn a_few_plain_lines_answer_in_the_island_and_the_rest_go_to_the_chat() {
+        assert_eq!(short_answer("  Thursday at 4:30 pm.\n\n  At Bright Smile Dental.  ").as_deref(), Some("Thursday at 4:30 pm.\nAt Bright Smile Dental."));
+        assert_eq!(short_answer(""), None);
+        assert_eq!(short_answer("one\ntwo\nthree\nfour"), None);
+        assert_eq!(short_answer(&"word ".repeat(60)), None);
+        assert_eq!(short_answer("Run this:\n```\nls\n```"), None);
+        assert_eq!(short_answer("| Day | Time |\n| Mon | 9 |"), None);
+        assert!(short_answer(&"é".repeat(280)).is_some(), "counted in characters, not bytes");
+    }
 
     fn day(text: &str) -> NaiveDate {
         NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()

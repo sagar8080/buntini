@@ -4,7 +4,7 @@
 import Foundation
 
 /// Bumped whenever a change on one side would break the other.
-public let surfaceContract: UInt32 = 2
+public let surfaceContract: UInt32 = 3
 
 /// Which part of Buntini a pill, card or action belongs to.
 public enum Source: String, Codable, CaseIterable, Sendable {
@@ -40,6 +40,14 @@ public struct Pill: Codable, Equatable, Identifiable, Sendable {
 
     /// The id of the card that goes with this pill.
     public var cardID: String { card ?? id }
+
+    /// An agent's finished or failed turn, news beside the notch until the island is opened.
+    public var isNews: Bool { source == .agents && (state == .done || state == .error) }
+
+    /// The same pill once its news is seen: it reads as any other session.
+    public var seen: Pill {
+        Pill(id: id, source: source, label: label, tint: tint, state: .idle, badge: badge, progress: progress, card: card)
+    }
 }
 
 public enum Mood: String, Codable, Sendable {

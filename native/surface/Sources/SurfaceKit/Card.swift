@@ -27,19 +27,27 @@ public enum CardBody: Equatable, Sendable {
     case timer(TimerCard)
     case capture(Capture)
     case vitals(Vitals)
+    case awake(Awake)
+    case recording(Recording)
     case update(Update)
     case whatsNew(WhatsNew)
     // The island itself
     case drop(DropCard)
     case greeting(Greeting)
+    case answer(Answer)
+    case upcoming(Upcoming)
+    case call(Call)
+    case unread(Unread)
+    case request(Request)
+    case shortcuts(Shortcuts)
     // Voice
     case note(Note)
 
     /// The `kind` each card is sent with.
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case approval, question, ticker, diff, finished, recap, usage
-        case service, mail, nowPlaying, timer, capture, vitals, update, whatsNew
-        case drop, greeting, note
+        case service, mail, nowPlaying, timer, capture, vitals, awake, recording, update, whatsNew
+        case drop, greeting, answer, upcoming, call, unread, request, shortcuts, note
     }
 
     public var kind: Kind {
@@ -57,10 +65,18 @@ public enum CardBody: Equatable, Sendable {
         case .timer: return .timer
         case .capture: return .capture
         case .vitals: return .vitals
+        case .awake: return .awake
+        case .recording: return .recording
         case .update: return .update
         case .whatsNew: return .whatsNew
         case .drop: return .drop
         case .greeting: return .greeting
+        case .answer: return .answer
+        case .upcoming: return .upcoming
+        case .call: return .call
+        case .unread: return .unread
+        case .request: return .request
+        case .shortcuts: return .shortcuts
         case .note: return .note
         }
     }
@@ -84,10 +100,18 @@ extension CardBody: Codable {
         case .timer: self = .timer(try TimerCard(from: decoder))
         case .capture: self = .capture(try Capture(from: decoder))
         case .vitals: self = .vitals(try Vitals(from: decoder))
+        case .awake: self = .awake(try Awake(from: decoder))
+        case .recording: self = .recording(try Recording(from: decoder))
         case .update: self = .update(try Update(from: decoder))
         case .whatsNew: self = .whatsNew(try WhatsNew(from: decoder))
         case .drop: self = .drop(try DropCard(from: decoder))
         case .greeting: self = .greeting(try Greeting(from: decoder))
+        case .answer: self = .answer(try Answer(from: decoder))
+        case .upcoming: self = .upcoming(try Upcoming(from: decoder))
+        case .call: self = .call(try Call(from: decoder))
+        case .unread: self = .unread(try Unread(from: decoder))
+        case .request: self = .request(try Request(from: decoder))
+        case .shortcuts: self = .shortcuts(try Shortcuts(from: decoder))
         case .note: self = .note(try Note(from: decoder))
         }
     }
@@ -109,10 +133,18 @@ extension CardBody: Codable {
         case .timer(let card): try card.encode(to: encoder)
         case .capture(let card): try card.encode(to: encoder)
         case .vitals(let card): try card.encode(to: encoder)
+        case .awake(let card): try card.encode(to: encoder)
+        case .recording(let card): try card.encode(to: encoder)
         case .update(let card): try card.encode(to: encoder)
         case .whatsNew(let card): try card.encode(to: encoder)
         case .drop(let card): try card.encode(to: encoder)
         case .greeting(let card): try card.encode(to: encoder)
+        case .answer(let card): try card.encode(to: encoder)
+        case .upcoming(let card): try card.encode(to: encoder)
+        case .call(let card): try card.encode(to: encoder)
+        case .unread(let card): try card.encode(to: encoder)
+        case .request(let card): try card.encode(to: encoder)
+        case .shortcuts(let card): try card.encode(to: encoder)
         case .note(let card): try card.encode(to: encoder)
         }
     }
