@@ -20,6 +20,7 @@ mod source_fields;
 mod edit_targets;
 mod location_fields;
 mod chat_threads;
+mod archive;
 mod chatgpt;
 mod mastodon;
 mod cli;
