@@ -321,14 +321,14 @@ struct WhatsNewCardView: View {
     }
 }
 
-/// On the island's home: start focusing, unless a focus timer already runs.
+/// In the band of the opened island: start focusing, unless a focus timer already runs.
 struct UtilityHomeButtons: View {
     let pills: [Pill]
     let send: (Action) -> Void
 
     var body: some View {
         if !pills.contains(where: { $0.source == .utilities && $0.id == "utilities.focus" }) {
-            IslandButton(label: L(.focus)) { send(Action(source: .utilities, card: nil, name: "focus")) }
+            BandButton(label: L(.focus), symbol: "timer", iconOnly: true) { send(Action(source: .utilities, card: nil, name: "focus")) }
         }
     }
 }

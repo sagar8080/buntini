@@ -114,13 +114,19 @@ struct IslandRoot: View {
         // The cat steps out of its wing only to sit beside a hello, a finished turn or files.
         let beside = mode == .open && model.interrupting.map(IslandModel.catBeside) == true
         let catSide: CGFloat = corner ? (mode == .open ? 26 : IslandGeometry.tile.width - 10) : model.band - 2
+        // Opened by a click, the band holds Ask beside the cat (until the field itself shows)
+        // and Focus and Chat across from it, each kept to its side of the notch.
+        let controls = model.showsControls
+        let wing = model.hasNotch && !corner ? (model.size.width - (IslandGeometry.notch(model.screen)?.width ?? 0)) / 2 : model.size.width / 2
         VStack(spacing: 0) {
             // The top band: the cat in one wing, what's running in the other. In a corner
             // the cat rests in its tile, nearest the corner.
             HStack(spacing: corner ? 10 : 0) {
                 if trailing {
+                    if controls { far(width: wing - 20).padding(.leading, 12) }
                     glance(mode: mode).padding(.leading, 9)
                     Spacer(minLength: 0)
+                    if controls && !model.showsField { ask(width: wing - catSide - 40, toward: .trailing).padding(.trailing, 8) }
                 }
                 if !beside, let cat = scene?.cat {
                     self.cat(cat)
@@ -129,8 +135,10 @@ struct IslandRoot: View {
                         .padding(.trailing, corner && trailing ? (mode == .open ? 14 : 5) : 0)
                 }
                 if !trailing {
+                    if controls && !model.showsField { ask(width: wing - catSide - 40, toward: .leading).padding(.leading, 8) }
                     Spacer(minLength: 0)
                     glance(mode: mode).padding(.trailing, corner ? 9 : 14)
+                    if controls { far(width: wing - 20).padding(.trailing, corner ? 9 : 12) }
                 }
             }
             .frame(height: corner ? (mode == .open ? 40 : IslandGeometry.tile.height) : model.band)
@@ -149,6 +157,25 @@ struct IslandRoot: View {
             }
         }
         .foregroundStyle(.white)
+    }
+
+    /// Ask, beside the cat: the question field opens with the cursor in it.
+    private func ask(width: CGFloat, toward cat: Alignment) -> some View {
+        BandButton(label: L(.ask), symbol: "magnifyingglass", spoken: L(.askBuntini)) {
+            model.asking = true
+            model.typing = true
+        }
+        .frame(maxWidth: max(width, 22), alignment: cat)
+    }
+
+    /// Focus and Chat, across the notch from the cat.
+    private func far(width: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            UtilityHomeButtons(pills: model.scene?.pills ?? [], send: send)
+            BandButton(label: L(.chat), prominent: !model.asking) { send(Action(source: .island, card: nil, name: "openChat")) }
+        }
+        .frame(maxWidth: max(width, 22), alignment: .trailing)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// The wing's readout while peeking; nothing once opened, where the chips say it.
@@ -230,8 +257,9 @@ struct Wardrobe: View {
     }
 }
 
-/// Opened by a click: a question for Buntini and the way to the chat, then a chip for each
-/// thing running and the chosen one's card.
+/// Opened by a click: a chip for each thing running once there's more than one, and the chosen
+/// one's card. The question field shows once Ask is chosen in the band, or when nothing runs;
+/// Ask, Focus and Chat themselves sit in the band.
 struct Home: View {
     @ObservedObject var model: IslandModel
     let width: CGFloat
@@ -244,16 +272,15 @@ struct Home: View {
         let chips = model.chips
         let selected = model.selected
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+            if model.showsField {
                 field
                     .font(.callout)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(Capsule().fill(.white.opacity(0.1)))
-                UtilityHomeButtons(pills: model.scene?.pills ?? [], send: send)
-                IslandButton(label: L(.chat), prominent: question.isEmpty) { send(Action(source: .island, card: nil, name: "openChat")) }
+                    .transition(.opacity)
             }
-            if !chips.isEmpty {
+            if model.showsChips {
                 ChipRow(chips: chips, selected: selected?.id, width: width, choose: choose)
             }
             if let card = selected {
@@ -264,7 +291,12 @@ struct Home: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: selected?.id)
-        .onChange(of: focused) { now in model.typing = now }
+        .animation(.easeOut(duration: 0.18), value: model.showsField)
+        .onChange(of: focused) { now in
+            model.typing = now
+            // Left empty, the field goes back into the band.
+            if !now && question.isEmpty { model.asking = false }
+        }
         .onDisappear { model.typing = false }
     }
 
@@ -288,6 +320,17 @@ struct Home: View {
                 .onExitCommand {
                     focused = false
                     model.expanded = false
+                }
+                // Chosen from the band: the cursor goes straight in, once the island has the
+                // keyboard. Should it not get there, the island doesn't stay held open for it.
+                .onAppear {
+                    guard model.asking else { return }
+                    DispatchQueue.main.async { focused = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        guard !focused else { return }
+                        model.typing = false
+                        if question.isEmpty { model.asking = false }
+                    }
                 }
         }
     }

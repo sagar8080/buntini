@@ -143,12 +143,27 @@ let notched = ScreenShape(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), v
 let band = IslandGeometry.notch(notched)!.height
 let scrolls: Set<CardBody.Kind> = [.approval, .mail, .diff]
 let steps = CardSteps.all
-// What an opened island may measure: a card that opened it, or the question field, chips and
-// the chosen card.
-var opened = Set(steps.map { band + 10 + $0 + 16 })
-for chipRow: CGFloat in [0, 40] {
-    opened.insert(band + 56 + chipRow)
-    for step in steps { opened.insert(band + 56 + chipRow + 12 + step) }
+// What an opened island may measure: a card that opened it, or whichever of the question
+// field, the chips and the chosen card show, 12 apart.
+var opened = Set<CGFloat>()
+for field: CGFloat in [0, 30] {
+    for chipRow: CGFloat in [0, 28] {
+        for card in [0] + steps {
+            let rows = [field, chipRow, card].filter { $0 > 0 }
+            guard !rows.isEmpty else { continue }
+            opened.insert(band + 10 + rows.reduce(0, +) + CGFloat(rows.count - 1) * 12 + 16)
+        }
+    }
+}
+// Opened by a click, the band holds Ask, Focus and Chat; the field shows only once asked for
+// or when nothing runs, and the chips once there's more than one thing to switch between.
+let home = MainActor.assumeIsolated { IslandSizing.home(busy, screen: notched) }
+guard home == (false, true, true) else { fail("opened with several things running, the home shows \(home)") }
+if let empty = fixture.scenes.first(where: { $0.card == nil && $0.pills.isEmpty && $0.placement == .auto }) {
+    guard MainActor.assumeIsolated({ IslandSizing.home(empty, screen: notched) }) == (true, false, true) else { fail("opened with nothing running, the question field doesn't show") }
+}
+if let single = fixture.scenes.first(where: { $0.pills.count == 1 && $0.card != nil && !$0.opens && $0.pills[0].cardID == $0.card?.id && $0.placement == .auto }) {
+    guard MainActor.assumeIsolated({ IslandSizing.home(single, screen: notched) }).chips == false else { fail("one thing running gets a chip row of one") }
 }
 let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let raw = try! JSONSerialization.jsonObject(with: data) as! [String: Any]

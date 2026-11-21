@@ -79,6 +79,35 @@ struct IslandButton: View {
     }
 }
 
+/// A button in the band beside the notch, small enough to fit a menu bar. With `iconOnly` it
+/// shows its symbol alone and says its label to VoiceOver and on hover.
+struct BandButton: View {
+    let label: String
+    var symbol: String? = nil
+    var iconOnly = false
+    var prominent = false
+    var spoken: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .semibold)) }
+                if !iconOnly { Text(label).lineLimit(1) }
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, iconOnly ? 0 : 10)
+            .frame(width: iconOnly ? 22 : nil, height: 22)
+            .background(Capsule().fill(prominent ? Color.white : Color.white.opacity(0.12)))
+            .foregroundStyle(prominent ? Color.black : Color.white)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(iconOnly ? label : "")
+        .accessibilityLabel(spoken ?? label)
+    }
+}
+
 /// As tall as its content up to `maxHeight`, scrolling past it, and shorter still when the
 /// island has less room, so what comes after it stays in view. A picture can't hold a scroll
 /// view, so it gets the top of the content, sized the same way.

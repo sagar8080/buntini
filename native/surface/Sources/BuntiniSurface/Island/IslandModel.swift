@@ -20,10 +20,15 @@ final class IslandModel: ObservableObject {
     /// Opened by a click, with no card.
     @Published var expanded = false {
         didSet {
-            if !expanded { chosen = nil }
+            if !expanded {
+                chosen = nil
+                asking = false
+            }
             measureAhead()
         }
     }
+    /// Ask was chosen: the question field shows above what's running until it's left empty.
+    @Published var asking = false
     /// The card picked from the chips in the opened island, until it closes.
     @Published var chosen: String?
     /// Files are being dragged over it.
@@ -129,11 +134,30 @@ final class IslandModel: ObservableObject {
             let content = beside ? max(68, contentHeight(card, beside: true)) : contentHeight(card, beside: false)
             return 10 + CardSteps.snap(content) + 16
         }
-        // Opened by a click: the question field, the chips and the chosen card, 12 apart.
-        var height: CGFloat = 10 + 30 + 16
-        if !chips.isEmpty { height += 12 + 28 }
-        if let card = selected { height += 12 + CardSteps.snap(contentHeight(card, beside: false)) }
-        return height
+        // Opened by a click: the question field, the chips and the chosen card, 12 apart, as
+        // many of them as show.
+        var rows: [CGFloat] = []
+        if showsField { rows.append(30) }
+        if showsChips { rows.append(28) }
+        if let card = selected { rows.append(CardSteps.snap(contentHeight(card, beside: false))) }
+        return 10 + rows.reduce(0, +) + CGFloat(max(rows.count - 1, 0)) * 12 + 16
+    }
+
+    /// Opened by a click with nothing asking: Ask, Focus and Chat sit in the band.
+    var showsControls: Bool {
+        mode == .open && interrupting == nil && !(dragging && scene?.card == nil)
+    }
+
+    /// The question field, once Ask is chosen, or when there's nothing else to show.
+    var showsField: Bool {
+        asking || (selected == nil && !showsChips)
+    }
+
+    /// Chips once there's more than one thing to switch between, or one with no card of its
+    /// own that only a chip reaches.
+    var showsChips: Bool {
+        let chips = chips
+        return chips.count > 1 || chips.first.map { $0.card == nil } == true
     }
 
     /// The width cards are laid out at once opened: the island less its 18 pt sides.

@@ -60,6 +60,15 @@ public enum IslandSizing {
         return (tall, short, model.size.height)
     }
 
+    /// Opened by a click: whether the question field and the chip row show, before Ask is
+    /// chosen.
+    @MainActor
+    public static func home(_ scene: SurfaceScene, screen: ScreenShape) -> (field: Bool, chips: Bool, controls: Bool) {
+        let model = model(scene, screen: screen)
+        model.expanded = true
+        return (model.showsField, model.showsChips, model.showsControls)
+    }
+
     @MainActor
     private static func model(_ scene: SurfaceScene, screen: ScreenShape) -> IslandModel {
         Lexicon.learn(scene)
