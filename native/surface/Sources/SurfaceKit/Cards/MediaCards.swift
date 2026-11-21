@@ -27,6 +27,8 @@ public struct NowPlaying: Codable, Equatable, Sendable {
     /// The bundle id of the app that plays, for one of the other players (Podcasts, VLC):
     /// its card shows the app's own icon.
     public let app: String?
+    /// Where the Mac's sound can go, the one in use marked; `nil` until read.
+    public let outputs: [Output]?
 
     /// The player's own colour, until a cover gives one. Mirror: `Player::tint` in
     /// src-tauri/src/media/player.rs.
@@ -37,6 +39,28 @@ public struct NowPlaying: Codable, Equatable, Sendable {
         case "browser": return "#5E9EFF"
         case "other": return "#BF5AF2"
         default: return "#FA2D48"
+        }
+    }
+}
+
+/// One of the Mac's sound outputs. Mirror: `Output` in src-tauri/src/surface/cards/media.rs.
+public struct Output: Codable, Equatable, Sendable {
+    public let uid: String
+    public let name: String
+    /// `builtIn`, `airpods`, `headphones`, `display`, `airplay`, `usb` or `other`.
+    public let kind: String
+    public let current: Bool
+
+    /// Its symbol, as Control Center draws it.
+    public var symbol: String {
+        switch kind {
+        case "builtIn": return "laptopcomputer"
+        case "airpods": return "airpods"
+        case "headphones": return "headphones"
+        case "display": return "display"
+        case "airplay": return "airplayaudio"
+        case "usb": return "hifispeaker.fill"
+        default: return "speaker.wave.2.fill"
         }
     }
 }

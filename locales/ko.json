@@ -1244,6 +1244,7 @@
   "surface.media.repeat": "반복",
   "surface.media.shuffle": "임의 재생",
   "surface.media.volume": "음량",
+  "surface.media.output": "사운드 출력",
   "surface.next": "다음",
   "surface.notNow": "나중에",
   "surface.note.notes": "노트",

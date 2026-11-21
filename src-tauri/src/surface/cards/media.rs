@@ -33,4 +33,19 @@ pub struct NowPlaying {
     /// the app's own icon. Left out for the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// Where the Mac's sound can go, the one in use marked. Left out until read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<Output>,
+}
+
+/// One of the Mac's sound outputs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Output {
+    /// Core Audio's id for it, which stays the same across restarts.
+    pub uid: String,
+    pub name: String,
+    /// `builtIn`, `airpods`, `headphones`, `display`, `airplay`, `usb` or `other`.
+    pub kind: String,
+    pub current: bool,
 }

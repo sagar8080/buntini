@@ -1259,6 +1259,7 @@
   "surface.media.repeat": "Tekrarla",
   "surface.media.shuffle": "Karıştır",
   "surface.media.volume": "Ses",
+  "surface.media.output": "Ses çıkışı",
   "surface.next": "Sonraki",
   "surface.notNow": "Şimdi değil",
   "surface.note.notes": "Notlar",

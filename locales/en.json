@@ -1259,6 +1259,7 @@
   "surface.media.repeat": "Repeat",
   "surface.media.shuffle": "Shuffle",
   "surface.media.volume": "Volume",
+  "surface.media.output": "Sound output",
   "surface.next": "Next",
   "surface.notNow": "Not now",
   "surface.note.notes": "Notes",

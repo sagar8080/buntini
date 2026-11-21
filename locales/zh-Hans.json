@@ -1244,6 +1244,7 @@
   "surface.media.repeat": "重复",
   "surface.media.shuffle": "随机播放",
   "surface.media.volume": "音量",
+  "surface.media.output": "声音输出",
   "surface.next": "下一步",
   "surface.notNow": "以后",
   "surface.note.notes": "笔记",

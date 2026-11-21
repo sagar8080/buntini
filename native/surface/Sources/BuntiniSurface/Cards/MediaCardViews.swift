@@ -103,6 +103,10 @@ struct NowPlayingCardView: View {
             if let volume = playing.volume {
                 VolumeBar(volume: volume, tint: tint) { level in act("volume", .number((level * 100).rounded() / 100)) }
             }
+            // Where the sound goes, when there's somewhere else for it to go.
+            if let outputs = playing.outputs, outputs.count > 1 {
+                OutputMenu(outputs: outputs) { uid in act("output", .string(uid)) }
+            }
         }
         // The first symbol lines up with the title, not its button's edge; a play button
         // that comes first is round, so its edge does.
@@ -136,5 +140,49 @@ struct NowPlayingCardView: View {
             guard artPath == path else { return }
             withAnimation(.easeOut(duration: 0.35)) { art = loaded }
         }
+    }
+}
+
+/// The Mac's sound outputs, the one in use showing as the button and ticked in the menu.
+struct OutputMenu: View {
+    let outputs: [Output]
+    let choose: (String) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        let current = outputs.first(where: \.current)
+        Group {
+            if inPicture {
+                mark(current)
+            } else {
+                Menu {
+                    ForEach(outputs, id: \.uid) { output in
+                        Button {
+                            if !output.current { choose(output.uid) }
+                        } label: {
+                            Label(output.name, systemImage: output.current ? "checkmark" : output.symbol)
+                        }
+                    }
+                } label: {
+                    mark(current)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+            }
+        }
+        .fixedSize()
+        .help(current?.name ?? L(.output))
+        .accessibilityLabel(L(.output))
+        .accessibilityValue(current?.name ?? "")
+    }
+
+    private func mark(_ current: Output?) -> some View {
+        Image(systemName: current?.symbol ?? "speaker.wave.2.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(Color.white.opacity(0.92))
+            .frame(width: 26, height: 26)
+            .contentShape(Circle())
     }
 }

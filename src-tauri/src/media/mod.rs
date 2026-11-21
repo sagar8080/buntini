@@ -7,6 +7,7 @@
 //! controls are the person's own clicks and act at once. The cat dances while music plays.
 mod artwork;
 mod native;
+mod output;
 mod player;
 mod system;
 
@@ -44,6 +45,8 @@ const FAILURES: u8 = 3;
 /// card goes back to what macOS last said.
 const ANSWER: Duration = Duration::from_secs(2);
 const CARD: &str = "now-playing";
+/// While the card shows, the outputs are read again this often.
+const OUTPUTS_EVERY: Duration = Duration::from_secs(3);
 
 /// Saved under `settings.media`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -120,6 +123,9 @@ struct Hub {
     /// Counts the controls sent to what macOS says plays, so only the last one's answer is
     /// waited for.
     reported_controls: u64,
+    /// Where the sound can go, read while the card shows, and when.
+    outputs: Vec<crate::surface::cards::media::Output>,
+    outputs_at: Option<Instant>,
     watched: Watched,
     shown: Option<Shown>,
     /// The card is on screen.
@@ -216,6 +222,9 @@ fn received(action: Action) {
         if let Some(player) = hub.shown.as_ref().map(|shown| shown.reading.player).filter(|_| visible) {
             hub.slots[player.index()].force = true;
         }
+        if visible {
+            hub.outputs_at = None;
+        }
         drop(hub);
         WAKE.notify_one();
         return;
@@ -274,6 +283,17 @@ async fn look() -> Duration {
             }
         }
     }
+    // Where the sound goes, while the card shows.
+    let outputs_due = {
+        let hub = hub();
+        hub.visible && hub.outputs_at.is_none_or(|at| at.elapsed() >= OUTPUTS_EVERY)
+    };
+    if outputs_due {
+        let outputs = output::list();
+        let mut hub = hub();
+        hub.outputs = outputs;
+        hub.outputs_at = Some(Instant::now());
+    }
     let mut hub = hub();
     settle(&mut hub);
     // macOS says when what it reports changes; while it plays the pill's progress still moves on.
@@ -288,6 +308,8 @@ async fn look() -> Duration {
             slot.at.map_or(Duration::ZERO, |at| cadence(&hub, player).saturating_sub(at.elapsed()))
         })
         .chain(reported)
+        // The outputs are read again while the card shows.
+        .chain(hub.visible.then_some(OUTPUTS_EVERY))
         .min()
         .unwrap_or(IDLE)
         .max(Duration::from_millis(200))
@@ -505,6 +527,7 @@ fn now_playing(shown: &Shown) -> NowPlaying {
         can_previous: reading.previous,
         can_next: reading.next,
         app: reading.app.clone().filter(|_| reading.player == Player::Other),
+        outputs: Vec::new(),
     }
 }
 
@@ -558,7 +581,11 @@ fn publish(hub: &mut Hub) {
                 (_, now) => now,
             };
             hub.pill_progress = progress;
-            contribution(shown, pill_shows(shown), progress)
+            let mut given = contribution(shown, pill_shows(shown), progress);
+            if let Some(CardBody::NowPlaying(card)) = given.offers.first_mut().map(|offer| &mut offer.card.body) {
+                card.outputs = hub.outputs.clone();
+            }
+            given
         }
         None => {
             hub.pill_progress = None;
@@ -606,6 +633,19 @@ fn coalesce(batch: Vec<Action>) -> Vec<Action> {
 }
 
 async fn act(action: &Action) -> Result<(), String> {
+    // Where the sound goes, whatever plays: only an output the card offered.
+    if action.name == "output" {
+        let uid = action.value.as_ref().and_then(Value::as_str).ok_or("No output came with it.")?.to_string();
+        if !hub().outputs.iter().any(|offered| offered.uid == uid) {
+            return Err("That output isn't offered.".into());
+        }
+        let outputs = tokio::task::spawn_blocking(move || output::choose(&uid).map(|_| output::list())).await.map_err(|_| "The output didn't change.")??;
+        let mut hub = hub();
+        hub.outputs = outputs;
+        hub.outputs_at = Some(Instant::now());
+        publish(&mut hub);
+        return Ok(());
+    }
     let Some(player) = hub().shown.as_ref().map(|shown| shown.reading.player) else { return Ok(()) };
     if player.reported() {
         return act_reported(player, action).await;
