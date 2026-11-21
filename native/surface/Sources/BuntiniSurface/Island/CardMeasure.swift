@@ -69,6 +69,18 @@ public enum IslandSizing {
         return (model.showsField, model.showsChips, model.showsControls)
     }
 
+    /// What leads beside the notch for `scene`, before the island is opened and after it was
+    /// opened and closed again.
+    @MainActor
+    public static func lead(_ scene: SurfaceScene, screen: ScreenShape) -> (before: Pill?, after: Pill?) {
+        let model = model(scene, screen: screen)
+        let before = model.glance?.lead
+        model.expanded = true
+        model.expanded = false
+        model.scene = scene
+        return (before, model.glance?.lead)
+    }
+
     /// How wide each chip is drawn when the island opens for `scene`.
     @MainActor
     public static func chipWidths(_ scene: SurfaceScene, screen: ScreenShape) -> [CGFloat] {

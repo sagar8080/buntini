@@ -188,6 +188,9 @@ public enum CardSteps {
     /// Room for a card below the band, not counting the 10 pt above it and 16 below: S, M and
     /// L. Under a 32 pt notch they make an island 144, 200 or 280 pt tall.
     public static let all: [CGFloat] = [86, 142, 222]
+    /// A card that says one thing opens as a line this tall below the band, 62 pt in all
+    /// under a 32 pt notch.
+    public static let line: CGFloat = 30
     public static var largest: CGFloat { all[all.count - 1] }
 
     /// The smallest step that holds `content`. Past the largest it's the largest, and the card

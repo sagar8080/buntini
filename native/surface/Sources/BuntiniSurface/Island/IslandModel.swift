@@ -9,6 +9,10 @@ final class IslandModel: ObservableObject {
             // A chip chosen stays chosen while the island is open; only a diff asked for from
             // a step comes forward in its place.
             if let card = scene?.card, card.id != oldValue?.card?.id, case .diff = card.body { chosen = nil }
+            // News seen stays seen until that session has news again.
+            let news = Set(scene?.pills.filter(\.isNews).map(\.id) ?? [])
+            seenNews.formIntersection(news)
+            if expanded { seenNews.formUnion(news) }
             measureAhead()
         }
     }
@@ -23,6 +27,9 @@ final class IslandModel: ObservableObject {
             if !expanded {
                 chosen = nil
                 asking = false
+            } else {
+                // Opened: what was news has been seen.
+                seenNews.formUnion(scene?.pills.filter(\.isNews).map(\.id) ?? [])
             }
             measureAhead()
         }
@@ -47,6 +54,8 @@ final class IslandModel: ObservableObject {
     private var measured: [String: Measured] = [:]
     /// The tallest the opened island has been while the pointer stayed on it.
     private var held: CGFloat?
+    /// Agent pills whose finished or failed turn was seen by opening the island.
+    private var seenNews: Set<String> = []
 
     private struct Measured {
         let card: Card
@@ -91,7 +100,31 @@ final class IslandModel: ObservableObject {
 
     /// Beside the notch: the most pressing thing running.
     var glance: Glance? {
-        scene.flatMap { Glance.of($0.pills, overflow: $0.overflow.count) }
+        scene.flatMap { Glance.of(pills, overflow: $0.overflow.count) }
+    }
+
+    /// The pills beside the notch, most urgent first: an agent's finished or failed turn is
+    /// news until the island is opened, then it reads as any other session.
+    var pills: [Pill] {
+        let shown = (scene?.pills ?? []).map { $0.isNews && seenNews.contains($0.id) ? $0.seen : $0 }
+        return shown.enumerated()
+            .sorted { (Glance.rank($0.element.state), $0.offset) < (Glance.rank($1.element.state), $1.offset) }
+            .map(\.element)
+    }
+
+    /// A card that opened the island to say one thing (a finished turn, a hello, how the Mac
+    /// is doing, being up to date) shows as a line under the band for its moment.
+    var line: Card? {
+        guard !inCorner, let card = interrupting, Self.saysOneLine(card) else { return nil }
+        return card
+    }
+
+    static func saysOneLine(_ card: Card) -> Bool {
+        switch card.body {
+        case .finished, .greeting, .vitals: return true
+        case .update(let update): return update.stage == "current"
+        default: return false
+        }
     }
 
     /// The card that opened the island by itself, to be answered or read.
@@ -128,6 +161,7 @@ final class IslandModel: ObservableObject {
 
     private var naturalOpenHeight: CGFloat {
         if dragging && scene?.card == nil { return 110 }
+        if line != nil { return LineView.height }
         if let card = interrupting {
             let beside = Self.catBeside(card)
             // Beside the cat a card is at least as tall as the cat.

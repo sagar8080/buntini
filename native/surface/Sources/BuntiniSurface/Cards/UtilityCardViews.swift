@@ -174,8 +174,8 @@ struct CaptureThumb: View {
 struct VitalsCardView: View {
     let vitals: Vitals
 
-    private var symbol: String {
-        switch vitals.line {
+    static func symbol(_ line: String) -> String {
+        switch line {
         case L(.soundsOff): return "speaker.slash.fill"
         case L(.soundsOn): return "speaker.wave.2.fill"
         case L(.nothingWaiting): return "checkmark.circle"
@@ -185,7 +185,7 @@ struct VitalsCardView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol).font(.callout).opacity(0.85)
+            Image(systemName: Self.symbol(vitals.line)).font(.callout).opacity(0.85)
             Text(vitals.line).font(.callout.weight(.semibold)).lineLimit(1)
         }
         .frame(maxHeight: .infinity)

@@ -9,6 +9,9 @@ use super::{answer_agent, diff, hub, recap, Agent, AgentRequest, Answer, Hub, AR
 
 /// How long last week's recap shows on Monday morning.
 const RECAP_MS: u64 = 20_000;
+/// A finished or failed turn keeps its mark beside the notch this long, as news; once the
+/// island is opened it reads as any other session (BuntiniSurface's `IslandModel.pills`).
+const NEWS_MS: u64 = 15 * 60_000;
 
 /// Each agent's colour on the island.
 pub fn tint(agent: &str) -> &'static str {
@@ -107,14 +110,7 @@ pub(super) fn publish(hub: &Hub) {
     let mut pills = Vec::new();
     for session in sessions {
         let waiting = session.asking || hub.waiting.iter().any(|waiting| waiting.agent.id() == session.agent && waiting.session == session.id);
-        let since = now.saturating_sub(session.last_ms);
-        let state = match session.phase {
-            _ if waiting => PillState::Waiting,
-            Phase::Working => PillState::Working,
-            Phase::Error if since < ERROR_MS => PillState::Error,
-            Phase::Done if since < FINISH_MS => PillState::Done,
-            _ => PillState::Idle,
-        };
+        let state = pill_state(session.phase, waiting, now.saturating_sub(session.last_ms));
         // Claude Code in the Claude app's Code tab.
         let label = if session.host.entrypoint == "claude-desktop" { "Claude".to_string() } else { name(&session.agent) };
         pills.push(Pill {
@@ -160,6 +156,18 @@ pub(super) fn publish(hub: &Hub) {
         offers.push(Offer { card: card.clone(), urgency: Urgency::Alert, at_ms: *at_ms, ttl_ms: Some(RECAP_MS) });
     }
     island::publish(Source::Agents, Contribution { pills, offers });
+}
+
+/// A session's pill: asking beats everything, then working; a turn that finished or failed
+/// `since` milliseconds ago stays news for `NEWS_MS`.
+fn pill_state(phase: Phase, waiting: bool, since: u64) -> PillState {
+    match phase {
+        _ if waiting => PillState::Waiting,
+        Phase::Working => PillState::Working,
+        Phase::Error if since < NEWS_MS => PillState::Error,
+        Phase::Done if since < NEWS_MS => PillState::Done,
+        _ => PillState::Idle,
+    }
 }
 
 /// Hands what the person clicks on the island to the agents.
@@ -270,5 +278,21 @@ pub(super) fn recap_card(week: &recap::Week) -> Card {
             week: recap::title(&week.start),
             stats: recap::stats(week, name, true).into_iter().map(|(label, value)| cards::RecapStat { label, value }).collect(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_finished_turn_stays_news_for_a_quarter_of_an_hour() {
+        assert_eq!(pill_state(Phase::Done, false, 10 * 60_000), PillState::Done);
+        assert_eq!(pill_state(Phase::Error, false, 14 * 60_000), PillState::Error);
+        assert_eq!(pill_state(Phase::Done, false, NEWS_MS), PillState::Idle);
+        assert_eq!(pill_state(Phase::Idle, false, 0), PillState::Idle);
+        // Working or asking again comes first.
+        assert_eq!(pill_state(Phase::Working, false, 0), PillState::Working);
+        assert_eq!(pill_state(Phase::Done, true, 0), PillState::Waiting);
     }
 }

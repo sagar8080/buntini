@@ -45,7 +45,7 @@ struct IslandRoot: View {
         let rect = model.localRect
         let corner = model.inCorner
         let notch = model.hasNotch && !corner
-        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? 24 : mode == .peek ? model.band / 2 : 8
+        let radius: CGFloat = corner ? (mode == .open ? 22 : 18) : mode == .open ? (model.line == nil ? 24 : 18) : mode == .peek ? model.band / 2 : 8
         let flare: CGFloat = notch ? (mode == .open ? 10 : mode == .peek ? 7 : 0) : 0
         let shape = corner ? AnyShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) : AnyShape(IslandShape(bottomRadius: radius, shoulder: flare))
         ZStack(alignment: .topLeading) {
@@ -111,8 +111,9 @@ struct IslandRoot: View {
         let scene = model.scene
         let corner = model.inCorner
         let trailing = model.placement == .topRight || model.placement == .bottomRight
-        // The cat steps out of its wing only to sit beside a hello, a finished turn or files.
-        let beside = mode == .open && model.interrupting.map(IslandModel.catBeside) == true
+        // The cat steps out of its wing only to sit beside files, or a hello or a finished turn
+        // in a corner, where they aren't a line.
+        let beside = mode == .open && model.line == nil && model.interrupting.map(IslandModel.catBeside) == true
         let catSide: CGFloat = corner ? (mode == .open ? 26 : IslandGeometry.tile.width - 10) : model.band - 2
         // Opened by a click, the band holds Ask beside the cat (until the field itself shows)
         // and Focus and Chat across from it, each kept to its side of the notch.
@@ -146,7 +147,13 @@ struct IslandRoot: View {
             .onTapGesture {
                 if model.interrupting == nil { model.expanded.toggle() }
             }
-            if mode == .open {
+            if mode == .open, let card = model.line {
+                LineView(card: card)
+                    .id(card.id)
+                    .inLanguage()
+                    .padding(.horizontal, 18)
+                    .transition(.opacity)
+            } else if mode == .open {
                 opened(beside: beside)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .inLanguage()

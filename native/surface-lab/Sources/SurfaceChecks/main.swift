@@ -155,6 +155,8 @@ for field: CGFloat in [0, 30] {
         }
     }
 }
+// A card that says one thing opens as a line under the band.
+opened.insert(band + CardSteps.line)
 // Opened by a click, the band holds Ask, Focus and Chat; the field shows only once asked for
 // or when nothing runs, and the chips once there's more than one thing to switch between.
 let home = MainActor.assumeIsolated { IslandSizing.home(busy, screen: notched) }
@@ -167,6 +169,26 @@ if let single = fixture.scenes.first(where: { $0.pills.count == 1 && $0.card != 
 }
 let root = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let raw = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+func longRaw0() -> [String: Any] { (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })! }
+// A finished turn that opens the island is a line under the band, as wide as the island
+// opens; its session's mark leads beside the notch, news, until the island is opened.
+var lineRaw = (raw["scenes"] as! [[String: Any]]).first(where: { (($0["card"] as? [String: Any])?["body"] as? [String: Any])?["kind"] as? String == "finished" })!
+lineRaw["interrupt"] = true
+var agentPill = (longRaw0()["pills"] as! [[String: Any]]).first(where: { $0["source"] as? String == "agents" })!
+agentPill["state"] = "done"
+var idlePill = agentPill
+idlePill["id"] = "other"
+idlePill["state"] = "idle"
+lineRaw["pills"] = [idlePill, agentPill]
+let finishedLine = try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: lineRaw))
+let lineSize = MainActor.assumeIsolated { IslandSizing.size(finishedLine, screen: notched, expanded: false) }
+guard lineSize == CGSize(width: IslandGeometry.openWidth, height: band + CardSteps.line) else { fail("a finished turn opens at \(lineSize), not as a line") }
+var calm = lineRaw
+calm["interrupt"] = false
+calm["card"] = NSNull()
+let lead = MainActor.assumeIsolated { IslandSizing.lead(try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: calm)), screen: notched) }
+guard lead.before?.state == .done, lead.before?.id == agentPill["id"] as? String, lead.after?.state != .done else { fail("a finished turn's mark doesn't lead until the island is opened: \(String(describing: lead))") }
+
 // A chip is never wider than the widest, however long its name.
 guard MainActor.assumeIsolated({ IslandSizing.chipWidths(busy, screen: notched) }).allSatisfy({ $0 <= Chips.widest }) else { fail("a chip is wider than \(Chips.widest) pt") }
 var longRaw = (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })!

@@ -17,6 +17,17 @@ public struct Glance: Equatable, Sendable {
     /// Characters of a badge shown beside the notch.
     public static let longest = 9
 
+    /// Most urgent first, as the board ranks them (`board::rank` in Rust).
+    public static func rank(_ state: PillState) -> Int {
+        switch state {
+        case .waiting: return 0
+        case .error: return 1
+        case .working: return 2
+        case .done: return 3
+        case .idle: return 4
+        }
+    }
+
     public static func of(_ pills: [Pill], overflow: Int = 0) -> Glance? {
         guard let lead = pills.first else { return nil }
         let rest = Array(pills.dropFirst())
