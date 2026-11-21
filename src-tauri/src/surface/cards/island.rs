@@ -19,6 +19,14 @@ pub struct DropTarget {
     pub label: String,
 }
 
+/// A short answer to what was typed in the island, shown there rather than opening the chat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Answer {
+    pub question: String,
+    pub answer: String,
+}
+
 /// Hello on launch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

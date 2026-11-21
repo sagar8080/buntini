@@ -142,10 +142,27 @@ pub enum Op {
     Ping,
     /// A question typed in the island wasn't asked: the chat was busy. The island says so.
     Busy,
+    /// The answer to a question typed in the island. Short enough, it shows there and this
+    /// answers true; otherwise false, and the chat opens with it.
+    Answer { question: String, answer: String },
 }
 
 /// How long the island says a question wasn't asked.
 const BUSY_MS: u64 = 4_000;
+/// How long an answer shows in the island by itself.
+const ANSWER_MS: u64 = 30_000;
+/// The most an answer in the island says: about three lines of the card.
+const ANSWER_CHARS: usize = 280;
+const ANSWER_LINES: usize = 3;
+
+/// An answer the island can show whole: a few plain lines. A longer one, a table or code
+/// reads better in the chat.
+fn short_answer(answer: &str) -> Option<String> {
+    let lines: Vec<&str> = answer.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let text = lines.join("\n");
+    let plain = !text.contains("```") && !lines.iter().any(|line| line.starts_with('|'));
+    (!lines.is_empty() && lines.len() <= ANSWER_LINES && text.chars().count() <= ANSWER_CHARS && plain).then_some(text)
+}
 
 #[tauri::command]
 pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
@@ -159,6 +176,17 @@ pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
                 ttl_ms: Some(BUSY_MS),
             }]);
             Ok(serde_json::Value::Null)
+        }
+        Op::Answer { question, answer } => {
+            let Some(answer) = short_answer(&answer) else { return Ok(serde_json::Value::Bool(false)) };
+            let question: String = question.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+            publish(vec![Offer {
+                card: Card { id: "answer".into(), source: Source::Island, body: CardBody::Answer(cards::Answer { question, answer }) },
+                urgency: Urgency::Alert,
+                at_ms: surface::now_ms(),
+                ttl_ms: Some(ANSWER_MS),
+            }]);
+            Ok(serde_json::Value::Bool(true))
         }
     }
 }
@@ -425,6 +453,17 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_few_plain_lines_answer_in_the_island_and_the_rest_go_to_the_chat() {
+        assert_eq!(short_answer("  Thursday at 4:30 pm.\n\n  At Bright Smile Dental.  ").as_deref(), Some("Thursday at 4:30 pm.\nAt Bright Smile Dental."));
+        assert_eq!(short_answer(""), None);
+        assert_eq!(short_answer("one\ntwo\nthree\nfour"), None);
+        assert_eq!(short_answer(&"word ".repeat(60)), None);
+        assert_eq!(short_answer("Run this:\n```\nls\n```"), None);
+        assert_eq!(short_answer("| Day | Time |\n| Mon | 9 |"), None);
+        assert!(short_answer(&"é".repeat(280)).is_some(), "counted in characters, not bytes");
+    }
 
     fn day(text: &str) -> NaiveDate {
         NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()

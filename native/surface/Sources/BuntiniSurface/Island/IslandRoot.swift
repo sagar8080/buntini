@@ -408,6 +408,7 @@ struct CardView: View {
         case .whatsNew(let value): WhatsNewCardView(whatsNew: value)
         case .drop(let value): DropCardView(card: card, drop: value, send: send)
         case .greeting(let value): GreetingCardView(greeting: value)
+        case .answer(let value): AnswerCardView(card: card, answer: value, send: send)
         case .note(let value): NoteCardView(card: card, note: value, send: send)
         }
     }

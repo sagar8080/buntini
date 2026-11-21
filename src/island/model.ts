@@ -10,12 +10,14 @@ export interface IslandSettings {
 }
 export const defaults: IslandSettings = { placement: 'auto', updates: false };
 
-/** What `island_call` accepts; mirrors `island::Op`. `busy`: a question typed in the island wasn't asked. */
-export type IslandOp = { op: 'ping' } | { op: 'busy' };
+/** What `island_call` accepts; mirrors `island::Op`. `busy`: a question typed in the island wasn't asked.
+ * `answer`: its answer, shown in the island when it's short enough (true), else false and the chat shows it. */
+export type IslandOp = { op: 'ping' } | { op: 'busy' } | { op: 'answer'; question: string; answer: string };
 
 /** What the browser preview answers for `island_call`. */
 export function preview(op: IslandOp): unknown {
   if (op.op === 'ping') return true;
   if (op.op === 'busy') return null;
+  if (op.op === 'answer') return false;
   throw new Error(t('common.desktopOnly'));
 }

@@ -14,6 +14,12 @@ public struct DropTarget: Codable, Equatable, Sendable {
     public let label: String
 }
 
+/// A short answer to what was typed in the island, shown there rather than opening the chat.
+public struct Answer: Codable, Equatable, Sendable {
+    public let question: String
+    public let answer: String
+}
+
 /// Hello on launch.
 public struct Greeting: Codable, Equatable, Sendable {
     public let name: String?

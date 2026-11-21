@@ -220,7 +220,7 @@ fn scene(hub: &mut Hub, now_ms: u64) -> Scene {
     // The cat reacts to what the island shows.
     match (&picked.card, picked.urgency) {
         (_, Some(Urgency::Waiting)) => cat.mood = Mood::Alert,
-        (Some(card), Some(Urgency::Alert)) if matches!(card.body, CardBody::Finished(_) | CardBody::Greeting(_) | CardBody::Recap(_)) => cat.mood = Mood::Happy,
+        (Some(card), Some(Urgency::Alert)) if matches!(card.body, CardBody::Finished(_) | CardBody::Greeting(_) | CardBody::Recap(_) | CardBody::Answer(_)) => cat.mood = Mood::Happy,
         _ => {}
     }
     // A sound when something new asks for you, or news arrives.
@@ -381,7 +381,7 @@ mod tests {
         kinds.dedup();
         let mut every = [
             "approval", "question", "ticker", "diff", "finished", "recap", "usage", "service", "mail", "nowPlaying", "timer",
-            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "note",
+            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "answer", "note",
         ]
         .map(String::from)
         .to_vec();

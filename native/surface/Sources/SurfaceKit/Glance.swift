@@ -117,6 +117,8 @@ public enum Chips {
             return (service.title, nil, "#8B949E", "circle.fill")
         case .timer(let timer):
             return (timer.label, nil, "#FF7A59", "timer")
+        case .answer(let answer):
+            return (answer.question, nil, "#F2B33D", "text.bubble")
         default:
             return nil
         }

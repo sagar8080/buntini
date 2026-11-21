@@ -29,6 +29,25 @@ struct DropCardView: View {
     }
 }
 
+/// The answer to what was typed in the island: the question, the answer in up to three
+/// lines, and the chat for more.
+struct AnswerCardView: View {
+    let card: Card
+    let answer: Answer
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardHeading(from: answer.question, title: answer.answer, titleLines: 3)
+                .textSelection(.enabled)
+            HStack {
+                Spacer()
+                IslandButton(label: L(.chat)) { send(Action(source: .island, card: card.id, name: "openChat")) }
+            }
+        }
+    }
+}
+
 struct GreetingCardView: View {
     let greeting: Greeting
 

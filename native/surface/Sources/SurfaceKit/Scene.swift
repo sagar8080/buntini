@@ -4,7 +4,7 @@
 import Foundation
 
 /// Bumped whenever a change on one side would break the other.
-public let surfaceContract: UInt32 = 2
+public let surfaceContract: UInt32 = 3
 
 /// Which part of Buntini a pill, card or action belongs to.
 public enum Source: String, Codable, CaseIterable, Sendable {
