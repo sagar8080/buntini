@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod assistant_setup;
 pub mod assistants;
 pub mod calls;
 pub mod commands;

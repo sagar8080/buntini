@@ -195,8 +195,8 @@ fn hook_entry(agent: Agent, event: &str, timeout: u64, waits: bool, socket: &Pat
 }
 
 /// A JSON object read with its keys in order and each value exactly as written.
-struct Doc {
-    entries: Vec<(String, Box<RawValue>)>,
+pub(crate) struct Doc {
+    pub(crate) entries: Vec<(String, Box<RawValue>)>,
 }
 
 impl<'de> Deserialize<'de> for Doc {
@@ -219,7 +219,7 @@ impl<'de> Deserialize<'de> for Doc {
     }
 }
 
-fn parse(bytes: &[u8], name: &str) -> Result<Doc, String> {
+pub(crate) fn parse(bytes: &[u8], name: &str) -> Result<Doc, String> {
     let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     if body.iter().all(u8::is_ascii_whitespace) {
         return Ok(Doc { entries: Vec::new() });
@@ -227,7 +227,7 @@ fn parse(bytes: &[u8], name: &str) -> Result<Doc, String> {
     serde_json::from_slice(body).map_err(|_| format!("{name} isn’t the JSON Buntini expects, so it was left alone."))
 }
 
-fn render(doc: &Doc, bom: bool) -> Vec<u8> {
+pub(crate) fn render(doc: &Doc, bom: bool) -> Vec<u8> {
     let mut out = String::new();
     if bom {
         out.push('\u{feff}');
@@ -247,7 +247,7 @@ fn render(doc: &Doc, bom: bool) -> Vec<u8> {
 }
 
 /// `value` written the way the rest of the file is: two spaces, one level in.
-fn raw(value: &Value) -> Box<RawValue> {
+pub(crate) fn raw(value: &Value) -> Box<RawValue> {
     let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".into()).replace('\n', "\n  ");
     RawValue::from_string(text).unwrap_or_else(|_| RawValue::from_string("{}".into()).unwrap())
 }

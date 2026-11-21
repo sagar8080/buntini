@@ -84,22 +84,53 @@ fn decide(name: &str, allowed: bool) {
 #[serde(rename_all = "camelCase")]
 pub struct Assistant {
     pub name: String,
+    /// It may use Buntini: added to it from here and not switched off, or allowed when it asked.
     pub allowed: bool,
+    /// For one Buntini can add itself to: whether it's in its list of tool servers.
+    pub added: Option<bool>,
 }
 
-/// The assistants that asked to use Buntini, for Settings.
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// The assistants on this Mac Buntini can be added to, and those that asked to use it.
 #[tauri::command]
 pub fn assistants() -> Vec<Assistant> {
-    let mut all: Vec<Assistant> = decisions().into_iter().map(|(name, allowed)| Assistant { name, allowed }).collect();
+    let decisions = decisions();
+    let home = home();
+    let mut all: Vec<Assistant> = super::assistant_setup::TARGETS
+        .into_iter()
+        .filter(|target| target.installed())
+        .map(|target| {
+            let added = home.as_deref().is_some_and(|home| target.added(home));
+            Assistant { name: target.name().into(), allowed: added && decisions.get(target.name()) != Some(&false), added: Some(added) }
+        })
+        .collect();
+    for (name, allowed) in decisions {
+        if !all.iter().any(|assistant| assistant.name == name) {
+            all.push(Assistant { name, allowed, added: None });
+        }
+    }
     all.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     all
 }
 
-/// Switches an assistant on or off in Settings.
+/// Switches an assistant on or off in Settings: Buntini is added to it or taken out, where it
+/// can be, and it may use Buntini or not.
 #[tauri::command]
-pub fn set_assistant(name: String, allowed: bool) -> Result<Vec<Assistant>, String> {
-    if !decisions().contains_key(&name) {
-        return Err("That assistant hasn't asked to use Buntini.".into());
+pub async fn set_assistant(name: String, allowed: bool) -> Result<Vec<Assistant>, String> {
+    match super::assistant_setup::Target::by_name(&name).filter(|target| target.installed()) {
+        Some(target) => {
+            let home = home().ok_or("There's no home folder.")?;
+            let data = crate::agents::socket_dir().ok_or("Buntini is still starting.")?;
+            super::assistant_setup::set(target, allowed, &home, data, |link| {
+                let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
+            })
+            .await?;
+        }
+        None if !decisions().contains_key(&name) => return Err("That assistant hasn't asked to use Buntini.".into()),
+        None => {}
     }
     decide(&name, allowed);
     Ok(assistants())
