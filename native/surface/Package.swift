@@ -13,8 +13,11 @@ let package = Package(
     targets: [
         // What Rust sends and receives, with no AppKit, so it can be checked anywhere.
         .target(name: "SurfaceKit"),
+        // Buntini's actions for Shortcuts and Spotlight, in a module of their own so their
+        // metadata (native/intents/metadata.sh) is made from them alone.
+        .target(name: "BuntiniIntents"),
         // Windows, drawing and the C entry points Rust calls.
-        .target(name: "BuntiniSurface", dependencies: ["SurfaceKit"]),
+        .target(name: "BuntiniSurface", dependencies: ["SurfaceKit", "BuntiniIntents"]),
     ],
     swiftLanguageVersions: [.v5]
 )

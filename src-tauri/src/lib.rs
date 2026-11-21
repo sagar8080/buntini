@@ -22,6 +22,7 @@ mod location_fields;
 mod chat_threads;
 mod archive;
 mod chatgpt;
+mod intents;
 mod mastodon;
 mod cli;
 mod attach;
@@ -240,6 +241,8 @@ pub fn run() {
             // The island and the dictation pill: drawn natively, empty until something shows.
             if surface::start() {
                 island::start(app.handle().clone());
+                // Shortcuts and Spotlight run Buntini's actions through this.
+                intents::start();
                 media::start(app.handle().clone());
             } else {
                 eprintln!("Native surfaces unavailable");
