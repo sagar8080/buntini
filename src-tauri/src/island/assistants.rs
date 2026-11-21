@@ -147,7 +147,7 @@ fn waiting() -> MutexGuard<'static, Vec<(String, oneshot::Sender<bool>)>> {
 
 /// Shows `what` from `from` in the island with Deny and Allow, and waits for the answer. No
 /// answer in time is No.
-async fn ask(from: &str, what: String) -> bool {
+pub(crate) async fn ask(from: &str, what: String) -> bool {
     let id = format!("{PREFIX}ask.{}", ASKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let (sender, receiver) = oneshot::channel();
     waiting().push((id.clone(), sender));

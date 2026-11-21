@@ -257,6 +257,7 @@ pub fn start(app: AppHandle) {
     watch_health();
     updates::start(app.clone());
     calls::start(&app);
+    crate::mastodon::start();
     power::start();
     unread::start(&app);
     commands::start();
@@ -429,6 +430,10 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             assistants::answer(card, name == "allow");
             return Ok(());
         }
+        (Some(unread::MASTODON), "open") => {
+            crate::mastodon::open();
+            return Ok(());
+        }
         (Some(card), "open") if card.starts_with(unread::PREFIX) => {
             unread::open(card);
             return Ok(());
@@ -440,6 +445,19 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
                 CardBody::Answer(answer) if offer.card.id == "answer" && answer.send_to.iter().any(|offered| offered == place) => Some(answer.answer.clone()),
                 _ => None,
             });
+            // Mastodon takes the post itself, once the person allows it in the island.
+            if place == "mastodon" {
+                let text = answer.ok_or("That answer can't go there.")?;
+                tauri::async_runtime::spawn(async move {
+                    let what = tf("mastodon.post", &[("text", &text)]);
+                    if assistants::ask("Mastodon", what).await {
+                        if let Err(problem) = crate::mastodon::post(&text).await {
+                            eprintln!("Mastodon didn't take the post: {problem}");
+                        }
+                    }
+                });
+                return Ok(());
+            }
             let link = answer.and_then(|answer| share::link(place, &answer)).ok_or("That answer can't go there.")?;
             let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
             return Ok(());

@@ -1,12 +1,13 @@
 //! Send to…: an answer in the island, opened in another app's own compose window with the text
-//! filled in, where the person picks who it goes to and presses send. Nothing is sent from
-//! here. WhatsApp when it's on this Mac; X, Threads and Bluesky in the browser, through their
-//! published compose links.
+//! filled in, where the person picks who it goes to and presses send: WhatsApp when it's on
+//! this Mac; X, Threads and Bluesky in the browser, through their published compose links. A
+//! signed-in Mastodon account posts it from Buntini, only after Allow in the island.
 
 /// Where an answer can go, in the order the menu lists them.
 pub fn places() -> Vec<String> {
     let whatsapp = crate::actions::find_app("WhatsApp").is_some();
-    whatsapp.then_some("whatsapp").into_iter().chain(["x", "threads", "bluesky"]).map(str::to_string).collect()
+    let mastodon = crate::mastodon::account().is_some();
+    whatsapp.then_some("whatsapp").into_iter().chain(["x", "threads", "bluesky"]).chain(mastodon.then_some("mastodon")).map(str::to_string).collect()
 }
 
 /// The longest text a compose link carries.

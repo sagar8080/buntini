@@ -67,6 +67,7 @@ struct AnswerCardView: View {
         case "x": return "X"
         case "threads": return "Threads"
         case "bluesky": return "Bluesky"
+        case "mastodon": return "Mastodon"
         default: return place
         }
     }

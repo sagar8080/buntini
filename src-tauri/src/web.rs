@@ -104,7 +104,7 @@ pub fn provider_valid(provider: &str) -> Result<(), String> {
 }
 /// Services whose keys Buntini keeps in the Keychain: online lookups and cloud models.
 pub fn credential_valid(provider: &str) -> Result<(), String> {
-    if provider_valid(provider).is_ok() || (crate::cloud::provider(provider).is_some() && crate::cli::tool(provider).is_none()) {
+    if provider_valid(provider).is_ok() || provider == crate::mastodon::KEYCHAIN_ID || (crate::cloud::provider(provider).is_some() && crate::cli::tool(provider).is_none()) {
         Ok(())
     } else {
         Err("Unknown service.".into())

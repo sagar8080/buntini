@@ -6,6 +6,7 @@ import { number, t } from './i18n.ts';
 import type { AppList, Settings } from './types';
 import AgentsSection from './agents/AgentsSection';
 import AssistantsSection from './AssistantsSection';
+import MastodonSection from './MastodonSection';
 
 type Props = { draft: Settings; update: <K extends keyof Settings>(key: K, value: Settings[K]) => void; onError: (error: string) => void };
 
@@ -43,6 +44,7 @@ export default function AppsTab({ draft, update, onError }: Props) {
     {draft.apps.includes('mail') && <MailSection value={draft.mail} onChange={mail => update('mail', mail)} onError={onError} />}
     <AgentsSection onError={onError} />
     <AssistantsSection onError={onError} />
+    <MastodonSection onError={onError} />
     <section className="settings-section">
       <div className="settings-section-heading"><h3>{t('settings.apps.accessibility')}</h3><span className={`status-dot ${assisting ? '' : 'amber'}`} /></div>
       <p className="field-help">{assisting ? t('settings.apps.allowed') : t('settings.apps.accessibilityDetail')}</p>

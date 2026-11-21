@@ -132,13 +132,22 @@ fn running(bundle: &str) -> Option<i32> {
     }
 }
 
-/// The chats with unread messages: their pills and cards.
+/// Mastodon's unread mentions share the chats' look; its card opens the notifications page.
+pub const MASTODON: &str = "unread.mastodon";
+
+/// The chats with unread messages, and Mastodon's unread mentions: their pills and cards.
 pub fn shown() -> (Vec<Pill>, Vec<Offer>) {
     let mut pills = Vec::new();
     let mut offers = Vec::new();
     for (pill, card) in shown_now().iter().filter_map(view) {
         pills.push(pill);
         offers.push(Offer { card, urgency: Urgency::Info, at_ms: 0, ttl_ms: None });
+    }
+    if let Some(mentions) = crate::mastodon::unread() {
+        let count = mentions.count.to_string();
+        pills.push(Pill { id: MASTODON.into(), source: Source::Island, label: "Mastodon".into(), tint: "#6364FF".into(), state: PillState::Idle, badge: Some(count.clone()), progress: None, card: None });
+        let line = mentions.newest.unwrap_or_else(|| line(&count));
+        offers.push(Offer { card: Card { id: MASTODON.into(), source: Source::Island, body: CardBody::Unread(UnreadCard { name: "Mastodon".into(), line }) }, urgency: Urgency::Info, at_ms: 0, ttl_ms: None });
     }
     (pills, offers)
 }

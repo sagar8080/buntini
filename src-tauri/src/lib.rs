@@ -21,6 +21,7 @@ mod edit_targets;
 mod location_fields;
 mod chat_threads;
 mod chatgpt;
+mod mastodon;
 mod cli;
 mod attach;
 mod helper;
@@ -412,6 +413,9 @@ pub fn run() {
             island::commands::set_terminal_commands,
             island::assistants::assistants,
             island::assistants::set_assistant,
+            mastodon::mastodon_account,
+            mastodon::mastodon_sign_in,
+            mastodon::mastodon_sign_out,
             agent_setup::connect_coding_agent,
             agents::agents_call,
             island::island_call,
