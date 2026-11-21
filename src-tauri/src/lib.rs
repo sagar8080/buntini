@@ -410,6 +410,8 @@ pub fn run() {
             agent_setup::coding_agents,
             island::commands::terminal_commands,
             island::commands::set_terminal_commands,
+            island::assistants::assistants,
+            island::assistants::set_assistant,
             agent_setup::connect_coding_agent,
             agents::agents_call,
             island::island_call,

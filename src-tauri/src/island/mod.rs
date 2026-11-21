@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod assistants;
 pub mod calls;
 pub mod commands;
 pub mod demo;
@@ -258,6 +259,7 @@ pub fn start(app: AppHandle) {
     power::start();
     unread::start(&app);
     commands::start();
+    assistants::start(&app);
     // What's next counts down beside the notch.
     tauri::async_runtime::spawn(async {
         loop {
@@ -321,6 +323,7 @@ pub(crate) fn refresh() {
 fn send(kept: &[Offer]) {
     let (mut pills, mut offers) = calls::shown();
     pills.extend(commands::shown());
+    pills.extend(assistants::shown());
     let (mut next_pills, mut next) = upcoming::shown(chrono::Local::now());
     pills.append(&mut next_pills);
     let (mut unread_pills, mut unread) = unread::shown();
@@ -420,6 +423,11 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     // Joining the next meeting's call, marking a reminder past due done, or a call's controls.
     match (action.card.as_deref(), action.name.as_str()) {
         (Some(calls::CALL), "mute") => return calls::toggle_mute(),
+        // Another assistant's request: Allow or Deny.
+        (Some(card), name @ ("allow" | "deny")) if card.starts_with(assistants::PREFIX) => {
+            assistants::answer(card, name == "allow");
+            return Ok(());
+        }
         (Some(card), "open") if card.starts_with(unread::PREFIX) => {
             unread::open(card);
             return Ok(());

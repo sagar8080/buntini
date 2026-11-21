@@ -413,6 +413,7 @@ struct CardView: View {
         case .upcoming(let value): UpcomingCardView(card: card, upcoming: value, send: send)
         case .call(let value): CallCardView(card: card, call: value, send: send)
         case .unread(let value): UnreadCardView(card: card, unread: value, send: send)
+        case .request(let value): RequestCardView(card: card, request: value, send: send)
         case .note(let value): NoteCardView(card: card, note: value, send: send)
         }
     }

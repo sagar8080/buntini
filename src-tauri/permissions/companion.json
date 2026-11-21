@@ -10,6 +10,8 @@
           "coding_agents",
           "terminal_commands",
           "set_terminal_commands",
+          "assistants",
+          "set_assistant",
           "connect_coding_agent",
           "agents_call",
           "island_call",

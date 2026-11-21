@@ -110,6 +110,13 @@ fn hub() -> MutexGuard<'static, Hub> {
     HUB.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// What plays now, for other assistants: the app, the title, the artist and whether it plays.
+pub fn playing_now() -> Option<(String, String, Option<String>, bool)> {
+    let hub = hub();
+    let reading = &hub.shown.as_ref()?.reading;
+    Some((reading.player.app().to_string(), reading.title.clone(), reading.artist.clone(), reading.playing))
+}
+
 /// The display sleeps or the session is locked, so the island isn't on screen.
 pub fn screen_away() -> bool {
     hub().asleep

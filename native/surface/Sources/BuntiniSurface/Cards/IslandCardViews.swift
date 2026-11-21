@@ -135,6 +135,24 @@ struct UpcomingCardView: View {
     }
 }
 
+/// Another assistant asks: who, what, and Deny or Allow.
+struct RequestCardView: View {
+    let card: Card
+    let request: Request
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardHeading(from: request.from, title: request.what, titleLines: 3)
+            HStack(spacing: 6) {
+                Spacer()
+                IslandButton(label: L(.deny)) { send(Action(source: .island, card: card.id, name: "deny")) }
+                IslandButton(label: L(.allow), prominent: true) { send(Action(source: .island, card: card.id, name: "allow")) }
+            }
+        }
+    }
+}
+
 /// Unread messages in a chat app, and the app a click away.
 struct UnreadCardView: View {
     let card: Card

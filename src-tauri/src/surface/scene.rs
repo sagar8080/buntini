@@ -210,6 +210,7 @@ pub enum CardBody {
     Upcoming(island::Upcoming),
     Call(island::Call),
     Unread(island::Unread),
+    Request(island::Request),
     // Voice
     Note(flow::Note),
 }

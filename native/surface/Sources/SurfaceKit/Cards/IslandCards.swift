@@ -22,6 +22,13 @@ public struct Answer: Codable, Equatable, Sendable {
     public let sendTo: [String]?
 }
 
+/// Something another assistant asks of the person, with Deny and Allow. Mirror: `Request` in
+/// src-tauri/src/surface/cards/island.rs.
+public struct Request: Codable, Equatable, Sendable {
+    public let from: String
+    public let what: String
+}
+
 /// Unread messages in a chat app, as its Dock icon counts them. Mirror: `Unread` in
 /// src-tauri/src/surface/cards/island.rs.
 public struct Unread: Codable, Equatable, Sendable {

@@ -76,6 +76,19 @@ pub fn reminder(id: &str) -> Option<(String, String)> {
     seen().reminders.iter().find(|reminder| reminder.id.as_deref() == Some(id)).map(|reminder| (id.to_string(), reminder.title.clone()))
 }
 
+/// Today's events and open reminders as last read, while the reads are fresh: for other
+/// assistants (assistants.rs).
+pub fn today() -> Option<(Vec<Event>, Vec<Reminder>)> {
+    let seen = seen();
+    let fresh = |at: Option<std::time::Instant>, within: Duration| at.is_some_and(|at| at.elapsed() < within);
+    if !fresh(seen.events_at, EVENTS_FRESH) && !fresh(seen.reminders_at, REMINDERS_FRESH) {
+        return None;
+    }
+    let events = if fresh(seen.events_at, EVENTS_FRESH) { seen.events.clone() } else { Vec::new() };
+    let reminders = if fresh(seen.reminders_at, REMINDERS_FRESH) { seen.reminders.iter().filter(|reminder| !reminder.id.as_ref().is_some_and(|id| seen.done.contains(id))).cloned().collect() } else { Vec::new() };
+    Some((events, reminders))
+}
+
 /// What shows now: pills beside the notch and their cards.
 pub fn shown(now: DateTime<Local>) -> (Vec<Pill>, Vec<Offer>) {
     let seen = seen();

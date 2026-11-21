@@ -30,6 +30,16 @@ pub struct Answer {
     pub send_to: Vec<String>,
 }
 
+/// Something another assistant asks of the person, with Deny and Allow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Request {
+    /// The assistant's name.
+    pub from: String,
+    /// What it asks, in Buntini's words.
+    pub what: String,
+}
+
 /// Unread messages in a chat app, as its Dock icon counts them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

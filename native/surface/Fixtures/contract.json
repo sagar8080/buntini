@@ -1729,6 +1729,35 @@
    "flow": null,
    "overlay": null,
    "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "assistant.ask.0",
+    "source": "island",
+    "body": {
+     "kind": "request",
+     "from": "Claude Code",
+     "what": "Add the reminder “Call the bank”"
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
   }
  ],
  "actions": [
