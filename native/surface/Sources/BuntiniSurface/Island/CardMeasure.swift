@@ -81,6 +81,20 @@ public enum IslandSizing {
         return (before, model.glance?.lead)
     }
 
+    /// Opened by a click: the card shown after each of `moves` (← -1, → 1), and what Return
+    /// does on the last, at once and after the arming delay.
+    @MainActor
+    public static func keys(_ scene: SurfaceScene, screen: ScreenShape, moves: [Int]) -> (cards: [String?], early: Action?, late: Action?) {
+        let model = model(scene, screen: screen)
+        model.expanded = true
+        var cards: [String?] = []
+        for move in moves {
+            model.step(by: move)
+            cards.append(model.selected?.id)
+        }
+        return (cards, model.primary(now: Date()), model.primary(now: Date().addingTimeInterval(Arming.delay + 0.1)))
+    }
+
     /// How wide each chip is drawn when the island opens for `scene`.
     @MainActor
     public static func chipWidths(_ scene: SurfaceScene, screen: ScreenShape) -> [CGFloat] {

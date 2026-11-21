@@ -330,17 +330,25 @@ struct Home: View {
                     focused = false
                     model.expanded = false
                 }
-                // Chosen from the band: the cursor goes straight in, once the island has the
-                // keyboard. Should it not get there, the island doesn't stay held open for it.
-                .onAppear {
-                    guard model.asking else { return }
-                    DispatchQueue.main.async { focused = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        guard !focused else { return }
-                        model.typing = false
-                        if question.isEmpty { model.asking = false }
-                    }
-                }
+                // Chosen from the band, or typed on the opened island: the cursor goes straight
+                // in, after what was typed, once the island has the keyboard.
+                .onAppear { if model.asking { takeAsk() } }
+                .onChange(of: model.asking) { now in if now { takeAsk() } }
+        }
+    }
+
+    /// Takes over from the band or the keys: what was typed goes in, and the cursor after it.
+    /// Should the cursor not get there, the island doesn't stay held open for it.
+    private func takeAsk() {
+        if !model.askPrefill.isEmpty {
+            question += model.askPrefill
+            model.askPrefill = ""
+        }
+        DispatchQueue.main.async { focused = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !focused else { return }
+            model.typing = false
+            if question.isEmpty { model.asking = false }
         }
     }
 

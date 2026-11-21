@@ -19,6 +19,7 @@ final class IslandWindow {
     private var carrier: CatCarrier?
     private var placement: Placement = .auto
     private var typingWatch: Any?
+    private var swipe = IslandSwipe()
 
     init(send: @escaping (Action) -> Void) {
         self.send = send
@@ -53,6 +54,9 @@ final class IslandWindow {
             if typing { self.panel.makeKey() }
         }
 
+        panel.onKey = { [weak self] event in self?.key(event) ?? false }
+        panel.onScroll = { [weak self] event in self?.scroll(event) ?? false }
+
         observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification) { [weak self] in self?.place() }
         let workspace = NSWorkspace.shared.notificationCenter
         observe(workspace, NSWorkspace.screensDidSleepNotification) { [weak self] in self?.setAsleep(true) }
@@ -75,6 +79,39 @@ final class IslandWindow {
     /// Lets screenshots see the island. Only SurfaceLab asks; Buntini keeps it out of them.
     func allowCapture() {
         panel.sharingType = .readOnly
+    }
+
+    /// ←, →, Return, Esc and typing on the island opened by a click.
+    private func key(_ event: NSEvent) -> Bool {
+        guard panel.holdsKeys, model.mode == .open else { return false }
+        let flags = event.modifierFlags
+        guard let key = IslandKey.of(keyCode: event.keyCode, characters: event.characters, command: flags.contains(.command), control: flags.contains(.control), rightToLeft: Lexicon.direction == .rightToLeft) else { return false }
+        switch key {
+        case .previous: model.step(by: -1)
+        case .next: model.step(by: 1)
+        case .close:
+            panel.holdsKeys = false
+            model.expanded = false
+        case .primary: if let action = model.primary() { send(action) }
+        case .type(let text): model.ask(with: text)
+        }
+        return true
+    }
+
+    /// A two-finger swipe sideways on the opened island moves between its chips. Anything
+    /// mostly vertical scrolls the card as before.
+    private func scroll(_ event: NSEvent) -> Bool {
+        guard model.mode == .open, model.interrupting == nil, event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty, !event.phase.isEmpty else { return false }
+        let inverted = event.isDirectionInvertedFromDevice
+        let dx = inverted ? event.scrollingDeltaX : -event.scrollingDeltaX
+        let dy = inverted ? event.scrollingDeltaY : -event.scrollingDeltaY
+        let ended = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+        guard let step = swipe.add(dx: dx, dy: dy, began: event.phase.contains(.began), ended: ended) else {
+            return abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        }
+        // Right to left, the chips read the other way.
+        model.step(by: Lexicon.direction == .rightToLeft ? -step : step)
+        return true
     }
 
     func close() {
@@ -173,6 +210,13 @@ final class IslandWindow {
         let rect = model.mode == .hidden && placement == .auto
             ? IslandGeometry.wakeRect(model.screen, panel: frame)
             : IslandGeometry.screenRect(panel: frame, size: model.size, placement: placement).insetBy(dx: -6, dy: -6)
+        // Opened by a click, the island takes the keyboard while the pointer is on it, and gives
+        // it back the moment the pointer leaves, before it closes.
+        let holds = model.expanded && model.mode == .open && rect.contains(pointer)
+        if panel.holdsKeys != holds {
+            panel.holdsKeys = holds
+            if holds { panel.makeKey() }
+        }
         // While the cat is carried or someone types, the island keeps the pointer.
         let inside = rect.contains(pointer) || model.carrying || model.typing
         panel.ignoresMouseEvents = !inside

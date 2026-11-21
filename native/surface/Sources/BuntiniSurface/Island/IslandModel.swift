@@ -30,6 +30,7 @@ final class IslandModel: ObservableObject {
             } else {
                 // Opened: what was news has been seen.
                 seenNews.formUnion(scene?.pills.filter(\.isNews).map(\.id) ?? [])
+                changedAt = Date()
             }
             measureAhead()
         }
@@ -37,7 +38,13 @@ final class IslandModel: ObservableObject {
     /// Ask was chosen: the question field shows above what's running until it's left empty.
     @Published var asking = false
     /// The card picked from the chips in the opened island, until it closes.
-    @Published var chosen: String?
+    @Published var chosen: String? {
+        didSet { if chosen != oldValue { changedAt = Date() } }
+    }
+    /// When the island opened or another card was chosen: Return waits out the arming delay.
+    private(set) var changedAt = Date.distantPast
+    /// What was typed on the opened island to start Ask, for the field to take.
+    var askPrefill = ""
     /// Files are being dragged over it.
     @Published var dragging = false
     /// The screen is asleep or locked.
@@ -110,6 +117,44 @@ final class IslandModel: ObservableObject {
         return shown.enumerated()
             .sorted { (Glance.rank($0.element.state), $0.offset) < (Glance.rank($1.element.state), $1.offset) }
             .map(\.element)
+    }
+
+    /// The cards the chips switch between, in order: what ←, → and a swipe move through.
+    private var switchable: [Card] { chips.compactMap(\.card) }
+
+    /// Shows the next (`delta` 1) or previous (-1) chip's card, stopping at either end. Only
+    /// on the island opened by a click.
+    func step(by delta: Int) {
+        let cards = switchable
+        guard mode == .open, interrupting == nil, !cards.isEmpty else { return }
+        let index = selected.flatMap { current in cards.firstIndex(where: { $0.id == current.id }) } ?? 0
+        let next = min(max(index + delta, 0), cards.count - 1)
+        if next != index { chosen = cards[next].id }
+    }
+
+    /// What Return does on the island opened by a click: the chosen card's one button, unless
+    /// it's a decision; nothing in the moment after it comes forward.
+    func primary(now: Date = Date()) -> Action? {
+        guard mode == .open, interrupting == nil, !asking, let card = selected, Arming.ready(since: changedAt, now: now) else { return nil }
+        return Self.primary(card)
+    }
+
+    static func primary(_ card: Card) -> Action? {
+        switch card.body {
+        case .nowPlaying(let playing): return Action(source: .media, card: card.id, name: playing.playing ? "pause" : "play")
+        case .timer(let timer): return Action(source: .utilities, card: card.id, name: timer.phase == "done" ? "focus" : timer.paused ? "resume" : "pause")
+        case .capture(let capture) where !capture.path.isEmpty: return Action(source: .utilities, card: card.id, name: "paste")
+        case .recap: return Action(source: .agents, card: card.id, name: "shareRecap")
+        case .note: return Action(source: .flow, card: card.id, name: "library")
+        default: return nil
+        }
+    }
+
+    /// Typing on the opened island starts Ask with what was typed.
+    func ask(with text: String) {
+        askPrefill += text
+        asking = true
+        typing = true
     }
 
     /// A card that opened the island to say one thing (a finished turn, a hello, how the Mac

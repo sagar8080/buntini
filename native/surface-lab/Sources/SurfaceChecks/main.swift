@@ -94,6 +94,7 @@ if let problem = SurfaceShaders.problem() { fail("a shader doesn't compile: \(pr
 if let problem = SurfaceSounds.problem() { fail(problem) }
 if let problem = MarkupCheck.problem() { fail(problem) }
 if let problem = MainActor.assumeIsolated({ IslandKeyCheck.problem() }) { fail(problem) }
+if let problem = MainActor.assumeIsolated({ IslandPanelKeysCheck.problem() }) { fail(problem) }
 
 // Placeholders fill in one pass: a value is never filled again.
 guard Lexicon.fill("{a} and {b}", ["a": "{b}", "b": "x"]) == "{b} and x",
@@ -189,6 +190,33 @@ calm["card"] = NSNull()
 let lead = MainActor.assumeIsolated { IslandSizing.lead(try! JSONDecoder().decode(SurfaceScene.self, from: JSONSerialization.data(withJSONObject: calm)), screen: notched) }
 guard lead.before?.state == .done, lead.before?.id == agentPill["id"] as? String, lead.after?.state != .done else { fail("a finished turn's mark doesn't lead until the island is opened: \(String(describing: lead))") }
 
+// Keys on the island opened by a click: ← and → in reading order, Return, Esc, and typing
+// that starts Ask; shortcuts and keys that type nothing aren't the island's.
+guard IslandKey.of(keyCode: 123, characters: "\u{F702}", command: false, control: false, rightToLeft: false) == .previous,
+      IslandKey.of(keyCode: 123, characters: "\u{F702}", command: false, control: false, rightToLeft: true) == .next,
+      IslandKey.of(keyCode: 124, characters: "\u{F703}", command: false, control: false, rightToLeft: false) == .next,
+      IslandKey.of(keyCode: 36, characters: "\r", command: false, control: false, rightToLeft: false) == .primary,
+      IslandKey.of(keyCode: 53, characters: "\u{1B}", command: false, control: false, rightToLeft: false) == .close,
+      IslandKey.of(keyCode: 0, characters: "a", command: false, control: false, rightToLeft: false) == .type("a"),
+      IslandKey.of(keyCode: 8, characters: "c", command: true, control: false, rightToLeft: false) == nil,
+      IslandKey.of(keyCode: 126, characters: "\u{F700}", command: false, control: false, rightToLeft: false) == nil,
+      IslandKey.of(keyCode: 48, characters: "\t", command: false, control: false, rightToLeft: false) == nil else { fail("the island's keys do the wrong thing") }
+// A swipe steps once, however far it goes on, and a mostly vertical one scrolls the card.
+var swiping = IslandSwipe()
+guard swiping.add(dx: -10, dy: 2, began: true, ended: false) == nil, swiping.add(dx: -30, dy: 1, began: false, ended: false) == 1,
+      swiping.add(dx: -60, dy: 0, began: false, ended: false) == nil, swiping.add(dx: -5, dy: 0, began: false, ended: true) == nil,
+      swiping.add(dx: 40, dy: 0, began: true, ended: false) == -1, swiping.add(dx: 5, dy: 50, began: true, ended: false) == nil else { fail("a swipe doesn't step once") }
+// ← and → move through the chips' cards and stop at either end; Return waits out the arming
+// delay, and does the card's one button or nothing.
+let switchable = Chips.of(busy).compactMap(\.card?.id)
+let walked = MainActor.assumeIsolated { IslandSizing.keys(busy, screen: notched, moves: Array(repeating: 1, count: switchable.count + 2) + [-99]) }
+guard walked.cards.dropLast().last == switchable.last, walked.cards.last == switchable.first, walked.early == nil,
+      walked.late == nil || walked.late?.card == switchable.first else { fail("the keys don't walk the chips: \(walked)") }
+if let asking = fixture.scenes.first(where: { $0.opens && $0.card?.body.kind == .approval }) {
+    let keys = MainActor.assumeIsolated { IslandSizing.keys(asking, screen: notched, moves: [1]) }
+    guard keys.late == nil else { fail("Return answers an approval") }
+}
+
 // A chip is never wider than the widest, however long its name.
 guard MainActor.assumeIsolated({ IslandSizing.chipWidths(busy, screen: notched) }).allSatisfy({ $0 <= Chips.widest }) else { fail("a chip is wider than \(Chips.widest) pt") }
 var longRaw = (raw["scenes"] as! [[String: Any]]).first(where: { ($0["pills"] as? [Any])?.count == 4 && $0["shelf"] != nil })!
@@ -232,4 +260,4 @@ if CommandLine.arguments.contains("--heights") {
     for (kind, values) in heights.sorted(by: { $0.key < $1.key }) { print(kind, values.joined(separator: ", ")) }
 }
 
-print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs; cards open at three heights in English, German and Arabic")
+print("Surface contract \(surfaceContract): \(fixture.scenes.count) scenes, \(kinds.count) card kinds, \(fixture.actions.count) actions, \(words.labels.count) words; shaders compile; sounds play; mark-up draws; dictation's clipboard checks pass; fields take the keyboard and buttons don't; the wing and the chips say what runs; cards open at three heights in English, German and Arabic; keys and swipes move between them")
