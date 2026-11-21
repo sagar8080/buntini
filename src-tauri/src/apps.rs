@@ -30,7 +30,7 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 23] = [
+pub const APPS: [App; 24] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
@@ -47,13 +47,16 @@ pub const APPS: [App; 23] = [
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "tv", name: "TV", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
+    // Not an app: whatever else macOS says plays (media/system.rs). Its name is translated in
+    // Settings.
+    App { id: OTHER_PLAYERS, name: "Other players", can: &["Now playing", "playback"], tools: &[], share: Some(Share::Music), note: None },
     App { id: "photos", name: "Photos", can: &["Find and show photos"], tools: &[], share: Some(Share::Photos), note: None },
     App { id: "shortcuts", name: "Shortcuts", can: &["Find", "run"], tools: &["list_shortcuts", "run_shortcut"], share: Some(Share::Shortcuts), note: None },
-    App { id: "safari", name: "Safari", can: &["Tabs", "read pages"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
-    App { id: "chrome", name: "Google Chrome", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "brave", name: "Brave Browser", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
-    App { id: "arc", name: "Arc", can: &["Open tabs"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "safari", name: "Safari", can: &["Tabs", "read pages", "Now playing"], tools: &["browser_tabs", "switch_tab", "read_page"], share: Some(Share::Browser), note: Some("Sees private windows too") },
+    App { id: "chrome", name: "Google Chrome", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "brave", name: "Brave Browser", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "edge", name: "Microsoft Edge", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
+    App { id: "arc", name: "Arc", can: &["Open tabs", "Now playing"], tools: &["browser_tabs", "switch_tab"], share: Some(Share::Browser), note: None },
     App { id: "mac_settings", name: "System Settings", can: &["Wallpaper", "Dock", "appearance", "Wi-Fi", "Finder"], tools: &["change_mac_setting"], share: None, note: None },
 ];
 
@@ -61,6 +64,9 @@ pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
 
 /// Chat apps Buntini only counts unread messages for; there's nothing a model can do with them.
 pub const COUNTED_ONLY: [&str; 5] = ["whatsapp", "telegram", "signal", "discord", "slack"];
+
+/// Podcasts, VLC, IINA, Books and anything else that tells macOS what it plays, in the island.
+pub const OTHER_PLAYERS: &str = "other_players";
 
 /// Apps whose playback `control_music` reads and changes.
 pub const PLAYERS: [&str; 3] = ["music", "spotify", "tv"];
@@ -103,7 +109,7 @@ pub fn app(id: &str) -> Option<&'static App> {
 }
 
 pub fn installed(app: &App) -> bool {
-    crate::actions::find_app(app.name).is_some()
+    app.id == OTHER_PLAYERS || crate::actions::find_app(app.name).is_some()
 }
 
 pub fn allowed(settings: &Settings, id: &str) -> bool {
@@ -190,7 +196,10 @@ pub fn usable(settings: &Settings) -> Vec<&'static App> {
 
 /// One line for the model: which apps it can use, and which the user could still allow.
 pub fn prompt_line(settings: &Settings) -> String {
-    let (here, missing): (Vec<&App>, Vec<&App>) = APPS.iter().filter(|app| !COUNTED_ONLY.contains(&app.id)).partition(|app| installed(app));
+    // Unread-only chat apps and "Other players" only show in the island; there's nothing a model
+    // can do with them.
+    let (here, missing): (Vec<&App>, Vec<&App>) =
+        APPS.iter().filter(|app| !COUNTED_ONLY.contains(&app.id) && app.id != OTHER_PLAYERS).partition(|app| installed(app));
     let (yes, no): (Vec<&App>, Vec<&App>) =
         here.into_iter().partition(|app| allowed(settings, app.id));
     let mut line = String::new();
@@ -4049,6 +4058,16 @@ mod tests {
             "Music being allowed says nothing about Spotify"
         );
         assert_eq!(for_call("add_reminder", &args).unwrap().id, "reminders");
+    }
+
+    #[test]
+    fn other_players_can_always_be_switched_on_and_is_never_offered_to_a_model() {
+        let other = app(OTHER_PLAYERS).unwrap();
+        assert!(installed(other) && other.tools.is_empty());
+        let mut settings = Settings::default();
+        settings.apps = vec![OTHER_PLAYERS.to_string()];
+        assert!(allowed(&settings, OTHER_PLAYERS));
+        assert!(!prompt_line(&settings).contains("Other players"));
     }
 
     #[test]

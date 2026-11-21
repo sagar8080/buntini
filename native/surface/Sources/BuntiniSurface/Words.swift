@@ -138,6 +138,7 @@ public enum Word: String, CaseIterable, Sendable {
     case pauseMedia = "surface.media.pause"
     case position = "surface.media.position"
     case volume = "surface.media.volume"
+    case output = "surface.media.output"
     // The dictation pill
     case listening = "surface.pill.listening"
     case handsFree = "surface.pill.handsFree"

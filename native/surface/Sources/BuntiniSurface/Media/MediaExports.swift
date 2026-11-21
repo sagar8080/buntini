@@ -81,3 +81,63 @@ final class MediaWatch: NSObject {
         if before != (sleeping || locked) { emit?(["event": "asleep", "value": sleeping || locked]) }
     }
 }
+
+/// Sends play (0), pause (1), next (4), previous (5) or a seek (24) to `position` seconds to
+/// whatever macOS says plays, as a media key would, but only while `bundle` is what plays.
+/// Waits up to two seconds for the answer: 1 when the player took it, 0 when it didn't, -1
+/// when another app plays now. Call off the main thread.
+@_cdecl("buntini_media_command")
+public func buntiniMediaCommand(_ command: UInt32, _ position: Double, _ bundle: UnsafePointer<CChar>?) -> Int32 {
+    guard let bundle else { return 0 }
+    let wanted = String(cString: bundle)
+    return autoreleasepool { MediaCommand.send(command, position: position, to: wanted) }
+}
+
+/// MediaRemote's own request, which macOS lets any app use to send a command and to ask which
+/// app plays, though not what it plays: that's read in src-tauri/src/media/system.rs.
+enum MediaCommand {
+    static let seek: UInt32 = 24
+    private static let loaded = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW) != nil
+
+    private final class Answer {
+        var taken = false
+    }
+
+    static func send(_ command: UInt32, position: Double, to bundle: String) -> Int32 {
+        guard loaded, let request = NSClassFromString("MRNowPlayingRequest") as? NSObject.Type else { return 0 }
+        guard playing(request).contains(where: { $0.caseInsensitiveCompare(bundle) == .orderedSame }) else { return -1 }
+        let selector = NSSelectorFromString("sendCommand:options:queue:completion:")
+        let sender = request.init()
+        guard sender.responds(to: selector) else { return 0 }
+        typealias Send = @convention(c) (AnyObject, Selector, UInt32, NSDictionary, DispatchQueue, @escaping @convention(block) (AnyObject?) -> Void) -> Void
+        let send = unsafeBitCast(sender.method(for: selector), to: Send.self)
+        let options: NSDictionary = command == seek ? ["kMRMediaRemoteOptionPlaybackPosition": position] : [:]
+        let answer = Answer()
+        let done = DispatchSemaphore(value: 0)
+        send(sender, selector, command, options, DispatchQueue.global(qos: .userInitiated)) { result in
+            let result = result as? NSObject
+            let failed = (value(result, "sendError") as? NSNumber)?.intValue ?? 0
+            answer.taken = result != nil && value(result, "error") == nil && failed == 0
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 2) == .success else { return 0 }
+        return answer.taken ? 1 : 0
+    }
+
+    /// The app that plays, and the app it belongs to: Safari plays through WebKit.
+    private static func playing(_ request: NSObject.Type) -> [String] {
+        typealias Get = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+        let selector = NSSelectorFromString("localNowPlayingPlayerPath")
+        guard let method = class_getClassMethod(request, selector) else { return [] }
+        let path = unsafeBitCast(method_getImplementation(method), to: Get.self)(request, selector)?.takeUnretainedValue() as? NSObject
+        let client = value(path, "client") as? NSObject
+        return ["bundleIdentifier", "parentApplicationBundleIdentifier"].compactMap { value(client, $0) as? String }
+    }
+
+    /// A property of a private object, or nothing if this macOS doesn't have it, rather than
+    /// the exception asking for an unknown key would throw.
+    private static func value(_ object: NSObject?, _ key: String) -> Any? {
+        guard let object, object.responds(to: NSSelectorFromString(key)) else { return nil }
+        return object.value(forKey: key)
+    }
+}

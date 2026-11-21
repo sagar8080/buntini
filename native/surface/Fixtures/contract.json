@@ -111,6 +111,7 @@
      "surface.media.repeat": "Repeat",
      "surface.media.shuffle": "Shuffle",
      "surface.media.volume": "Volume",
+     "surface.media.output": "Sound output",
      "surface.next": "Next",
      "surface.notNow": "Not now",
      "surface.note.notes": "Notes",
@@ -696,7 +697,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
@@ -1309,7 +1312,9 @@
       "shuffle": false,
       "repeatMode": "off",
       "volume": 0.6,
-      "positionAt": null
+      "positionAt": null,
+      "canPrevious": null,
+      "canNext": null
      }
     },
     {
@@ -1513,7 +1518,9 @@
      "shuffle": false,
      "repeatMode": "off",
      "volume": 0.6,
-     "positionAt": null
+     "positionAt": null,
+     "canPrevious": null,
+     "canNext": null
     }
    },
    "held": false,
