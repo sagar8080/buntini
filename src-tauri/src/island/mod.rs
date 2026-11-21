@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 pub mod calls;
 pub mod demo;
 pub mod power;
+pub mod share;
+pub mod unread;
 pub mod upcoming;
 pub mod updates;
 
@@ -184,7 +186,7 @@ pub async fn island_call(op: Op) -> Result<serde_json::Value, String> {
             let Some(answer) = short_answer(&answer) else { return Ok(serde_json::Value::Bool(false)) };
             let question: String = question.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
             publish(vec![Offer {
-                card: Card { id: "answer".into(), source: Source::Island, body: CardBody::Answer(cards::Answer { question, answer }) },
+                card: Card { id: "answer".into(), source: Source::Island, body: CardBody::Answer(cards::Answer { question, answer, send_to: share::places() }) },
                 urgency: Urgency::Alert,
                 at_ms: surface::now_ms(),
                 ttl_ms: Some(ANSWER_MS),
@@ -253,6 +255,7 @@ pub fn start(app: AppHandle) {
     updates::start(app.clone());
     calls::start(&app);
     power::start();
+    unread::start(&app);
     // What's next counts down beside the notch.
     tauri::async_runtime::spawn(async {
         loop {
@@ -317,6 +320,9 @@ fn send(kept: &[Offer]) {
     let (mut pills, mut offers) = calls::shown();
     let (mut next_pills, mut next) = upcoming::shown(chrono::Local::now());
     pills.append(&mut next_pills);
+    let (mut unread_pills, mut unread) = unread::shown();
+    pills.append(&mut unread_pills);
+    next.append(&mut unread);
     offers.extend(kept.iter().cloned());
     offers.append(&mut next);
     surface::publish(Source::Island, Contribution { pills, offers });
@@ -404,6 +410,21 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     // Joining the next meeting's call, marking a reminder past due done, or a call's controls.
     match (action.card.as_deref(), action.name.as_str()) {
         (Some(calls::CALL), "mute") => return calls::toggle_mute(),
+        (Some(card), "open") if card.starts_with(unread::PREFIX) => {
+            unread::open(card);
+            return Ok(());
+        }
+        // The answer, in another app's compose window: only a place the card offered.
+        (Some("answer"), "sendTo") => {
+            let place = action.value.as_ref().and_then(Value::as_str).ok_or("No place came with it.")?;
+            let answer = OFFERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find_map(|offer| match &offer.card.body {
+                CardBody::Answer(answer) if offer.card.id == "answer" && answer.send_to.iter().any(|offered| offered == place) => Some(answer.answer.clone()),
+                _ => None,
+            });
+            let link = answer.and_then(|answer| share::link(place, &answer)).ok_or("That answer can't go there.")?;
+            let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();
+            return Ok(());
+        }
         (Some(calls::CALL), "open") => {
             calls::open();
             return Ok(());

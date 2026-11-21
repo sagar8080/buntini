@@ -18,6 +18,16 @@ public struct DropTarget: Codable, Equatable, Sendable {
 public struct Answer: Codable, Equatable, Sendable {
     public let question: String
     public let answer: String
+    /// Where Send to… can open the answer: `whatsapp`, `x`, `threads`, `bluesky`.
+    public let sendTo: [String]?
+}
+
+/// Unread messages in a chat app, as its Dock icon counts them. Mirror: `Unread` in
+/// src-tauri/src/surface/cards/island.rs.
+public struct Unread: Codable, Equatable, Sendable {
+    public let name: String
+    /// "3 unread", or that there are new messages.
+    public let line: String
 }
 
 /// What's next: a meeting about to start (`item` is `meeting`) or reminders past due

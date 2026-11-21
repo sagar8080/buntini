@@ -30,13 +30,19 @@ pub struct App {
     pub note: Option<&'static str>,
 }
 
-pub const APPS: [App; 18] = [
+pub const APPS: [App; 23] = [
     App { id: "mail", name: "Mail", can: &["Read", "draft replies"], tools: &["read_mail", "draft_email", "reply_email"], share: Some(Share::Mail), note: None },
     App { id: "calendar", name: "Calendar", can: &["Read", "add and move events"], tools: &["read_calendar", "add_calendar_event", "update_calendar_event"], share: Some(Share::Calendar), note: None },
     App { id: "reminders", name: "Reminders", can: &["Read", "add", "complete"], tools: &["read_reminders", "add_reminder", "complete_reminder", "reschedule_reminder"], share: Some(Share::Calendar), note: None },
     App { id: "notes", name: "Notes", can: &["Find", "write notes"], tools: &["find_notes", "create_note", "append_to_note"], share: Some(Share::Notes), note: None },
     App { id: "contacts", name: "Contacts", can: &["Find people"], tools: &["find_contact"], share: Some(Share::Contacts), note: None },
-    App { id: "messages", name: "Messages", can: &["Send texts"], tools: &["send_message"], share: None, note: None },
+    App { id: "messages", name: "Messages", can: &["Send texts", "unread count"], tools: &["send_message"], share: None, note: None },
+    // Chat apps: only the unread count their Dock icon shows, in the island (island/unread.rs).
+    App { id: "whatsapp", name: "WhatsApp", can: &["Unread count"], tools: &[], share: None, note: None },
+    App { id: "telegram", name: "Telegram", can: &["Unread count"], tools: &[], share: None, note: None },
+    App { id: "signal", name: "Signal", can: &["Unread count"], tools: &[], share: None, note: None },
+    App { id: "discord", name: "Discord", can: &["Unread count"], tools: &[], share: None, note: None },
+    App { id: "slack", name: "Slack", can: &["Unread count"], tools: &[], share: None, note: None },
     App { id: "facetime", name: "FaceTime", can: &["Start calls"], tools: &["start_call"], share: None, note: None },
     App { id: "music", name: "Music", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
     App { id: "spotify", name: "Spotify", can: &["Now playing", "playback"], tools: &["control_music"], share: Some(Share::Music), note: None },
@@ -52,6 +58,9 @@ pub const APPS: [App; 18] = [
 ];
 
 pub const BROWSERS: [&str; 5] = ["safari", "chrome", "brave", "edge", "arc"];
+
+/// Chat apps Buntini only counts unread messages for; there's nothing a model can do with them.
+pub const COUNTED_ONLY: [&str; 5] = ["whatsapp", "telegram", "signal", "discord", "slack"];
 
 /// Apps whose playback `control_music` reads and changes.
 pub const PLAYERS: [&str; 3] = ["music", "spotify", "tv"];
@@ -181,7 +190,7 @@ pub fn usable(settings: &Settings) -> Vec<&'static App> {
 
 /// One line for the model: which apps it can use, and which the user could still allow.
 pub fn prompt_line(settings: &Settings) -> String {
-    let (here, missing): (Vec<&App>, Vec<&App>) = APPS.iter().partition(|app| installed(app));
+    let (here, missing): (Vec<&App>, Vec<&App>) = APPS.iter().filter(|app| !COUNTED_ONLY.contains(&app.id)).partition(|app| installed(app));
     let (yes, no): (Vec<&App>, Vec<&App>) =
         here.into_iter().partition(|app| allowed(settings, app.id));
     let mut line = String::new();

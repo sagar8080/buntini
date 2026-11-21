@@ -148,6 +148,7 @@
      "surface.undo": "Undo",
      "surface.upcoming.join": "Join",
      "surface.call.inCall": "In a call",
+     "surface.answer.sendTo": "Send to",
      "surface.call.mute": "Mute",
      "surface.call.unmute": "Unmute",
      "surface.call.muted": "Muted",
@@ -1540,7 +1541,13 @@
     "body": {
      "kind": "answer",
      "question": "When is my dentist appointment?",
-     "answer": "Thursday at 4:30 pm, at Bright Smile Dental on 2 Elm Street."
+     "answer": "Thursday at 4:30 pm, at Bright Smile Dental on 2 Elm Street.",
+     "sendTo": [
+      "whatsapp",
+      "x",
+      "threads",
+      "bluesky"
+     ]
     }
    },
    "held": false,
@@ -1668,6 +1675,45 @@
      "kind": "awake",
      "label": "Awake",
      "until": 1795250000
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "unread.whatsapp",
+     "source": "island",
+     "label": "WhatsApp",
+     "tint": "#25D366",
+     "state": "idle",
+     "badge": "3",
+     "progress": null
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "unread.whatsapp",
+    "source": "island",
+    "body": {
+     "kind": "unread",
+     "name": "WhatsApp",
+     "line": "3 unread"
     }
    },
    "held": false,

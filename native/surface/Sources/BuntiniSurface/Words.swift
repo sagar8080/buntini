@@ -14,6 +14,7 @@ public enum Word: String, CaseIterable, Sendable {
     case done = "surface.done"
     case join = "surface.upcoming.join"
     case inCall = "surface.call.inCall"
+    case sendTo = "surface.answer.sendTo"
     case mute = "surface.call.mute"
     case unmute = "surface.call.unmute"
     case next = "surface.next"

@@ -51,12 +51,35 @@ struct AnswerCardView: View {
     let answer: Answer
     let send: (Action) -> Void
 
+    /// The answer, in another app's own compose window. The places are names, so not
+    /// translated.
+    @ViewBuilder private func sendTo(_ places: [String]) -> some View {
+        Menu(L(.sendTo)) {
+            ForEach(places, id: \.self) { place in
+                Button(Self.name(place)) { send(Action(source: .island, card: card.id, name: "sendTo", value: .string(place))) }
+            }
+        }
+    }
+
+    private static func name(_ place: String) -> String {
+        switch place {
+        case "whatsapp": return "WhatsApp"
+        case "x": return "X"
+        case "threads": return "Threads"
+        case "bluesky": return "Bluesky"
+        default: return place
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CardHeading(from: answer.question, title: answer.answer, titleLines: 3)
                 .textSelection(.enabled)
             HStack {
                 Spacer()
+                if let places = answer.sendTo, !places.isEmpty {
+                    MoreButton { sendTo(places) }
+                }
                 IslandButton(label: L(.chat)) { send(Action(source: .island, card: card.id, name: "openChat")) }
             }
         }
@@ -109,6 +132,23 @@ struct UpcomingCardView: View {
         show.locale = Lexicon.locale
         show.setLocalizedDateFormatFromTemplate(stamp.count > 10 ? (Calendar.current.isDateInToday(date) ? "HHmm" : "EEEHHmm") : "EEEdMMM")
         return show.string(from: date)
+    }
+}
+
+/// Unread messages in a chat app, and the app a click away.
+struct UnreadCardView: View {
+    let card: Card
+    let unread: Unread
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardHeading(from: unread.line, title: unread.name)
+            HStack {
+                Spacer()
+                IslandButton(label: L(.open), prominent: true) { send(Action(source: .island, card: card.id, name: "open")) }
+            }
+        }
     }
 }
 

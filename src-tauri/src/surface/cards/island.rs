@@ -25,6 +25,18 @@ pub struct DropTarget {
 pub struct Answer {
     pub question: String,
     pub answer: String,
+    /// Where Send to… can open the answer: `whatsapp`, `x`, `threads`, `bluesky`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub send_to: Vec<String>,
+}
+
+/// Unread messages in a chat app, as its Dock icon counts them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unread {
+    pub name: String,
+    /// "3 unread", or that there are new messages.
+    pub line: String,
 }
 
 /// What's next: a meeting about to start (`item` is `meeting`) or reminders past due
