@@ -123,6 +123,8 @@ public enum Chips {
             return (answer.question, nil, "#F2B33D", "text.bubble")
         case .upcoming(let upcoming):
             return (upcoming.title, nil, upcoming.item == "meeting" ? "#FF453A" : "#FF9F0A", upcoming.item == "meeting" ? "calendar" : "checklist")
+        case .shortcuts(let shortcuts):
+            return (shortcuts.title, nil, "#FF375F", "square.stack.3d.up.fill")
         case .request(let request):
             return (request.from, nil, "#BF5AF2", "hand.raised.fill")
         case .unread(let unread):

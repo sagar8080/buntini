@@ -468,6 +468,7 @@
   "island.unread.some": "Новые сообщения",
   "island.command.done": "{command} · готово за {time}",
   "island.command.failed": "{command} · ошибка через {time}",
+  "island.shortcuts.title": "Быстрые команды",
   "assistants.use": "{name} хочет использовать Buntini",
   "assistants.reminder": "Добавить напоминание «{title}»",
   "mastodon.post": "Опубликовать «{text}»",

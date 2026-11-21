@@ -1758,6 +1758,48 @@
    "flow": null,
    "overlay": null,
    "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [],
+   "overflow": [],
+   "card": {
+    "id": "shortcuts",
+    "source": "island",
+    "body": {
+     "kind": "shortcuts",
+     "title": "Shortcuts",
+     "buttons": [
+      {
+       "id": "11111111-2222-3333-4444-555555555555",
+       "name": "Movie night"
+      },
+      {
+       "id": "22222222-2222-3333-4444-555555555555",
+       "name": "Lights off"
+      },
+      {
+       "id": "33333333-2222-3333-4444-555555555555",
+       "name": "Leaving home"
+      }
+     ]
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
   }
  ],
  "actions": [

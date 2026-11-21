@@ -460,6 +460,7 @@
   "island.unread.some": "নতুন বার্তা",
   "island.command.done": "{command} · {time}-এ শেষ",
   "island.command.failed": "{command} · {time} পরে ব্যর্থ",
+  "island.shortcuts.title": "শর্টকাট",
   "assistants.use": "{name} Buntini ব্যবহার করতে চায়",
   "assistants.reminder": "রিমাইন্ডার যোগ করুন “{title}”",
   "mastodon.post": "পোস্ট করুন “{text}”",

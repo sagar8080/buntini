@@ -476,6 +476,7 @@
   "island.unread.some": "رسائل جديدة",
   "island.command.done": "{command} · انتهى خلال {time}",
   "island.command.failed": "{command} · فشل بعد {time}",
+  "island.shortcuts.title": "الاختصارات",
   "assistants.use": "يريد {name} استخدام Buntini",
   "assistants.reminder": "إضافة التذكير «{title}»",
   "mastodon.post": "نشر «{text}»",

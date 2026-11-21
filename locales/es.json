@@ -460,6 +460,7 @@
   "island.unread.some": "Mensajes nuevos",
   "island.command.done": "{command} · listo en {time}",
   "island.command.failed": "{command} · falló tras {time}",
+  "island.shortcuts.title": "Atajos",
   "assistants.use": "{name} quiere usar Buntini",
   "assistants.reminder": "Añadir el recordatorio «{title}»",
   "mastodon.post": "Publicar «{text}»",

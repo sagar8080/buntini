@@ -30,6 +30,22 @@ pub struct Answer {
     pub send_to: Vec<String>,
 }
 
+/// The shortcuts in the person's "Buntini" folder in Shortcuts, as buttons.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shortcuts {
+    pub title: String,
+    pub buttons: Vec<ShortcutButton>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutButton {
+    /// The shortcut's id in Shortcuts.
+    pub id: String,
+    pub name: String,
+}
+
 /// Something another assistant asks of the person, with Deny and Allow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

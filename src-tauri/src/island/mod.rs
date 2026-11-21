@@ -17,6 +17,7 @@ pub mod commands;
 pub mod demo;
 pub mod power;
 pub mod share;
+pub mod shortcuts;
 pub mod unread;
 pub mod upcoming;
 pub mod updates;
@@ -258,6 +259,7 @@ pub fn start(app: AppHandle) {
     updates::start(app.clone());
     calls::start(&app);
     crate::mastodon::start();
+    shortcuts::start(&app);
     power::start();
     unread::start(&app);
     commands::start();
@@ -331,6 +333,7 @@ fn send(kept: &[Offer]) {
     let (mut unread_pills, mut unread) = unread::shown();
     pills.append(&mut unread_pills);
     next.append(&mut unread);
+    next.extend(shortcuts::shown());
     offers.extend(kept.iter().cloned());
     offers.append(&mut next);
     surface::publish(Source::Island, Contribution { pills, offers });
@@ -430,6 +433,7 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             assistants::answer(card, name == "allow");
             return Ok(());
         }
+        (Some(shortcuts::CARD), "run") => return shortcuts::run(action.value.as_ref().and_then(Value::as_str).ok_or("No shortcut came with it.")?),
         (Some(unread::MASTODON), "open") => {
             crate::mastodon::open();
             return Ok(());

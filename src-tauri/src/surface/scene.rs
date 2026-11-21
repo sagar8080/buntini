@@ -211,6 +211,7 @@ pub enum CardBody {
     Call(island::Call),
     Unread(island::Unread),
     Request(island::Request),
+    Shortcuts(island::Shortcuts),
     // Voice
     Note(flow::Note),
 }

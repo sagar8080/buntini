@@ -456,6 +456,7 @@
   "island.unread.some": "新訊息",
   "island.command.done": "{command} · {time} 後完成",
   "island.command.failed": "{command} · {time} 後失敗",
+  "island.shortcuts.title": "捷徑",
   "assistants.use": "{name} 想使用 Buntini",
   "assistants.reminder": "加入提醒事項「{title}」",
   "mastodon.post": "發布「{text}」",

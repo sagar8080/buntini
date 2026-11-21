@@ -456,6 +456,7 @@
   "island.unread.some": "ข้อความใหม่",
   "island.command.done": "{command} · เสร็จใน {time}",
   "island.command.failed": "{command} · ล้มเหลวหลัง {time}",
+  "island.shortcuts.title": "คำสั่งลัด",
   "assistants.use": "{name} ต้องการใช้ Buntini",
   "assistants.reminder": "เพิ่มเตือนความจำ “{title}”",
   "mastodon.post": "โพสต์ “{text}”",

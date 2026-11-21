@@ -460,6 +460,7 @@
   "island.unread.some": "Yeni mesajlar",
   "island.command.done": "{command} · {time} içinde bitti",
   "island.command.failed": "{command} · {time} sonra başarısız",
+  "island.shortcuts.title": "Kestirmeler",
   "assistants.use": "{name}, Buntini'yi kullanmak istiyor",
   "assistants.reminder": "“{title}” anımsatıcısını ekle",
   "mastodon.post": "“{text}” paylaş",

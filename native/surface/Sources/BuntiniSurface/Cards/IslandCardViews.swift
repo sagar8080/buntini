@@ -136,6 +136,24 @@ struct UpcomingCardView: View {
     }
 }
 
+/// The person's own shortcuts, a click each.
+struct ShortcutsCardView: View {
+    let card: Card
+    let shortcuts: Shortcuts
+    let send: (Action) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(shortcuts.title).font(.callout.weight(.semibold))
+            FlowRow(spacing: 6) {
+                ForEach(shortcuts.buttons, id: \.id) { button in
+                    IslandButton(label: button.name) { send(Action(source: .island, card: card.id, name: "run", value: .string(button.id))) }
+                }
+            }
+        }
+    }
+}
+
 /// Another assistant asks: who, what, and Deny or Allow.
 struct RequestCardView: View {
     let card: Card

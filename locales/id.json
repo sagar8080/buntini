@@ -456,6 +456,7 @@
   "island.unread.some": "Pesan baru",
   "island.command.done": "{command} · selesai dalam {time}",
   "island.command.failed": "{command} · gagal setelah {time}",
+  "island.shortcuts.title": "Pintasan",
   "assistants.use": "{name} ingin memakai Buntini",
   "assistants.reminder": "Tambahkan pengingat “{title}”",
   "mastodon.post": "Posting “{text}”",

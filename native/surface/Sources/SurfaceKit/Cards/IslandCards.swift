@@ -22,6 +22,18 @@ public struct Answer: Codable, Equatable, Sendable {
     public let sendTo: [String]?
 }
 
+/// The shortcuts in the person's "Buntini" folder, as buttons. Mirror: `Shortcuts` in
+/// src-tauri/src/surface/cards/island.rs.
+public struct Shortcuts: Codable, Equatable, Sendable {
+    public let title: String
+    public let buttons: [ShortcutButton]
+}
+
+public struct ShortcutButton: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+}
+
 /// Something another assistant asks of the person, with Deny and Allow. Mirror: `Request` in
 /// src-tauri/src/surface/cards/island.rs.
 public struct Request: Codable, Equatable, Sendable {

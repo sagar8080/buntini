@@ -460,6 +460,7 @@
   "island.unread.some": "नए संदेश",
   "island.command.done": "{command} · {time} में पूरा",
   "island.command.failed": "{command} · {time} बाद विफल",
+  "island.shortcuts.title": "शॉर्टकट",
   "assistants.use": "{name} Buntini का उपयोग करना चाहता है",
   "assistants.reminder": "रिमाइंडर जोड़ें “{title}”",
   "mastodon.post": "पोस्ट करें “{text}”",

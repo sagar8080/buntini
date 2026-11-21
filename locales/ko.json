@@ -456,6 +456,7 @@
   "island.unread.some": "새 메시지",
   "island.command.done": "{command} · {time} 만에 완료",
   "island.command.failed": "{command} · {time} 후 실패",
+  "island.shortcuts.title": "단축어",
   "assistants.use": "{name}이(가) Buntini를 사용하려고 해요",
   "assistants.reminder": "‘{title}’ 미리 알림 추가",
   "mastodon.post": "‘{text}’ 게시",

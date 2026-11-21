@@ -456,6 +456,7 @@
   "island.unread.some": "新着メッセージ",
   "island.command.done": "{command} · {time}で完了",
   "island.command.failed": "{command} · {time}後に失敗",
+  "island.shortcuts.title": "ショートカット",
   "assistants.use": "{name}がBuntiniを使おうとしています",
   "assistants.reminder": "リマインダー「{title}」を追加",
   "mastodon.post": "「{text}」を投稿",
