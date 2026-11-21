@@ -196,6 +196,16 @@ pub fn running() -> bool {
     STARTED.load(Ordering::SeqCst)
 }
 
+/// Opens macOS's AirDrop picker for `paths`. False when AirDrop can't take them.
+pub fn airdrop(paths: &[String]) -> bool {
+    #[cfg(target_os = "macos")]
+    if STARTED.load(Ordering::SeqCst) {
+        return serde_json::to_vec(paths).is_ok_and(|json| ffi::airdrop(&json));
+    }
+    let _ = paths;
+    false
+}
+
 /// Closes the native surfaces.
 pub fn stop() {
     if STARTED.swap(false, Ordering::SeqCst) {

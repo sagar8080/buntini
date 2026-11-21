@@ -322,6 +322,18 @@ fn send(kept: &[Offer]) {
     surface::publish(Source::Island, Contribution { pills, offers });
 }
 
+/// The files a drop card sends by AirDrop: absolute paths to files or folders that exist,
+/// as many as a drop takes.
+fn airdrop_paths(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|value| value.get("paths"))
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths.iter().filter_map(Value::as_str).filter(|path| path.starts_with('/') && !path.contains('\0') && std::path::Path::new(path).exists()).take(20).map(str::to_string).collect()
+        })
+        .unwrap_or_default()
+}
+
 fn first_word(name: &str) -> String {
     name.split_whitespace().next().unwrap_or(name).chars().take(24).collect()
 }
@@ -456,6 +468,18 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
             forget("drop");
             crate::agents::terminal::drop_files(pill, &paths)
         }
+        // To another Mac or iPhone nearby: macOS's own AirDrop picker, for files that are there.
+        "dropAirDrop" => {
+            let paths = airdrop_paths(action.value.as_ref());
+            if paths.is_empty() {
+                return Err("Nothing to send.".into());
+            }
+            forget("drop");
+            if !surface::airdrop(&paths) {
+                return Err("AirDrop can't take them now.".into());
+            }
+            Ok(())
+        }
         // To the chat, which takes them from here.
         "dropChat" => {
             let paths: Vec<String> = action.value.as_ref().and_then(|value| value.get("paths")).and_then(Value::as_array).map(|paths| paths.iter().filter_map(Value::as_str).filter(|path| path.starts_with('/')).take(crate::attach::MAX_ATTACHMENTS).map(str::to_string).collect()).unwrap_or_default();
@@ -518,6 +542,18 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn airdrop_sends_only_files_that_are_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("report.pdf");
+        std::fs::write(&file, b"%PDF").unwrap();
+        let file = file.to_string_lossy().to_string();
+        let value = serde_json::json!({"paths": [file, "relative.txt", "/no/such/file", 7, format!("{}/../{}", dir.path().display(), "x\u{0}y")]});
+        assert_eq!(airdrop_paths(Some(&value)), vec![file]);
+        assert!(airdrop_paths(Some(&serde_json::json!(["/tmp"]))).is_empty());
+        assert!(airdrop_paths(None).is_empty());
+    }
 
     #[test]
     fn a_few_plain_lines_answer_in_the_island_and_the_rest_go_to_the_chat() {

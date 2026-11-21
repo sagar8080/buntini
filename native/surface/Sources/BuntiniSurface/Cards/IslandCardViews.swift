@@ -1,4 +1,5 @@
 // Views for the island's own cards (stream A).
+import AppKit
 import SwiftUI
 import SurfaceKit
 
@@ -6,6 +7,14 @@ struct DropCardView: View {
     let card: Card
     let drop: DropCard
     let send: (Action) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    /// AirDrop is on and takes these files. A picture shows it as if it were.
+    private var canAirDrop: Bool {
+        if inPicture { return true }
+        let urls = drop.files.map { URL(fileURLWithPath: $0) }
+        return NSSharingService(named: .sendViaAirDrop)?.canPerform(withItems: urls) == true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -22,6 +31,12 @@ struct DropCardView: View {
                 ForEach(drop.targets, id: \.pill) { target in
                     IslandButton(label: target.label) {
                         send(Action(source: .island, card: card.id, name: "dropInto", value: .object(["pill": .string(target.pill), "paths": .array(drop.files.map(JSONValue.string))])))
+                    }
+                }
+                // To an iPhone or Mac nearby, through macOS's own picker. A name, so not translated.
+                if canAirDrop {
+                    IslandButton(label: "AirDrop") {
+                        send(Action(source: .island, card: card.id, name: "dropAirDrop", value: .object(["paths": .array(drop.files.map(JSONValue.string))])))
                     }
                 }
             }
