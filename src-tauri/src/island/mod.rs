@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod calls;
 pub mod demo;
 pub mod upcoming;
 pub mod updates;
@@ -249,6 +250,7 @@ pub fn start(app: AppHandle) {
     surface::set_island(shown.clone());
     watch_health();
     updates::start(app.clone());
+    calls::start(&app);
     // What's next counts down beside the notch.
     tauri::async_runtime::spawn(async {
         loop {
@@ -307,10 +309,13 @@ pub(crate) fn refresh() {
     send(&kept);
 }
 
-/// The island's own cards, with what's next and its pills (upcoming.rs).
+/// The island's own cards, with a call going on (calls.rs) and what's next (upcoming.rs), and
+/// their pills.
 fn send(kept: &[Offer]) {
-    let (pills, mut next) = upcoming::shown(chrono::Local::now());
-    let mut offers = kept.to_vec();
+    let (mut pills, mut offers) = calls::shown();
+    let (mut next_pills, mut next) = upcoming::shown(chrono::Local::now());
+    pills.append(&mut next_pills);
+    offers.extend(kept.iter().cloned());
     offers.append(&mut next);
     surface::publish(Source::Island, Contribution { pills, offers });
 }
@@ -382,8 +387,18 @@ fn handle(app: &AppHandle, action: &Action) -> Result<(), String> {
     if action.card.as_deref() == Some("update") {
         return updates::act(app, &action.name);
     }
-    // Joining the next meeting's call, or marking a reminder past due done.
+    // Joining the next meeting's call, marking a reminder past due done, or a call's controls.
     match (action.card.as_deref(), action.name.as_str()) {
+        (Some(calls::CALL), "mute") => return calls::toggle_mute(),
+        (Some(calls::CALL), "open") => {
+            calls::open();
+            return Ok(());
+        }
+        // Notes are Flow's call recording, as its own pill starts and stops it.
+        (Some(calls::CALL), "record") => {
+            surface::act(Action { source: Source::Flow, card: None, name: "record".into(), value: None });
+            return Ok(());
+        }
         (Some(upcoming::MEETING), "join") => {
             let link = action.value.as_ref().and_then(Value::as_str).and_then(upcoming::call_link).ok_or("That isn't a call link.")?;
             let _ = std::process::Command::new("/usr/bin/open").arg(link).spawn();

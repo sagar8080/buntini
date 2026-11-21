@@ -1033,6 +1033,8 @@ impl Runtime {
 
     /// The island shows a call recording the whole time, and its note when ready.
     fn publish_recording(&self) {
+        // A call's card in the island offers to start or stop this.
+        crate::island::calls::set_recording(self.recording.is_some());
         let pills = self
             .recording
             .as_ref()

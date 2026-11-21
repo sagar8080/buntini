@@ -381,7 +381,7 @@ mod tests {
         kinds.dedup();
         let mut every = [
             "approval", "question", "ticker", "diff", "finished", "recap", "usage", "service", "mail", "nowPlaying", "timer",
-            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "answer", "upcoming", "note",
+            "capture", "vitals", "update", "whatsNew", "drop", "greeting", "answer", "upcoming", "call", "note",
         ]
         .map(String::from)
         .to_vec();

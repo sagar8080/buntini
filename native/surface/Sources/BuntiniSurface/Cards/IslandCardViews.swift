@@ -97,6 +97,54 @@ struct UpcomingCardView: View {
     }
 }
 
+/// A call in another app: how long it has gone on, the microphone's mute, and notes.
+struct CallCardView: View {
+    let card: Card
+    let call: Call
+    let send: (Action) -> Void
+    @Environment(\.inPicture) private var inPicture
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if inPicture {
+                heading(at: Date())
+            } else {
+                TimelineView(.periodic(from: .now, by: 1)) { context in heading(at: context.date) }
+            }
+            HStack(spacing: 6) {
+                Spacer()
+                if call.muted != nil || call.recording != nil {
+                    MoreButton { more }
+                }
+                if let muted = call.muted {
+                    IslandButton(label: muted ? L(.unmute) : L(.mute), prominent: true) { act("mute") }
+                } else {
+                    IslandButton(label: L(.open), prominent: true) { act("open") }
+                }
+            }
+        }
+        .contextMenu { more }
+    }
+
+    /// "In a call · 12:40" over the app's name.
+    private func heading(at date: Date) -> some View {
+        CardHeading(from: "\(L(.inCall)) · \(playbackTime(date.timeIntervalSince1970 - Double(call.since)))", title: call.name)
+    }
+
+    @ViewBuilder private var more: some View {
+        if call.muted != nil {
+            Button(L(.open)) { act("open") }
+        }
+        if let recording = call.recording {
+            Button(recording ? L(.stopRecording) : L(.recordCall)) { act("record") }
+        }
+    }
+
+    private func act(_ name: String) {
+        send(Action(source: .island, card: card.id, name: name))
+    }
+}
+
 struct GreetingCardView: View {
     let greeting: Greeting
 

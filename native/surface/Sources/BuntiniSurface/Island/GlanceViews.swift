@@ -48,6 +48,10 @@ struct PillMark: View {
             Image(systemName: "envelope.fill").foregroundStyle(color)
         case (.island?, _) where pill?.id == "upcoming.reminders":
             Image(systemName: "checklist").foregroundStyle(color)
+        case (.island?, _) where pill?.id == "call":
+            Image(systemName: "phone.fill").foregroundStyle(color)
+        case (.island?, _) where pill?.id == "call.muted":
+            Image(systemName: "mic.slash.fill").foregroundStyle(Color(hex: errorTint))
         case (_, _) where pill?.progress != nil:
             Ring(progress: pill?.progress ?? 0, tint: tint, width: size / 6)
         default:

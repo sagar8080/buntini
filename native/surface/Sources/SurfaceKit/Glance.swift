@@ -121,6 +121,8 @@ public enum Chips {
             return (answer.question, nil, "#F2B33D", "text.bubble")
         case .upcoming(let upcoming):
             return (upcoming.title, nil, upcoming.item == "meeting" ? "#FF453A" : "#FF9F0A", upcoming.item == "meeting" ? "calendar" : "checklist")
+        case .call(let call):
+            return (call.name, nil, "#30D158", call.muted == true ? "mic.slash.fill" : "phone.fill")
         default:
             return nil
         }

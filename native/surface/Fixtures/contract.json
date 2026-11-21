@@ -147,6 +147,10 @@
      "surface.tryAgain": "Try again",
      "surface.undo": "Undo",
      "surface.upcoming.join": "Join",
+     "surface.call.inCall": "In a call",
+     "surface.call.mute": "Mute",
+     "surface.call.unmute": "Unmute",
+     "surface.call.muted": "Muted",
      "surface.update.ask": "Keep Buntini up to date?",
      "surface.update.available": "New version",
      "surface.update.checkDaily": "Check daily",
@@ -1582,6 +1586,48 @@
      "link": "https://zoom.us/j/123",
      "id": null,
      "more": 0
+    }
+   },
+   "held": false,
+   "cat": {
+    "character": "cat",
+    "coat": "ginger",
+    "eyes": "amber",
+    "accessory": "bell",
+    "accent": "#F2B33D",
+    "mood": "happy",
+    "outfit": "winter"
+   },
+   "flow": null,
+   "overlay": null,
+   "sound": null
+  },
+  {
+   "contract": 3,
+   "home": "island",
+   "placement": "auto",
+   "pills": [
+    {
+     "id": "call.muted",
+     "source": "island",
+     "label": "Zoom",
+     "tint": "#30D158",
+     "state": "working",
+     "badge": "Muted",
+     "progress": null,
+     "card": "call"
+    }
+   ],
+   "overflow": [],
+   "card": {
+    "id": "call",
+    "source": "island",
+    "body": {
+     "kind": "call",
+     "name": "Zoom",
+     "since": 1795247220,
+     "muted": true,
+     "recording": false
     }
    },
    "held": false,

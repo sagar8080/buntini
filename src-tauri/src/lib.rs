@@ -441,6 +441,8 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if !SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
                     api.prevent_exit();
+                    // A microphone muted from a call's card doesn't stay muted after Buntini.
+                    island::calls::lift();
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app.state::<controller::AppState>();

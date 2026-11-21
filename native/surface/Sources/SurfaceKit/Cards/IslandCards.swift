@@ -43,3 +43,16 @@ public struct Upcoming: Codable, Equatable, Sendable {
 public struct Greeting: Codable, Equatable, Sendable {
     public let name: String?
 }
+
+/// A call in another app: Zoom, Teams, FaceTime, a meeting in a browser. Mirror: `Call` in
+/// src-tauri/src/surface/cards/island.rs.
+public struct Call: Codable, Equatable, Sendable {
+    /// The app's name, as macOS shows it.
+    public let name: String
+    /// When the call began, in Unix seconds.
+    public let since: Int64
+    /// Whether the microphone is muted; `nil` when it can't be from here.
+    public let muted: Bool?
+    /// Whether the call is being recorded for notes; `nil` while "Record calls" is off.
+    public let recording: Bool?
+}

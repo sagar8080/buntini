@@ -48,6 +48,20 @@ pub struct Upcoming {
     pub more: u32,
 }
 
+/// A call in another app: Zoom, Teams, FaceTime, a meeting in a browser.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Call {
+    /// The app's name, as macOS shows it.
+    pub name: String,
+    /// When the call began, in Unix seconds; the island counts on from there.
+    pub since: i64,
+    /// Whether the microphone is muted. Left out when it can't be from here.
+    pub muted: Option<bool>,
+    /// Whether the call is being recorded for notes. Left out while "Record calls" is off.
+    pub recording: Option<bool>,
+}
+
 /// Hello on launch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
